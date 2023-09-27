@@ -1,11 +1,11 @@
-use libc::{ioctl, STDOUT_FILENO, TIOCGWINSZ};
+use libc::{
+    ioctl, tcgetattr, tcsetattr, termios as Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN,
+    ISIG, ISTRIP, IXON, OPOST, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
+};
 use std::{
     fmt,
     io::{self, Stdout, Write},
-};
-use termios::{
-    tcsetattr, Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, ISIG, ISTRIP, IXON, OPOST,
-    TCSAFLUSH, VMIN, VTIME,
+    mem,
 };
 
 // ANSI escape codes:
@@ -61,7 +61,18 @@ pub(crate) fn enable_raw_mode(mut t: Termios) {
 }
 
 pub(crate) fn set_termios(t: Termios) {
-    if let Err(e) = tcsetattr(STDOUT_FILENO, TCSAFLUSH, &t) {
-        die(format!("tcsetattr: {e}"));
+    if unsafe { tcsetattr(STDOUT_FILENO, TCSAFLUSH, &t) } == -1 {
+        die("tcsetattr");
+    }
+}
+
+pub(crate) fn get_termios() -> Termios {
+    unsafe {
+        let mut t: Termios = mem::zeroed();
+        if tcgetattr(STDOUT_FILENO, &mut t as *mut _) == -1 {
+            die("tcgetattr");
+        }
+
+        t
     }
 }

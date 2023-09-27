@@ -1,23 +1,20 @@
 use crate::{
     buffer::Buffer,
     die,
-    key::{Arrow, Key},
+    key::Key,
     term::{
-        clear_screen, enable_raw_mode, get_termsize, set_termios, CUR_CLEAR_RIGHT, CUR_HIDE,
-        CUR_SHOW, CUR_TO_START,
+        clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, CUR_CLEAR_RIGHT,
+        CUR_HIDE, CUR_SHOW, CUR_TO_START,
     },
     VERSION,
 };
-use libc::STDOUT_FILENO;
+use libc::termios as Termios;
 use std::{
-    cmp::min,
+    cmp::{max, min},
     io::{self, Read, Stdin, Stdout, Write},
 };
-use termios::Termios;
 
 pub struct Editor {
-    cx: usize,
-    cy: usize,
     screen_rows: usize,
     screen_cols: usize,
     stdout: Stdout,
@@ -42,16 +39,11 @@ impl Default for Editor {
 impl Editor {
     pub fn new() -> Self {
         let (screen_rows, screen_cols) = get_termsize();
-        let original_termios = match Termios::from_fd(STDOUT_FILENO) {
-            Ok(t) => t,
-            Err(e) => die(format!("unable to init termios: {e}")),
-        };
+        let original_termios = get_termios();
 
         enable_raw_mode(original_termios);
 
         Self {
-            cx: 0,
-            cy: 0,
             screen_rows,
             screen_cols,
             stdout: io::stdout(),
@@ -71,6 +63,22 @@ impl Editor {
         Ok(())
     }
 
+    fn current_buffer(&self) -> Option<&Buffer> {
+        if self.buffers.is_empty() {
+            None
+        } else {
+            Some(&self.buffers[0])
+        }
+    }
+
+    fn current_buffer_mut(&mut self) -> Option<&mut Buffer> {
+        if self.buffers.is_empty() {
+            None
+        } else {
+            Some(&mut self.buffers[0])
+        }
+    }
+
     fn current_buffer_len(&self) -> usize {
         if self.buffers.is_empty() {
             0
@@ -79,10 +87,32 @@ impl Editor {
         }
     }
 
+    fn row_off(&self) -> usize {
+        if self.buffers.is_empty() {
+            0
+        } else {
+            self.buffers[0].row_off
+        }
+    }
+
+    fn col_off(&self) -> usize {
+        if self.buffers.is_empty() {
+            0
+        } else {
+            self.buffers[0].col_off
+        }
+    }
+
     pub fn refresh_screen(&mut self) -> io::Result<()> {
         let mut buf = format!("{CUR_HIDE}{CUR_TO_START}");
         self.render_rows(&mut buf);
-        buf.push_str(&format!("\x1b[{};{}H{CUR_SHOW}", self.cy + 1, self.cx + 1));
+
+        let (cy, cx) = match self.current_buffer() {
+            Some(b) => (b.cy, b.cx),
+            None => (0, 0),
+        };
+
+        buf.push_str(&format!("\x1b[{};{}H{CUR_SHOW}", cy + 1, cx + 1));
 
         self.stdout.write_all(buf.as_bytes())?;
         self.stdout.flush()
@@ -90,7 +120,9 @@ impl Editor {
 
     fn render_rows(&self, buf: &mut String) {
         for y in 0..self.screen_rows {
-            if y >= self.current_buffer_len() {
+            let file_row = y + self.row_off();
+
+            if file_row >= self.current_buffer_len() {
                 if self.buffers.is_empty() && y == self.screen_rows / 3 {
                     let mut banner = format!("ad editor :: version {VERSION}");
                     banner.truncate(self.screen_cols);
@@ -105,8 +137,12 @@ impl Editor {
                     buf.push('~');
                 }
             } else {
-                let line = &self.buffers[0].lines[y];
-                buf.push_str(&line[0..min(self.screen_cols, line.len())]);
+                let col_off = self.col_off();
+                // file_row < self.current_buffer_len() so there is an active buffer
+                let line = &self.buffers[0].lines[file_row];
+                let mut len = max(0, line.len() - col_off);
+                len = min(self.screen_cols, len);
+                buf.push_str(&line[col_off..min(self.screen_cols, len)]);
             }
 
             buf.push_str(CUR_CLEAR_RIGHT);
@@ -130,7 +166,6 @@ impl Editor {
         buf[0] as char
     }
 
-    // The written char will be garbage if this function returns false
     #[inline]
     fn try_read_char(&mut self) -> Option<char> {
         let mut buf: [u8; 1] = [0; 1];
@@ -174,19 +209,15 @@ impl Editor {
     }
 
     pub fn handle_keypress(&mut self, k: Key) -> io::Result<()> {
+        let (screen_rows, screen_cols) = (self.screen_rows, self.screen_cols);
+
         match k {
-            Key::Arrow(arr) => self.move_cursor(arr),
-            Key::Home => self.cx = 0,
-            Key::End => self.cx = self.screen_cols - 1,
-            Key::PageUp | Key::PageDown => {
-                for _ in 0..self.screen_rows {
-                    self.move_cursor(if k == Key::PageUp {
-                        Arrow::Up
-                    } else {
-                        Arrow::Down
-                    });
+            Key::Arrow(_) | Key::Home | Key::End | Key::PageUp | Key::PageDown => {
+                if let Some(b) = self.current_buffer_mut() {
+                    b.handle_keypress(k, screen_rows, screen_cols)?;
                 }
             }
+
             Key::Ctrl('q') => {
                 clear_screen(&mut self.stdout)?;
                 self.running = false;
@@ -195,30 +226,5 @@ impl Editor {
         }
 
         Ok(())
-    }
-
-    fn move_cursor(&mut self, arr: Arrow) {
-        match arr {
-            Arrow::Up => {
-                if self.cy != 0 {
-                    self.cy -= 1;
-                }
-            }
-            Arrow::Down => {
-                if self.cy != self.screen_rows - 1 {
-                    self.cy += 1;
-                }
-            }
-            Arrow::Left => {
-                if self.cx != 0 {
-                    self.cx -= 1;
-                }
-            }
-            Arrow::Right => {
-                if self.cx != self.screen_cols - 1 {
-                    self.cx += 1;
-                }
-            }
-        }
     }
 }

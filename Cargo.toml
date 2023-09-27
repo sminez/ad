@@ -7,4 +7,3 @@ edition = "2021"
 
 [dependencies]
 libc = "0.2.148"
-termios = "0.3.3"
