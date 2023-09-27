@@ -21,7 +21,7 @@ pub struct Editor {
     stdout: Stdout,
     stdin: Stdin,
     original_termios: Termios,
-    pub running: bool,
+    running: bool,
     status_message: String,
     status_time: Instant,
     buffers: Vec<Buffer>,
@@ -68,26 +68,15 @@ impl Editor {
         Ok(())
     }
 
+    #[inline]
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
     pub fn set_status_message(&mut self, msg: &str) {
         self.status_message.clear();
         self.status_message.push_str(msg);
         self.status_time = Instant::now();
-    }
-
-    fn current_buffer(&self) -> Option<&Buffer> {
-        if self.buffers.is_empty() {
-            None
-        } else {
-            Some(&self.buffers[0])
-        }
-    }
-
-    fn current_buffer_len(&self) -> usize {
-        if self.buffers.is_empty() {
-            0
-        } else {
-            self.buffers[0].len()
-        }
     }
 
     fn row_off(&self) -> usize {
@@ -116,10 +105,11 @@ impl Editor {
         self.render_status_bar(&mut buf);
         self.render_message_bar(&mut buf);
 
-        let (cy, rx) = match self.current_buffer() {
-            Some(b) => (b.cy, b.rx),
-            None => (0, 0),
-        };
+        let (cy, rx) = self
+            .buffers
+            .get(0)
+            .map(|b| (b.cy, b.rx))
+            .unwrap_or_default();
 
         buf.push_str(&format!(
             "\x1b[{};{}H{CUR_SHOW}",
@@ -132,10 +122,12 @@ impl Editor {
     }
 
     fn render_rows(&self, buf: &mut String) {
+        let buffer_len = self.buffers.get(0).map(|b| b.len()).unwrap_or_default();
+
         for y in 0..self.screen_rows {
             let file_row = y + self.row_off();
 
-            if file_row >= self.current_buffer_len() {
+            if file_row >= buffer_len {
                 if self.buffers.is_empty() && y == self.screen_rows / 3 {
                     let mut banner = format!("ad editor :: version {VERSION}");
                     banner.truncate(self.screen_cols);
