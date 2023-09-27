@@ -104,6 +104,10 @@ impl Editor {
     }
 
     pub fn refresh_screen(&mut self) -> io::Result<()> {
+        if !self.buffers.is_empty() {
+            self.buffers[0].clamp_scroll(self.screen_rows, self.screen_cols);
+        }
+
         let mut buf = format!("{CUR_HIDE}{CUR_TO_START}");
         self.render_rows(&mut buf);
 
@@ -112,7 +116,11 @@ impl Editor {
             None => (0, 0),
         };
 
-        buf.push_str(&format!("\x1b[{};{}H{CUR_SHOW}", cy + 1, cx + 1));
+        buf.push_str(&format!(
+            "\x1b[{};{}H{CUR_SHOW}",
+            cy - self.row_off() + 1,
+            cx - self.col_off() + 1
+        ));
 
         self.stdout.write_all(buf.as_bytes())?;
         self.stdout.flush()

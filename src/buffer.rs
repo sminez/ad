@@ -1,5 +1,5 @@
 use crate::key::{Arrow, Key};
-use std::{fs::read_to_string, io};
+use std::{cmp::Ordering, fs::read_to_string, io};
 
 #[derive(Default)]
 pub struct Buffer {
@@ -81,9 +81,12 @@ impl Buffer {
         screen_cols: usize,
     ) -> io::Result<()> {
         match k {
-            Key::Arrow(arr) => self.move_cursor(arr, screen_rows, screen_cols),
+            Key::Arrow(arr) => self.move_cursor(arr),
             Key::Home => self.cx = 0,
-            Key::End => self.cx = screen_cols - 1,
+            Key::End => {
+                self.cx = screen_cols - 1;
+                self.clamp_cx();
+            }
             Key::PageUp | Key::PageDown => {
                 let arr = if k == Key::PageUp {
                     Arrow::Up
@@ -92,7 +95,7 @@ impl Buffer {
                 };
 
                 for _ in 0..screen_rows {
-                    self.move_cursor(arr, screen_rows, screen_cols);
+                    self.move_cursor(arr);
                 }
             }
 
@@ -102,7 +105,7 @@ impl Buffer {
         Ok(())
     }
 
-    fn move_cursor(&mut self, arr: Arrow, screen_rows: usize, screen_cols: usize) {
+    fn move_cursor(&mut self, arr: Arrow) {
         match arr {
             Arrow::Up => {
                 if self.cy != 0 {
@@ -110,20 +113,34 @@ impl Buffer {
                 }
             }
             Arrow::Down => {
-                if self.cy != screen_rows - 1 {
+                if self.cy < self.lines.len() {
                     self.cy += 1;
                 }
             }
             Arrow::Left => {
                 if self.cx != 0 {
                     self.cx -= 1;
+                } else if self.cy > 0 {
+                    // Allow <- to move to the end of the previous line
+                    self.cy -= 1;
+                    self.cx = self.lines[self.cy].len();
                 }
             }
             Arrow::Right => {
-                if self.cx != screen_cols - 1 {
-                    self.cx += 1;
+                if let Some(line) = self.current_line() {
+                    match self.cx.cmp(&line.len()) {
+                        Ordering::Less => self.cx += 1,
+                        Ordering::Equal => {
+                            // Allow -> to move to the start of the next line
+                            self.cy += 1;
+                            self.cx = 0;
+                        }
+                        _ => (),
+                    }
                 }
             }
         }
+
+        self.clamp_cx();
     }
 }
