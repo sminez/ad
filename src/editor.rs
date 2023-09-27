@@ -71,14 +71,6 @@ impl Editor {
         }
     }
 
-    fn current_buffer_mut(&mut self) -> Option<&mut Buffer> {
-        if self.buffers.is_empty() {
-            None
-        } else {
-            Some(&mut self.buffers[0])
-        }
-    }
-
     fn current_buffer_len(&self) -> usize {
         if self.buffers.is_empty() {
             0
@@ -217,12 +209,10 @@ impl Editor {
     }
 
     pub fn handle_keypress(&mut self, k: Key) -> io::Result<()> {
-        let (screen_rows, screen_cols) = (self.screen_rows, self.screen_cols);
-
         match k {
             Key::Arrow(_) | Key::Home | Key::End | Key::PageUp | Key::PageDown => {
-                if let Some(b) = self.current_buffer_mut() {
-                    b.handle_keypress(k, screen_rows, screen_cols)?;
+                if !self.buffers.is_empty() {
+                    self.buffers[0].handle_keypress(k, self.screen_rows)?;
                 }
             }
 

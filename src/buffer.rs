@@ -2,7 +2,11 @@ use crate::{
     key::{Arrow, Key},
     TAB_STOP,
 };
-use std::{cmp::Ordering, fs::read_to_string, io};
+use std::{
+    cmp::{min, Ordering},
+    fs::read_to_string,
+    io,
+};
 
 #[derive(Default)]
 pub struct Buffer {
@@ -107,23 +111,23 @@ impl Buffer {
         }
     }
 
-    pub fn handle_keypress(
-        &mut self,
-        k: Key,
-        screen_rows: usize,
-        screen_cols: usize,
-    ) -> io::Result<()> {
+    pub fn handle_keypress(&mut self, k: Key, screen_rows: usize) -> io::Result<()> {
         match k {
             Key::Arrow(arr) => self.move_cursor(arr),
             Key::Home => self.cx = 0,
             Key::End => {
-                self.cx = screen_cols - 1;
-                self.clamp_cx();
+                if self.cy < self.lines.len() {
+                    self.cx = self.lines[self.cy].len();
+                }
             }
             Key::PageUp | Key::PageDown => {
                 let arr = if k == Key::PageUp {
+                    self.cy = self.row_off;
+
                     Arrow::Up
                 } else {
+                    self.cy = min(self.row_off + screen_rows - 1, self.lines.len());
+
                     Arrow::Down
                 };
 
