@@ -15,6 +15,8 @@ pub const CUR_TO_START: &str = "\x1b[H";
 pub const CUR_HIDE: &str = "\x1b[?25l";
 pub const CUR_SHOW: &str = "\x1b[?25h";
 pub const CUR_CLEAR_RIGHT: &str = "\x1b[K";
+pub const REVERSE_VIDEO: &str = "\x1b[7m";
+pub const RESTORE_VIDEO: &str = "\x1b[m";
 
 pub(crate) fn die<D: fmt::Display>(msg: D) -> ! {
     let _ = clear_screen(&mut io::stdout());

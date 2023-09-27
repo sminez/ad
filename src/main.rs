@@ -9,6 +9,8 @@ fn main() -> io::Result<()> {
         e.open_file(&args[1])?;
     }
 
+    e.set_status_message("HELP: C-q = quit");
+
     while e.running {
         e.refresh_screen().unwrap();
         let k = e.read_key();

@@ -8,3 +8,4 @@ pub(crate) use term::die;
 
 pub const VERSION: &str = "1.0.0";
 pub const TAB_STOP: usize = 4;
+pub const STATUS_TIMEOUT: u64 = 5;

@@ -4,14 +4,15 @@ use crate::{
     key::Key,
     term::{
         clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, CUR_CLEAR_RIGHT,
-        CUR_HIDE, CUR_SHOW, CUR_TO_START,
+        CUR_HIDE, CUR_SHOW, CUR_TO_START, RESTORE_VIDEO, REVERSE_VIDEO,
     },
-    VERSION,
+    STATUS_TIMEOUT, VERSION,
 };
 use libc::termios as Termios;
 use std::{
     cmp::{max, min},
     io::{self, Read, Stdin, Stdout, Write},
+    time::Instant,
 };
 
 pub struct Editor {
@@ -21,6 +22,8 @@ pub struct Editor {
     stdin: Stdin,
     original_termios: Termios,
     pub running: bool,
+    status_message: String,
+    status_time: Instant,
     buffers: Vec<Buffer>,
 }
 
@@ -44,13 +47,15 @@ impl Editor {
         enable_raw_mode(original_termios);
 
         Self {
-            screen_rows,
+            screen_rows: screen_rows - 2, // stats+msg bars
             screen_cols,
             stdout: io::stdout(),
             stdin: io::stdin(),
             original_termios,
             running: true,
             buffers: Vec::new(),
+            status_message: String::new(),
+            status_time: Instant::now(),
         }
     }
 
@@ -61,6 +66,12 @@ impl Editor {
         self.buffers.insert(0, Buffer::new_from_file(path)?);
 
         Ok(())
+    }
+
+    pub fn set_status_message(&mut self, msg: &str) {
+        self.status_message.clear();
+        self.status_message.push_str(msg);
+        self.status_time = Instant::now();
     }
 
     fn current_buffer(&self) -> Option<&Buffer> {
@@ -102,6 +113,8 @@ impl Editor {
 
         let mut buf = format!("{CUR_HIDE}{CUR_TO_START}");
         self.render_rows(&mut buf);
+        self.render_status_bar(&mut buf);
+        self.render_message_bar(&mut buf);
 
         let (cy, rx) = match self.current_buffer() {
             Some(b) => (b.cy, b.rx),
@@ -145,10 +158,44 @@ impl Editor {
                 buf.push_str(&rline[col_off..min(self.screen_cols, len)]);
             }
 
-            buf.push_str(CUR_CLEAR_RIGHT);
-            if y < self.screen_rows - 1 {
-                buf.push_str("\r\n");
-            }
+            buf.push_str(&format!("{CUR_CLEAR_RIGHT}\r\n"));
+        }
+    }
+
+    fn render_status_bar(&self, buf: &mut String) {
+        let max_name_len = 20;
+        let no_name = "[---]";
+
+        let (name, n_lines, cy, rx) = if self.buffers.is_empty() {
+            (no_name, 1, 1, 1)
+        } else {
+            let b = &self.buffers[0];
+            let name = b
+                .path
+                .as_ref()
+                .map(|s| &s.as_str()[0..min(max_name_len, s.len())])
+                .unwrap_or(no_name);
+
+            (name, b.len(), b.cy + 1, b.rx + 1)
+        };
+
+        let lstatus = format!("{name} - {n_lines} lines");
+        let rstatus = format!("{cy}:{rx}");
+        let width = self.screen_cols - lstatus.len();
+        buf.push_str(&format!(
+            "{REVERSE_VIDEO}{lstatus}{rstatus:>width$}{RESTORE_VIDEO}\r\n"
+        ));
+    }
+
+    fn render_message_bar(&self, buf: &mut String) {
+        buf.push_str(CUR_CLEAR_RIGHT);
+
+        let mut msg = self.status_message.clone();
+        msg.truncate(self.screen_cols);
+
+        let delta = (Instant::now() - self.status_time).as_secs();
+        if !msg.is_empty() && delta < STATUS_TIMEOUT {
+            buf.push_str(&msg);
         }
     }
 
