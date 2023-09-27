@@ -1,26 +1,41 @@
-use crate::key::{Arrow, Key};
+use crate::{
+    key::{Arrow, Key},
+    TAB_STOP,
+};
 use std::{cmp::Ordering, fs::read_to_string, io};
 
 #[derive(Default)]
 pub struct Buffer {
     pub(crate) path: Option<String>,
     pub(crate) lines: Vec<String>,
+    pub(crate) render_lines: Vec<String>,
     pub(crate) cx: usize,
     pub(crate) cy: usize,
+    pub(crate) rx: usize,
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
+}
+
+fn as_render_lines(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|line| line.replace('\t', &" ".repeat(TAB_STOP)))
+        .collect()
 }
 
 impl Buffer {
     pub fn new_from_file(path: &str) -> io::Result<Self> {
         let raw = read_to_string(path)?;
         let lines: Vec<String> = raw.lines().map(String::from).collect();
+        let render_lines = as_render_lines(&lines);
 
         Ok(Self {
             path: Some(path.to_string()),
             lines,
+            render_lines,
             cx: 0,
             cy: 0,
+            rx: 0,
             row_off: 0,
             col_off: 0,
         })
@@ -37,6 +52,11 @@ impl Buffer {
     }
 
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
+        self.rx = 0;
+        if self.cy < self.lines.len() {
+            self.update_rx();
+        }
+
         if self.cy < self.row_off {
             self.row_off = self.cy;
         }
@@ -45,13 +65,26 @@ impl Buffer {
             self.row_off = self.cy - screen_rows + 1;
         }
 
-        if self.cx < self.col_off {
-            self.col_off = self.cx;
+        if self.rx < self.col_off {
+            self.col_off = self.rx;
         }
 
-        if self.cx >= self.col_off + screen_cols {
-            self.col_off = self.cx - screen_cols + 1;
+        if self.rx >= self.col_off + screen_cols {
+            self.col_off = self.rx - screen_cols + 1;
         }
+    }
+
+    fn update_rx(&mut self) {
+        let mut rx = 0;
+
+        for c in self.lines[self.cy].chars().take(self.cx) {
+            if c == '\t' {
+                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+            }
+            rx += 1;
+        }
+
+        self.rx = rx;
     }
 
     pub fn clamp_cx(&mut self) {

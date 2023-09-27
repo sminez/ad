@@ -111,15 +111,15 @@ impl Editor {
         let mut buf = format!("{CUR_HIDE}{CUR_TO_START}");
         self.render_rows(&mut buf);
 
-        let (cy, cx) = match self.current_buffer() {
-            Some(b) => (b.cy, b.cx),
+        let (cy, rx) = match self.current_buffer() {
+            Some(b) => (b.cy, b.rx),
             None => (0, 0),
         };
 
         buf.push_str(&format!(
             "\x1b[{};{}H{CUR_SHOW}",
             cy - self.row_off() + 1,
-            cx - self.col_off() + 1
+            rx - self.col_off() + 1
         ));
 
         self.stdout.write_all(buf.as_bytes())?;
@@ -147,10 +147,10 @@ impl Editor {
             } else {
                 let col_off = self.col_off();
                 // file_row < self.current_buffer_len() so there is an active buffer
-                let line = &self.buffers[0].lines[file_row];
-                let mut len = max(0, line.len() - col_off);
+                let rline = &self.buffers[0].render_lines[file_row];
+                let mut len = max(0, rline.len() - col_off);
                 len = min(self.screen_cols, len);
-                buf.push_str(&line[col_off..min(self.screen_cols, len)]);
+                buf.push_str(&rline[col_off..min(self.screen_cols, len)]);
             }
 
             buf.push_str(CUR_CLEAR_RIGHT);
