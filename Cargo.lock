@@ -3,7 +3,7 @@
 version = 3
 
 [[package]]
-name = "ad-rs"
+name = "ad"
 version = "0.1.0"
 dependencies = [
  "libc",
