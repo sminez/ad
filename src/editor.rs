@@ -1,7 +1,7 @@
 use crate::{
     buffer::{Buffer, BufferKind, Buffers},
     die,
-    key::Key,
+    key::{Arrow, Key},
     term::{
         clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, CUR_CLEAR_RIGHT,
         CUR_HIDE, CUR_SHOW, CUR_TO_START, RESTORE_VIDEO, REVERSE_VIDEO,
@@ -13,6 +13,7 @@ use std::{
     cmp::{max, min},
     fs,
     io::{self, Read, Stdin, Stdout, Write},
+    path::PathBuf,
     time::Instant,
 };
 
@@ -70,15 +71,23 @@ impl Editor {
     }
 
     fn save_current_buffer(&mut self) -> io::Result<()> {
-        let b = self.buffers.active_mut();
-        let p = match b.kind {
-            BufferKind::File(ref p) => p,
-            _ => {
-                self.set_status_message("Error: no file name");
-                return Ok(()); // TODO: prompt for name if possible
+        let p = match self.buffers.active().kind {
+            BufferKind::File(ref p) => p.clone(),
+            BufferKind::Unnamed => match self.prompt("Save As: ") {
+                Some(s) => {
+                    let p: PathBuf = s.into();
+                    self.buffers.active_mut().kind = BufferKind::File(p.clone());
+                    p
+                }
+                None => return Ok(()),
+            },
+            BufferKind::Virtual(_) => {
+                self.set_status_message("Error: virtual buffer");
+                return Ok(());
             }
         };
 
+        let b = self.buffers.active_mut();
         let contents = b.contents();
         let n_lines = b.len();
         let display_path = match p.canonicalize() {
@@ -100,6 +109,50 @@ impl Editor {
         Ok(())
     }
 
+    /// Prompt the user for input supporting cancellation
+    fn prompt(&mut self, prompt: &str) -> Option<String> {
+        let mut input = String::new();
+        let mut x = 0;
+        let offset = prompt.len();
+
+        loop {
+            self.set_status_message(&format!("{prompt}{input}"));
+            self.buffers.active_mut().rx = x;
+            self.refresh_screen_w_cursor(Some((x + offset, self.screen_rows + 1)));
+
+            match self.read_key() {
+                Key::Char(c) => {
+                    input.insert(x, c);
+                    x += 1;
+                }
+                Key::Ctrl('h') | Key::Backspace | Key::Del => {
+                    if x <= input.len() {
+                        input.remove(x - 1);
+                        x = x.saturating_sub(1);
+                    }
+                }
+                Key::Return => {
+                    self.set_status_message("");
+                    return Some(input);
+                }
+                Key::Esc => {
+                    self.set_status_message("");
+                    return None;
+                }
+                Key::Arrow(Arrow::Right) => {
+                    if x < input.len() {
+                        x += 1;
+                    }
+                }
+                Key::Arrow(Arrow::Left) => {
+                    x = x.saturating_sub(1);
+                }
+
+                _ => (),
+            }
+        }
+    }
+
     #[inline]
     pub fn running(&self) -> bool {
         self.running
@@ -111,7 +164,11 @@ impl Editor {
         self.status_time = Instant::now();
     }
 
-    pub fn refresh_screen(&mut self) -> io::Result<()> {
+    pub fn refresh_screen(&mut self) {
+        self.refresh_screen_w_cursor(None);
+    }
+
+    fn refresh_screen_w_cursor(&mut self, cur: Option<(usize, usize)>) {
         self.buffers
             .active_mut()
             .clamp_scroll(self.screen_rows, self.screen_cols);
@@ -122,15 +179,16 @@ impl Editor {
         self.render_message_bar(&mut buf);
 
         let active = self.buffers.active();
+        let (x, y) = cur.unwrap_or((active.rx - active.col_off, active.cy - active.row_off));
+        buf.push_str(&format!("\x1b[{};{}H{CUR_SHOW}", y + 1, x + 1));
 
-        buf.push_str(&format!(
-            "\x1b[{};{}H{CUR_SHOW}",
-            active.cy - active.row_off + 1,
-            active.rx - active.col_off + 1
-        ));
+        if let Err(e) = self.stdout.write_all(buf.as_bytes()) {
+            die!("Unable to refresh screen: {e}");
+        }
 
-        self.stdout.write_all(buf.as_bytes())?;
-        self.stdout.flush()
+        if let Err(e) = self.stdout.flush() {
+            die!("Unable to refresh screen: {e}");
+        }
     }
 
     fn render_rows(&self, buf: &mut String) {
@@ -204,7 +262,7 @@ impl Editor {
             match self.stdin.read_exact(&mut buf) {
                 Ok(_) => break,
                 Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => continue,
-                Err(e) => die(format!("read: {e}")),
+                Err(e) => die!("read: {e}"),
             }
         }
 
@@ -260,7 +318,7 @@ impl Editor {
                     self.set_status_message(
                         "Current buffer is dirty: press C-q again to force quit",
                     );
-                    self.refresh_screen()?;
+                    self.refresh_screen();
 
                     match self.read_key() {
                         Key::Ctrl('q') => (),
@@ -268,7 +326,7 @@ impl Editor {
                     }
                 }
 
-                clear_screen(&mut self.stdout)?;
+                clear_screen(&mut self.stdout);
                 self.running = false;
             }
 

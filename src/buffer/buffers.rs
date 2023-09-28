@@ -4,7 +4,6 @@ use std::collections::VecDeque;
 // TODO:
 //   - next/previous buffer
 //   - delete buffer
-//   - rename buffer
 
 /// A non-empty vec of buffers where the active buffer is accessible and default
 /// buffers are inserted where needed to maintain invariants
@@ -41,6 +40,12 @@ impl Buffers {
         &mut self.0[0]
     }
 
+    #[inline]
+    pub fn modify_active<F: FnMut(&mut Buffer)>(&mut self, mut f: F) {
+        (f)(&mut self.0[0])
+    }
+
+    #[inline]
     pub fn is_empty_scratch(&self) -> bool {
         self.0.len() == 1 && self.0[0].is_unnamed() && !self.0[0].dirty
     }

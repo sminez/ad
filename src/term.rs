@@ -3,8 +3,7 @@ use libc::{
     ISIG, ISTRIP, IXON, OPOST, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
 };
 use std::{
-    fmt,
-    io::{self, Stdout, Write},
+    io::{Stdout, Write},
     mem,
 };
 
@@ -18,9 +17,14 @@ pub const CUR_CLEAR_RIGHT: &str = "\x1b[K";
 pub const REVERSE_VIDEO: &str = "\x1b[7m";
 pub const RESTORE_VIDEO: &str = "\x1b[m";
 
-pub(crate) fn die<D: fmt::Display>(msg: D) -> ! {
-    let _ = clear_screen(&mut io::stdout());
-    panic!("{}", msg);
+/// Helper for panicing the program but first ensuring that the screen is cleared
+#[macro_export]
+macro_rules! die {
+    ($template:expr $(, $arg:expr)*) => {{
+        $crate::term::clear_screen(&mut ::std::io::stdout());
+        panic!($template $(, $arg)*)
+    }};
+
 }
 
 /// Request the current terminal size from the kernel using ioctl
@@ -46,9 +50,13 @@ pub(crate) fn get_termsize() -> (usize, usize) {
     (ts.r as usize, ts.c as usize)
 }
 
-pub(crate) fn clear_screen(stdout: &mut Stdout) -> io::Result<()> {
-    stdout.write_all(format!("{CLEAR_SCREEN}{CUR_TO_START}").as_bytes())?;
-    stdout.flush()
+pub(crate) fn clear_screen(stdout: &mut Stdout) {
+    if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{CUR_TO_START}").as_bytes()) {
+        panic!("unable to clear screen: {e}");
+    }
+    if let Err(e) = stdout.flush() {
+        panic!("unable to clear screen: {e}");
+    }
 }
 
 pub(crate) fn enable_raw_mode(mut t: Termios) {
@@ -64,7 +72,7 @@ pub(crate) fn enable_raw_mode(mut t: Termios) {
 
 pub(crate) fn set_termios(t: Termios) {
     if unsafe { tcsetattr(STDOUT_FILENO, TCSAFLUSH, &t) } == -1 {
-        die("tcsetattr");
+        die!("tcsetattr");
     }
 }
 
@@ -72,7 +80,7 @@ pub(crate) fn get_termios() -> Termios {
     unsafe {
         let mut t: Termios = mem::zeroed();
         if tcgetattr(STDOUT_FILENO, &mut t as *mut _) == -1 {
-            die("tcgetattr");
+            die!("tcgetattr");
         }
 
         t
