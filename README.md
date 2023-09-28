@@ -2,11 +2,11 @@
 
 ## Why?
 
-I've used [vim][0] for years now (more recently [neovim][1]) and I really love the core editor
-itself. A while back I discovered [acme][2] through a fantastic [screencast][3] from Russ Cox,
-showing how you could interface with it via plan filesystem protocol, allowing you to run pretty
-much whatever you want inside of the editor (in any language) so long as you can interact with that
-protocol. _That_ I absolutely love, but the lack of modal editing and requirement to use the mouse
+I've used [vim][0] for years now (more recently [neovim][1] and [kakoune][2]) and I really love the
+core editor itself. A while back I discovered [acme][3] through a fantastic [screencast][4] from
+Russ Cox, showing how you could interface with it via plan filesystem protocol, allowing you to run
+pretty much whatever you want inside of the editor (in any language) so long as you can interact with
+that protocol. _That_ I absolutely love, but the lack of modal editing and requirement to use the mouse
 when I'm sat with my laptop is proving hard to get used to, so I set about looking at how to port
 over some of the acme ideas into vim (namely the load/execute semantics via the plumber and the
 idea of exposing the editor state in a really simple way to client programs).
@@ -34,5 +34,6 @@ but the whole thing will be a lot easier to write if there isn't really any conf
 
   [0]: https://www.vim.org/
   [1]: https://neovim.io/
-  [2]: https://en.wikipedia.org/wiki/Acme_(text_editor)
-  [3]: https://www.youtube.com/watch?v=dP1xVpMPn8M
+  [2]: https://github.com/mawww/kakoune
+  [3]: https://en.wikipedia.org/wiki/Acme_(text_editor)
+  [4]: https://www.youtube.com/watch?v=dP1xVpMPn8M
