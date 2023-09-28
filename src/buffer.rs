@@ -1,48 +1,83 @@
 use crate::{
     key::{Arrow, Key},
-    TAB_STOP,
+    MAX_NAME_LEN, TAB_STOP,
 };
 use std::{
     cmp::{min, Ordering},
     fs::read_to_string,
     io,
+    path::PathBuf,
 };
+
+fn as_render_line(line: &str) -> String {
+    line.replace('\t', &" ".repeat(TAB_STOP))
+}
+
+#[derive(Default)]
+pub struct Line {
+    // The raw characters as they will be stored on disk
+    pub(crate) raw: String,
+    // A cache of the rendered string content for the terminal
+    pub(crate) render: String,
+}
+
+impl Line {
+    fn new(raw: String) -> Self {
+        let render = as_render_line(&raw);
+        Self { raw, render }
+    }
+
+    fn update_render(&mut self) {
+        self.render = as_render_line(&self.raw);
+    }
+
+    fn modify<F: FnMut(&mut String)>(&mut self, mut f: F) {
+        (f)(&mut self.raw);
+        self.update_render();
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.raw.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.raw.len()
+    }
+}
 
 #[derive(Default)]
 pub struct Buffer {
-    pub(crate) path: Option<String>,
-    pub(crate) lines: Vec<String>,
-    pub(crate) render_lines: Vec<String>,
+    pub(crate) path: Option<PathBuf>,
+    pub(crate) lines: Vec<Line>,
     pub(crate) cx: usize,
     pub(crate) cy: usize,
     pub(crate) rx: usize,
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
-}
-
-fn as_render_lines(lines: &[String]) -> Vec<String> {
-    lines
-        .iter()
-        .map(|line| line.replace('\t', &" ".repeat(TAB_STOP)))
-        .collect()
+    pub(crate) dirty: bool,
 }
 
 impl Buffer {
     pub fn new_from_file(path: &str) -> io::Result<Self> {
         let raw = read_to_string(path)?;
-        let lines: Vec<String> = raw.lines().map(String::from).collect();
-        let render_lines = as_render_lines(&lines);
+        let lines: Vec<Line> = raw.lines().map(|s| Line::new(s.to_string())).collect();
 
         Ok(Self {
-            path: Some(path.to_string()),
+            path: Some(PathBuf::from(path)),
             lines,
-            render_lines,
             cx: 0,
             cy: 0,
             rx: 0,
             row_off: 0,
             col_off: 0,
+            dirty: false,
         })
+    }
+
+    pub fn display_name(&self) -> Option<&str> {
+        let s = self.path.as_ref()?.file_name()?.to_str()?;
+
+        Some(&s[0..min(MAX_NAME_LEN, s.len())])
     }
 
     #[inline]
@@ -81,7 +116,7 @@ impl Buffer {
     fn update_rx(&mut self) {
         let mut rx = 0;
 
-        for c in self.lines[self.cy].chars().take(self.cx) {
+        for c in self.lines[self.cy].raw.chars().take(self.cx) {
             if c == '\t' {
                 rx += (TAB_STOP - 1) - (rx % TAB_STOP);
             }
@@ -103,7 +138,7 @@ impl Buffer {
         }
     }
 
-    pub fn current_line(&self) -> Option<&str> {
+    pub fn current_line(&self) -> Option<&Line> {
         if self.cy >= self.len() {
             None
         } else {
@@ -122,12 +157,8 @@ impl Buffer {
             }
             Key::PageUp | Key::PageDown => {
                 let arr = if k == Key::PageUp {
-                    self.cy = self.row_off;
-
                     Arrow::Up
                 } else {
-                    self.cy = min(self.row_off + screen_rows - 1, self.lines.len());
-
                     Arrow::Down
                 };
 
@@ -135,6 +166,17 @@ impl Buffer {
                     self.move_cursor(arr);
                 }
             }
+
+            Key::Return => self.insert_newline(),
+
+            Key::Backspace | Key::Del | Key::Ctrl('h') => {
+                if k == Key::Del {
+                    self.move_cursor(Arrow::Right);
+                }
+                self.delete_char();
+            }
+
+            Key::Char(c) => self.insert_char(c),
 
             _ => (),
         }
@@ -179,5 +221,57 @@ impl Buffer {
         }
 
         self.clamp_cx();
+    }
+
+    fn insert_char(&mut self, c: char) {
+        if self.cy == self.lines.len() {
+            self.insert_line(self.lines.len(), String::new());
+        }
+
+        self.lines[self.cy].modify(|s| s.insert(self.cx, c));
+        self.cx += 1;
+        self.dirty = true;
+    }
+
+    fn insert_line(&mut self, at: usize, line: String) {
+        if at <= self.len() {
+            self.lines.insert(at, Line::new(line));
+            self.dirty = true;
+        }
+    }
+
+    fn insert_newline(&mut self) {
+        if self.cx == 0 {
+            self.insert_line(self.cy, String::new());
+        } else {
+            let (cur, nxt) = self.lines[self.cy].raw.split_at(self.cx);
+            let (cur, nxt) = (cur.to_string(), nxt.to_string());
+            self.lines[self.cy].modify(|s| *s = cur.clone());
+            self.insert_line(self.cy + 1, nxt);
+        }
+
+        self.cy += 1;
+        self.cx = 0;
+        self.dirty = true;
+    }
+
+    fn delete_char(&mut self) {
+        if self.cy == self.len() || (self.cx == 0 && self.cy == 0) {
+            return;
+        }
+
+        if self.cx > 0 {
+            self.lines[self.cy].modify(|s| {
+                s.remove(self.cx - 1);
+            });
+            self.cx -= 1;
+        } else {
+            self.cx = self.lines[self.cy - 1].len();
+            let line = self.lines.remove(self.cy);
+            self.lines[self.cy - 1].modify(|s| s.push_str(&line.raw));
+            self.cy -= 1;
+        }
+
+        self.dirty = true;
     }
 }

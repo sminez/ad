@@ -1,4 +1,12 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arrow {
+    Up,
+    Down,
+    Left,
+    Right,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Char(char),
     Ctrl(char),
@@ -11,14 +19,7 @@ pub enum Key {
     End,
     PageUp,
     PageDown,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Arrow {
-    Up,
-    Down,
-    Left,
-    Right,
+    Esc,
 }
 
 impl Key {

@@ -6,7 +6,7 @@ use crate::{
         clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, CUR_CLEAR_RIGHT,
         CUR_HIDE, CUR_SHOW, CUR_TO_START, RESTORE_VIDEO, REVERSE_VIDEO,
     },
-    STATUS_TIMEOUT, VERSION,
+    STATUS_TIMEOUT, UNNAMED_BUFFER, VERSION,
 };
 use libc::termios as Termios;
 use std::{
@@ -144,7 +144,7 @@ impl Editor {
             } else {
                 let col_off = self.col_off();
                 // file_row < self.current_buffer_len() so there is an active buffer
-                let rline = &self.buffers[0].render_lines[file_row];
+                let rline = &self.buffers[0].lines[file_row].render;
                 let mut len = max(0, rline.len() - col_off);
                 len = min(self.screen_cols, len);
                 buf.push_str(&rline[col_off..min(self.screen_cols, len)]);
@@ -155,23 +155,19 @@ impl Editor {
     }
 
     fn render_status_bar(&self, buf: &mut String) {
-        let max_name_len = 20;
-        let no_name = "[---]";
-
-        let (name, n_lines, cy, rx) = if self.buffers.is_empty() {
-            (no_name, 1, 1, 1)
+        let (name, n_lines, cy, rx, dirty) = if self.buffers.is_empty() {
+            (UNNAMED_BUFFER, 1, 1, 1, false)
         } else {
             let b = &self.buffers[0];
-            let name = b
-                .path
-                .as_ref()
-                .map(|s| &s.as_str()[0..min(max_name_len, s.len())])
-                .unwrap_or(no_name);
+            let name = b.display_name().unwrap_or(UNNAMED_BUFFER);
 
-            (name, b.len(), b.cy + 1, b.rx + 1)
+            (name, b.len(), b.cy + 1, b.rx + 1, b.dirty)
         };
 
-        let lstatus = format!("{name} - {n_lines} lines");
+        let lstatus = format!(
+            "{name} - {n_lines} lines {}",
+            if dirty { "[+]" } else { "" }
+        );
         let rstatus = format!("{cy}:{rx}");
         let width = self.screen_cols - lstatus.len();
         buf.push_str(&format!(
@@ -225,11 +221,11 @@ impl Editor {
 
         let c2 = match self.try_read_char() {
             Some(c2) => c2,
-            None => return Key::Char(c),
+            None => return Key::Esc,
         };
         let c3 = match self.try_read_char() {
             Some(c3) => c3,
-            None => return Key::Char(c),
+            None => return Key::Esc,
         };
 
         if let Some(key) = Key::try_from_seq2(c2, c3) {
@@ -244,22 +240,21 @@ impl Editor {
             }
         }
 
-        Key::Char(c)
+        Key::Esc
     }
 
     pub fn handle_keypress(&mut self, k: Key) -> io::Result<()> {
         match k {
-            Key::Arrow(_) | Key::Home | Key::End | Key::PageUp | Key::PageDown => {
-                if !self.buffers.is_empty() {
-                    self.buffers[0].handle_keypress(k, self.screen_rows)?;
-                }
-            }
-
             Key::Ctrl('q') => {
                 clear_screen(&mut self.stdout)?;
                 self.running = false;
             }
-            _ => (),
+
+            k => {
+                if !self.buffers.is_empty() {
+                    self.buffers[0].handle_keypress(k, self.screen_rows)?;
+                }
+            }
         }
 
         Ok(())
