@@ -1,53 +1,45 @@
 use crate::{
     key::{Arrow, Key},
-    MAX_NAME_LEN, TAB_STOP,
+    MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
     cmp::{min, Ordering},
-    fs::read_to_string,
-    io,
-    path::PathBuf,
+    fs, io,
+    path::{Path, PathBuf},
 };
 
-fn as_render_line(line: &str) -> String {
-    line.replace('\t', &" ".repeat(TAB_STOP))
+mod buffers;
+mod line;
+
+pub use buffers::Buffers;
+pub use line::Line;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BufferKind {
+    File(PathBuf),
+    Virtual(String),
+    Unnamed,
 }
 
-#[derive(Default)]
-pub struct Line {
-    // The raw characters as they will be stored on disk
-    pub(crate) raw: String,
-    // A cache of the rendered string content for the terminal
-    pub(crate) render: String,
-}
-
-impl Line {
-    fn new(raw: String) -> Self {
-        let render = as_render_line(&raw);
-        Self { raw, render }
-    }
-
-    fn update_render(&mut self) {
-        self.render = as_render_line(&self.raw);
-    }
-
-    fn modify<F: FnMut(&mut String)>(&mut self, mut f: F) {
-        (f)(&mut self.raw);
-        self.update_render();
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.raw.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.raw.len()
+impl Default for BufferKind {
+    fn default() -> Self {
+        Self::Unnamed
     }
 }
 
-#[derive(Default)]
+impl BufferKind {
+    fn display_name(&self) -> Option<&str> {
+        match self {
+            BufferKind::File(p) => p.file_name()?.to_str(),
+            BufferKind::Virtual(s) => Some(s.as_str()),
+            BufferKind::Unnamed => Some(UNNAMED_BUFFER),
+        }
+    }
+}
+
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Buffer {
-    pub(crate) path: Option<PathBuf>,
+    pub(crate) kind: BufferKind,
     pub(crate) lines: Vec<Line>,
     pub(crate) cx: usize,
     pub(crate) cy: usize,
@@ -59,11 +51,11 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new_from_file(path: &str) -> io::Result<Self> {
-        let raw = read_to_string(path)?;
+        let raw = fs::read_to_string(path)?;
         let lines: Vec<Line> = raw.lines().map(|s| Line::new(s.to_string())).collect();
 
         Ok(Self {
-            path: Some(PathBuf::from(path)),
+            kind: BufferKind::File(PathBuf::from(path)),
             lines,
             cx: 0,
             cy: 0,
@@ -74,10 +66,44 @@ impl Buffer {
         })
     }
 
+    pub fn new_virtual(name: String) -> Self {
+        Self {
+            kind: BufferKind::Virtual(name),
+            lines: Vec::new(),
+            cx: 0,
+            cy: 0,
+            rx: 0,
+            row_off: 0,
+            col_off: 0,
+            dirty: false,
+        }
+    }
+
     pub fn display_name(&self) -> Option<&str> {
-        let s = self.path.as_ref()?.file_name()?.to_str()?;
+        let s = self.kind.display_name()?;
 
         Some(&s[0..min(MAX_NAME_LEN, s.len())])
+    }
+
+    pub fn file_path(&self) -> Option<&Path> {
+        match &self.kind {
+            BufferKind::File(p) => Some(p),
+            _ => None,
+        }
+    }
+
+    pub fn is_unnamed(&self) -> bool {
+        self.kind == BufferKind::Unnamed
+    }
+
+    pub fn contents(&self) -> String {
+        let mut s = String::new();
+        for line in self.lines.iter() {
+            s.push_str(&line.raw);
+            s.push('\n');
+        }
+
+        s
     }
 
     #[inline]

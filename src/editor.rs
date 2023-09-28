@@ -1,5 +1,5 @@
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, Buffers},
     die,
     key::Key,
     term::{
@@ -11,6 +11,7 @@ use crate::{
 use libc::termios as Termios;
 use std::{
     cmp::{max, min},
+    fs,
     io::{self, Read, Stdin, Stdout, Write},
     time::Instant,
 };
@@ -24,7 +25,7 @@ pub struct Editor {
     running: bool,
     status_message: String,
     status_time: Instant,
-    buffers: Vec<Buffer>,
+    buffers: Buffers,
 }
 
 impl Drop for Editor {
@@ -53,9 +54,9 @@ impl Editor {
             stdin: io::stdin(),
             original_termios,
             running: true,
-            buffers: Vec::new(),
             status_message: String::new(),
             status_time: Instant::now(),
+            buffers: Buffers::new(),
         }
     }
 
@@ -63,10 +64,14 @@ impl Editor {
     //   - display an error rather than erroring
     //   - check if the file is already open
     pub fn open_file(&mut self, path: &str) -> io::Result<()> {
-        self.buffers.insert(0, Buffer::new_from_file(path)?);
+        self.buffers.insert(Buffer::new_from_file(path)?);
 
         Ok(())
     }
+
+    // fn save_current_buffer(&self) -> io::Result<()> {
+    //     let p = self.buffers
+    // }
 
     #[inline]
     pub fn running(&self) -> bool {
@@ -79,42 +84,22 @@ impl Editor {
         self.status_time = Instant::now();
     }
 
-    fn row_off(&self) -> usize {
-        if self.buffers.is_empty() {
-            0
-        } else {
-            self.buffers[0].row_off
-        }
-    }
-
-    fn col_off(&self) -> usize {
-        if self.buffers.is_empty() {
-            0
-        } else {
-            self.buffers[0].col_off
-        }
-    }
-
     pub fn refresh_screen(&mut self) -> io::Result<()> {
-        if !self.buffers.is_empty() {
-            self.buffers[0].clamp_scroll(self.screen_rows, self.screen_cols);
-        }
+        self.buffers
+            .active_mut()
+            .clamp_scroll(self.screen_rows, self.screen_cols);
 
         let mut buf = format!("{CUR_HIDE}{CUR_TO_START}");
         self.render_rows(&mut buf);
         self.render_status_bar(&mut buf);
         self.render_message_bar(&mut buf);
 
-        let (cy, rx) = self
-            .buffers
-            .get(0)
-            .map(|b| (b.cy, b.rx))
-            .unwrap_or_default();
+        let active = self.buffers.active();
 
         buf.push_str(&format!(
             "\x1b[{};{}H{CUR_SHOW}",
-            cy - self.row_off() + 1,
-            rx - self.col_off() + 1
+            active.cy - active.row_off + 1,
+            active.rx - active.col_off + 1
         ));
 
         self.stdout.write_all(buf.as_bytes())?;
@@ -122,13 +107,18 @@ impl Editor {
     }
 
     fn render_rows(&self, buf: &mut String) {
-        let buffer_len = self.buffers.get(0).map(|b| b.len()).unwrap_or_default();
+        let Buffer {
+            lines,
+            row_off,
+            col_off,
+            ..
+        } = self.buffers.active();
 
         for y in 0..self.screen_rows {
-            let file_row = y + self.row_off();
+            let file_row = y + row_off;
 
-            if file_row >= buffer_len {
-                if self.buffers.is_empty() && y == self.screen_rows / 3 {
+            if file_row >= lines.len() {
+                if self.buffers.is_empty_scratch() && y == self.screen_rows / 3 {
                     let mut banner = format!("ad editor :: version {VERSION}");
                     banner.truncate(self.screen_cols);
                     let mut padding = (self.screen_cols - banner.len()) / 2;
@@ -142,12 +132,10 @@ impl Editor {
                     buf.push('~');
                 }
             } else {
-                let col_off = self.col_off();
-                // file_row < self.current_buffer_len() so there is an active buffer
-                let rline = &self.buffers[0].lines[file_row].render;
+                let rline = &lines[file_row].render;
                 let mut len = max(0, rline.len() - col_off);
                 len = min(self.screen_cols, len);
-                buf.push_str(&rline[col_off..min(self.screen_cols, len)]);
+                buf.push_str(&rline[*col_off..min(self.screen_cols, len)]);
             }
 
             buf.push_str(&format!("{CUR_CLEAR_RIGHT}\r\n"));
@@ -155,14 +143,9 @@ impl Editor {
     }
 
     fn render_status_bar(&self, buf: &mut String) {
-        let (name, n_lines, cy, rx, dirty) = if self.buffers.is_empty() {
-            (UNNAMED_BUFFER, 1, 1, 1, false)
-        } else {
-            let b = &self.buffers[0];
-            let name = b.display_name().unwrap_or(UNNAMED_BUFFER);
-
-            (name, b.len(), b.cy + 1, b.rx + 1, b.dirty)
-        };
+        let b = self.buffers.active();
+        let name = b.display_name().unwrap_or(UNNAMED_BUFFER);
+        let (name, n_lines, cy, rx, dirty) = (name, b.len(), b.cy + 1, b.rx + 1, b.dirty);
 
         let lstatus = format!(
             "{name} - {n_lines} lines {}",
@@ -250,11 +233,10 @@ impl Editor {
                 self.running = false;
             }
 
-            k => {
-                if !self.buffers.is_empty() {
-                    self.buffers[0].handle_keypress(k, self.screen_rows)?;
-                }
-            }
+            k => self
+                .buffers
+                .active_mut()
+                .handle_keypress(k, self.screen_rows)?,
         }
 
         Ok(())
