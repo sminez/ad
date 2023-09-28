@@ -2,6 +2,7 @@ use crate::{
     buffer::{Buffer, BufferKind, Buffers},
     die,
     key::{Arrow, Key},
+    mode::{modes, Action, Mode},
     term::{clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, Cur, Style},
     STATUS_TIMEOUT, UNNAMED_BUFFER, VERSION,
 };
@@ -23,6 +24,8 @@ pub struct Editor {
     running: bool,
     status_message: String,
     status_time: Instant,
+    modes: Vec<Mode>,
+    pending_keys: Vec<Key>,
     buffers: Buffers,
 }
 
@@ -54,6 +57,8 @@ impl Editor {
             running: true,
             status_message: String::new(),
             status_time: Instant::now(),
+            modes: modes(),
+            pending_keys: Vec::new(),
             buffers: Buffers::new(),
         }
     }
@@ -230,7 +235,8 @@ impl Editor {
         let (name, n_lines, cy, rx, dirty) = (name, b.len(), b.cy + 1, b.rx + 1, b.dirty);
 
         let lstatus = format!(
-            "{name} - {n_lines} lines {}",
+            "{} {name} - {n_lines} lines {}",
+            self.modes[0],
             if dirty { "[+]" } else { "" }
         );
         let rstatus = format!("{cy}:{rx}");
@@ -312,31 +318,57 @@ impl Editor {
     }
 
     pub fn handle_keypress(&mut self, k: Key) -> io::Result<()> {
-        match k {
-            Key::Ctrl('q') => {
-                if self.buffers.active().dirty {
-                    self.set_status_message(
-                        "Current buffer is dirty: press C-q again to force quit",
-                    );
-                    self.refresh_screen();
+        self.pending_keys.push(k);
 
-                    match self.read_key() {
-                        Key::Ctrl('q') => (),
-                        k => return self.handle_keypress(k),
+        match self.modes[0].handle_keys(&mut self.pending_keys) {
+            Some(actions) => self.handle_actions(actions),
+            None => Ok(()),
+        }
+    }
+
+    fn handle_actions(&mut self, actions: Vec<Action>) -> io::Result<()> {
+        for action in actions.into_iter() {
+            match action {
+                Action::SaveBuffer => self.save_current_buffer()?,
+                Action::SetMode(name) => {
+                    if let Some((i, _)) =
+                        self.modes.iter().enumerate().find(|(_, m)| m.name == name)
+                    {
+                        self.modes.swap(0, i);
+                        let cur_shape = self.modes[0].cur_shape.to_string();
+                        self.stdout.write_all(cur_shape.as_bytes())?;
+                    }
+                }
+                Action::Exit => {
+                    self.exit()?;
+                    if !self.running {
+                        break;
                     }
                 }
 
-                clear_screen(&mut self.stdout);
-                self.running = false;
+                a => self
+                    .buffers
+                    .active_mut()
+                    .handle_action(a, self.screen_rows)?,
             }
-
-            Key::Ctrl('s') => self.save_current_buffer()?,
-
-            k => self
-                .buffers
-                .active_mut()
-                .handle_keypress(k, self.screen_rows)?,
         }
+
+        Ok(())
+    }
+
+    fn exit(&mut self) -> io::Result<()> {
+        if self.buffers.active().dirty {
+            self.set_status_message("Current buffer is dirty: press C-q again to force quit");
+            self.refresh_screen();
+
+            match self.read_key() {
+                Key::Ctrl('q') => (),
+                k => return self.handle_keypress(k),
+            }
+        }
+
+        clear_screen(&mut self.stdout);
+        self.running = false;
 
         Ok(())
     }

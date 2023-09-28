@@ -1,4 +1,4 @@
-use ad::editor::Editor;
+use ad::Editor;
 use std::{env::args, io};
 
 fn main() -> io::Result<()> {

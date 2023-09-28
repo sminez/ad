@@ -1,5 +1,6 @@
 use crate::{
     key::{Arrow, Key},
+    mode::Action,
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
@@ -172,9 +173,20 @@ impl Buffer {
         }
     }
 
-    pub fn handle_keypress(&mut self, k: Key, screen_rows: usize) -> io::Result<()> {
+    pub fn handle_action(&mut self, a: Action, screen_rows: usize) -> io::Result<()> {
+        match a {
+            Action::Move(arr) => self.move_cursor(arr),
+            Action::DeleteChar => self.delete_char(),
+            Action::RawKey(k) => self.handle_raw_key(k, screen_rows)?,
+
+            _ => (),
+        }
+
+        Ok(())
+    }
+
+    fn handle_raw_key(&mut self, k: Key, screen_rows: usize) -> io::Result<()> {
         match k {
-            Key::Arrow(arr) => self.move_cursor(arr),
             Key::Home => self.cx = 0,
             Key::End => {
                 if self.cy < self.lines.len() {
@@ -192,16 +204,7 @@ impl Buffer {
                     self.move_cursor(arr);
                 }
             }
-
             Key::Return => self.insert_newline(),
-
-            Key::Backspace | Key::Del | Key::Ctrl('h') => {
-                if k == Key::Del {
-                    self.move_cursor(Arrow::Right);
-                }
-                self.delete_char();
-            }
-
             Key::Tab => self.insert_char('\t'),
             Key::Char(c) => self.insert_char(c),
 

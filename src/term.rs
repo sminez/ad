@@ -81,6 +81,31 @@ impl fmt::Display for Cur {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CurShape {
+    Block,
+    Bar,
+    Underline,
+    BlinkingBlock,
+    BlinkingBar,
+    BlinkingUnderline,
+}
+
+impl fmt::Display for CurShape {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use CurShape::*;
+
+        match self {
+            BlinkingBlock => write!(f, "\x1b[\x31 q"),
+            Block => write!(f, "\x1b[\x32 q"),
+            BlinkingUnderline => write!(f, "\x1b[\x33 q"),
+            Underline => write!(f, "\x1b[\x34 q"),
+            BlinkingBar => write!(f, "\x1b[\x35 q"),
+            Bar => write!(f, "\x1b[\x36 q"),
+        }
+    }
+}
+
 /// Request the current terminal size from the kernel using ioctl
 pub(crate) fn get_termsize() -> (usize, usize) {
     #[repr(C)]

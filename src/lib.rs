@@ -2,9 +2,13 @@
 pub mod buffer;
 pub mod editor;
 pub mod key;
+pub mod mode;
 pub mod term;
+pub mod trie;
 
-pub const VERSION: &str = "1.0.0";
+pub use editor::Editor;
+
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UNNAMED_BUFFER: &str = "[No Name]";
 pub const TAB_STOP: usize = 4;
 pub const STATUS_TIMEOUT: u64 = 5;
