@@ -5,7 +5,8 @@ use crate::{
 };
 use std::{
     cmp::{min, Ordering},
-    fs, io,
+    fs,
+    io::{self, ErrorKind},
     path::{Path, PathBuf},
 };
 
@@ -52,7 +53,12 @@ pub struct Buffer {
 
 impl Buffer {
     pub fn new_from_file(path: &str) -> io::Result<Self> {
-        let raw = fs::read_to_string(path)?;
+        let raw = match fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+            Err(e) => return Err(e),
+        };
+
         let lines: Vec<Line> = raw.lines().map(|s| Line::new(s.to_string())).collect();
 
         Ok(Self {

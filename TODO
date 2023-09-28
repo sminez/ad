@@ -1,0 +1,13 @@
+:: TODO
+
+- Display pending keys in the RHS of the message bar
+- Better colors for the status bar
+  - Maybe change the color based on the mode?
+- Command mode
+  - This probably needs to be a special case that works more like
+    the current prompt mode?
+- Port over the normal mode actions from poe
+  - This will require rewriting the impls as they depend on rope data structures
+- Search
+- Buffer switch
+- FUSE filesystem fun...!

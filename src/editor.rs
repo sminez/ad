@@ -63,11 +63,12 @@ impl Editor {
         }
     }
 
-    // TODO:
-    //   - display an error rather than erroring
-    //   - check if the file is already open
+    // TODO: check if the file is already open
     pub fn open_file(&mut self, path: &str) -> io::Result<()> {
-        self.buffers.insert(Buffer::new_from_file(path)?);
+        match Buffer::new_from_file(path) {
+            Ok(b) => self.buffers.insert(b),
+            Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
+        };
 
         Ok(())
     }
