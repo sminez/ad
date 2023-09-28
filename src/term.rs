@@ -1,8 +1,10 @@
+use crate::die;
 use libc::{
     ioctl, tcgetattr, tcsetattr, termios as Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN,
     ISIG, ISTRIP, IXON, OPOST, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
 };
 use std::{
+    fmt,
     io::{Stdout, Write},
     mem,
 };
@@ -10,21 +12,73 @@ use std::{
 // ANSI escape codes:
 //   https://vt100.net/docs/vt100-ug/chapter3.html
 pub const CLEAR_SCREEN: &str = "\x1b[2J";
-pub const CUR_TO_START: &str = "\x1b[H";
-pub const CUR_HIDE: &str = "\x1b[?25l";
-pub const CUR_SHOW: &str = "\x1b[?25h";
-pub const CUR_CLEAR_RIGHT: &str = "\x1b[K";
-pub const REVERSE_VIDEO: &str = "\x1b[7m";
-pub const RESTORE_VIDEO: &str = "\x1b[m";
 
-/// Helper for panicing the program but first ensuring that the screen is cleared
-#[macro_export]
-macro_rules! die {
-    ($template:expr $(, $arg:expr)*) => {{
-        $crate::term::clear_screen(&mut ::std::io::stdout());
-        panic!($template $(, $arg)*)
-    }};
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Color {
+    r: u8,
+    b: u8,
+    g: u8,
+}
 
+impl From<&str> for Color {
+    fn from(s: &str) -> Self {
+        let [_, r, g, b] = match u32::from_str_radix(s.strip_prefix('#').unwrap_or(s), 16) {
+            Ok(hex) => hex.to_be_bytes(),
+            Err(e) => die!("invalid color ('{s}'): {e}"),
+        };
+
+        Self { r, g, b }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Style {
+    Fg(Color),
+    Bg(Color),
+    Bold,
+    Italic,
+    Underline,
+    Reverse,
+    Reset,
+}
+
+impl fmt::Display for Style {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Style::*;
+
+        match self {
+            Fg(Color { r, b, g }) => write!(f, "\x1b[38;2;{r};{g};{b}m"),
+            Bg(Color { r, b, g }) => write!(f, "\x1b[48;2;{r};{g};{b}m"),
+            Bold => write!(f, "\x1b[1m"),
+            Italic => write!(f, "\x1b[3m"),
+            Underline => write!(f, "\x1b[4m"),
+            Reverse => write!(f, "\x1b[7m"),
+            Reset => write!(f, "\x1b[m"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cur {
+    To(usize, usize),
+    ToStart,
+    Hide,
+    Show,
+    ClearRight,
+}
+
+impl fmt::Display for Cur {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use Cur::*;
+
+        match self {
+            To(x, y) => write!(f, "\x1b[{y};{x}H"),
+            ToStart => write!(f, "\x1b[H"),
+            Hide => write!(f, "\x1b[?25l"),
+            Show => write!(f, "\x1b[?25h"),
+            ClearRight => write!(f, "\x1b[K"),
+        }
+    }
 }
 
 /// Request the current terminal size from the kernel using ioctl
@@ -51,7 +105,7 @@ pub(crate) fn get_termsize() -> (usize, usize) {
 }
 
 pub(crate) fn clear_screen(stdout: &mut Stdout) {
-    if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{CUR_TO_START}").as_bytes()) {
+    if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{}", Cur::ToStart).as_bytes()) {
         panic!("unable to clear screen: {e}");
     }
     if let Err(e) = stdout.flush() {

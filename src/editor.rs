@@ -2,10 +2,7 @@ use crate::{
     buffer::{Buffer, BufferKind, Buffers},
     die,
     key::{Arrow, Key},
-    term::{
-        clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, CUR_CLEAR_RIGHT,
-        CUR_HIDE, CUR_SHOW, CUR_TO_START, RESTORE_VIDEO, REVERSE_VIDEO,
-    },
+    term::{clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios, Cur, Style},
     STATUS_TIMEOUT, UNNAMED_BUFFER, VERSION,
 };
 use libc::termios as Termios;
@@ -173,14 +170,14 @@ impl Editor {
             .active_mut()
             .clamp_scroll(self.screen_rows, self.screen_cols);
 
-        let mut buf = format!("{CUR_HIDE}{CUR_TO_START}");
+        let mut buf = format!("{}{}", Cur::Hide, Cur::ToStart);
         self.render_rows(&mut buf);
         self.render_status_bar(&mut buf);
         self.render_message_bar(&mut buf);
 
         let active = self.buffers.active();
         let (x, y) = cur.unwrap_or((active.rx - active.col_off, active.cy - active.row_off));
-        buf.push_str(&format!("\x1b[{};{}H{CUR_SHOW}", y + 1, x + 1));
+        buf.push_str(&format!("{}{}", Cur::To(x + 1, y + 1), Cur::Show));
 
         if let Err(e) = self.stdout.write_all(buf.as_bytes()) {
             die!("Unable to refresh screen: {e}");
@@ -223,7 +220,7 @@ impl Editor {
                 buf.push_str(&rline[*col_off..min(self.screen_cols, len)]);
             }
 
-            buf.push_str(&format!("{CUR_CLEAR_RIGHT}\r\n"));
+            buf.push_str(&format!("{}\r\n", Cur::ClearRight));
         }
     }
 
@@ -239,12 +236,14 @@ impl Editor {
         let rstatus = format!("{cy}:{rx}");
         let width = self.screen_cols - lstatus.len();
         buf.push_str(&format!(
-            "{REVERSE_VIDEO}{lstatus}{rstatus:>width$}{RESTORE_VIDEO}\r\n"
+            "{}{lstatus}{rstatus:>width$}{}\r\n",
+            Style::Bg("#4E415C".into()),
+            Style::Reset
         ));
     }
 
     fn render_message_bar(&self, buf: &mut String) {
-        buf.push_str(CUR_CLEAR_RIGHT);
+        buf.push_str(&Cur::ClearRight.to_string());
 
         let mut msg = self.status_message.clone();
         msg.truncate(self.screen_cols);

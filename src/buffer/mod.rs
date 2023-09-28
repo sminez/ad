@@ -202,6 +202,7 @@ impl Buffer {
                 self.delete_char();
             }
 
+            Key::Tab => self.insert_char('\t'),
             Key::Char(c) => self.insert_char(c),
 
             _ => (),
