@@ -5,8 +5,10 @@ fn main() -> io::Result<()> {
     let mut e = Editor::new();
 
     let args: Vec<String> = args().collect();
-    if args.len() == 2 {
-        e.open_file(&args[1])?;
+    if args.len() > 1 {
+        for fname in &args[1..] {
+            e.open_file(fname)?;
+        }
     }
 
     e.set_status_message("HELP: C-s: save | C-q: quit");

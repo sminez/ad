@@ -159,6 +159,25 @@ impl Buffer {
         self.rx = rx;
     }
 
+    fn set_cx_from_rx(&mut self, cur_rx: usize) {
+        let mut rx = 0;
+        let mut cx = 0;
+
+        for c in self.lines[self.cy].raw.chars() {
+            if c == '\t' {
+                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+            }
+            rx += 1;
+
+            if rx > cur_rx {
+                break;
+            }
+            cx += 1;
+        }
+
+        self.cx = cx;
+    }
+
     pub fn clamp_cx(&mut self) {
         let len = if self.cy >= self.len() {
             0
@@ -225,11 +244,13 @@ impl Buffer {
             Arrow::Up => {
                 if self.cy != 0 {
                     self.cy -= 1;
+                    self.set_cx_from_rx(self.rx);
                 }
             }
             Arrow::Down => {
                 if self.cy < self.lines.len() {
                     self.cy += 1;
+                    self.set_cx_from_rx(self.rx);
                 }
             }
             Arrow::Left => {
