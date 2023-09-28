@@ -9,7 +9,7 @@ fn main() -> io::Result<()> {
         e.open_file(&args[1])?;
     }
 
-    e.set_status_message("HELP: C-q = quit");
+    e.set_status_message("HELP: C-s: save | C-q: quit");
 
     while e.running() {
         e.refresh_screen().unwrap();

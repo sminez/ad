@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, Buffers},
+    buffer::{Buffer, BufferKind, Buffers},
     die,
     key::Key,
     term::{
@@ -69,9 +69,36 @@ impl Editor {
         Ok(())
     }
 
-    // fn save_current_buffer(&self) -> io::Result<()> {
-    //     let p = self.buffers
-    // }
+    fn save_current_buffer(&mut self) -> io::Result<()> {
+        let b = self.buffers.active_mut();
+        let p = match b.kind {
+            BufferKind::File(ref p) => p,
+            _ => {
+                self.set_status_message("Error: no file name");
+                return Ok(()); // TODO: prompt for name if possible
+            }
+        };
+
+        let contents = b.contents();
+        let n_lines = b.len();
+        let display_path = match p.canonicalize() {
+            Ok(cp) => cp.display().to_string(),
+            Err(_) => p.display().to_string(),
+        };
+        let n_bytes = contents.as_bytes().len();
+
+        let msg = match fs::write(p, contents) {
+            Ok(_) => {
+                b.dirty = false;
+                format!("\"{display_path}\" {n_lines}L {n_bytes}B written")
+            }
+            Err(e) => format!("Unable to save buffer: {e}"),
+        };
+
+        self.set_status_message(&msg);
+
+        Ok(())
+    }
 
     #[inline]
     pub fn running(&self) -> bool {
@@ -229,9 +256,23 @@ impl Editor {
     pub fn handle_keypress(&mut self, k: Key) -> io::Result<()> {
         match k {
             Key::Ctrl('q') => {
+                if self.buffers.active().dirty {
+                    self.set_status_message(
+                        "Current buffer is dirty: press C-q again to force quit",
+                    );
+                    self.refresh_screen()?;
+
+                    match self.read_key() {
+                        Key::Ctrl('q') => (),
+                        k => return self.handle_keypress(k),
+                    }
+                }
+
                 clear_screen(&mut self.stdout)?;
                 self.running = false;
             }
+
+            Key::Ctrl('s') => self.save_current_buffer()?,
 
             k => self
                 .buffers
