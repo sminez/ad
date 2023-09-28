@@ -6,10 +6,13 @@ pub enum Arrow {
     Right,
 }
 
+// using 'showkey -a' to view keycodes is useful for adding to this
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Char(char),
     Ctrl(char),
+    Alt(char),
+    CtrlAlt(char),
     Tab,
     Return,
     Backspace,
@@ -23,15 +26,15 @@ pub enum Key {
 }
 
 impl Key {
-    pub fn try_from_char(c: char) -> Option<Self> {
+    pub fn from_char(c: char) -> Self {
         match c {
-            '\x1b' => None,
-            '\n' | '\r' => Some(Key::Return),
-            '\x7f' => Some(Key::Backspace),
-            '\t' => Some(Key::Tab),
-            c @ '\x01'..='\x1A' => Some(Key::Ctrl((c as u8 - 0x1 + b'a') as char)),
-            c @ '\x1C'..='\x1F' => Some(Key::Ctrl((c as u8 - 0x1C + b'4') as char)),
-            _ => Some(Key::Char(c)),
+            '\x1b' => Key::Esc,
+            '\n' | '\r' => Key::Return,
+            '\x7f' => Key::Backspace,
+            '\t' => Key::Tab,
+            c @ '\x01'..='\x1A' => Key::Ctrl((c as u8 - 0x1 + b'a') as char),
+            c @ '\x1C'..='\x1F' => Key::Ctrl((c as u8 - 0x1C + b'4') as char),
+            _ => Key::Char(c),
         }
     }
 
@@ -44,6 +47,11 @@ impl Key {
             ('[', 'B') => Some(Key::Arrow(Arrow::Down)),
             ('[', 'C') => Some(Key::Arrow(Arrow::Right)),
             ('[', 'D') => Some(Key::Arrow(Arrow::Left)),
+            ('\x1b', c) if c.is_ascii() => match Self::from_char(c) {
+                Key::Char(c) => Some(Key::Alt(c)),
+                Key::Ctrl(c) => Some(Key::CtrlAlt(c)),
+                _ => None,
+            },
             _ => None,
         }
     }

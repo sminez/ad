@@ -282,8 +282,9 @@ impl Editor {
     pub fn read_key(&mut self) -> Key {
         let c = self.read_char();
 
-        if let Some(key) = Key::try_from_char(c) {
-            return key;
+        match Key::from_char(c) {
+            Key::Esc => (),
+            key => return key,
         }
 
         let c2 = match self.try_read_char() {
@@ -292,7 +293,7 @@ impl Editor {
         };
         let c3 = match self.try_read_char() {
             Some(c3) => c3,
-            None => return Key::Esc,
+            None => return Key::try_from_seq2(c, c2).unwrap_or(Key::Esc),
         };
 
         if let Some(key) = Key::try_from_seq2(c2, c3) {
