@@ -22,7 +22,7 @@ pub enum Action {
     Move(Arrow, usize),
     RawKey(Key),
     SaveBuffer,
-    SetMode(String),
+    SetMode(&'static str),
     // Yank,
     // NewBuffer,
     // CloseBuffer,

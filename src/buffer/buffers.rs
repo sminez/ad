@@ -30,6 +30,14 @@ impl Buffers {
         self.0.insert(0, b);
     }
 
+    pub fn dirty_buffers(&self) -> Vec<&str> {
+        self.0
+            .iter()
+            .filter(|b| b.dirty)
+            .map(|b| b.display_name())
+            .collect()
+    }
+
     #[inline]
     pub fn active(&self) -> &Buffer {
         &self.0[0]

@@ -9,8 +9,8 @@ use crate::{
 
 pub(crate) fn insert_mode() -> Mode {
     let mut keymap = keymap! {
-        [ Esc ] => [ SetMode("NORMAL".to_string()) ],
-        [ Char('f'), Char('d') ] => [ SetMode("NORMAL".to_string()) ],
+        [ Esc ] => [ SetMode("NORMAL") ],
+        [ Char('f'), Char('d') ] => [ SetMode("NORMAL") ],
         [ Backspace ] => [ DeleteChar ],
         [ Del ] => [ Move(Right, 1), DeleteChar ]
 

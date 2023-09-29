@@ -16,12 +16,12 @@ pub(crate) fn normal_mode() -> Mode {
 
         [ Ctrl('s') ] => [ SaveBuffer ],
 
-        [ Char('i') ] => [ SetMode("INSERT".to_string()) ],
-        [ Char('a') ] => [ Move(Right, 1), SetMode("INSERT".to_string()) ],
+        [ Char('i') ] => [ SetMode("INSERT") ],
+        [ Char('a') ] => [ Move(Right, 1), SetMode("INSERT") ],
 
         [ Char('x') ] => [ Move(Right, 1), DeleteChar ],
-        [ Char('o') ] => [ InsertLine ],
-        [ Char('O') ] => [ Move(Up, 1), InsertLine, Move(Down, 2) ],
+        [ Char('o') ] => [ InsertLine, Move(Down, 1), SetMode("INSERT") ],
+        [ Char('O') ] => [ Move(Up, 1), InsertLine, Move(Down, 1), SetMode("INSERT") ],
 
         [ Char('h') ] => [ Move(Left, 1) ],
         [ Char('j') ] => [ Move(Down, 1) ],

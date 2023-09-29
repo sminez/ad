@@ -83,7 +83,7 @@ impl Editor {
         for action in actions.into_iter() {
             match action {
                 Action::SaveBuffer => self.save_current_buffer()?,
-                Action::SetMode(name) => self.set_mode(&name)?,
+                Action::SetMode(name) => self.set_mode(name)?,
                 Action::Exit => self.exit(false)?,
                 Action::ForceExit => self.exit(true)?,
 
