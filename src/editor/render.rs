@@ -3,6 +3,7 @@ use crate::{
     buffer::Buffer,
     die,
     editor::Editor,
+    key::Key,
     term::{Cur, Style},
     STATUS_TIMEOUT, VERSION,
 };
@@ -104,14 +105,12 @@ impl Editor {
     fn render_status_bar(&self, buf: &mut String) {
         let b = self.buffers.active();
         let name = b.display_name();
-        let (name, n_lines, cy, rx, dirty) = (name, b.len(), b.cy + 1, b.rx + 1, b.dirty);
+        let (n_lines, cy, rx) = (b.len(), b.cy + 1, b.rx + 1);
 
         let lstatus = format!(
-            "{}{}{} {name} - {n_lines} lines {}",
-            Style::Bold,
+            "{} {name} - {n_lines} lines {}",
             self.modes[0],
-            Style::NoBold,
-            if dirty { "[+]" } else { "" }
+            if b.dirty { "[+]" } else { "" }
         );
         let rstatus = format!("{cy}:{rx}");
         let width = self.screen_cols - lstatus.len();
@@ -122,17 +121,57 @@ impl Editor {
         ));
     }
 
+    // current prompt and pending chars
     fn render_message_bar(&self, buf: &mut String) {
         buf.push_str(&Cur::ClearRight.to_string());
 
         let mut msg = self.status_message.clone();
-        msg.truncate(self.screen_cols);
+        msg.truncate(self.screen_cols.saturating_sub(10));
 
+        let pending = render_pending(&self.pending_keys);
         let delta = (Instant::now() - self.status_time).as_secs();
+
         if !msg.is_empty() && delta < STATUS_TIMEOUT {
-            buf.push_str(&msg);
+            let width = self.screen_cols - msg.len() - 10;
+            buf.push_str(&format!("{msg}{pending:>width$}"));
+        } else {
+            let width = self.screen_cols - 10;
+            buf.push_str(&format!("{pending:>width$}"));
         }
     }
+}
+
+fn render_pending(keys: &[Key]) -> String {
+    let mut s = String::new();
+    for k in keys {
+        match k {
+            Key::Char(c) if c.is_ascii_whitespace() => s.push_str(&format!("<{:x}>", *c as u8)),
+            Key::Char(c) => s.push(*c),
+            Key::Ctrl(c) => {
+                s.push('^');
+                s.push(*c);
+            }
+            Key::Alt(c) => {
+                s.push('^');
+                s.push('[');
+                s.push(*c);
+            }
+            Key::CtrlAlt(c) => {
+                s.push('^');
+                s.push('[');
+                s.push('^');
+                s.push(*c);
+            }
+
+            _ => (),
+        }
+    }
+
+    if s.len() > 10 {
+        s = s.split_off(s.len() - 10);
+    }
+
+    s
 }
 
 fn n_digits(mut n: usize) -> usize {
@@ -152,6 +191,7 @@ fn n_digits(mut n: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::key::Key::*;
     use simple_test_case::test_case;
 
     #[test_case(0, 1; "n0")]
@@ -163,5 +203,23 @@ mod tests {
     #[test]
     fn n_digits_works(n: usize, digits: usize) {
         assert_eq!(n_digits(n), digits);
+    }
+
+    #[test_case(vec![Char('a')], "a"; "single char")]
+    #[test_case(vec![Ctrl('a')], "^a"; "single ctrl")]
+    #[test_case(vec![Alt('a')], "^[a"; "single alt")]
+    #[test_case(vec![Char(' ')], "<20>"; "space")]
+    #[test_case(vec![CtrlAlt('a')], "^[^a"; "single ctrlalt")]
+    #[test_case(vec![Char('a'), Char('b')], "ab"; "multi char")]
+    #[test_case(vec![Ctrl('a'), Char('b')], "^ab"; "multi mixed")]
+    #[test_case(
+        "1234567890ABC".chars().map(Char).collect(),
+        "4567890ABC";
+        "truncated"
+    )]
+    #[test]
+    fn render_pending_works(pending: Vec<Key>, expected: &str) {
+        let s = render_pending(&pending);
+        assert_eq!(s, expected);
     }
 }
