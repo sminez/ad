@@ -82,8 +82,9 @@ impl Editor {
                 }
             } else {
                 buf.push_str(&format!(
-                    "{} {file_row:>width$}{VLINE}{}",
+                    "{} {:>width$}{VLINE}{}",
                     Style::Fg(SGNCOL_FG.into()),
+                    file_row + 1,
                     Style::Reset,
                     width = w_lnum
                 ));
