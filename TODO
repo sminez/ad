@@ -1,6 +1,7 @@
 :: TODO
 
 - [ ] Display pending keys in the RHS of the message bar
+- [x] sign/number column
 - [ ] Better colors for the status bar
   - Maybe change the color based on the mode?
 - [ ] Command mode

@@ -248,7 +248,7 @@ impl Buffer {
                 }
             }
             Arrow::Down => {
-                if self.cy < self.lines.len() {
+                if self.cy < self.lines.len() - 1 {
                     self.cy += 1;
                     self.set_cx_from_rx(self.rx);
                 }
