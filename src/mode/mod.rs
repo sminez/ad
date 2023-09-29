@@ -1,5 +1,6 @@
 use crate::{
-    key::{Arrow, Key},
+    editor::Action,
+    key::Key,
     term::CurShape,
     trie::{QueryResult, Trie},
 };
@@ -11,22 +12,6 @@ mod normal;
 /// The modes available for ad
 pub(crate) fn modes() -> Vec<Mode> {
     vec![normal::normal_mode(), insert::insert_mode()]
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Action {
-    InsertChar(char),
-    RawKey(Key),
-    DeleteChar,
-    Move(Arrow),
-    SetMode(String),
-    SaveBuffer,
-    Exit,
-    // Yank,
-    // NewBuffer,
-    // CloseBuffer,
-    // NextBuffer,
-    // PreviousBuffer,
 }
 
 pub struct Mode {

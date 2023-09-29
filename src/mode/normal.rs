@@ -1,37 +1,40 @@
 //! vim style normal mode
 use crate::{
+    editor::Action::*,
     key::{Arrow::*, Key::*},
     keymap,
-    mode::{Action::*, Mode},
+    mode::Mode,
     term::CurShape,
 };
 
 pub(crate) fn normal_mode() -> Mode {
+    let leader = Char(' ');
+
     let mut keymap = keymap! {
-        [ Ctrl('q') ] => [ Exit ],
+        [ leader, Char('q') ] => [ Exit ],
+        [ leader, Char('Q') ] => [ ForceExit ],
+
         [ Ctrl('s') ] => [ SaveBuffer ],
+
         [ Char('i') ] => [ SetMode("INSERT".to_string()) ],
-        [ Char('a') ] => [ Move(Right), SetMode("INSERT".to_string()) ],
+        [ Char('a') ] => [ Move(Right, 1), SetMode("INSERT".to_string()) ],
 
-        [ Char('x') ] => [ Move(Right), DeleteChar ],
+        [ Char('x') ] => [ Move(Right, 1), DeleteChar ],
+        [ Char('o') ] => [ InsertLine ],
+        [ Char('O') ] => [ Move(Up, 1), InsertLine, Move(Down, 2) ],
 
-        [ Char('h') ] => [ Move(Left) ],
-        [ Char('j') ] => [ Move(Down) ],
-        [ Char('k') ] => [ Move(Up) ],
-        [ Char('l') ] => [ Move(Right) ],
+        [ Char('h') ] => [ Move(Left, 1) ],
+        [ Char('j') ] => [ Move(Down, 1) ],
+        [ Char('k') ] => [ Move(Up, 1) ],
+        [ Char('l') ] => [ Move(Right, 1) ],
 
         [ Char('H') ] => [ RawKey(Home) ],
-        [ Char('L') ] => [ RawKey(End) ],
-
-        [ Arrow(Up) ] => [ Move(Up) ],
-        [ Arrow(Down) ] => [ Move(Down) ],
-        [ Arrow(Right) ] => [ Move(Right) ],
-        [ Arrow(Left) ] => [ Move(Left) ]
+        [ Char('L') ] => [ RawKey(End) ]
 
     };
 
     keymap.set_default(|k| match k {
-        PageUp | PageDown | Home | End => Some(vec![RawKey(*k)]),
+        Arrow(_) | PageUp | PageDown | Home | End => Some(vec![RawKey(*k)]),
         _ => None,
     });
 

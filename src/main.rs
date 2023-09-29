@@ -11,8 +11,6 @@ fn main() -> io::Result<()> {
         }
     }
 
-    e.set_status_message("HELP: C-s: save | C-q: quit");
-
     while e.running() {
         e.refresh_screen();
         let k = e.read_key();

@@ -2,7 +2,7 @@
 use crate::{
     buffer::{Buffer, BufferKind},
     editor::Editor,
-    key::Key,
+    key::{Arrow, Key},
     term::clear_screen,
 };
 use std::{
@@ -10,6 +10,25 @@ use std::{
     io::{self, Write},
     path::PathBuf,
 };
+
+/// Supported actions for interacting with the editor state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Action {
+    DeleteChar,
+    Exit,
+    ForceExit,
+    InsertChar(char),
+    InsertLine,
+    Move(Arrow, usize),
+    RawKey(Key),
+    SaveBuffer,
+    SetMode(String),
+    // Yank,
+    // NewBuffer,
+    // CloseBuffer,
+    // NextBuffer,
+    // PreviousBuffer,
+}
 
 impl Editor {
     // TODO: check if the file is already open
@@ -71,9 +90,9 @@ impl Editor {
         Ok(())
     }
 
-    pub(super) fn exit(&mut self) -> io::Result<()> {
-        if self.buffers.active().dirty {
-            self.set_status_message("Current buffer is dirty: press C-q again to force quit");
+    pub(super) fn exit(&mut self, force: bool) -> io::Result<()> {
+        if self.buffers.active().dirty && !force {
+            self.set_status_message("No write since last change");
             self.refresh_screen();
 
             match self.read_key() {

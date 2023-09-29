@@ -1,7 +1,7 @@
 use crate::{
     buffer::Buffers,
     key::Key,
-    mode::{modes, Action, Mode},
+    mode::{modes, Mode},
     term::{enable_raw_mode, get_termios, get_termsize, set_termios},
 };
 use libc::termios as Termios;
@@ -13,6 +13,8 @@ use std::{
 mod actions;
 mod input;
 mod render;
+
+pub use actions::Action;
 
 pub struct Editor {
     screen_rows: usize,
@@ -82,18 +84,18 @@ impl Editor {
             match action {
                 Action::SaveBuffer => self.save_current_buffer()?,
                 Action::SetMode(name) => self.set_mode(&name)?,
-                Action::Exit => {
-                    self.exit()?;
-                    if !self.running {
-                        break;
-                    }
-                }
+                Action::Exit => self.exit(false)?,
+                Action::ForceExit => self.exit(true)?,
 
                 a => self
                     .buffers
                     .active_mut()
                     .handle_action(a, self.screen_rows)?,
             }
+
+            if !self.running {
+                break;
+            };
         }
 
         Ok(())

@@ -1,8 +1,9 @@
 //! vim style insert mode where most keys are directly modifying the buffer
 use crate::{
+    editor::Action::*,
     key::{Arrow::*, Key::*},
     keymap,
-    mode::{Action::*, Mode},
+    mode::Mode,
     term::CurShape,
 };
 
@@ -11,12 +12,7 @@ pub(crate) fn insert_mode() -> Mode {
         [ Esc ] => [ SetMode("NORMAL".to_string()) ],
         [ Char('f'), Char('d') ] => [ SetMode("NORMAL".to_string()) ],
         [ Backspace ] => [ DeleteChar ],
-        [ Del ] => [ Move(Right), DeleteChar ],
-
-        [ Arrow(Up) ] => [ Move(Up) ],
-        [ Arrow(Down) ] => [ Move(Down) ],
-        [ Arrow(Right) ] => [ Move(Right) ],
-        [ Arrow(Left) ] => [ Move(Left) ]
+        [ Del ] => [ Move(Right, 1), DeleteChar ]
 
     };
 

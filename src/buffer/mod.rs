@@ -1,6 +1,6 @@
 use crate::{
+    editor::Action,
     key::{Arrow, Key},
-    mode::Action,
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
@@ -30,11 +30,14 @@ impl Default for BufferKind {
 }
 
 impl BufferKind {
-    fn display_name(&self) -> Option<&str> {
+    fn display_name(&self) -> &str {
         match self {
-            BufferKind::File(p) => p.file_name()?.to_str(),
-            BufferKind::Virtual(s) => Some(s.as_str()),
-            BufferKind::Unnamed => Some(UNNAMED_BUFFER),
+            BufferKind::File(p) => p
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(UNNAMED_BUFFER),
+            BufferKind::Virtual(s) => s.as_str(),
+            BufferKind::Unnamed => UNNAMED_BUFFER,
         }
     }
 }
@@ -86,10 +89,10 @@ impl Buffer {
         }
     }
 
-    pub fn display_name(&self) -> Option<&str> {
-        let s = self.kind.display_name()?;
+    pub fn display_name(&self) -> &str {
+        let s = self.kind.display_name();
 
-        Some(&s[0..min(MAX_NAME_LEN, s.len())])
+        &s[0..min(MAX_NAME_LEN, s.len())]
     }
 
     pub fn file_path(&self) -> Option<&Path> {
@@ -200,8 +203,10 @@ impl Buffer {
 
     pub fn handle_action(&mut self, a: Action, screen_rows: usize) -> io::Result<()> {
         match a {
-            Action::Move(arr) => self.move_cursor(arr),
+            Action::Move(arr, count) => self.move_cursor(arr, count),
             Action::DeleteChar => self.delete_char(),
+            Action::InsertLine => self.insert_line(self.cy + 1, "".to_string()),
+
             Action::RawKey(k) => self.handle_raw_key(k, screen_rows)?,
 
             _ => (),
@@ -212,6 +217,7 @@ impl Buffer {
 
     fn handle_raw_key(&mut self, k: Key, screen_rows: usize) -> io::Result<()> {
         match k {
+            Key::Arrow(arr) => self.move_cursor(arr, 1),
             Key::Home => self.cx = 0,
             Key::End => {
                 if self.cy < self.lines.len() {
@@ -225,9 +231,7 @@ impl Buffer {
                     Arrow::Down
                 };
 
-                for _ in 0..screen_rows {
-                    self.move_cursor(arr);
-                }
+                self.move_cursor(arr, screen_rows);
             }
             Key::Return => self.insert_newline(),
             Key::Tab => self.insert_char('\t'),
@@ -239,39 +243,41 @@ impl Buffer {
         Ok(())
     }
 
-    fn move_cursor(&mut self, arr: Arrow) {
-        match arr {
-            Arrow::Up => {
-                if self.cy != 0 {
-                    self.cy -= 1;
-                    self.set_cx_from_rx(self.rx);
+    fn move_cursor(&mut self, arr: Arrow, count: usize) {
+        for _ in 0..count {
+            match arr {
+                Arrow::Up => {
+                    if self.cy != 0 {
+                        self.cy -= 1;
+                        self.set_cx_from_rx(self.rx);
+                    }
                 }
-            }
-            Arrow::Down => {
-                if self.cy < self.lines.len() - 1 {
-                    self.cy += 1;
-                    self.set_cx_from_rx(self.rx);
+                Arrow::Down => {
+                    if self.cy < self.lines.len() - 1 {
+                        self.cy += 1;
+                        self.set_cx_from_rx(self.rx);
+                    }
                 }
-            }
-            Arrow::Left => {
-                if self.cx != 0 {
-                    self.cx -= 1;
-                } else if self.cy > 0 {
-                    // Allow <- to move to the end of the previous line
-                    self.cy -= 1;
-                    self.cx = self.lines[self.cy].len();
+                Arrow::Left => {
+                    if self.cx != 0 {
+                        self.cx -= 1;
+                    } else if self.cy > 0 {
+                        // Allow <- to move to the end of the previous line
+                        self.cy -= 1;
+                        self.cx = self.lines[self.cy].len();
+                    }
                 }
-            }
-            Arrow::Right => {
-                if let Some(line) = self.current_line() {
-                    match self.cx.cmp(&line.len()) {
-                        Ordering::Less => self.cx += 1,
-                        Ordering::Equal => {
-                            // Allow -> to move to the start of the next line
-                            self.cy += 1;
-                            self.cx = 0;
+                Arrow::Right => {
+                    if let Some(line) = self.current_line() {
+                        match self.cx.cmp(&line.len()) {
+                            Ordering::Less => self.cx += 1,
+                            Ordering::Equal => {
+                                // Allow -> to move to the start of the next line
+                                self.cy += 1;
+                                self.cx = 0;
+                            }
+                            _ => (),
                         }
-                        _ => (),
                     }
                 }
             }

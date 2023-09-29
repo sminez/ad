@@ -4,7 +4,7 @@ use crate::{
     die,
     editor::Editor,
     term::{Cur, Style},
-    STATUS_TIMEOUT, UNNAMED_BUFFER, VERSION,
+    STATUS_TIMEOUT, VERSION,
 };
 use std::{
     cmp::{max, min},
@@ -102,7 +102,7 @@ impl Editor {
 
     fn render_status_bar(&self, buf: &mut String) {
         let b = self.buffers.active();
-        let name = b.display_name().unwrap_or(UNNAMED_BUFFER);
+        let name = b.display_name();
         let (name, n_lines, cy, rx, dirty) = (name, b.len(), b.cy + 1, b.rx + 1, b.dirty);
 
         let lstatus = format!(
