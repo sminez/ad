@@ -36,9 +36,13 @@ pub enum Style {
     Fg(Color),
     Bg(Color),
     Bold,
+    NoBold,
     Italic,
+    NoItalic,
     Underline,
+    NoUnderline,
     Reverse,
+    NoReverse,
     Reset,
 }
 
@@ -50,9 +54,13 @@ impl fmt::Display for Style {
             Fg(Color { r, b, g }) => write!(f, "\x1b[38;2;{r};{g};{b}m"),
             Bg(Color { r, b, g }) => write!(f, "\x1b[48;2;{r};{g};{b}m"),
             Bold => write!(f, "\x1b[1m"),
+            NoBold => write!(f, "\x1b[22m"),
             Italic => write!(f, "\x1b[3m"),
+            NoItalic => write!(f, "\x1b[23m"),
             Underline => write!(f, "\x1b[4m"),
+            NoUnderline => write!(f, "\x1b[24m"),
             Reverse => write!(f, "\x1b[7m"),
+            NoReverse => write!(f, "\x1b[27m"),
             Reset => write!(f, "\x1b[m"),
         }
     }

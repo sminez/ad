@@ -107,8 +107,10 @@ impl Editor {
         let (name, n_lines, cy, rx, dirty) = (name, b.len(), b.cy + 1, b.rx + 1, b.dirty);
 
         let lstatus = format!(
-            "{} {name} - {n_lines} lines {}",
+            "{}{}{} {name} - {n_lines} lines {}",
+            Style::Bold,
             self.modes[0],
+            Style::NoBold,
             if dirty { "[+]" } else { "" }
         );
         let rstatus = format!("{cy}:{rx}");
