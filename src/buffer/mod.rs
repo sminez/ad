@@ -163,6 +163,11 @@ impl Buffer {
     }
 
     fn set_cx_from_rx(&mut self, cur_rx: usize) {
+        if self.lines.is_empty() {
+            self.cx = 0;
+            return;
+        }
+
         let mut rx = 0;
         let mut cx = 0;
 
@@ -253,7 +258,7 @@ impl Buffer {
                     }
                 }
                 Arrow::Down => {
-                    if self.cy < self.lines.len() - 1 {
+                    if !self.lines.is_empty() && self.cy < self.lines.len() - 1 {
                         self.cy += 1;
                         self.set_cx_from_rx(self.rx);
                     }
