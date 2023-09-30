@@ -117,7 +117,7 @@ impl Buffer {
     }
 
     #[inline]
-    pub fn len(&self) -> usize {
+    pub fn len_lines(&self) -> usize {
         self.lines.len()
     }
 
@@ -187,7 +187,7 @@ impl Buffer {
     }
 
     pub fn clamp_cx(&mut self) {
-        let len = if self.cy >= self.len() {
+        let len = if self.cy >= self.len_lines() {
             0
         } else {
             self.lines[self.cy].len()
@@ -199,7 +199,7 @@ impl Buffer {
     }
 
     pub fn current_line(&self) -> Option<&Line> {
-        if self.cy >= self.len() {
+        if self.cy >= self.len_lines() {
             None
         } else {
             Some(&self.lines[self.cy])
@@ -302,7 +302,7 @@ impl Buffer {
     }
 
     fn insert_line(&mut self, at: usize, line: String) {
-        if at <= self.len() {
+        if at <= self.len_lines() {
             self.lines.insert(at, Line::new(line));
             self.dirty = true;
         }
@@ -324,7 +324,7 @@ impl Buffer {
     }
 
     fn delete_char(&mut self) {
-        if self.cy == self.len() || (self.cx == 0 && self.cy == 0) {
+        if self.cy == self.len_lines() || (self.cx == 0 && self.cy == 0) {
             return;
         }
 

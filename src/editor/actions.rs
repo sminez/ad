@@ -60,7 +60,7 @@ impl Editor {
 
         let b = self.buffers.active_mut();
         let contents = b.contents();
-        let n_lines = b.len();
+        let n_lines = b.len_lines();
         let display_path = match p.canonicalize() {
             Ok(cp) => cp.display().to_string(),
             Err(_) => p.display().to_string(),
