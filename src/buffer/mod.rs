@@ -212,11 +212,10 @@ impl Buffer {
 
     pub fn handle_action(&mut self, a: Action, screen_rows: usize) -> io::Result<()> {
         match a {
-            Action::Move(arr, count) => self.move_cursor(arr, count),
+            Action::Move { d, n } => self.move_cursor(d, n),
             Action::DeleteChar => self.delete_char(),
             Action::InsertLine => self.insert_line(self.cy + 1, "".to_string()),
-
-            Action::RawKey(k) => self.handle_raw_key(k, screen_rows)?,
+            Action::RawKey { k } => self.handle_raw_key(k, screen_rows)?,
 
             _ => (),
         }

@@ -15,23 +15,22 @@ use std::{
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    CloseBuffer,
     CommandMode,
     DeleteChar,
-    Exit,
-    ForceExit,
-    InsertChar(char),
+    Exit { force: bool },
+    InsertChar { c: char },
     InsertLine,
-    Move(Arrow, usize),
-    RawKey(Key),
+    Move { d: Arrow, n: usize },
+    NextBuffer,
+    OpenFile { path: String },
+    PreviousBuffer,
+    RawKey { k: Key },
     SaveBuffer,
-    SaveBufferAs(String),
+    SaveBufferAs { path: String },
     SearchInCurrentBuffer,
-    SetMode(&'static str),
+    SetMode { m: &'static str },
     // Yank,
-    // NewBuffer,
-    // CloseBuffer,
-    // NextBuffer,
-    // PreviousBuffer,
 }
 
 impl Editor {
@@ -43,6 +42,14 @@ impl Editor {
         };
 
         Ok(())
+    }
+
+    pub fn close_current_buffer(&mut self) {
+        if self.buffers.active().dirty {
+            self.set_status_message("No write since last change");
+        } else {
+            self.buffers.close_active();
+        }
     }
 
     pub(super) fn save_current_buffer(&mut self, fname: Option<String>) -> io::Result<()> {
@@ -99,12 +106,7 @@ impl Editor {
             let dirty_buffers = self.buffers.dirty_buffers().join(" ");
             // TODO: probably want this to be a "cancel only" mini-buffer w multiple lines?
             self.set_status_message(&format!("No write since last change: {dirty_buffers}"));
-            self.refresh_screen();
-
-            match self.read_key() {
-                Key::Ctrl('q') => (),
-                k => return self.handle_keypress(k),
-            }
+            return Ok(());
         }
 
         clear_screen(&mut self.stdout);

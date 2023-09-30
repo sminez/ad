@@ -87,13 +87,16 @@ impl Editor {
     fn handle_actions(&mut self, actions: Vec<Action>) -> io::Result<()> {
         for action in actions.into_iter() {
             match action {
+                Action::CloseBuffer => self.close_current_buffer(),
                 Action::CommandMode => self.command_mode()?,
-                Action::Exit => self.exit(false)?,
-                Action::ForceExit => self.exit(true)?,
+                Action::Exit { force } => self.exit(force)?,
+                Action::NextBuffer => self.buffers.next(),
+                Action::OpenFile { path } => self.open_file(&path)?,
+                Action::PreviousBuffer => self.buffers.previous(),
+                Action::SaveBufferAs { path } => self.save_current_buffer(Some(path))?,
                 Action::SaveBuffer => self.save_current_buffer(None)?,
-                Action::SaveBufferAs(fname) => self.save_current_buffer(Some(fname))?,
                 Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
-                Action::SetMode(name) => self.set_mode(name)?,
+                Action::SetMode { m } => self.set_mode(m)?,
 
                 a => self
                     .buffers

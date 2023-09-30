@@ -11,31 +11,31 @@ pub(crate) fn normal_mode() -> Mode {
     let leader = Char(' ');
 
     let mut keymap = keymap! {
-        [ leader, Char('q') ] => [ Exit ],
-        [ leader, Char('Q') ] => [ ForceExit ],
+        [ leader, Char('q') ] => [ Exit { force: false } ],
+        [ leader, Char('Q') ] => [ Exit { force: true } ],
 
         [ Char(':') ] => [ CommandMode ],
         [ Char('/') ] => [ SearchInCurrentBuffer ],
 
-        [ Char('i') ] => [ SetMode("INSERT") ],
-        [ Char('a') ] => [ Move(Right, 1), SetMode("INSERT") ],
+        [ Char('i') ] => [ SetMode { m: "INSERT" } ],
+        [ Char('a') ] => [ Move { d: Right, n: 1 }, SetMode { m: "INSERT" } ],
 
-        [ Char('x') ] => [ Move(Right, 1), DeleteChar ],
-        [ Char('o') ] => [ InsertLine, Move(Down, 1), SetMode("INSERT") ],
-        [ Char('O') ] => [ Move(Up, 1), InsertLine, Move(Down, 1), SetMode("INSERT") ],
+        [ Char('x') ] => [ Move { d: Right, n: 1 }, DeleteChar ],
+        [ Char('o') ] => [ InsertLine, Move { d: Down, n: 1 }, SetMode { m: "INSERT" } ],
+        [ Char('O') ] => [ Move { d: Up, n: 1 }, InsertLine, Move { d: Down, n: 1 }, SetMode { m: "INSERT" } ],
 
-        [ Char('h') ] => [ Move(Left, 1) ],
-        [ Char('j') ] => [ Move(Down, 1) ],
-        [ Char('k') ] => [ Move(Up, 1) ],
-        [ Char('l') ] => [ Move(Right, 1) ],
+        [ Char('h') ] => [ Move { d: Left, n: 1 } ],
+        [ Char('j') ] => [ Move { d: Down, n: 1 } ],
+        [ Char('k') ] => [ Move { d: Up, n: 1 } ],
+        [ Char('l') ] => [ Move { d: Right, n: 1 } ],
 
-        [ Char('H') ] => [ RawKey(Home) ],
-        [ Char('L') ] => [ RawKey(End) ]
+        [ Char('H') ] => [ RawKey { k: Home } ],
+        [ Char('L') ] => [ RawKey { k: End } ]
 
     };
 
-    keymap.set_default(|k| match k {
-        Arrow(_) | PageUp | PageDown | Home | End => Some(vec![RawKey(*k)]),
+    keymap.set_default(|&k| match k {
+        Arrow(_) | PageUp | PageDown | Home | End => Some(vec![RawKey { k }]),
         _ => None,
     });
 

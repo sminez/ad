@@ -52,4 +52,19 @@ impl Buffers {
     pub fn is_empty_scratch(&self) -> bool {
         self.0.len() == 1 && self.0[0].is_unnamed() && !self.0[0].dirty
     }
+
+    pub fn next(&mut self) {
+        self.0.rotate_right(1)
+    }
+
+    pub fn previous(&mut self) {
+        self.0.rotate_left(1)
+    }
+
+    pub fn close_active(&mut self) {
+        self.0.remove(0);
+        if self.0.is_empty() {
+            self.0.push_back(Buffer::default());
+        }
+    }
 }
