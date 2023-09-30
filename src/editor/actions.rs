@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{Buffer, BufferKind, MiniBuffer},
+    buffer::{Buffer, BufferKind, MiniBuffer, MiniBufferSelection},
     editor::Editor,
     key::{Arrow, Key},
     term::clear_screen,
@@ -22,6 +22,7 @@ pub enum Action {
     Move(Arrow, usize),
     RawKey(Key),
     SaveBuffer,
+    SearchInCurrentBuffer,
     SetMode(&'static str),
     // Yank,
     // NewBuffer,
@@ -105,5 +106,12 @@ impl Editor {
         self.running = false;
 
         Ok(())
+    }
+
+    pub(super) fn search_in_current_buffer(&mut self) {
+        let selection = MiniBuffer::select_from("> ", self.buffers.active().lines.clone(), self);
+        if let MiniBufferSelection::Line { cy, .. } = selection {
+            self.buffers.active_mut().cy = cy;
+        }
     }
 }

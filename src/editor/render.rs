@@ -16,37 +16,12 @@ use std::{
 // UI colors (should be pulled from config eventually)
 const BAR_BG: &str = "#4E415C";
 const SGNCOL_FG: &str = "#544863";
+const MB_HIGHLIGHT: &str = "#3E3549";
 const VLINE: char = '│';
 
 impl Editor {
     pub fn refresh_screen(&mut self) {
-        self.refresh_screen_w_cursor(None);
-    }
-
-    pub(crate) fn refresh_screen_w_cursor(&mut self, cur: Option<(usize, usize)>) {
-        self.buffers
-            .active_mut()
-            .clamp_scroll(self.screen_rows, self.screen_cols);
-
-        let mut buf = format!("{}{}", Cur::Hide, Cur::ToStart);
-        let w_sgncol = self.render_rows(&mut buf, self.screen_rows);
-        self.render_status_bar(&mut buf);
-        self.render_message_bar(&mut buf);
-
-        let active = self.buffers.active();
-        let (x, y) = cur.unwrap_or((
-            active.rx - active.col_off + w_sgncol,
-            active.cy - active.row_off,
-        ));
-        buf.push_str(&format!("{}{}", Cur::To(x + 1, y + 1), Cur::Show));
-
-        if let Err(e) = self.stdout.write_all(buf.as_bytes()) {
-            die!("Unable to refresh screen: {e}");
-        }
-
-        if let Err(e) = self.stdout.flush() {
-            die!("Unable to refresh screen: {e}");
-        }
+        self.refresh_screen_w_minibuffer(None);
     }
 
     pub(crate) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
@@ -194,18 +169,18 @@ impl Editor {
         lines: &[Line],
         selected_line_idx: usize,
     ) {
+        let width = self.screen_cols;
         for (i, Line { render: rline, .. }) in lines.iter().enumerate() {
             let len = min(self.screen_cols, rline.len());
             if i == selected_line_idx {
                 buf.push_str(&format!(
-                    "{}{}{}{}\r\n",
-                    Style::Bg(SGNCOL_FG.into()),
+                    "{}{:<width$}{}\r\n",
+                    Style::Bg(MB_HIGHLIGHT.into()),
                     &rline[0..len],
                     Style::Reset,
-                    Cur::ClearRight
                 ));
             } else {
-                buf.push_str(&rline[0..len]);
+                buf.push_str(&format!("{}{}\r\n", &rline[0..len], Cur::ClearRight));
             }
         }
 

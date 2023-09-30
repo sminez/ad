@@ -16,6 +16,8 @@ pub(crate) fn normal_mode() -> Mode {
 
         [ Ctrl('s') ] => [ SaveBuffer ],
 
+        [ Char('/') ] => [ SearchInCurrentBuffer ],
+
         [ Char('i') ] => [ SetMode("INSERT") ],
         [ Char('a') ] => [ Move(Right, 1), SetMode("INSERT") ],
 

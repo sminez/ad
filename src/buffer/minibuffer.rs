@@ -17,9 +17,17 @@ pub(crate) struct MiniBufferState<'a> {
     pub(crate) lines: &'a [Line],
 }
 
+// TODO: remove this allow when line selection fields are in use
+#[allow(dead_code)]
 pub(crate) enum MiniBufferSelection {
-    Line(usize, String),
-    UserInput(String),
+    Line {
+        cy: usize,
+        line: String,
+        input: String,
+    },
+    UserInput {
+        input: String,
+    },
     Cancelled,
 }
 
@@ -31,6 +39,7 @@ pub(crate) enum MiniBufferSelection {
 /// files you are editing) crossed with dmenu.
 pub(crate) struct MiniBuffer {
     prompt: String,
+    initial_lines: Vec<Line>,
     b: Buffer,
     max_height: usize,
 }
@@ -39,9 +48,10 @@ impl MiniBuffer {
     pub fn new(prompt: String, lines: Vec<Line>, max_height: usize) -> Self {
         Self {
             prompt,
+            initial_lines: lines,
             b: Buffer {
                 kind: BufferKind::MiniBuffer,
-                lines,
+                lines: vec![],
                 cx: 0,
                 cy: 0,
                 rx: 0,
@@ -53,8 +63,10 @@ impl MiniBuffer {
         }
     }
 
-    fn handle_on_change<F: Fn(&str, &mut Vec<Line>)>(&mut self, input: &str, on_change: F) {
-        (on_change)(input, &mut self.b.lines);
+    fn handle_on_change<F: Fn(&str) -> Option<Vec<Line>>>(&mut self, input: &str, on_change: F) {
+        if let Some(lines) = (on_change)(input) {
+            self.b.lines = lines;
+        };
 
         self.b.cy = if self.b.lines.is_empty() {
             0
@@ -63,29 +75,45 @@ impl MiniBuffer {
         };
     }
 
-    pub fn prompt_w_callback<F: Fn(&str, &mut Vec<Line>)>(
+    pub fn prompt_w_callback<F: Fn(&str) -> Option<Vec<Line>>>(
         prompt: &str,
         initial_lines: Vec<Line>,
         on_change: F,
         ed: &mut Editor,
     ) -> MiniBufferSelection {
+        let offset = prompt.len();
+        let (screen_rows, _) = ed.screen_rowcol();
         let mut mb = MiniBuffer::new(prompt.to_string(), initial_lines, MINI_BUFFER_HEIGHT);
         let mut input = String::new();
         let mut x = 0;
-        let offset = prompt.len();
-        let (screen_rows, _) = ed.screen_rowcol();
+        let mut line_indices: Vec<usize> = vec![];
 
         loop {
             mb.prompt = format!("{prompt}{input}");
+            mb.b.lines.clear();
+            line_indices.clear();
+
+            for (i, line) in mb.initial_lines.iter().enumerate() {
+                if line.raw.contains(&input) {
+                    mb.b.lines.push(line.clone());
+                    line_indices.push(i);
+                }
+            }
+
             let n_visible_lines = min(mb.b.lines.len(), mb.max_height);
-            let max_line_idx = min(mb.b.lines.len(), mb.b.row_off + n_visible_lines);
+            let (selected_line_idx, lines) = if mb.b.cy >= n_visible_lines {
+                let lower = mb.b.cy.saturating_sub(n_visible_lines) + 1;
+                (n_visible_lines - 1, &mb.b.lines[lower..(mb.b.cy + 1)])
+            } else {
+                (mb.b.cy, &mb.b.lines[0..n_visible_lines])
+            };
 
             ed.refresh_screen_w_minibuffer(Some(MiniBufferState {
                 cx: x + offset,
                 cy: screen_rows + 1 + n_visible_lines,
-                selected_line_idx: mb.b.cy,
                 prompt_line: &mb.prompt,
-                lines: &mb.b.lines[mb.b.row_off..max_line_idx],
+                selected_line_idx,
+                lines,
             }));
 
             match ed.read_key() {
@@ -104,20 +132,22 @@ impl MiniBuffer {
 
                 Key::Esc => return MiniBufferSelection::Cancelled,
                 Key::Return => {
-                    return mb
-                        .b
-                        .lines
-                        .get(mb.b.cy)
-                        .map(|l| MiniBufferSelection::Line(mb.b.cy, l.raw.clone()))
-                        .unwrap_or_else(|| MiniBufferSelection::UserInput(input.to_string()))
+                    return match mb.b.lines.get(mb.b.cy) {
+                        Some(l) => MiniBufferSelection::Line {
+                            cy: line_indices[mb.b.cy],
+                            line: l.raw.clone(),
+                            input,
+                        },
+                        None => MiniBufferSelection::UserInput { input },
+                    }
                 }
 
                 Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
                 Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
-                Key::Ctrl('k') | Key::Arrow(Arrow::Up) => {
+                Key::Alt('k') | Key::Arrow(Arrow::Up) => {
                     mb.b.move_cursor(Arrow::Up, 1);
                 }
-                Key::Ctrl('j') | Key::Arrow(Arrow::Down) => {
+                Key::Alt('j') | Key::Arrow(Arrow::Down) => {
                     mb.b.move_cursor(Arrow::Down, 1);
                 }
 
@@ -127,26 +157,17 @@ impl MiniBuffer {
     }
 
     pub fn prompt(prompt: &str, ed: &mut Editor) -> Option<String> {
-        match MiniBuffer::prompt_w_callback(prompt, vec![], |_, _| (), ed) {
-            MiniBufferSelection::UserInput(s) => Some(s),
+        match MiniBuffer::prompt_w_callback(prompt, vec![], |_| None, ed) {
+            MiniBufferSelection::UserInput { input } => Some(input),
             _ => None,
         }
     }
 
-    // pub fn select_from(
-    //     prompt: &str,
-    //     initial_lines: Vec<Line>,
-    //     ed: &mut Editor,
-    // ) -> MiniBufferSelection {
-    //     MiniBuffer::prompt_w_callback(
-    //         prompt,
-    //         initial_lines.clone(),
-    //         |input, lines| {
-    //             let mut filtered_lines = initial_lines.clone();
-    //             filtered_lines.retain(|l| l.raw.contains(input));
-    //             *lines = filtered_lines;
-    //         },
-    //         ed,
-    //     )
-    // }
+    pub fn select_from(
+        prompt: &str,
+        initial_lines: Vec<Line>,
+        ed: &mut Editor,
+    ) -> MiniBufferSelection {
+        MiniBuffer::prompt_w_callback(prompt, initial_lines, |_| None, ed)
+    }
 }

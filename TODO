@@ -2,7 +2,7 @@
 
 - [x] Display pending keys in the RHS of the message bar
 - [x] sign/number column
-- [ ] Mini-buffer
+- [x] Mini-buffer
   - This will replace the current prompt functionality as the primary way
     for the user to provide commands to the editor other than Normal mode
 - [ ] Better colors for the status bar
@@ -16,7 +16,7 @@
       kakoune) or below (like emacs).
 - [ ] Port over the normal mode actions from poe
   - This will require rewriting the impls as they depend on rope data structures
-- [ ] Search
+- [x] Search
 - [ ] Buffer switch
 - [ ] cwd and cwd manipulation
   - buffer paths should be converted to absolute and displayed relative to cwd

@@ -86,10 +86,11 @@ impl Editor {
     fn handle_actions(&mut self, actions: Vec<Action>) -> io::Result<()> {
         for action in actions.into_iter() {
             match action {
-                Action::SaveBuffer => self.save_current_buffer()?,
-                Action::SetMode(name) => self.set_mode(name)?,
                 Action::Exit => self.exit(false)?,
                 Action::ForceExit => self.exit(true)?,
+                Action::SaveBuffer => self.save_current_buffer()?,
+                Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
+                Action::SetMode(name) => self.set_mode(name)?,
 
                 a => self
                     .buffers
