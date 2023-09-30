@@ -82,7 +82,7 @@ impl MiniBuffer {
         ed: &mut Editor,
     ) -> MiniBufferSelection {
         let offset = prompt.len();
-        let (screen_rows, _) = ed.screen_rowcol();
+        let (screen_rows, screen_cols) = ed.screen_rowcol();
         let mut mb = MiniBuffer::new(prompt.to_string(), initial_lines, MINI_BUFFER_HEIGHT);
         let mut input = String::new();
         let mut x = 0;
@@ -101,7 +101,11 @@ impl MiniBuffer {
             }
 
             let n_visible_lines = min(mb.b.lines.len(), mb.max_height);
-            let (selected_line_idx, lines) = if mb.b.cy >= n_visible_lines {
+            mb.b.clamp_scroll(n_visible_lines, screen_cols);
+
+            let (selected_line_idx, lines): (usize, &[Line]) = if n_visible_lines == 0 {
+                (0, &[])
+            } else if mb.b.cy >= n_visible_lines {
                 let lower = mb.b.cy.saturating_sub(n_visible_lines) + 1;
                 (n_visible_lines - 1, &mb.b.lines[lower..(mb.b.cy + 1)])
             } else {
@@ -123,7 +127,7 @@ impl MiniBuffer {
                     mb.handle_on_change(&input, &on_change);
                 }
                 Key::Ctrl('h') | Key::Backspace | Key::Del => {
-                    if x <= input.len() {
+                    if x > 0 && x <= input.len() {
                         input.remove(x - 1);
                         x = x.saturating_sub(1);
                         mb.handle_on_change(&input, &on_change);
