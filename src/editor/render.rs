@@ -1,6 +1,6 @@
 //! Rendering the user interface
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, Line, MiniBufferState},
     die,
     editor::Editor,
     key::Key,
@@ -23,13 +23,13 @@ impl Editor {
         self.refresh_screen_w_cursor(None);
     }
 
-    pub(super) fn refresh_screen_w_cursor(&mut self, cur: Option<(usize, usize)>) {
+    pub(crate) fn refresh_screen_w_cursor(&mut self, cur: Option<(usize, usize)>) {
         self.buffers
             .active_mut()
             .clamp_scroll(self.screen_rows, self.screen_cols);
 
         let mut buf = format!("{}{}", Cur::Hide, Cur::ToStart);
-        let w_sgncol = self.render_rows(&mut buf);
+        let w_sgncol = self.render_rows(&mut buf, self.screen_rows);
         self.render_status_bar(&mut buf);
         self.render_message_bar(&mut buf);
 
@@ -49,8 +49,55 @@ impl Editor {
         }
     }
 
+    pub(crate) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
+        let w_minibuffer = mb.is_some();
+        let MiniBufferState {
+            cx,
+            cy,
+            selected_line_idx,
+            prompt_line,
+            lines,
+        } = mb.unwrap_or_default();
+
+        let effective_screen_rows = self.screen_rows - lines.len();
+
+        self.buffers
+            .active_mut()
+            .clamp_scroll(self.screen_rows, self.screen_cols);
+
+        let mut buf = format!("{}{}", Cur::Hide, Cur::ToStart);
+        let w_sgncol = self.render_rows(&mut buf, effective_screen_rows);
+        self.render_status_bar(&mut buf);
+
+        if w_minibuffer {
+            self.render_minibuffer_state(&mut buf, prompt_line, lines, selected_line_idx);
+        } else {
+            self.render_message_bar(&mut buf);
+        }
+
+        let active = self.buffers.active();
+        let (x, y) = if w_minibuffer {
+            (cx, cy)
+        } else {
+            (
+                active.rx - active.col_off + w_sgncol,
+                active.cy - active.row_off,
+            )
+        };
+
+        buf.push_str(&format!("{}{}", Cur::To(x + 1, y + 1), Cur::Show));
+
+        if let Err(e) = self.stdout.write_all(buf.as_bytes()) {
+            die!("Unable to refresh screen: {e}");
+        }
+
+        if let Err(e) = self.stdout.flush() {
+            die!("Unable to refresh screen: {e}");
+        }
+    }
+
     /// Returns the width of the sign column
-    fn render_rows(&self, buf: &mut String) -> usize {
+    fn render_rows(&self, buf: &mut String, screen_rows: usize) -> usize {
         let Buffer {
             lines,
             row_off,
@@ -59,11 +106,11 @@ impl Editor {
         } = self.buffers.active();
 
         // Sort out dimensions of the sign/number column
-        let max_linum = min(lines.len(), self.screen_rows + row_off);
+        let max_linum = min(lines.len(), screen_rows + row_off);
         let w_lnum = n_digits(max_linum);
         let w_sgncol = w_lnum + 2;
 
-        for y in 0..self.screen_rows {
+        for y in 0..screen_rows {
             let file_row = y + row_off;
 
             if file_row >= lines.len() {
@@ -74,7 +121,7 @@ impl Editor {
                     width = w_lnum
                 ));
 
-                if self.buffers.is_empty_scratch() && y == self.screen_rows / 3 {
+                if self.buffers.is_empty_scratch() && y == self.screen_rows / 3 && y < screen_rows {
                     let mut banner = format!("ad editor :: version {VERSION}");
                     banner.truncate(self.screen_cols - w_sgncol);
                     let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
@@ -138,6 +185,31 @@ impl Editor {
             let width = self.screen_cols - 10;
             buf.push_str(&format!("{pending:>width$}"));
         }
+    }
+
+    fn render_minibuffer_state(
+        &self,
+        buf: &mut String,
+        prompt_line: &str,
+        lines: &[Line],
+        selected_line_idx: usize,
+    ) {
+        for (i, Line { render: rline, .. }) in lines.iter().enumerate() {
+            let len = min(self.screen_cols, rline.len());
+            if i == selected_line_idx {
+                buf.push_str(&format!(
+                    "{}{}{}{}\r\n",
+                    Style::Bg(SGNCOL_FG.into()),
+                    &rline[0..len],
+                    Style::Reset,
+                    Cur::ClearRight
+                ));
+            } else {
+                buf.push_str(&rline[0..len]);
+            }
+        }
+
+        buf.push_str(&format!("{prompt_line}{}", Cur::ClearRight));
     }
 }
 

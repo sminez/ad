@@ -12,15 +12,18 @@ use std::{
 
 mod buffers;
 mod line;
+mod minibuffer;
 
-pub use buffers::Buffers;
-pub use line::Line;
+pub(crate) use buffers::Buffers;
+pub(crate) use line::Line;
+pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BufferKind {
     File(PathBuf),
     Virtual(String),
     Unnamed,
+    MiniBuffer,
 }
 
 impl Default for BufferKind {
@@ -38,6 +41,7 @@ impl BufferKind {
                 .unwrap_or(UNNAMED_BUFFER),
             BufferKind::Virtual(s) => s.as_str(),
             BufferKind::Unnamed => UNNAMED_BUFFER,
+            BufferKind::MiniBuffer => "",
         }
     }
 }

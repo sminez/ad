@@ -49,11 +49,6 @@ impl Buffers {
     }
 
     #[inline]
-    pub fn modify_active<F: FnMut(&mut Buffer)>(&mut self, mut f: F) {
-        (f)(&mut self.0[0])
-    }
-
-    #[inline]
     pub fn is_empty_scratch(&self) -> bool {
         self.0.len() == 1 && self.0[0].is_unnamed() && !self.0[0].dirty
     }

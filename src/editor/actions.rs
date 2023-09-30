@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{Buffer, BufferKind},
+    buffer::{Buffer, BufferKind, MiniBuffer},
     editor::Editor,
     key::{Arrow, Key},
     term::clear_screen,
@@ -31,7 +31,7 @@ pub enum Action {
 }
 
 impl Editor {
-    // TODO: check if the file is already open
+    // TODO: check if the file is already open in our internal state
     pub fn open_file(&mut self, path: &str) -> io::Result<()> {
         match Buffer::new_from_file(path) {
             Ok(b) => self.buffers.insert(b),
@@ -44,7 +44,8 @@ impl Editor {
     pub(super) fn save_current_buffer(&mut self) -> io::Result<()> {
         let p = match self.buffers.active().kind {
             BufferKind::File(ref p) => p.clone(),
-            BufferKind::Unnamed => match self.prompt("Save As: ") {
+
+            BufferKind::Unnamed => match MiniBuffer::prompt("Save As: ", self) {
                 Some(s) => {
                     let p: PathBuf = s.into();
                     self.buffers.active_mut().kind = BufferKind::File(p.clone());
@@ -52,10 +53,7 @@ impl Editor {
                 }
                 None => return Ok(()),
             },
-            BufferKind::Virtual(_) => {
-                self.set_status_message("Error: virtual buffer");
-                return Ok(());
-            }
+            BufferKind::Virtual(_) | BufferKind::MiniBuffer => return Ok(()),
         };
 
         let b = self.buffers.active_mut();
@@ -92,7 +90,9 @@ impl Editor {
 
     pub(super) fn exit(&mut self, force: bool) -> io::Result<()> {
         if self.buffers.active().dirty && !force {
-            self.set_status_message("No write since last change");
+            let dirty_buffers = self.buffers.dirty_buffers().join(" ");
+            // TODO: probably want this to be a "cancel only" mini-buffer w multiple lines?
+            self.set_status_message(&format!("No write since last change: {dirty_buffers}"));
             self.refresh_screen();
 
             match self.read_key() {

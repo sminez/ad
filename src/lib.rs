@@ -13,6 +13,7 @@ pub const UNNAMED_BUFFER: &str = "[No Name]";
 pub const TAB_STOP: usize = 4;
 pub const STATUS_TIMEOUT: u64 = 5;
 pub const MAX_NAME_LEN: usize = 20;
+pub const MINI_BUFFER_HEIGHT: usize = 10;
 
 /// Helper for panicing the program but first ensuring that the screen is cleared
 #[macro_export]

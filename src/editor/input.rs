@@ -1,9 +1,5 @@
 //! Fetching and parsing input from the user
-use crate::{
-    die,
-    editor::Editor,
-    key::{Arrow, Key},
-};
+use crate::{die, editor::Editor, key::Key};
 use std::io::{ErrorKind, Read};
 
 impl Editor {
@@ -62,49 +58,5 @@ impl Editor {
         }
 
         Key::Esc
-    }
-
-    /// Prompt the user for input supporting cancellation
-    pub(super) fn prompt(&mut self, prompt: &str) -> Option<String> {
-        let mut input = String::new();
-        let mut x = 0;
-        let offset = prompt.len();
-
-        loop {
-            self.set_status_message(&format!("{prompt}{input}"));
-            self.buffers.active_mut().rx = x;
-            self.refresh_screen_w_cursor(Some((x + offset, self.screen_rows + 1)));
-
-            match self.read_key() {
-                Key::Char(c) => {
-                    input.insert(x, c);
-                    x += 1;
-                }
-                Key::Ctrl('h') | Key::Backspace | Key::Del => {
-                    if x <= input.len() {
-                        input.remove(x - 1);
-                        x = x.saturating_sub(1);
-                    }
-                }
-                Key::Return => {
-                    self.set_status_message("");
-                    return Some(input);
-                }
-                Key::Esc => {
-                    self.set_status_message("");
-                    return None;
-                }
-                Key::Arrow(Arrow::Right) => {
-                    if x < input.len() {
-                        x += 1;
-                    }
-                }
-                Key::Arrow(Arrow::Left) => {
-                    x = x.saturating_sub(1);
-                }
-
-                _ => (),
-            }
-        }
     }
 }

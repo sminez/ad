@@ -64,6 +64,10 @@ impl Editor {
         self.running
     }
 
+    pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
+        (self.screen_rows, self.screen_cols)
+    }
+
     pub fn set_status_message(&mut self, msg: &str) {
         self.status_message.clear();
         self.status_message.push_str(msg);
