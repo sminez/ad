@@ -11,6 +11,7 @@ use std::{
 };
 
 mod actions;
+mod commands;
 mod input;
 mod render;
 
@@ -86,9 +87,11 @@ impl Editor {
     fn handle_actions(&mut self, actions: Vec<Action>) -> io::Result<()> {
         for action in actions.into_iter() {
             match action {
+                Action::CommandMode => self.command_mode()?,
                 Action::Exit => self.exit(false)?,
                 Action::ForceExit => self.exit(true)?,
-                Action::SaveBuffer => self.save_current_buffer()?,
+                Action::SaveBuffer => self.save_current_buffer(None)?,
+                Action::SaveBufferAs(fname) => self.save_current_buffer(Some(fname))?,
                 Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
                 Action::SetMode(name) => self.set_mode(name)?,
 

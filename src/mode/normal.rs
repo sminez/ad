@@ -14,8 +14,7 @@ pub(crate) fn normal_mode() -> Mode {
         [ leader, Char('q') ] => [ Exit ],
         [ leader, Char('Q') ] => [ ForceExit ],
 
-        [ Ctrl('s') ] => [ SaveBuffer ],
-
+        [ Char(':') ] => [ CommandMode ],
         [ Char('/') ] => [ SearchInCurrentBuffer ],
 
         [ Char('i') ] => [ SetMode("INSERT") ],

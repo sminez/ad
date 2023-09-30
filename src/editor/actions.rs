@@ -3,6 +3,7 @@ use crate::{
     buffer::{Buffer, BufferKind, MiniBuffer, MiniBufferSelection},
     editor::Editor,
     key::{Arrow, Key},
+    mode::Mode,
     term::clear_screen,
 };
 use std::{
@@ -14,6 +15,7 @@ use std::{
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    CommandMode,
     DeleteChar,
     Exit,
     ForceExit,
@@ -22,6 +24,7 @@ pub enum Action {
     Move(Arrow, usize),
     RawKey(Key),
     SaveBuffer,
+    SaveBufferAs(String),
     SearchInCurrentBuffer,
     SetMode(&'static str),
     // Yank,
@@ -42,11 +45,13 @@ impl Editor {
         Ok(())
     }
 
-    pub(super) fn save_current_buffer(&mut self) -> io::Result<()> {
-        let p = match self.buffers.active().kind {
-            BufferKind::File(ref p) => p.clone(),
+    pub(super) fn save_current_buffer(&mut self, fname: Option<String>) -> io::Result<()> {
+        use BufferKind as Bk;
 
-            BufferKind::Unnamed => match MiniBuffer::prompt("Save As: ", self) {
+        let p = match (fname, &self.buffers.active().kind) {
+            (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
+            (_, Bk::File(ref p)) => p.clone(),
+            (_, Bk::Unnamed) => match MiniBuffer::prompt("Save As: ", self) {
                 Some(s) => {
                     let p: PathBuf = s.into();
                     self.buffers.active_mut().kind = BufferKind::File(p.clone());
@@ -54,7 +59,7 @@ impl Editor {
                 }
                 None => return Ok(()),
             },
-            BufferKind::Virtual(_) | BufferKind::MiniBuffer => return Ok(()),
+            (_, Bk::Virtual(_) | Bk::MiniBuffer) => return Ok(()),
         };
 
         let b = self.buffers.active_mut();
@@ -113,5 +118,19 @@ impl Editor {
         if let MiniBufferSelection::Line { cy, .. } = selection {
             self.buffers.active_mut().cy = cy;
         }
+    }
+
+    pub(super) fn command_mode(&mut self) -> io::Result<()> {
+        self.modes.insert(0, Mode::command_mode());
+
+        if let Some(input) = MiniBuffer::prompt(":", self) {
+            if let Some(actions) = self.parse_command(&input) {
+                self.handle_actions(actions)?;
+            }
+        }
+
+        self.modes.remove(0);
+
+        Ok(())
     }
 }

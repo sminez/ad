@@ -28,6 +28,15 @@ impl fmt::Display for Mode {
 }
 
 impl Mode {
+    pub(crate) fn command_mode() -> Self {
+        Mode {
+            name: "COMMAND".to_string(),
+            cur_shape: CurShape::Block,
+            keymap: Trie::from_pairs(vec![]),
+            handle_expired_pending: |_| None,
+        }
+    }
+
     pub fn handle_keys(&self, keys: &mut Vec<Key>) -> Option<Vec<Action>> {
         match self.keymap.get(keys) {
             QueryResult::Val(outcome) => {
