@@ -18,7 +18,9 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('/') ] => [ SearchInCurrentBuffer ],
 
         [ Char('i') ] => [ SetMode { m: "INSERT" } ],
+        [ Char('I') ] => [ RawKey { k: Home }, SetMode { m: "INSERT" } ],
         [ Char('a') ] => [ Move { d: Right, n: 1 }, SetMode { m: "INSERT" } ],
+        [ Char('A') ] => [ RawKey { k: End }, SetMode { m: "INSERT" } ],
 
         [ Char('x') ] => [ Move { d: Right, n: 1 }, DeleteChar ],
         [ Char('o') ] => [ InsertLine, Move { d: Down, n: 1 }, SetMode { m: "INSERT" } ],

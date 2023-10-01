@@ -3,7 +3,10 @@ use crate::{
     die,
     key::Key,
     mode::{modes, Mode},
-    term::{clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios},
+    term::{
+        clear_screen, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
+        set_termios, win_size_changed,
+    },
 };
 use libc::termios as Termios;
 use std::{
@@ -44,7 +47,6 @@ impl Drop for Editor {
 impl Editor {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        let (screen_rows, screen_cols) = get_termsize();
         let original_termios = get_termios();
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
@@ -54,8 +56,8 @@ impl Editor {
         enable_raw_mode(original_termios);
 
         Self {
-            screen_rows: screen_rows - 2, // stats+msg bars
-            screen_cols,
+            screen_rows: 0,
+            screen_cols: 0,
             stdout: io::stdout(),
             stdin: io::stdin(),
             original_termios,
@@ -69,11 +71,27 @@ impl Editor {
         }
     }
 
+    /// Update the stored window size, accounting for the status and message bars
+    /// This will panic if the available screen rows are 0 or 1
+    fn update_window_size(&mut self) {
+        let (screen_rows, screen_cols) = get_termsize();
+        self.screen_rows = screen_rows - 2;
+        self.screen_cols = screen_cols;
+    }
+
     pub fn run(&mut self) {
+        register_signal_handler();
+        self.update_window_size();
+
         while self.running {
             self.refresh_screen();
-            let k = self.read_key();
-            self.handle_keypress(k);
+            if let Some(k) = self.try_read_key() {
+                self.handle_keypress(k);
+            }
+
+            if win_size_changed() {
+                self.update_window_size();
+            }
         }
 
         clear_screen(&mut self.stdout);

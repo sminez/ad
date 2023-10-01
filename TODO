@@ -14,6 +14,12 @@
     - If I do it that way, then the "default" mini-buffer is just a single
       line but it should be possible to show more detail either above (like
       kakoune) or below (like emacs).
+- [ ] mini-buffer tab complete
+- [ ] completion of command mode commands
+  - To start with this should be simple enough for handling just what is built in
+    but supporting listing external scripts and tools would be nice as well
+- [ ] Running shell commands
+- [ ] Proper implementation of Sam style `dot`
 - [ ] Port over the normal mode actions from poe
   - This will require rewriting the impls as they depend on rope data structures
 - [x] Search
@@ -25,3 +31,13 @@
   - Probably want to look at kakboard for this one / just use xclip & pbcopy
   - true "native" support in ad will require knowing OS specific code
 - [ ] FUSE filesystem fun...!
+- [ ] Mouse support
+- [x] handle terminal resize
+- [ ] window splitting
+  - This is one where I don't know if I definitely want it or not?
+  - It might be better to just rely on tmux but then that forces me into the multi
+    process route with a server/client model rather than a single editor and then
+    the filesystem stuff for external programs to _extend_ functionality.
+    In the client/server model then _everything_ needs to be RPC...which might be
+    ok given the current `Action` driven model? The main issue becomes where the
+    buffer state lives and how thin the client is.

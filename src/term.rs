@@ -1,13 +1,51 @@
 use crate::die;
 use libc::{
-    ioctl, tcgetattr, tcsetattr, termios as Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN,
-    ISIG, ISTRIP, IXON, OPOST, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
+    c_int, c_void, ioctl, sigaction, sighandler_t, siginfo_t, tcgetattr, tcsetattr,
+    termios as Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, ISIG, ISTRIP, IXON, OPOST,
+    SA_SIGINFO, SIGWINCH, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
 };
 use std::{
     fmt,
-    io::{Stdout, Write},
-    mem,
+    io::{self, Stdout, Write},
+    mem, ptr,
+    sync::atomic::{AtomicBool, Ordering},
 };
+
+/// Used for storing and checking whether or not we've received a signal that our window
+/// size has changed.
+static WIN_SIZE_CHANGED: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn handle_win_size_change(_: c_int, _: *mut siginfo_t, _: *mut c_void) {
+    WIN_SIZE_CHANGED.store(true, Ordering::Relaxed)
+}
+
+#[inline]
+pub fn win_size_changed() -> bool {
+    WIN_SIZE_CHANGED.swap(false, Ordering::Relaxed)
+}
+
+pub fn register_signal_handler() {
+    unsafe {
+        let mut maybe_sa = mem::MaybeUninit::<sigaction>::uninit();
+        if libc::sigemptyset(&mut (*maybe_sa.as_mut_ptr()).sa_mask) == -1 {
+            die!(
+                "Unable to register signal handler: {}",
+                io::Error::last_os_error()
+            )
+        }
+
+        let mut sa_ptr = *maybe_sa.as_mut_ptr();
+        sa_ptr.sa_sigaction = handle_win_size_change as sighandler_t;
+        sa_ptr.sa_flags = SA_SIGINFO;
+
+        if libc::sigaction(SIGWINCH, &sa_ptr as *const _, ptr::null_mut()) == -1 {
+            die!(
+                "Unable to register signal handler: {}",
+                io::Error::last_os_error()
+            )
+        }
+    }
+}
 
 // ANSI escape codes:
 //   https://vt100.net/docs/vt100-ug/chapter3.html

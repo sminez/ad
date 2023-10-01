@@ -121,7 +121,7 @@ impl MiniBuffer {
                 lines,
             }));
 
-            match ed.read_key() {
+            match ed.block_for_key() {
                 Key::Char(c) => {
                     input.insert(x, c);
                     x += 1;
