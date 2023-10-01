@@ -1,5 +1,5 @@
-use crate::buffer::Buffer;
-use std::collections::VecDeque;
+use crate::buffer::{Buffer, BufferKind};
+use std::{collections::VecDeque, io, path::Path};
 
 /// A non-empty vec of buffers where the active buffer is accessible and default
 /// buffers are inserted where needed to maintain invariants
@@ -24,6 +24,23 @@ impl Buffers {
         }
 
         self.0.insert(0, b);
+    }
+
+    pub fn open_or_focus<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+        let path = path.as_ref().canonicalize()?;
+        let idx = self.0.iter().position(|b| match &b.kind {
+            BufferKind::File(p) => p == &path,
+            _ => false,
+        });
+
+        if let Some(idx) = idx {
+            self.0.swap(0, idx);
+            return Ok(());
+        }
+
+        self.insert(Buffer::new_from_canonical_file_path(path)?);
+
+        Ok(())
     }
 
     pub fn dirty_buffers(&self) -> Vec<&str> {

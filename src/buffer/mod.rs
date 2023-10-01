@@ -57,8 +57,8 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new_from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
-        let path = path.as_ref().canonicalize()?;
+    /// As the name implies, this method MUST be called with the full cannonical file path
+    pub(crate) fn new_from_canonical_file_path(path: PathBuf) -> io::Result<Self> {
         let raw = match fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => String::new(),

@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{Buffer, BufferKind, MiniBuffer, MiniBufferSelection},
+    buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
     die,
     editor::Editor,
     key::{Arrow, Key},
@@ -66,11 +66,9 @@ impl Editor {
         self.set_status_message(&self.cwd.display().to_string());
     }
 
-    // TODO: check if the file is already open in our internal state
     pub fn open_file(&mut self, path: &str) {
-        match Buffer::new_from_file(path) {
-            Ok(b) => self.buffers.insert(b),
-            Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
+        if let Err(e) = self.buffers.open_or_focus(path) {
+            self.set_status_message(&format!("Error opening file: {e}"));
         };
     }
 
