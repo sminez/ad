@@ -6,6 +6,17 @@ pub enum Arrow {
     Right,
 }
 
+impl Arrow {
+    pub fn flip(&self) -> Self {
+        match self {
+            Self::Up => Self::Down,
+            Self::Down => Self::Up,
+            Self::Left => Self::Right,
+            Self::Right => Self::Left,
+        }
+    }
+}
+
 // using 'showkey -a' to view keycodes is useful for adding to this
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {

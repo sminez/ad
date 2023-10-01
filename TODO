@@ -32,6 +32,8 @@
   - true "native" support in ad will require knowing OS specific code
 - [ ] FUSE filesystem fun...!
 - [ ] Mouse support
+- [ ] Scroll off / scroll while maintaining cursor position
+- [ ] Undo...!
 - [x] handle terminal resize
 - [ ] window splitting
   - This is one where I don't know if I definitely want it or not?

@@ -5,17 +5,19 @@ use crate::{
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
-    cmp::{min, Ordering},
+    cmp::min,
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
 };
 
 mod buffers;
+mod dot;
 mod line;
 mod minibuffer;
 
 pub(crate) use buffers::Buffers;
+pub(crate) use dot::{Cur, Dot, LineRange, Range, TextObject, UpdateDot};
 pub(crate) use line::Line;
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
@@ -48,9 +50,8 @@ impl BufferKind {
 pub struct Buffer {
     id: usize,
     pub(crate) kind: BufferKind,
+    pub(crate) dot: Dot,
     pub(crate) lines: Vec<Line>,
-    pub(crate) cx: usize,
-    pub(crate) cy: usize,
     pub(crate) rx: usize,
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
@@ -71,9 +72,8 @@ impl Buffer {
         Ok(Self {
             id,
             kind: BufferKind::File(path),
+            dot: Dot::default(),
             lines,
-            cx: 0,
-            cy: 0,
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -85,9 +85,8 @@ impl Buffer {
         Self {
             id,
             kind: BufferKind::Unnamed,
+            dot: Dot::default(),
             lines: Vec::new(),
-            cx: 0,
-            cy: 0,
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -99,9 +98,8 @@ impl Buffer {
         Self {
             id,
             kind: BufferKind::Virtual(name),
+            dot: Dot::default(),
             lines: Vec::new(),
-            cx: 0,
-            cy: 0,
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -152,16 +150,26 @@ impl Buffer {
 
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
         self.rx = 0;
-        if self.cy < self.lines.len() {
-            self.update_rx();
+        let Cur { x, y } = self.dot.first_cur();
+
+        if y < self.lines.len() {
+            let mut rx = 0;
+            for c in self.lines[y].raw.chars().take(x) {
+                if c == '\t' {
+                    rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+                }
+                rx += 1;
+            }
+
+            self.rx = rx;
         }
 
-        if self.cy < self.row_off {
-            self.row_off = self.cy;
+        if y < self.row_off {
+            self.row_off = y;
         }
 
-        if self.cy >= self.row_off + screen_rows {
-            self.row_off = self.cy - screen_rows + 1;
+        if y >= self.row_off + screen_rows {
+            self.row_off = y - screen_rows + 1;
         }
 
         if self.rx < self.col_off {
@@ -173,69 +181,25 @@ impl Buffer {
         }
     }
 
-    fn update_rx(&mut self) {
-        let mut rx = 0;
-
-        for c in self.lines[self.cy].raw.chars().take(self.cx) {
-            if c == '\t' {
-                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
-            }
-            rx += 1;
-        }
-
-        self.rx = rx;
-    }
-
-    fn set_cx_from_rx(&mut self, cur_rx: usize) {
-        if self.lines.is_empty() {
-            self.cx = 0;
-            return;
-        }
-
-        let mut rx = 0;
-        let mut cx = 0;
-
-        for c in self.lines[self.cy].raw.chars() {
-            if c == '\t' {
-                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
-            }
-            rx += 1;
-
-            if rx > cur_rx {
-                break;
-            }
-            cx += 1;
-        }
-
-        self.cx = cx;
-    }
-
-    pub fn clamp_cx(&mut self) {
-        let len = if self.cy >= self.len_lines() {
-            0
-        } else {
-            self.lines[self.cy].len()
-        };
-
-        if self.cx > len {
-            self.cx = len;
-        }
-    }
-
-    pub fn current_line(&self) -> Option<&Line> {
-        if self.cy >= self.len_lines() {
+    pub fn line(&self, y: usize) -> Option<&Line> {
+        if y >= self.len_lines() {
             None
         } else {
-            Some(&self.lines[self.cy])
+            Some(&self.lines[y])
         }
     }
 
     pub fn handle_action(&mut self, a: Action, screen_rows: usize) {
         match a {
-            Action::Move { d, n } => self.move_cursor(d, n),
-            Action::DeleteChar => self.delete_char(),
-            Action::InsertLine => self.insert_line(self.cy + 1, "".to_string()),
+            Action::Move { d } => self.dot = d.set_dot(self),
+            Action::Delete => self.delete(),
+            Action::InsertChar { c } => self.insert_char(c),
             Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
+            Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
+            Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
+            Action::DotSet(tobj) => self.dot = tobj.set_dot(self),
+            Action::DotExtendForward(tobj) => self.dot = tobj.extend_dot_forward(self),
+            Action::DotExtendBackward(tobj) => self.dot = tobj.extend_dot_backward(self),
 
             _ => (),
         }
@@ -243,13 +207,11 @@ impl Buffer {
 
     fn handle_raw_key(&mut self, k: Key, screen_rows: usize) {
         match k {
-            Key::Arrow(arr) => self.move_cursor(arr, 1),
-            Key::Home => self.cx = 0,
-            Key::End => {
-                if self.cy < self.lines.len() {
-                    self.cx = self.lines[self.cy].len();
-                }
-            }
+            Key::Return => self.insert_char('\n'),
+            Key::Tab => self.insert_char('\t'),
+            Key::Char(c) => self.insert_char(c),
+
+            Key::Arrow(arr) => self.dot = arr.set_dot(self),
             Key::PageUp | Key::PageDown => {
                 let arr = if k == Key::PageUp {
                     Arrow::Up
@@ -257,67 +219,52 @@ impl Buffer {
                     Arrow::Down
                 };
 
-                self.move_cursor(arr, screen_rows);
+                for _ in 0..screen_rows {
+                    self.dot = arr.set_dot(self);
+                }
             }
-            Key::Return => self.insert_newline(),
-            Key::Tab => self.insert_char('\t'),
-            Key::Char(c) => self.insert_char(c),
 
             _ => (),
         }
     }
 
-    fn move_cursor(&mut self, arr: Arrow, count: usize) {
-        for _ in 0..count {
-            match arr {
-                Arrow::Up => {
-                    if self.cy != 0 {
-                        self.cy -= 1;
-                        self.set_cx_from_rx(self.rx);
-                    }
-                }
-                Arrow::Down => {
-                    if !self.lines.is_empty() && self.cy < self.lines.len() - 1 {
-                        self.cy += 1;
-                        self.set_cx_from_rx(self.rx);
-                    }
-                }
-                Arrow::Left => {
-                    if self.cx != 0 {
-                        self.cx -= 1;
-                    } else if self.cy > 0 {
-                        // Allow <- to move to the end of the previous line
-                        self.cy -= 1;
-                        self.cx = self.lines[self.cy].len();
-                    }
-                }
-                Arrow::Right => {
-                    if let Some(line) = self.current_line() {
-                        match self.cx.cmp(&line.len()) {
-                            Ordering::Less => self.cx += 1,
-                            Ordering::Equal => {
-                                // Allow -> to move to the start of the next line
-                                self.cy += 1;
-                                self.cx = 0;
-                            }
-                            _ => (),
-                        }
-                    }
-                }
-            }
-        }
-
-        self.clamp_cx();
-    }
-
-    fn insert_char(&mut self, c: char) {
-        if self.cy == self.lines.len() {
+    /// ch is inserted based on the current dot
+    fn insert_char(&mut self, ch: char) {
+        if self.dot.last_cur().y == self.lines.len() {
             self.insert_line(self.lines.len(), String::new());
         }
 
-        self.lines[self.cy].modify(|s| s.insert(self.cx, c));
-        self.cx += 1;
+        let c = match self.dot {
+            Dot::Cur { c } => self.insert_char_handling_newline(c, ch),
+            Dot::Range { r } => {
+                let c = self.delete_range(r);
+                self.insert_char_handling_newline(c, ch)
+            }
+        };
+
+        self.dot = Dot::Cur { c };
         self.dirty = true;
+    }
+
+    fn insert_char_handling_newline(&mut self, mut cur: Cur, ch: char) -> Cur {
+        if ch == '\n' {
+            if cur.x == 0 {
+                self.insert_line(cur.y, String::new());
+            } else {
+                let (l1, l2) = self.lines[cur.y].raw.split_at(cur.x);
+                let (l1, l2) = (l1.to_string(), l2.to_string());
+                self.lines[cur.y].modify(|s| *s = l1.clone());
+                self.insert_line(cur.y + 1, l2);
+            }
+
+            cur.y += 1;
+            cur.x = 0;
+        } else {
+            self.lines[cur.y].modify(|s| s.insert(cur.x, ch));
+            cur.x += 1;
+        }
+
+        cur
     }
 
     fn insert_line(&mut self, at: usize, line: String) {
@@ -327,38 +274,55 @@ impl Buffer {
         }
     }
 
-    fn insert_newline(&mut self) {
-        if self.cx == 0 {
-            self.insert_line(self.cy, String::new());
-        } else {
-            let (cur, nxt) = self.lines[self.cy].raw.split_at(self.cx);
-            let (cur, nxt) = (cur.to_string(), nxt.to_string());
-            self.lines[self.cy].modify(|s| *s = cur.clone());
-            self.insert_line(self.cy + 1, nxt);
-        }
+    fn delete(&mut self) {
+        let c = match self.dot {
+            Dot::Cur { c } => self.delete_cur(c),
+            Dot::Range { r } => self.delete_range(r),
+        };
 
-        self.cy += 1;
-        self.cx = 0;
+        self.dot = Dot::Cur { c };
         self.dirty = true;
     }
 
-    fn delete_char(&mut self) {
-        if self.cy == self.len_lines() || (self.cx == 0 && self.cy == 0) {
-            return;
+    fn delete_cur(&mut self, mut cur: Cur) -> Cur {
+        if cur.y == self.len_lines() || (cur.x == 0 && cur.y == 0) {
+            return cur;
         }
 
-        if self.cx > 0 {
-            self.lines[self.cy].modify(|s| {
-                s.remove(self.cx - 1);
+        if cur.x > 0 {
+            self.lines[cur.y].modify(|s| {
+                s.remove(cur.x - 1);
             });
-            self.cx -= 1;
+            cur.x -= 1;
         } else {
-            self.cx = self.lines[self.cy - 1].len();
-            let line = self.lines.remove(self.cy);
-            self.lines[self.cy - 1].modify(|s| s.push_str(&line.raw));
-            self.cy -= 1;
+            cur.x = self.lines[cur.y - 1].len();
+            let line = self.lines.remove(cur.y);
+            self.lines[cur.y - 1].modify(|s| s.push_str(&line.raw));
+            cur.y -= 1;
         }
 
         self.dirty = true;
+        cur
+    }
+
+    /// Delete all LineRanges from the given range in reverse order so we
+    /// don't invalidate line offsets
+    fn delete_range(&mut self, r: Range) -> Cur {
+        for lr in r.line_ranges().into_iter().rev() {
+            match lr {
+                LineRange::Full { y } => {
+                    self.lines.remove(y);
+                }
+                LineRange::ToEnd { y, start } => self.lines[y].raw.truncate(start),
+                LineRange::FromStart { y, end } => {
+                    self.lines[y].raw.drain(..end);
+                }
+                LineRange::Partial { y, start, end } => {
+                    self.lines[y].raw.drain(start..end);
+                }
+            }
+        }
+
+        r.start
     }
 }

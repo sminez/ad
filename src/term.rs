@@ -105,7 +105,7 @@ impl fmt::Display for Style {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cur {
+pub enum Cursor {
     To(usize, usize),
     ToStart,
     Hide,
@@ -113,9 +113,9 @@ pub enum Cur {
     ClearRight,
 }
 
-impl fmt::Display for Cur {
+impl fmt::Display for Cursor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use Cur::*;
+        use Cursor::*;
 
         match self {
             To(x, y) => write!(f, "\x1b[{y};{x}H"),
@@ -176,7 +176,7 @@ pub(crate) fn get_termsize() -> (usize, usize) {
 }
 
 pub(crate) fn clear_screen(stdout: &mut Stdout) {
-    if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{}", Cur::ToStart).as_bytes()) {
+    if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{}", Cursor::ToStart).as_bytes()) {
         panic!("unable to clear screen: {e}");
     }
     if let Err(e) = stdout.flush() {

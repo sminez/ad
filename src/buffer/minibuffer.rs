@@ -1,7 +1,10 @@
 //! A transient buffer for handling interactive input from the user without
 //! modifying the current buffer state.
 use crate::{
-    buffer::{Buffer, BufferKind, Line},
+    buffer::{
+        dot::{Cur, Dot, UpdateDot},
+        Buffer, BufferKind, Line,
+    },
     editor::Editor,
     key::{Arrow, Key},
     MINI_BUFFER_HEIGHT,
@@ -52,9 +55,8 @@ impl MiniBuffer {
             b: Buffer {
                 id: usize::MAX,
                 kind: BufferKind::MiniBuffer,
+                dot: Default::default(),
                 lines: vec![],
-                cx: 0,
-                cy: 0,
                 rx: 0,
                 row_off: 0,
                 col_off: 0,
@@ -64,16 +66,22 @@ impl MiniBuffer {
         }
     }
 
+    /// Force the cursor to be a single Cur and ensure that its y offset is in bounds
     fn handle_on_change<F: Fn(&str) -> Option<Vec<Line>>>(&mut self, input: &str, on_change: F) {
         if let Some(lines) = (on_change)(input) {
             self.b.lines = lines;
         };
 
-        self.b.cy = if self.b.lines.is_empty() {
-            0
-        } else {
-            min(self.b.lines.len() - 1, self.b.cy)
+        let c = Cur {
+            x: 0,
+            y: if self.b.lines.is_empty() {
+                0
+            } else {
+                min(self.b.lines.len() - 1, self.b.dot.first_cur().y)
+            },
         };
+
+        self.b.dot = Dot::Cur { c };
     }
 
     pub fn prompt_w_callback<F: Fn(&str) -> Option<Vec<Line>>>(
@@ -103,14 +111,15 @@ impl MiniBuffer {
 
             let n_visible_lines = min(mb.b.lines.len(), mb.max_height);
             mb.b.clamp_scroll(n_visible_lines, screen_cols);
+            let Cur { y, .. } = mb.b.dot.first_cur();
 
             let (selected_line_idx, lines): (usize, &[Line]) = if n_visible_lines == 0 {
                 (0, &[])
-            } else if mb.b.cy >= n_visible_lines {
-                let lower = mb.b.cy.saturating_sub(n_visible_lines) + 1;
-                (n_visible_lines - 1, &mb.b.lines[lower..(mb.b.cy + 1)])
+            } else if y >= n_visible_lines {
+                let lower = y.saturating_sub(n_visible_lines) + 1;
+                (n_visible_lines - 1, &mb.b.lines[lower..(y + 1)])
             } else {
-                (mb.b.cy, &mb.b.lines[0..n_visible_lines])
+                (y, &mb.b.lines[0..n_visible_lines])
             };
 
             ed.refresh_screen_w_minibuffer(Some(MiniBufferState {
@@ -137,23 +146,23 @@ impl MiniBuffer {
 
                 Key::Esc => return MiniBufferSelection::Cancelled,
                 Key::Return => {
-                    return match mb.b.lines.get(mb.b.cy) {
+                    return match mb.b.lines.get(y) {
                         Some(l) => MiniBufferSelection::Line {
-                            cy: line_indices[mb.b.cy],
+                            cy: line_indices[y],
                             line: l.raw.clone(),
                             input,
                         },
                         None => MiniBufferSelection::UserInput { input },
-                    }
+                    };
                 }
 
                 Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
                 Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
                 Key::Alt('k') | Key::Arrow(Arrow::Up) => {
-                    mb.b.move_cursor(Arrow::Up, 1);
+                    Arrow::Up.set_dot(&mb.b);
                 }
                 Key::Alt('j') | Key::Arrow(Arrow::Down) => {
-                    mb.b.move_cursor(Arrow::Down, 1);
+                    Arrow::Down.set_dot(&mb.b);
                 }
 
                 _ => (),

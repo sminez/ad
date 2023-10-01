@@ -1,10 +1,10 @@
 //! Rendering the user interface
 use crate::{
-    buffer::{Buffer, Line, MiniBufferState},
+    buffer::{Buffer, Cur, Line, MiniBufferState},
     die,
     editor::Editor,
     key::Key,
-    term::{Cur, Style},
+    term::{Cursor, Style},
     STATUS_TIMEOUT, VERSION,
 };
 use std::{
@@ -40,7 +40,7 @@ impl Editor {
             .active_mut()
             .clamp_scroll(self.screen_rows, self.screen_cols);
 
-        let mut buf = format!("{}{}", Cur::Hide, Cur::ToStart);
+        let mut buf = format!("{}{}", Cursor::Hide, Cursor::ToStart);
         let w_sgncol = self.render_rows(&mut buf, effective_screen_rows);
         self.render_status_bar(&mut buf);
 
@@ -54,13 +54,11 @@ impl Editor {
         let (x, y) = if w_minibuffer {
             (cx, cy)
         } else {
-            (
-                active.rx - active.col_off + w_sgncol,
-                active.cy - active.row_off,
-            )
+            let Cur { y, .. } = active.dot.first_cur();
+            (active.rx - active.col_off + w_sgncol, y - active.row_off)
         };
 
-        buf.push_str(&format!("{}{}", Cur::To(x + 1, y + 1), Cur::Show));
+        buf.push_str(&format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
         if let Err(e) = self.stdout.write_all(buf.as_bytes()) {
             die!("Unable to refresh screen: {e}");
@@ -118,7 +116,7 @@ impl Editor {
                 buf.push_str(&rline[*col_off..min(self.screen_cols - w_sgncol, len)]);
             }
 
-            buf.push_str(&format!("{}\r\n", Cur::ClearRight));
+            buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
         }
 
         w_sgncol
@@ -127,7 +125,7 @@ impl Editor {
     fn render_status_bar(&self, buf: &mut String) {
         let b = self.buffers.active();
         let name = b.display_name(&self.cwd);
-        let (n_lines, cy, rx) = (b.len_lines(), b.cy + 1, b.rx + 1);
+        let (n_lines, cy, rx) = (b.len_lines(), b.dot.first_cur().y + 1, b.rx + 1);
 
         let lstatus = format!(
             "{} {name} - {n_lines} lines {}",
@@ -145,7 +143,7 @@ impl Editor {
 
     // current prompt and pending chars
     fn render_message_bar(&self, buf: &mut String) {
-        buf.push_str(&Cur::ClearRight.to_string());
+        buf.push_str(&Cursor::ClearRight.to_string());
 
         let mut msg = self.status_message.clone();
         msg.truncate(self.screen_cols.saturating_sub(10));
@@ -180,11 +178,11 @@ impl Editor {
                     Style::Reset,
                 ));
             } else {
-                buf.push_str(&format!("{}{}\r\n", &rline[0..len], Cur::ClearRight));
+                buf.push_str(&format!("{}{}\r\n", &rline[0..len], Cursor::ClearRight));
             }
         }
 
-        buf.push_str(&format!("{prompt_line}{}", Cur::ClearRight));
+        buf.push_str(&format!("{prompt_line}{}", Cursor::ClearRight));
     }
 }
 

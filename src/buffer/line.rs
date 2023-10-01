@@ -22,7 +22,7 @@ impl Line {
         self.render = as_render_line(&self.raw);
     }
 
-    pub(super) fn modify<F: FnMut(&mut String)>(&mut self, mut f: F) {
+    pub(super) fn modify<F: Fn(&mut String)>(&mut self, f: F) {
         (f)(&mut self.raw);
         self.update_render();
     }

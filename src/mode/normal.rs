@@ -1,5 +1,6 @@
 //! vim style normal mode
 use crate::{
+    buffer::TextObject::*,
     editor::{Action::*, Actions},
     key::{Arrow::*, Key::*},
     keymap,
@@ -14,30 +15,34 @@ pub(crate) fn normal_mode() -> Mode {
         [ leader, Char('q') ] => [ Exit { force: false } ],
         [ leader, Char('Q') ] => [ Exit { force: true } ],
 
+        [ leader, Char('b') ] => [ SelectBuffer ],
+
         [ Char(':') ] => [ CommandMode ],
         [ Char('/') ] => [ SearchInCurrentBuffer ],
 
         [ Char('i') ] => [ SetMode { m: "INSERT" } ],
-        [ Char('I') ] => [ RawKey { k: Home }, SetMode { m: "INSERT" } ],
-        [ Char('a') ] => [ Move { d: Right, n: 1 }, SetMode { m: "INSERT" } ],
-        [ Char('A') ] => [ RawKey { k: End }, SetMode { m: "INSERT" } ],
+        [ Char('I') ] => [ DotSet(Line), DotCollapseFirst, SetMode { m: "INSERT" } ],
+        [ Char('a') ] => [ Move { d: Right }, SetMode { m: "INSERT" } ],
+        [ Char('A') ] => [ DotSet(Line), DotCollapseLast, SetMode { m: "INSERT" } ],
 
-        [ Char('x') ] => [ Move { d: Right, n: 1 }, DeleteChar ],
-        [ Char('o') ] => [ InsertLine, Move { d: Down, n: 1 }, SetMode { m: "INSERT" } ],
-        [ Char('O') ] => [ Move { d: Up, n: 1 }, InsertLine, Move { d: Down, n: 1 }, SetMode { m: "INSERT" } ],
+        [ Char('x') ] => [ Move { d: Right }, Delete ],
+        [ Char('o') ] => [ InsertChar { c: '\n' }, Move { d: Down }, SetMode { m: "INSERT" } ],
+        [ Char('O') ] => [ Move { d: Up }, InsertChar { c: '\n' }, Move { d: Down }, SetMode { m: "INSERT" } ],
 
-        [ Char('h') ] => [ Move { d: Left, n: 1 } ],
-        [ Char('j') ] => [ Move { d: Down, n: 1 } ],
-        [ Char('k') ] => [ Move { d: Up, n: 1 } ],
-        [ Char('l') ] => [ Move { d: Right, n: 1 } ],
+        [ Char('h') ] => [ Move { d: Left } ],
+        [ Char('j') ] => [ Move { d: Down } ],
+        [ Char('k') ] => [ Move { d: Up } ],
+        [ Char('l') ] => [ Move { d: Right } ],
 
-        [ Char('H') ] => [ RawKey { k: Home } ],
-        [ Char('L') ] => [ RawKey { k: End } ]
+        [ Alt('h') ] => [ DotSet(Line), DotCollapseFirst ],
+        [ Alt('l') ] => [ DotSet(Line), DotCollapseLast ],
+        [ Home ] => [ DotSet(Line), DotCollapseFirst ],
+        [ End ] => [ DotSet(Line), DotCollapseLast ]
 
     };
 
     keymap.set_default(|&k| match k {
-        Arrow(_) | PageUp | PageDown | Home | End => Some(Actions::Single(RawKey { k })),
+        Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawKey { k })),
         _ => None,
     });
 

@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
+    buffer::{BufferKind, Cur, Dot, MiniBuffer, MiniBufferSelection, TextObject},
     die,
     editor::Editor,
     key::{Arrow, Key},
@@ -17,14 +17,19 @@ pub enum Actions {
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    Change,
     ChangeDirectory { path: Option<String> },
     CommandMode,
     DeleteBuffer { force: bool },
-    DeleteChar,
+    Delete,
+    DotCollapseFirst,
+    DotCollapseLast,
+    DotSet(TextObject),
+    DotExtendForward(TextObject),
+    DotExtendBackward(TextObject),
     Exit { force: bool },
     InsertChar { c: char },
-    InsertLine,
-    Move { d: Arrow, n: usize },
+    Move { d: Arrow },
     NextBuffer,
     OpenFile { path: String },
     PreviousBuffer,
@@ -149,7 +154,9 @@ impl Editor {
     pub(super) fn search_in_current_buffer(&mut self) {
         let selection = MiniBuffer::select_from("> ", self.buffers.active().lines.clone(), self);
         if let MiniBufferSelection::Line { cy, .. } = selection {
-            self.buffers.active_mut().cy = cy;
+            self.buffers.active_mut().dot = Dot::Cur {
+                c: Cur { y: cy, x: 0 },
+            };
         }
     }
 
