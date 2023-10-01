@@ -124,6 +124,7 @@ impl Editor {
             Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
             Action::SaveBuffer => self.save_current_buffer(None),
             Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
+            Action::SelectBuffer => self.select_buffer(),
             Action::SetMode { m } => self.set_mode(m),
 
             a => self.buffers.active_mut().handle_action(a, self.screen_rows),

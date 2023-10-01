@@ -50,6 +50,7 @@ impl MiniBuffer {
             prompt,
             initial_lines: lines,
             b: Buffer {
+                id: usize::MAX,
                 kind: BufferKind::MiniBuffer,
                 lines: vec![],
                 cx: 0,

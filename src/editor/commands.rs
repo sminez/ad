@@ -14,6 +14,7 @@ impl Editor {
         };
 
         match command {
+            "b" | "buffer" => Some(Single(SelectBuffer)),
             "bn" | "buffer-next" => Some(Single(NextBuffer)),
             "bp" | "buffer-previous" => Some(Single(PreviousBuffer)),
 

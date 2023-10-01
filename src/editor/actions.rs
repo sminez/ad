@@ -32,6 +32,7 @@ pub enum Action {
     SaveBuffer,
     SaveBufferAs { path: String },
     SearchInCurrentBuffer,
+    SelectBuffer,
     SetMode { m: &'static str },
     // Yank,
 }
@@ -149,6 +150,16 @@ impl Editor {
         let selection = MiniBuffer::select_from("> ", self.buffers.active().lines.clone(), self);
         if let MiniBufferSelection::Line { cy, .. } = selection {
             self.buffers.active_mut().cy = cy;
+        }
+    }
+
+    pub(super) fn select_buffer(&mut self) {
+        let selection = MiniBuffer::select_from("> ", self.buffers.as_buf_list(), self);
+        if let MiniBufferSelection::Line { line, .. } = selection {
+            // unwrap is fine here because we know the format of the buf list we are supplying
+            if let Ok(id) = line.split_once(' ').unwrap().0.parse::<usize>() {
+                self.buffers.focus_id(id);
+            }
         }
     }
 

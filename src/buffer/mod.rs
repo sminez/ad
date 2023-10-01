@@ -44,8 +44,9 @@ impl BufferKind {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Buffer {
+    id: usize,
     pub(crate) kind: BufferKind,
     pub(crate) lines: Vec<Line>,
     pub(crate) cx: usize,
@@ -58,7 +59,7 @@ pub struct Buffer {
 
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
-    pub(crate) fn new_from_canonical_file_path(path: PathBuf) -> io::Result<Self> {
+    pub(super) fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
         let raw = match fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
@@ -68,6 +69,7 @@ impl Buffer {
         let lines: Vec<Line> = raw.lines().map(|s| Line::new(s.to_string())).collect();
 
         Ok(Self {
+            id,
             kind: BufferKind::File(path),
             lines,
             cx: 0,
@@ -79,8 +81,23 @@ impl Buffer {
         })
     }
 
-    pub fn new_virtual(name: String) -> Self {
+    pub fn new_unnamed(id: usize) -> Self {
         Self {
+            id,
+            kind: BufferKind::Unnamed,
+            lines: Vec::new(),
+            cx: 0,
+            cy: 0,
+            rx: 0,
+            row_off: 0,
+            col_off: 0,
+            dirty: false,
+        }
+    }
+
+    pub fn new_virtual(id: usize, name: String) -> Self {
+        Self {
+            id,
             kind: BufferKind::Virtual(name),
             lines: Vec::new(),
             cx: 0,
@@ -100,11 +117,12 @@ impl Buffer {
     }
 
     /// Absolute path of full name of a virtual buffer
-    pub fn full_name(&self) -> Option<&str> {
+    pub fn full_name(&self) -> &str {
         match &self.kind {
-            BufferKind::File(p) => p.to_str(), // assume valid unicode
-            BufferKind::Unnamed => Some(UNNAMED_BUFFER),
-            _ => None,
+            BufferKind::File(p) => p.to_str().expect("valid unicode"),
+            BufferKind::Virtual(s) => s,
+            BufferKind::Unnamed => UNNAMED_BUFFER,
+            BufferKind::MiniBuffer => "*mini-buffer*",
         }
     }
 

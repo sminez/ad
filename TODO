@@ -22,4 +22,6 @@
   - buffer paths should be converted to absolute and displayed relative to cwd
 - [x] Opening files from within the editor
 - [ ] clipboard support
+  - Probably want to look at kakboard for this one / just use xclip & pbcopy
+  - true "native" support in ad will require knowing OS specific code
 - [ ] FUSE filesystem fun...!
