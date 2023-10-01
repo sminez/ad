@@ -1,6 +1,7 @@
 use crate::{
     editor::Action,
     key::{Arrow, Key},
+    util::relative_path_from,
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
@@ -33,15 +34,12 @@ impl Default for BufferKind {
 }
 
 impl BufferKind {
-    fn display_name(&self) -> &str {
+    fn display_name(&self, cwd: &Path) -> String {
         match self {
-            BufferKind::File(p) => p
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or(UNNAMED_BUFFER),
-            BufferKind::Virtual(s) => s.as_str(),
-            BufferKind::Unnamed => UNNAMED_BUFFER,
-            BufferKind::MiniBuffer => "",
+            BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
+            BufferKind::Virtual(s) => s.clone(),
+            BufferKind::Unnamed => UNNAMED_BUFFER.to_string(),
+            BufferKind::MiniBuffer => "".to_string(),
         }
     }
 }
@@ -59,8 +57,9 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new_from_file(path: &str) -> io::Result<Self> {
-        let raw = match fs::read_to_string(path) {
+    pub fn new_from_file<P: AsRef<Path>>(path: P) -> io::Result<Self> {
+        let path = path.as_ref().canonicalize()?;
+        let raw = match fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
@@ -69,7 +68,7 @@ impl Buffer {
         let lines: Vec<Line> = raw.lines().map(|s| Line::new(s.to_string())).collect();
 
         Ok(Self {
-            kind: BufferKind::File(PathBuf::from(path)),
+            kind: BufferKind::File(path),
             lines,
             cx: 0,
             cy: 0,
@@ -93,15 +92,18 @@ impl Buffer {
         }
     }
 
-    pub fn display_name(&self) -> &str {
-        let s = self.kind.display_name();
+    /// Short name for displaying in the status line
+    pub fn display_name(&self, cwd: &Path) -> String {
+        let s = self.kind.display_name(cwd);
 
-        &s[0..min(MAX_NAME_LEN, s.len())]
+        s[0..min(MAX_NAME_LEN, s.len())].to_string()
     }
 
-    pub fn file_path(&self) -> Option<&Path> {
+    /// Absolute path of full name of a virtual buffer
+    pub fn full_name(&self) -> Option<&str> {
         match &self.kind {
-            BufferKind::File(p) => Some(p),
+            BufferKind::File(p) => p.to_str(), // assume valid unicode
+            BufferKind::Unnamed => Some(UNNAMED_BUFFER),
             _ => None,
         }
     }
@@ -210,20 +212,18 @@ impl Buffer {
         }
     }
 
-    pub fn handle_action(&mut self, a: Action, screen_rows: usize) -> io::Result<()> {
+    pub fn handle_action(&mut self, a: Action, screen_rows: usize) {
         match a {
             Action::Move { d, n } => self.move_cursor(d, n),
             Action::DeleteChar => self.delete_char(),
             Action::InsertLine => self.insert_line(self.cy + 1, "".to_string()),
-            Action::RawKey { k } => self.handle_raw_key(k, screen_rows)?,
+            Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
 
             _ => (),
         }
-
-        Ok(())
     }
 
-    fn handle_raw_key(&mut self, k: Key, screen_rows: usize) -> io::Result<()> {
+    fn handle_raw_key(&mut self, k: Key, screen_rows: usize) {
         match k {
             Key::Arrow(arr) => self.move_cursor(arr, 1),
             Key::Home => self.cx = 0,
@@ -247,8 +247,6 @@ impl Buffer {
 
             _ => (),
         }
-
-        Ok(())
     }
 
     fn move_cursor(&mut self, arr: Arrow, count: usize) {

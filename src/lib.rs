@@ -5,6 +5,7 @@ pub mod key;
 pub mod mode;
 pub mod term;
 pub mod trie;
+pub mod util;
 
 pub use editor::Editor;
 

@@ -1,12 +1,15 @@
 use crate::{
     buffer::Buffers,
+    die,
     key::Key,
     mode::{modes, Mode},
-    term::{enable_raw_mode, get_termios, get_termsize, set_termios},
+    term::{clear_screen, enable_raw_mode, get_termios, get_termsize, set_termios},
 };
 use libc::termios as Termios;
 use std::{
+    env,
     io::{self, Stdin, Stdout},
+    path::PathBuf,
     time::Instant,
 };
 
@@ -23,6 +26,7 @@ pub struct Editor {
     stdout: Stdout,
     stdin: Stdin,
     original_termios: Termios,
+    cwd: PathBuf,
     running: bool,
     status_message: String,
     status_time: Instant,
@@ -42,6 +46,10 @@ impl Editor {
     pub fn new() -> Self {
         let (screen_rows, screen_cols) = get_termsize();
         let original_termios = get_termios();
+        let cwd = match env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(e) => die!("Unable to determine working directory: {e}"),
+        };
 
         enable_raw_mode(original_termios);
 
@@ -51,6 +59,7 @@ impl Editor {
             stdout: io::stdout(),
             stdin: io::stdin(),
             original_termios,
+            cwd,
             running: true,
             status_message: String::new(),
             status_time: Instant::now(),
@@ -60,9 +69,14 @@ impl Editor {
         }
     }
 
-    #[inline]
-    pub fn running(&self) -> bool {
-        self.running
+    pub fn run(&mut self) {
+        while self.running {
+            self.refresh_screen();
+            let k = self.read_key();
+            self.handle_keypress(k);
+        }
+
+        clear_screen(&mut self.stdout);
     }
 
     pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
@@ -75,51 +89,44 @@ impl Editor {
         self.status_time = Instant::now();
     }
 
-    pub fn handle_keypress(&mut self, k: Key) -> io::Result<()> {
+    pub fn handle_keypress(&mut self, k: Key) {
         self.pending_keys.push(k);
 
-        match self.modes[0].handle_keys(&mut self.pending_keys) {
-            Some(actions) => self.handle_actions(actions),
-            None => Ok(()),
+        if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {
+            self.handle_actions(actions);
         }
     }
 
-    fn handle_actions(&mut self, actions: Actions) -> io::Result<()> {
+    fn handle_actions(&mut self, actions: Actions) {
         match actions {
-            Actions::Single(action) => self.handle_action(action)?,
+            Actions::Single(action) => self.handle_action(action),
             Actions::Multi(actions) => {
                 for action in actions.into_iter() {
-                    self.handle_action(action)?;
+                    self.handle_action(action);
                     if !self.running {
                         break;
                     };
                 }
             }
         }
-
-        Ok(())
     }
 
     #[inline]
-    fn handle_action(&mut self, action: Action) -> io::Result<()> {
+    fn handle_action(&mut self, action: Action) {
         match action {
-            Action::CloseBuffer => self.close_current_buffer(),
-            Action::CommandMode => self.command_mode()?,
-            Action::Exit { force } => self.exit(force)?,
+            Action::ChangeDirectory { path } => self.change_directory(path),
+            Action::CommandMode => self.command_mode(),
+            Action::DeleteBuffer { force } => self.delete_current_buffer(force),
+            Action::Exit { force } => self.exit(force),
             Action::NextBuffer => self.buffers.next(),
-            Action::OpenFile { path } => self.open_file(&path)?,
+            Action::OpenFile { path } => self.open_file(&path),
             Action::PreviousBuffer => self.buffers.previous(),
-            Action::SaveBufferAs { path } => self.save_current_buffer(Some(path))?,
-            Action::SaveBuffer => self.save_current_buffer(None)?,
+            Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
+            Action::SaveBuffer => self.save_current_buffer(None),
             Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
-            Action::SetMode { m } => self.set_mode(m)?,
+            Action::SetMode { m } => self.set_mode(m),
 
-            a => self
-                .buffers
-                .active_mut()
-                .handle_action(a, self.screen_rows)?,
+            a => self.buffers.active_mut().handle_action(a, self.screen_rows),
         }
-
-        Ok(())
     }
 }

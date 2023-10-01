@@ -1,10 +1,6 @@
 use crate::buffer::Buffer;
 use std::collections::VecDeque;
 
-// TODO:
-//   - next/previous buffer
-//   - delete buffer
-
 /// A non-empty vec of buffers where the active buffer is accessible and default
 /// buffers are inserted where needed to maintain invariants
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +30,7 @@ impl Buffers {
         self.0
             .iter()
             .filter(|b| b.dirty)
-            .map(|b| b.display_name())
+            .flat_map(|b| b.full_name())
             .collect()
     }
 
@@ -46,6 +42,11 @@ impl Buffers {
     #[inline]
     pub fn active_mut(&mut self) -> &mut Buffer {
         &mut self.0[0]
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.0.len()
     }
 
     #[inline]

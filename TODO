@@ -7,7 +7,7 @@
     for the user to provide commands to the editor other than Normal mode
 - [ ] Better colors for the status bar
   - Maybe change the color based on the mode?
-- [ ] Command mode
+- [x] Command mode
   - This probably needs to be a special case that works more like
     the current prompt mode?
   - Actually...this probably wants to be more like the emacs mini-buffer?
@@ -17,9 +17,9 @@
 - [ ] Port over the normal mode actions from poe
   - This will require rewriting the impls as they depend on rope data structures
 - [x] Search
-- [ ] Buffer switch
-- [ ] cwd and cwd manipulation
+- [x] Buffer switch
+- [x] cwd and cwd manipulation
   - buffer paths should be converted to absolute and displayed relative to cwd
-- [ ] Opening files from within the editor
+- [x] Opening files from within the editor
 - [ ] clipboard support
 - [ ] FUSE filesystem fun...!

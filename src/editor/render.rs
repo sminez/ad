@@ -126,7 +126,7 @@ impl Editor {
 
     fn render_status_bar(&self, buf: &mut String) {
         let b = self.buffers.active();
-        let name = b.display_name();
+        let name = b.display_name(&self.cwd);
         let (n_lines, cy, rx) = (b.len_lines(), b.cy + 1, b.rx + 1);
 
         let lstatus = format!(

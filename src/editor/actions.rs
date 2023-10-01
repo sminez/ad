@@ -1,16 +1,12 @@
 //! Editor actions in response to user input
 use crate::{
     buffer::{Buffer, BufferKind, MiniBuffer, MiniBufferSelection},
+    die,
     editor::Editor,
     key::{Arrow, Key},
     mode::Mode,
-    term::clear_screen,
 };
-use std::{
-    fs,
-    io::{self, Write},
-    path::PathBuf,
-};
+use std::{env, fs, io::Write, path::PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actions {
@@ -21,8 +17,9 @@ pub enum Actions {
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    CloseBuffer,
+    ChangeDirectory { path: Option<String> },
     CommandMode,
+    DeleteBuffer { force: bool },
     DeleteChar,
     Exit { force: bool },
     InsertChar { c: char },
@@ -40,25 +37,57 @@ pub enum Action {
 }
 
 impl Editor {
+    pub fn change_directory(&mut self, opt_path: Option<String>) {
+        let p = match opt_path {
+            Some(p) => p,
+            None => match env::var("HOME") {
+                Ok(p) => p,
+                Err(e) => {
+                    self.set_status_message(&format!("Unable to determine home directory: {e}"));
+                    return;
+                }
+            },
+        };
+
+        let new_cwd = match fs::canonicalize(p) {
+            Ok(cwd) => cwd,
+            Err(e) => {
+                self.set_status_message(&format!("Invalid path: {e}"));
+                return;
+            }
+        };
+
+        if let Err(e) = env::set_current_dir(&new_cwd) {
+            self.set_status_message(&format!("Unable to set working directory: {e}"));
+            return;
+        };
+
+        self.cwd = new_cwd;
+        self.set_status_message(&self.cwd.display().to_string());
+    }
+
     // TODO: check if the file is already open in our internal state
-    pub fn open_file(&mut self, path: &str) -> io::Result<()> {
+    pub fn open_file(&mut self, path: &str) {
         match Buffer::new_from_file(path) {
             Ok(b) => self.buffers.insert(b),
             Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
         };
-
-        Ok(())
     }
 
-    pub fn close_current_buffer(&mut self) {
-        if self.buffers.active().dirty {
+    pub fn delete_current_buffer(&mut self, force: bool) {
+        let is_last_buffer = self.buffers.len() == 1;
+
+        if self.buffers.active().dirty && !force {
             self.set_status_message("No write since last change");
         } else {
             self.buffers.close_active();
+            if is_last_buffer {
+                self.running = false;
+            }
         }
     }
 
-    pub(super) fn save_current_buffer(&mut self, fname: Option<String>) -> io::Result<()> {
+    pub(super) fn save_current_buffer(&mut self, fname: Option<String>) {
         use BufferKind as Bk;
 
         let p = match (fname, &self.buffers.active().kind) {
@@ -70,9 +99,9 @@ impl Editor {
                     self.buffers.active_mut().kind = BufferKind::File(p.clone());
                     p
                 }
-                None => return Ok(()),
+                None => return,
             },
-            (_, Bk::Virtual(_) | Bk::MiniBuffer) => return Ok(()),
+            (_, Bk::Virtual(_) | Bk::MiniBuffer) => return,
         };
 
         let b = self.buffers.active_mut();
@@ -93,32 +122,29 @@ impl Editor {
         };
 
         self.set_status_message(&msg);
-
-        Ok(())
     }
 
-    pub(super) fn set_mode(&mut self, name: &str) -> io::Result<()> {
+    pub(super) fn set_mode(&mut self, name: &str) {
         if let Some((i, _)) = self.modes.iter().enumerate().find(|(_, m)| m.name == name) {
             self.modes.swap(0, i);
             let cur_shape = self.modes[0].cur_shape.to_string();
-            self.stdout.write_all(cur_shape.as_bytes())?;
+            if let Err(e) = self.stdout.write_all(cur_shape.as_bytes()) {
+                // In this situation we're probably not going to be able to do all that much
+                // but we might as well try
+                die!("Unable to write to stdout: {e}");
+            };
         }
-
-        Ok(())
     }
 
-    pub(super) fn exit(&mut self, force: bool) -> io::Result<()> {
+    pub(super) fn exit(&mut self, force: bool) {
         if self.buffers.active().dirty && !force {
             let dirty_buffers = self.buffers.dirty_buffers().join(" ");
             // TODO: probably want this to be a "cancel only" mini-buffer w multiple lines?
             self.set_status_message(&format!("No write since last change: {dirty_buffers}"));
-            return Ok(());
+            return;
         }
 
-        clear_screen(&mut self.stdout);
         self.running = false;
-
-        Ok(())
     }
 
     pub(super) fn search_in_current_buffer(&mut self) {
@@ -128,17 +154,15 @@ impl Editor {
         }
     }
 
-    pub(super) fn command_mode(&mut self) -> io::Result<()> {
+    pub(super) fn command_mode(&mut self) {
         self.modes.insert(0, Mode::command_mode());
 
         if let Some(input) = MiniBuffer::prompt(":", self) {
             if let Some(actions) = self.parse_command(&input) {
-                self.handle_actions(actions)?;
+                self.handle_actions(actions);
             }
         }
 
         self.modes.remove(0);
-
-        Ok(())
     }
 }

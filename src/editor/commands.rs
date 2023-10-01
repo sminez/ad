@@ -14,9 +14,21 @@ impl Editor {
         };
 
         match command {
-            "bc" | "buffer-close" => Some(Single(CloseBuffer)),
             "bn" | "buffer-next" => Some(Single(NextBuffer)),
             "bp" | "buffer-previous" => Some(Single(PreviousBuffer)),
+
+            "cd" | "change-directory" => {
+                if args.is_empty() {
+                    Some(Single(ChangeDirectory { path: None }))
+                } else {
+                    Some(Single(ChangeDirectory {
+                        path: Some(args.to_string()),
+                    }))
+                }
+            }
+
+            "db" | "delete-buffer" => Some(Single(DeleteBuffer { force: false })),
+            "db!" | "delete-buffer!" => Some(Single(DeleteBuffer { force: true })),
 
             "e" | "edit" => {
                 if args.is_empty() {
@@ -30,7 +42,7 @@ impl Editor {
             }
 
             "q" | "quit" => Some(Single(Exit { force: false })),
-            "Q" | "quit-all" => Some(Single(Exit { force: true })),
+            "q!" | "quit!" => Some(Single(Exit { force: true })),
 
             "w" | "write" => {
                 if args.is_empty() {
@@ -41,6 +53,9 @@ impl Editor {
                     }))
                 }
             }
+
+            "wq" | "write-quit" => Some(Multi(vec![SaveBuffer, Exit { force: false }])),
+            "wq!" | "write-quit!" => Some(Multi(vec![SaveBuffer, Exit { force: true }])),
 
             "" => None,
 
