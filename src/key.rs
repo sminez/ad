@@ -58,6 +58,7 @@ impl Key {
             ('[', 'B') => Some(Key::Arrow(Arrow::Down)),
             ('[', 'C') => Some(Key::Arrow(Arrow::Right)),
             ('[', 'D') => Some(Key::Arrow(Arrow::Left)),
+            ('[', 'H') => Some(Key::Home),
             ('\x1b', c) if c.is_ascii() => match Self::from_char(c) {
                 Key::Char(c) => Some(Key::Alt(c)),
                 Key::Ctrl(c) => Some(Key::CtrlAlt(c)),
