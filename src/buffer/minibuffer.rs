@@ -159,10 +159,10 @@ impl MiniBuffer {
                 Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
                 Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
                 Key::Alt('k') | Key::Arrow(Arrow::Up) => {
-                    Arrow::Up.set_dot(&mb.b);
+                    mb.b.dot = Arrow::Up.set_dot(&mb.b);
                 }
                 Key::Alt('j') | Key::Arrow(Arrow::Down) => {
-                    Arrow::Down.set_dot(&mb.b);
+                    mb.b.dot = Arrow::Down.set_dot(&mb.b);
                 }
 
                 _ => (),

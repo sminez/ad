@@ -72,8 +72,11 @@ impl Dot {
 
 /// Something that can be applied to an existing Dot to update it to a new state
 pub trait UpdateDot {
+    #[must_use]
     fn set_dot(&self, b: &Buffer) -> Dot;
+    #[must_use]
     fn extend_dot_forward(&self, b: &Buffer) -> Dot;
+    #[must_use]
     fn extend_dot_backward(&self, b: &Buffer) -> Dot;
 }
 
