@@ -1,5 +1,5 @@
 use crate::{
-    editor::Action,
+    editor::Actions,
     key::Key,
     term::CurShape,
     trie::{QueryResult, Trie},
@@ -17,8 +17,8 @@ pub(crate) fn modes() -> Vec<Mode> {
 pub struct Mode {
     pub(crate) name: String,
     pub(crate) cur_shape: CurShape,
-    keymap: Trie<Key, Vec<Action>>,
-    handle_expired_pending: fn(&[Key]) -> Option<Vec<Action>>,
+    keymap: Trie<Key, Actions>,
+    handle_expired_pending: fn(&[Key]) -> Option<Actions>,
 }
 
 impl fmt::Display for Mode {
@@ -37,7 +37,7 @@ impl Mode {
         }
     }
 
-    pub fn handle_keys(&self, keys: &mut Vec<Key>) -> Option<Vec<Action>> {
+    pub fn handle_keys(&self, keys: &mut Vec<Key>) -> Option<Actions> {
         match self.keymap.get(keys) {
             QueryResult::Val(outcome) => {
                 keys.clear();
@@ -62,11 +62,14 @@ macro_rules! keymap {
 
             $(
                 let key = vec![$($k),+];
-                let value = vec![$($v),+];
+                let value = $crate::keymap!(@action $($v),+);
                 pairs.push((key, value));
             )+
 
             $crate::trie::Trie::from_pairs(pairs)
         }
     };
+
+    (@action $v:expr) => { $crate::editor::Actions::Single($v) };
+    (@action $($v:expr),+) => { $crate::editor::Actions::Multi(vec![$($v),+]) };
 }

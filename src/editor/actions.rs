@@ -12,6 +12,12 @@ use std::{
     path::PathBuf,
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Actions {
+    Single(Action),
+    Multi(Vec<Action>),
+}
+
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {

@@ -15,7 +15,7 @@ mod commands;
 mod input;
 mod render;
 
-pub use actions::Action;
+pub use actions::{Action, Actions};
 
 pub struct Editor {
     screen_rows: usize,
@@ -84,29 +84,40 @@ impl Editor {
         }
     }
 
-    fn handle_actions(&mut self, actions: Vec<Action>) -> io::Result<()> {
-        for action in actions.into_iter() {
-            match action {
-                Action::CloseBuffer => self.close_current_buffer(),
-                Action::CommandMode => self.command_mode()?,
-                Action::Exit { force } => self.exit(force)?,
-                Action::NextBuffer => self.buffers.next(),
-                Action::OpenFile { path } => self.open_file(&path)?,
-                Action::PreviousBuffer => self.buffers.previous(),
-                Action::SaveBufferAs { path } => self.save_current_buffer(Some(path))?,
-                Action::SaveBuffer => self.save_current_buffer(None)?,
-                Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
-                Action::SetMode { m } => self.set_mode(m)?,
-
-                a => self
-                    .buffers
-                    .active_mut()
-                    .handle_action(a, self.screen_rows)?,
+    fn handle_actions(&mut self, actions: Actions) -> io::Result<()> {
+        match actions {
+            Actions::Single(action) => self.handle_action(action)?,
+            Actions::Multi(actions) => {
+                for action in actions.into_iter() {
+                    self.handle_action(action)?;
+                    if !self.running {
+                        break;
+                    };
+                }
             }
+        }
 
-            if !self.running {
-                break;
-            };
+        Ok(())
+    }
+
+    #[inline]
+    fn handle_action(&mut self, action: Action) -> io::Result<()> {
+        match action {
+            Action::CloseBuffer => self.close_current_buffer(),
+            Action::CommandMode => self.command_mode()?,
+            Action::Exit { force } => self.exit(force)?,
+            Action::NextBuffer => self.buffers.next(),
+            Action::OpenFile { path } => self.open_file(&path)?,
+            Action::PreviousBuffer => self.buffers.previous(),
+            Action::SaveBufferAs { path } => self.save_current_buffer(Some(path))?,
+            Action::SaveBuffer => self.save_current_buffer(None)?,
+            Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
+            Action::SetMode { m } => self.set_mode(m)?,
+
+            a => self
+                .buffers
+                .active_mut()
+                .handle_action(a, self.screen_rows)?,
         }
 
         Ok(())

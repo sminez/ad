@@ -1,6 +1,6 @@
 //! vim style normal mode
 use crate::{
-    editor::Action::*,
+    editor::{Action::*, Actions},
     key::{Arrow::*, Key::*},
     keymap,
     mode::Mode,
@@ -35,7 +35,7 @@ pub(crate) fn normal_mode() -> Mode {
     };
 
     keymap.set_default(|&k| match k {
-        Arrow(_) | PageUp | PageDown | Home | End => Some(vec![RawKey { k }]),
+        Arrow(_) | PageUp | PageDown | Home | End => Some(Actions::Single(RawKey { k })),
         _ => None,
     });
 

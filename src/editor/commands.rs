@@ -1,13 +1,12 @@
 //! Command mode commands for ad
 use crate::editor::{
-    Action::{self, *},
+    Action::*,
+    Actions::{self, *},
     Editor,
 };
 
-// FIXME: Probably want / need the ability to have individual actions without the need to
-// allocate a new vec?
 impl Editor {
-    pub(super) fn parse_command(&mut self, input: &str) -> Option<Vec<Action>> {
+    pub(super) fn parse_command(&mut self, input: &str) -> Option<Actions> {
         let (command, args) = if input.contains(' ') {
             input.split_once(' ')?
         } else {
@@ -15,31 +14,31 @@ impl Editor {
         };
 
         match command {
-            "bc" | "buffer-close" => Some(vec![CloseBuffer]),
-            "bn" | "buffer-next" => Some(vec![NextBuffer]),
-            "bp" | "buffer-previous" => Some(vec![PreviousBuffer]),
+            "bc" | "buffer-close" => Some(Single(CloseBuffer)),
+            "bn" | "buffer-next" => Some(Single(NextBuffer)),
+            "bp" | "buffer-previous" => Some(Single(PreviousBuffer)),
 
             "e" | "edit" => {
                 if args.is_empty() {
                     self.set_status_message("No filename provided");
                     None
                 } else {
-                    Some(vec![OpenFile {
+                    Some(Multi(vec![OpenFile {
                         path: args.to_string(),
-                    }])
+                    }]))
                 }
             }
 
-            "q" | "quit" => Some(vec![Exit { force: false }]),
-            "Q" | "quit-all" => Some(vec![Exit { force: true }]),
+            "q" | "quit" => Some(Single(Exit { force: false })),
+            "Q" | "quit-all" => Some(Single(Exit { force: true })),
 
             "w" | "write" => {
                 if args.is_empty() {
-                    Some(vec![SaveBuffer])
+                    Some(Single(SaveBuffer))
                 } else {
-                    Some(vec![SaveBufferAs {
+                    Some(Single(SaveBufferAs {
                         path: args.to_string(),
-                    }])
+                    }))
                 }
             }
 
