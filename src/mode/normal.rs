@@ -23,9 +23,9 @@ pub(crate) fn normal_mode() -> Mode {
 
         // Entering INSERT mode
         [ Char('i') ] => [ SetMode { m: "INSERT" } ],
-        [ Char('I') ] => [ DotSet(Line), DotCollapseFirst, SetMode { m: "INSERT" } ],
+        [ Char('I') ] => [ DotSet(LineBoundary), DotCollapseFirst, SetMode { m: "INSERT" } ],
         [ Char('a') ] => [ Move { d: Right }, SetMode { m: "INSERT" } ],
-        [ Char('A') ] => [ DotSet(Line), DotCollapseLast, SetMode { m: "INSERT" } ],
+        [ Char('A') ] => [ DotSet(LineBoundary), DotCollapseLast, SetMode { m: "INSERT" } ],
         [ Char('o') ] => [ InsertChar { c: '\n' }, Move { d: Down }, SetMode { m: "INSERT" } ],
         [ Char('O') ] => [ Move { d: Up }, InsertChar { c: '\n' }, Move { d: Down }, SetMode { m: "INSERT" } ],
 
@@ -38,15 +38,19 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char(',') ] => [ DotCollapseFirst ],
         [ Alt(',') ] => [ DotCollapseLast ],
 
-        [ Alt('h') ] => [ DotSet(Line), DotCollapseFirst ],
-        [ Alt('l') ] => [ DotSet(Line), DotCollapseLast ],
-        [ Home ] => [ DotSet(Line), DotCollapseFirst ],
-        [ End ] => [ DotSet(Line), DotCollapseLast ],
+        [ Alt('h') ] => [ DotSet(LineBoundary), DotCollapseFirst ],
+        [ Alt('l') ] => [ DotSet(LineBoundary), DotCollapseLast ],
+        [ Home ] => [ DotSet(LineBoundary), DotCollapseFirst ],
+        [ End ] => [ DotSet(LineBoundary), DotCollapseLast ],
 
-        [ Char('x') ] => [ DotSet(Line) ],
+        [ Char('x') ] => [ DotSet(LineBoundary) ],
         [ Char('%') ] => [ DotSet(Buffer) ],
 
         // Extending dot
+        // [ Char('H') ] => [ DotExtendForward(Character) ],
+        [ Char('J') ] => [ DotExtendForward(Line) ],
+        [ Char('K') ] => [ DotExtendBackward(Line) ],
+        // [ Char('L') ] => [ DotExtendBackward(Character) ],
 
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],

@@ -14,8 +14,8 @@ pub(crate) fn insert_mode() -> Mode {
         [ Char('f'), Char('d') ] => [ SetMode { m: "NORMAL" } ],
         [ Backspace ] => [ Move { d: Left }, Delete ],
         [ Del ] => [ Delete ],
-        [ Home ] => [ DotSet(TextObject::Line), DotCollapseFirst ],
-        [ End ] => [ DotSet(TextObject::Line), DotCollapseLast ],
+        [ Home ] => [ DotSet(TextObject::LineBoundary), DotCollapseFirst ],
+        [ End ] => [ DotSet(TextObject::LineBoundary), DotCollapseLast ],
 
     };
 

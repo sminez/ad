@@ -371,12 +371,21 @@ impl Buffer {
                 LineRange::Full { y } => {
                     self.lines.remove(y);
                 }
-                LineRange::ToEnd { y, start } => self.lines[y].raw.truncate(start),
+                LineRange::ToEnd { y, start } => self.lines[y].modify(|s| s.truncate(start)),
                 LineRange::FromStart { y, end } => {
-                    self.lines[y].raw.drain(..end);
+                    self.lines[y].modify(|s| {
+                        let _: String = s.drain(..end).collect();
+                    });
                 }
                 LineRange::Partial { y, start, end } => {
-                    self.lines[y].raw.drain(start..end);
+                    self.lines[y].modify(|s| {
+                        let _: String = s.drain(start..end).collect();
+                    });
+                    // LineRange doesn't know about the length of the line so we need to
+                    // check to see if we've removed all of its contents
+                    if self.lines[y].raw.is_empty() {
+                        self.lines.remove(y);
+                    }
                 }
             }
         }

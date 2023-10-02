@@ -23,6 +23,7 @@ pub(crate) use range::{LineRange, Range};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Dot {
     Cur { c: Cur },
+    // FIXME: need to track which cursor is active
     Range { r: Range },
 }
 
@@ -130,6 +131,7 @@ pub enum TextObject {
     // Character(char),
     // Delimited(char, char),
     Line,
+    LineBoundary,
     // Paragraph,
     // Word,
 }
@@ -143,7 +145,9 @@ impl UpdateDot for TextObject {
                     end: Cur::buffer_end(b),
                 },
             },
-            TextObject::Line => {
+            // For setting dot, line and line boundary operate the same as we are selecting
+            // "the whole line" or "between line boundaries" which are equivalent
+            TextObject::Line | TextObject::LineBoundary => {
                 let mut start = b.dot.first_cur();
                 let mut end = b.dot.last_cur();
                 start.x = 0;
@@ -162,7 +166,8 @@ impl UpdateDot for TextObject {
 
         (start, end) = match self {
             TextObject::Buffer => (start, Cur::buffer_end(b)),
-            TextObject::Line => {
+            TextObject::Line => (start, end.arr_w_count(Arrow::Down, 1, b)),
+            TextObject::LineBoundary => {
                 end.x = b.lines.get(end.y).map(|l| l.len()).unwrap_or_default();
                 (start, end)
             }
@@ -179,7 +184,8 @@ impl UpdateDot for TextObject {
 
         (start, end) = match self {
             TextObject::Buffer => (Cur::buffer_start(), end),
-            TextObject::Line => {
+            TextObject::Line => (start.arr_w_count(Arrow::Up, 1, b), end),
+            TextObject::LineBoundary => {
                 start.x = 0;
                 (start, end)
             }
