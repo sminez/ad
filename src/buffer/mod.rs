@@ -1,11 +1,12 @@
 use crate::{
     editor::Action,
     key::{Arrow, Key},
+    term::{Color, Style},
     util::relative_path_from,
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
-    cmp::min,
+    cmp::{max, min},
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -149,20 +150,8 @@ impl Buffer {
     }
 
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
-        self.rx = 0;
         let Cur { x, y } = self.dot.first_cur();
-
-        if y < self.lines.len() {
-            let mut rx = 0;
-            for c in self.lines[y].raw.chars().take(x) {
-                if c == '\t' {
-                    rx += (TAB_STOP - 1) - (rx % TAB_STOP);
-                }
-                rx += 1;
-            }
-
-            self.rx = rx;
-        }
+        self.rx = self.rx_from_x(y, x);
 
         if y < self.row_off {
             self.row_off = y;
@@ -181,12 +170,83 @@ impl Buffer {
         }
     }
 
+    pub(crate) fn rx_from_x(&self, y: usize, x: usize) -> usize {
+        if y >= self.lines.len() {
+            return 0;
+        }
+
+        let mut rx = 0;
+        for c in self.lines[y].raw.chars().take(x) {
+            if c == '\t' {
+                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+            }
+            rx += 1;
+        }
+
+        rx
+    }
+
+    pub(crate) fn x_from_rx(&self, y: usize) -> usize {
+        if self.lines.is_empty() {
+            return 0;
+        }
+
+        let mut rx = 0;
+        let mut cx = 0;
+
+        for c in self.lines[y].raw.chars() {
+            if c == '\t' {
+                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+            }
+            rx += 1;
+
+            if rx > self.rx {
+                break;
+            }
+            cx += 1;
+        }
+
+        cx
+    }
+
     pub fn line(&self, y: usize) -> Option<&Line> {
         if y >= self.len_lines() {
             None
         } else {
             Some(&self.lines[y])
         }
+    }
+
+    /// The render representation of a given line, truncated to fit within the
+    /// available screen space.
+    /// This includes tab expansion and any styling that might be applied but not
+    /// trailing \r\n or screen clearing escape codes.
+    pub(crate) fn styled_rline_unchecked(
+        &self,
+        y: usize,
+        lpad: usize,
+        screen_cols: usize,
+        bg_dot: Color,
+    ) -> String {
+        // Truncate to available screen width
+        let mut rline = self.lines[y].render.clone();
+        let mut len = max(0, rline.len() - self.col_off);
+        len = min(screen_cols - lpad, len);
+        rline = rline[self.col_off..min(screen_cols - lpad, len)].to_string();
+
+        // Apply highlight if included in current Dot
+        if let Some(lr) = self.dot.line_range(y) {
+            let (start, end) = match lr {
+                LineRange::Partial { start, end, .. } => (start, end),
+                LineRange::FromStart { end, .. } => (0, end),
+                LineRange::ToEnd { start, .. } => (start, rline.len()),
+                LineRange::Full { .. } => (0, rline.len()),
+            };
+            rline.insert_str(end, &Style::Reset.to_string());
+            rline.insert_str(start, &Style::Bg(bg_dot).to_string());
+        }
+
+        rline
     }
 
     pub fn handle_action(&mut self, a: Action, screen_rows: usize) {
@@ -284,21 +344,19 @@ impl Buffer {
         self.dirty = true;
     }
 
-    fn delete_cur(&mut self, mut cur: Cur) -> Cur {
+    fn delete_cur(&mut self, cur: Cur) -> Cur {
         if cur.y == self.len_lines() || (cur.x == 0 && cur.y == 0) {
             return cur;
         }
 
-        if cur.x > 0 {
+        if cur.x < self.lines[cur.y].len() {
             self.lines[cur.y].modify(|s| {
-                s.remove(cur.x - 1);
+                s.remove(cur.x);
             });
-            cur.x -= 1;
-        } else {
-            cur.x = self.lines[cur.y - 1].len();
-            let line = self.lines.remove(cur.y);
-            self.lines[cur.y - 1].modify(|s| s.push_str(&line.raw));
-            cur.y -= 1;
+        } else if cur.y < self.lines.len() - 1 {
+            // Deleting the newline char at the end of this line
+            let line = self.lines.remove(cur.y + 1);
+            self.lines[cur.y].modify(|s| s.push_str(&line.raw));
         }
 
         self.dirty = true;

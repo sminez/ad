@@ -33,6 +33,7 @@ impl Default for Dot {
 }
 
 impl Dot {
+    #[inline]
     pub fn first_cur(&self) -> Cur {
         match self {
             Self::Cur { c } => *c,
@@ -40,6 +41,7 @@ impl Dot {
         }
     }
 
+    #[inline]
     pub fn last_cur(&self) -> Cur {
         match self {
             Self::Cur { c } => *c,
@@ -57,6 +59,13 @@ impl Dot {
     #[inline]
     pub fn collapse_to_last_cur(&self) -> Self {
         Dot::Cur { c: self.last_cur() }
+    }
+
+    pub(crate) fn line_range(&self, y: usize) -> Option<LineRange> {
+        match self {
+            Dot::Cur { .. } => None,
+            Dot::Range { r } => r.line_range(y),
+        }
     }
 
     /// If both ends of a Range match then replace with a single Cur

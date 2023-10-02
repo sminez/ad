@@ -1,19 +1,16 @@
 //! Rendering the user interface
 use crate::{
-    buffer::{Buffer, Cur, Line, MiniBufferState},
+    buffer::{Cur, Line, MiniBufferState},
     die,
     editor::Editor,
     key::Key,
     term::{Cursor, Style},
     STATUS_TIMEOUT, VERSION,
 };
-use std::{
-    cmp::{max, min},
-    io::Write,
-    time::Instant,
-};
+use std::{cmp::min, io::Write, time::Instant};
 
 // UI colors (should be pulled from config eventually)
+const DOT_BG: &str = "#336677";
 const BAR_BG: &str = "#4E415C";
 const SGNCOL_FG: &str = "#544863";
 const MB_HIGHLIGHT: &str = "#3E3549";
@@ -71,22 +68,17 @@ impl Editor {
 
     /// Returns the width of the sign column
     fn render_rows(&self, buf: &mut String, screen_rows: usize) -> usize {
-        let Buffer {
-            lines,
-            row_off,
-            col_off,
-            ..
-        } = self.buffers.active();
+        let b = self.buffers.active();
 
         // Sort out dimensions of the sign/number column
-        let max_linum = min(lines.len(), screen_rows + row_off);
+        let max_linum = min(b.lines.len(), screen_rows + b.row_off);
         let w_lnum = n_digits(max_linum);
         let w_sgncol = w_lnum + 2;
 
         for y in 0..screen_rows {
-            let file_row = y + row_off;
+            let file_row = y + b.row_off;
 
-            if file_row >= lines.len() {
+            if file_row >= b.lines.len() {
                 buf.push_str(&format!(
                     "{}~ {VLINE:>width$}{}",
                     Style::Fg(SGNCOL_FG.into()),
@@ -103,17 +95,13 @@ impl Editor {
                 }
             } else {
                 buf.push_str(&format!(
-                    "{} {:>width$}{VLINE}{}",
+                    "{} {:>width$}{VLINE}{}{}",
                     Style::Fg(SGNCOL_FG.into()),
                     file_row + 1,
                     Style::Reset,
+                    b.styled_rline_unchecked(y, w_lnum, self.screen_cols, DOT_BG.into()),
                     width = w_lnum
                 ));
-
-                let rline = &lines[file_row].render;
-                let mut len = max(0, rline.len() - col_off);
-                len = min(self.screen_cols - w_sgncol, len);
-                buf.push_str(&rline[*col_off..min(self.screen_cols - w_sgncol, len)]);
             }
 
             buf.push_str(&format!("{}\r\n", Cursor::ClearRight));

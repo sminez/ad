@@ -56,7 +56,7 @@ impl Mode {
 
 #[macro_export]
 macro_rules! keymap {
-    ($([$($k:expr),+] => [ $($v:expr),+ ]),+) => {
+    ($([$($k:expr),+] => [ $($v:expr),+ ]),+,) => {
         {
             let mut pairs = Vec::new();
 

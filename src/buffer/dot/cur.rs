@@ -1,4 +1,4 @@
-use crate::{buffer::Buffer, key::Arrow, TAB_STOP};
+use crate::{buffer::Buffer, key::Arrow};
 use std::cmp::Ordering;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,26 +86,6 @@ impl Cur {
     }
 
     fn set_x_from_buffer_rx(&mut self, b: &Buffer) {
-        if b.lines.is_empty() {
-            self.x = 0;
-            return;
-        }
-
-        let mut rx = 0;
-        let mut cx = 0;
-
-        for c in b.lines[self.y].raw.chars() {
-            if c == '\t' {
-                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
-            }
-            rx += 1;
-
-            if rx > b.rx {
-                break;
-            }
-            cx += 1;
-        }
-
-        self.x = cx;
+        self.x = b.x_from_rx(self.y);
     }
 }

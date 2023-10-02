@@ -12,10 +12,10 @@ pub(crate) fn insert_mode() -> Mode {
     let mut keymap = keymap! {
         [ Esc ] => [ SetMode { m: "NORMAL" } ],
         [ Char('f'), Char('d') ] => [ SetMode { m: "NORMAL" } ],
-        [ Backspace ] => [ Delete ],
-        [ Del ] => [ Move { d: Right }, Delete ],
+        [ Backspace ] => [ Move { d: Left }, Delete ],
+        [ Del ] => [ Delete ],
         [ Home ] => [ DotSet(TextObject::Line), DotCollapseFirst ],
-        [ End ] => [ DotSet(TextObject::Line), DotCollapseLast ]
+        [ End ] => [ DotSet(TextObject::Line), DotCollapseLast ],
 
     };
 
