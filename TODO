@@ -1,8 +1,9 @@
 :: TODO
 
+- [ ] Undo...!
+- [ ] Mouse support
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?
-- [ ] copy / paste
 - [ ] Better colors for the status bar
   - Maybe change the color based on the mode?
 - [ ] mini-buffer tab complete
@@ -10,13 +11,8 @@
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
 - [ ] Running shell commands
-- [ ] clipboard support
-  - Probably want to look at kakboard for this one / just use xclip & pbcopy
-  - true "native" support in ad will require knowing OS specific code
 - [ ] FUSE filesystem fun...!
-- [ ] Mouse support
 - [ ] Scroll off / scroll while maintaining cursor position
-- [ ] Undo...!
 - [ ] window splitting
   - This is one where I don't know if I definitely want it or not?
   - It might be better to just rely on tmux but then that forces me into the multi

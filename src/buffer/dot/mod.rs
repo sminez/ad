@@ -33,6 +33,37 @@ impl Default for Dot {
 }
 
 impl Dot {
+    pub fn content(&self, b: &Buffer) -> String {
+        match self {
+            Self::Cur { c } => b.lines[c.y].raw[c.x..(c.x + 1)].to_string(),
+            Self::Range { r } => {
+                let lrs = r.line_ranges();
+                let mut lines: Vec<&str> = Vec::with_capacity(lrs.len());
+
+                for lr in lrs.into_iter() {
+                    match lr {
+                        LineRange::Full { y } => lines.push(&b.lines[y].raw),
+                        LineRange::ToEnd { y, start } => {
+                            lines.push(b.lines[y].raw.split_at(start).1)
+                        }
+                        LineRange::FromStart { y, end } => {
+                            lines.push(b.lines[y].raw.split_at(end + 1).0)
+                        }
+                        LineRange::Partial { y, start, end } => {
+                            lines.push(&b.lines[y].raw[start..end])
+                        }
+                    }
+                }
+
+                if lines.len() == 1 {
+                    format!("{}\n", lines[0])
+                } else {
+                    lines.join("\n")
+                }
+            }
+        }
+    }
+
     #[inline]
     pub fn active_cur(&self) -> Cur {
         match self {

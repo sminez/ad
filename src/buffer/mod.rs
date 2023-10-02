@@ -2,7 +2,7 @@ use crate::{
     editor::Action,
     key::{Arrow, Key},
     term::{Color, Style},
-    util::relative_path_from,
+    util::{relative_path_from, set_clipboard},
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
 use std::{
@@ -137,6 +137,10 @@ impl Buffer {
         }
 
         s
+    }
+
+    pub fn dot_contents(&self) -> String {
+        self.dot.content(self)
     }
 
     #[inline]
@@ -291,6 +295,14 @@ impl Buffer {
         }
     }
 
+    // FIXME: this is a horrible way to do this but it's the simplest thing to do for initial
+    // testing
+    pub(crate) fn insert_string(&mut self, s: String) {
+        for c in s.chars() {
+            self.insert_char(c)
+        }
+    }
+
     /// ch is inserted based on the current dot
     fn insert_char(&mut self, ch: char) {
         if self.dot.last_cur().y == self.lines.len() {
@@ -300,7 +312,8 @@ impl Buffer {
         let c = match self.dot {
             Dot::Cur { c } => self.insert_char_handling_newline(c, ch),
             Dot::Range { r } => {
-                let c = self.delete_range(r);
+                let (c, deleted) = self.delete_range(r);
+                let _ = set_clipboard(&deleted);
                 self.insert_char_handling_newline(c, ch)
             }
         };
@@ -338,58 +351,70 @@ impl Buffer {
     }
 
     fn delete(&mut self) {
-        let c = match self.dot {
+        let (c, deleted) = match self.dot {
             Dot::Cur { c } => self.delete_cur(c),
             Dot::Range { r } => self.delete_range(r),
         };
 
         self.dot = Dot::Cur { c };
         self.dirty = true;
+
+        // NOTE: Ignoring errors in setting the system clipboard
+        let _ = set_clipboard(&deleted);
     }
 
-    fn delete_cur(&mut self, cur: Cur) -> Cur {
+    fn delete_cur(&mut self, cur: Cur) -> (Cur, String) {
         if cur.y == self.len_lines() || (cur.x == 0 && cur.y == 0) {
-            return cur;
+            return (cur, String::new());
         }
 
-        if cur.x < self.lines[cur.y].len() {
-            self.lines[cur.y].modify(|s| {
-                s.remove(cur.x);
-            });
+        let deleted = if cur.x < self.lines[cur.y].len() {
+            let s = self.lines[cur.y].raw.remove(cur.x).to_string();
+            self.lines[cur.y].update_render();
+            s
         } else if cur.y < self.lines.len() - 1 {
             // Deleting the newline char at the end of this line
             let line = self.lines.remove(cur.y + 1);
             self.lines[cur.y].modify(|s| s.push_str(&line.raw));
-        }
+            "\n".to_string()
+        } else {
+            String::new()
+        };
 
         self.dirty = true;
-        cur
+
+        (cur, deleted)
     }
 
     /// Delete all LineRanges from the given range in reverse order so we
     /// don't invalidate line offsets
-    fn delete_range(&mut self, r: Range) -> Cur {
+    fn delete_range(&mut self, r: Range) -> (Cur, String) {
+        let line_ranges = r.line_ranges();
         let mut had_trailing_chars = false;
+        let mut removed_lines = Vec::with_capacity(line_ranges.len());
 
-        for lr in r.line_ranges().into_iter().rev() {
+        for lr in line_ranges.into_iter().rev() {
             match lr {
                 lr if lr.is_full_line(self) => {
-                    self.lines.remove(lr.y());
+                    removed_lines.push(self.lines.remove(lr.y()).raw);
                 }
                 LineRange::Full { y } => {
-                    self.lines.remove(y);
+                    removed_lines.push(self.lines.remove(y).raw);
                 }
-                LineRange::ToEnd { y, start } => self.lines[y].modify(|s| s.truncate(start)),
+                LineRange::ToEnd { y, start } => {
+                    let (left, removed) = self.lines[y].raw.split_at(start);
+                    removed_lines.push(removed.to_string());
+                    self.lines[y].raw = left.to_string();
+                    self.lines[y].update_render();
+                }
                 LineRange::FromStart { y, end } => {
-                    self.lines[y].modify(|s| {
-                        let _: String = s.drain(..=end).collect();
-                    });
+                    removed_lines.push(self.lines[y].raw.drain(..=end).collect());
+                    self.lines[y].update_render();
                     had_trailing_chars = true;
                 }
                 LineRange::Partial { y, start, end } => {
-                    self.lines[y].modify(|s| {
-                        let _: String = s.drain(start..=end).collect();
-                    });
+                    removed_lines.push(self.lines[y].raw.drain(start..=end).collect());
+                    self.lines[y].update_render();
                 }
             }
         }
@@ -399,6 +424,8 @@ impl Buffer {
             self.lines[r.start.y].modify(|s| s.push_str(&line.raw));
         }
 
-        r.start
+        removed_lines.reverse();
+
+        (r.start, removed_lines.join("\n"))
     }
 }

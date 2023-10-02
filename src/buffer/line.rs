@@ -18,7 +18,7 @@ impl Line {
         Self { raw, render }
     }
 
-    fn update_render(&mut self) {
+    pub(super) fn update_render(&mut self) {
         self.render = as_render_line(&self.raw);
     }
 

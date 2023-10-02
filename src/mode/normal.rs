@@ -56,6 +56,8 @@ pub(crate) fn normal_mode() -> Mode {
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],
         [ Char('d') ] => [ Delete ],
+        [ Char('p') ] => [ Paste ],
+        [ Char('y') ] => [ Yank ],
 
 
     };

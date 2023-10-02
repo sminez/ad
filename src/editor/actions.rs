@@ -5,6 +5,7 @@ use crate::{
     editor::Editor,
     key::{Arrow, Key},
     mode::Mode,
+    util::{read_clipboard, set_clipboard},
 };
 use std::{env, fs, io::Write, path::PathBuf};
 
@@ -33,6 +34,7 @@ pub enum Action {
     Move { d: Arrow },
     NextBuffer,
     OpenFile { path: String },
+    Paste,
     PreviousBuffer,
     RawKey { k: Key },
     SaveBuffer,
@@ -40,7 +42,7 @@ pub enum Action {
     SearchInCurrentBuffer,
     SelectBuffer,
     SetMode { m: &'static str },
-    // Yank,
+    Yank,
 }
 
 impl Editor {
@@ -150,6 +152,19 @@ impl Editor {
         }
 
         self.running = false;
+    }
+
+    pub(super) fn yank(&mut self) {
+        if let Err(e) = set_clipboard(&self.buffers.active().dot_contents()) {
+            self.set_status_message(&format!("Error setting system clipboard: {e}"));
+        }
+    }
+
+    pub(super) fn paste(&mut self) {
+        match read_clipboard() {
+            Ok(s) => self.buffers.active_mut().insert_string(s),
+            Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
+        }
     }
 
     pub(super) fn search_in_current_buffer(&mut self) {

@@ -1,4 +1,38 @@
-use std::path::{Component, Path, PathBuf};
+use std::{
+    io::{self, Write},
+    path::{Component, Path, PathBuf},
+    process::{Command, Stdio},
+};
+
+#[cfg(target_os = "linux")]
+pub fn set_clipboard(s: &str) -> io::Result<()> {
+    let mut child = Command::new("xclip")
+        .args(["-selection", "clipboard", "-i"])
+        .stdin(Stdio::piped())
+        .spawn()?;
+
+    child.stdin.take().unwrap().write_all(s.as_bytes())
+}
+
+#[cfg(target_os = "linux")]
+pub fn read_clipboard() -> io::Result<String> {
+    let output = Command::new("xclip")
+        .args(["-selection", "clipboard", "-o"])
+        .output()?;
+    Ok(String::from_utf8(output.stdout).unwrap_or_default())
+}
+
+#[cfg(target_os = "macos")]
+pub fn set_clipboard(s: &str) -> io::Result<()> {
+    let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
+    child.stdin.take().unwrap().write_all(s.as_bytes())
+}
+
+#[cfg(target_os = "macos")]
+pub fn read_clipboard() -> io::Result<String> {
+    let output = Command::new("pbpaste").output()?;
+    Ok(String::from_utf8(output.stdout).unwrap_or_default())
+}
 
 /// Both the base path and p must be absolute paths and base must be a directory
 pub(crate) fn relative_path_from(base: &Path, p: &Path) -> PathBuf {

@@ -138,12 +138,14 @@ impl Editor {
             Action::Exit { force } => self.exit(force),
             Action::NextBuffer => self.buffers.next(),
             Action::OpenFile { path } => self.open_file(&path),
+            Action::Paste => self.paste(),
             Action::PreviousBuffer => self.buffers.previous(),
             Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
             Action::SaveBuffer => self.save_current_buffer(None),
             Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
             Action::SelectBuffer => self.select_buffer(),
             Action::SetMode { m } => self.set_mode(m),
+            Action::Yank => self.yank(),
 
             a => self.buffers.active_mut().handle_action(a, self.screen_rows),
         }
