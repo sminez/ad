@@ -99,7 +99,7 @@ impl Editor {
                     Style::Fg(SGNCOL_FG.into()),
                     file_row + 1,
                     Style::Reset,
-                    b.styled_rline_unchecked(y, w_lnum, self.screen_cols, DOT_BG.into()),
+                    b.styled_rline_unchecked(file_row, w_lnum, self.screen_cols, DOT_BG.into()),
                     width = w_lnum
                 ));
             }
