@@ -1,8 +1,9 @@
 :: TODO
 
-- [ ] sort out multi-line delete
-  - partial lines from the last deleted line need to be lifted up
+- [ ] Normal mode cursor for ranges is a character past where it should be
 - [ ] implement remaining text objects
+- [ ] store "desired x" or an "x is at EOL" flag?
+- [ ] copy / paste
 - [ ] Better colors for the status bar
   - Maybe change the color based on the mode?
 - [ ] mini-buffer tab complete

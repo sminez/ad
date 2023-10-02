@@ -367,8 +367,13 @@ impl Buffer {
     /// Delete all LineRanges from the given range in reverse order so we
     /// don't invalidate line offsets
     fn delete_range(&mut self, r: Range) -> Cur {
+        let mut had_trailing_chars = false;
+
         for lr in r.line_ranges().into_iter().rev() {
             match lr {
+                lr if lr.is_full_line(self) => {
+                    self.lines.remove(lr.y());
+                }
                 LineRange::Full { y } => {
                     self.lines.remove(y);
                 }
@@ -377,18 +382,19 @@ impl Buffer {
                     self.lines[y].modify(|s| {
                         let _: String = s.drain(..end).collect();
                     });
+                    had_trailing_chars = true;
                 }
                 LineRange::Partial { y, start, end } => {
                     self.lines[y].modify(|s| {
                         let _: String = s.drain(start..end).collect();
                     });
-                    // LineRange doesn't know about the length of the line so we need to
-                    // check to see if we've removed all of its contents
-                    if self.lines[y].raw.is_empty() {
-                        self.lines.remove(y);
-                    }
                 }
             }
+        }
+
+        if had_trailing_chars {
+            let line = self.lines.remove(r.start.y + 1);
+            self.lines[r.start.y].modify(|s| s.push_str(&line.raw));
         }
 
         r.start

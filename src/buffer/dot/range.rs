@@ -1,4 +1,4 @@
-use crate::buffer::dot::Cur;
+use crate::buffer::{dot::Cur, Buffer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {
@@ -98,6 +98,26 @@ pub(crate) enum LineRange {
     ToEnd { y: usize, start: usize },
     FromStart { y: usize, end: usize },
     Partial { y: usize, start: usize, end: usize },
+}
+
+impl LineRange {
+    pub(crate) fn is_full_line(&self, b: &Buffer) -> bool {
+        match *self {
+            LineRange::Full { .. } => true,
+            LineRange::ToEnd { start, .. } => start == 0,
+            LineRange::FromStart { y, end } => end == b.lines[y].len(),
+            LineRange::Partial { y, start, end } => start == 0 && end == b.lines[y].len(),
+        }
+    }
+
+    pub(crate) fn y(&self) -> usize {
+        match *self {
+            LineRange::Full { y } => y,
+            LineRange::ToEnd { y, .. } => y,
+            LineRange::FromStart { y, .. } => y,
+            LineRange::Partial { y, .. } => y,
+        }
+    }
 }
 
 #[cfg(test)]
