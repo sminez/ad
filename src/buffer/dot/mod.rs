@@ -126,13 +126,8 @@ pub trait UpdateDot {
 
 impl UpdateDot for Arrow {
     fn set_dot(&self, b: &Buffer) -> Dot {
-        match b.dot {
-            Dot::Cur { c } => Dot::Cur {
-                c: c.arr_w_count(*self, 1, b),
-            },
-            Dot::Range { r } => Dot::Cur {
-                c: r.end.arr_w_count(*self, 1, b),
-            },
+        Dot::Cur {
+            c: b.dot.active_cur().arr_w_count(*self, 1, b),
         }
     }
 
@@ -169,9 +164,11 @@ impl UpdateDot for Arrow {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextObject {
+    // Arr(Arrow),
     Buffer,
-    // Character(char),
+    Character,
     // Delimited(char, char),
+    // FindChar(char),
     Line,
     LineBoundary,
     // Paragraph,
@@ -187,6 +184,9 @@ impl UpdateDot for TextObject {
                     end: Cur::buffer_end(b),
                     start_active: b.dot.start_active(),
                 },
+            },
+            TextObject::Character => Dot::Cur {
+                c: b.dot.active_cur().arr_w_count(Arrow::Right, 1, b),
             },
             // For setting dot, line and line boundary operate the same as we are selecting
             // "the whole line" or "between line boundaries" which are equivalent
@@ -217,6 +217,8 @@ impl UpdateDot for TextObject {
         (start, end) = match (self, start_active) {
             (TextObject::Buffer, true) => (end, Cur::buffer_end(b)),
             (TextObject::Buffer, false) => (start, Cur::buffer_end(b)),
+            (TextObject::Character, true) => (start.arr_w_count(Arrow::Right, 1, b), end),
+            (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Right, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Down, 1, b), end),
             (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Down, 1, b)),
             (TextObject::LineBoundary, true) => {
@@ -244,6 +246,8 @@ impl UpdateDot for TextObject {
         (start, end) = match (self, start_active) {
             (TextObject::Buffer, true) => (Cur::buffer_start(), end),
             (TextObject::Buffer, false) => (Cur::buffer_start(), start),
+            (TextObject::Character, true) => (start.arr_w_count(Arrow::Left, 1, b), end),
+            (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Left, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Up, 1, b), end),
             (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Up, 1, b)),
             (TextObject::LineBoundary, true) => {

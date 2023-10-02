@@ -48,10 +48,10 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('%') ] => [ DotSet(Buffer) ],
 
         // Extending dot
-        // [ Char('H') ] => [ DotExtendForward(Character) ],
+        [ Char('H') ] => [ DotExtendBackward(Character) ],
         [ Char('J') ] => [ DotExtendForward(Line) ],
         [ Char('K') ] => [ DotExtendBackward(Line) ],
-        // [ Char('L') ] => [ DotExtendBackward(Character) ],
+        [ Char('L') ] => [ DotExtendForward(Character) ],
 
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],
