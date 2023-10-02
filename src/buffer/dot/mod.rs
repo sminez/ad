@@ -164,7 +164,7 @@ impl UpdateDot for Arrow {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextObject {
-    // Arr(Arrow),
+    Arr(Arrow),
     Buffer,
     Character,
     // Delimited(char, char),
@@ -178,6 +178,7 @@ pub enum TextObject {
 impl UpdateDot for TextObject {
     fn set_dot(&self, b: &Buffer) -> Dot {
         match self {
+            TextObject::Arr(arr) => arr.set_dot(b),
             TextObject::Buffer => Dot::Range {
                 r: Range {
                     start: Cur::buffer_start(),
@@ -215,6 +216,7 @@ impl UpdateDot for TextObject {
         } = b.dot.as_range();
 
         (start, end) = match (self, start_active) {
+            (TextObject::Arr(arr), _) => return arr.extend_dot_forward(b),
             (TextObject::Buffer, true) => (end, Cur::buffer_end(b)),
             (TextObject::Buffer, false) => (start, Cur::buffer_end(b)),
             (TextObject::Character, true) => (start.arr_w_count(Arrow::Right, 1, b), end),
@@ -244,6 +246,7 @@ impl UpdateDot for TextObject {
         } = b.dot.as_range();
 
         (start, end) = match (self, start_active) {
+            (TextObject::Arr(arr), _) => return arr.extend_dot_backward(b),
             (TextObject::Buffer, true) => (Cur::buffer_start(), end),
             (TextObject::Buffer, false) => (Cur::buffer_start(), start),
             (TextObject::Character, true) => (start.arr_w_count(Arrow::Left, 1, b), end),
