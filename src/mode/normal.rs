@@ -25,9 +25,9 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('i') ] => [ SetMode { m: "INSERT" } ],
         [ Char('I') ] => [ DotSet(LineBoundary), DotCollapseFirst, SetMode { m: "INSERT" } ],
         [ Char('a') ] => [ Move { d: Right }, SetMode { m: "INSERT" } ],
-        [ Char('A') ] => [ DotSet(LineBoundary), DotCollapseLast, SetMode { m: "INSERT" } ],
-        [ Char('o') ] => [ InsertChar { c: '\n' }, Move { d: Down }, SetMode { m: "INSERT" } ],
-        [ Char('O') ] => [ Move { d: Up }, InsertChar { c: '\n' }, Move { d: Down }, SetMode { m: "INSERT" } ],
+        [ Char('A') ] => [ DotSet(Line), DotCollapseLast, SetMode { m: "INSERT" } ],
+        [ Char('o') ] => [ DotSet(Line), DotCollapseLast, InsertChar { c: '\n' }, SetMode { m: "INSERT" } ],
+        [ Char('O') ] => [ DotSet(Line), DotCollapseFirst, InsertChar { c: '\n' }, Move { d: Up }, SetMode { m: "INSERT" } ],
 
         // Setting dot
         [ Char('h') ] => [ Move { d: Left } ],

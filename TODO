@@ -1,32 +1,15 @@
 :: TODO
 
-- [x] Display pending keys in the RHS of the message bar
-- [x] sign/number column
-- [x] Mini-buffer
-  - This will replace the current prompt functionality as the primary way
-    for the user to provide commands to the editor other than Normal mode
+- [ ] sort out multi-line delete
+  - partial lines from the last deleted line need to be lifted up
+- [ ] implement remaining text objects
 - [ ] Better colors for the status bar
   - Maybe change the color based on the mode?
-- [x] Command mode
-  - This probably needs to be a special case that works more like
-    the current prompt mode?
-  - Actually...this probably wants to be more like the emacs mini-buffer?
-    - If I do it that way, then the "default" mini-buffer is just a single
-      line but it should be possible to show more detail either above (like
-      kakoune) or below (like emacs).
 - [ ] mini-buffer tab complete
 - [ ] completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
 - [ ] Running shell commands
-- [ ] Proper implementation of Sam style `dot`
-- [ ] Port over the normal mode actions from poe
-  - This will require rewriting the impls as they depend on rope data structures
-- [x] Search
-- [x] Buffer switch
-- [x] cwd and cwd manipulation
-  - buffer paths should be converted to absolute and displayed relative to cwd
-- [x] Opening files from within the editor
 - [ ] clipboard support
   - Probably want to look at kakboard for this one / just use xclip & pbcopy
   - true "native" support in ad will require knowing OS specific code
@@ -34,7 +17,6 @@
 - [ ] Mouse support
 - [ ] Scroll off / scroll while maintaining cursor position
 - [ ] Undo...!
-- [x] handle terminal resize
 - [ ] window splitting
   - This is one where I don't know if I definitely want it or not?
   - It might be better to just rely on tmux but then that forces me into the multi

@@ -63,7 +63,7 @@ impl Dot {
             Self::Cur { c } => Range {
                 start: *c,
                 end: *c,
-                start_active: true,
+                start_active: false,
             },
             Self::Range { r } => *r,
         }
@@ -72,7 +72,7 @@ impl Dot {
     #[inline]
     fn start_active(&self) -> bool {
         match self {
-            Self::Cur { .. } => true,
+            Self::Cur { .. } => false,
             Self::Range { r } => r.start_active,
         }
     }
