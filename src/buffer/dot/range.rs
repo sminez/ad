@@ -8,15 +8,19 @@ pub struct Range {
 }
 
 impl Range {
-    /// Construct a new range from two cursors, ensuring that their are
-    /// correctly ordered.
-    pub fn from_cursors(c1: Cur, c2: Cur) -> Self {
-        let (start, end) = if c1 < c2 { (c1, c2) } else { (c2, c1) };
+    pub fn from_cursors(c1: Cur, c2: Cur, c1_was_active: bool) -> Self {
+        let (start, end, start_active) = if c1 <= c2 {
+            (c1, c2, c1_was_active)
+        } else if c1_was_active {
+            (c2, c1, false)
+        } else {
+            (c2, c1, true)
+        };
 
         Self {
             start,
             end,
-            start_active: true,
+            start_active,
         }
     }
 

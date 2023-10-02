@@ -58,6 +58,26 @@ impl Dot {
     }
 
     #[inline]
+    fn as_range(&self) -> Range {
+        match self {
+            Self::Cur { c } => Range {
+                start: *c,
+                end: *c,
+                start_active: true,
+            },
+            Self::Range { r } => *r,
+        }
+    }
+
+    #[inline]
+    fn start_active(&self) -> bool {
+        match self {
+            Self::Cur { .. } => true,
+            Self::Range { r } => r.start_active,
+        }
+    }
+
+    #[inline]
     pub fn collapse_to_first_cur(&self) -> Self {
         Dot::Cur {
             c: self.first_cur(),
@@ -119,10 +139,14 @@ impl UpdateDot for Arrow {
     fn extend_dot_forward(&self, b: &Buffer) -> Dot {
         match b.dot {
             Dot::Cur { c } => Dot::Range {
-                r: Range::from_cursors(c, c.arr_w_count(*self, 1, b)),
+                r: Range::from_cursors(c, c.arr_w_count(*self, 1, b), b.dot.start_active()),
             },
             Dot::Range { r } => Dot::Range {
-                r: Range::from_cursors(r.start, r.end.arr_w_count(*self, 1, b)),
+                r: Range::from_cursors(
+                    r.start,
+                    r.end.arr_w_count(*self, 1, b),
+                    b.dot.start_active(),
+                ),
             }
             .collapse_null_range(),
         }
@@ -132,7 +156,11 @@ impl UpdateDot for Arrow {
         match b.dot {
             Dot::Cur { .. } => self.flip().extend_dot_forward(b),
             Dot::Range { r } => Dot::Range {
-                r: Range::from_cursors(r.start.arr_w_count(self.flip(), 1, b), r.end),
+                r: Range::from_cursors(
+                    r.start.arr_w_count(self.flip(), 1, b),
+                    r.end,
+                    b.dot.start_active(),
+                ),
             }
             .collapse_null_range(),
         }
@@ -157,7 +185,7 @@ impl UpdateDot for TextObject {
                 r: Range {
                     start: Cur::buffer_start(),
                     end: Cur::buffer_end(b),
-                    start_active: true,
+                    start_active: b.dot.start_active(),
                 },
             },
             // For setting dot, line and line boundary operate the same as we are selecting
@@ -172,7 +200,7 @@ impl UpdateDot for TextObject {
                     r: Range {
                         start,
                         end,
-                        start_active: false,
+                        start_active: b.dot.start_active(),
                     },
                 }
             }
@@ -180,46 +208,56 @@ impl UpdateDot for TextObject {
     }
 
     fn extend_dot_forward(&self, b: &Buffer) -> Dot {
-        let mut start = b.dot.first_cur();
-        let mut end = b.dot.last_cur();
+        let Range {
+            mut start,
+            mut end,
+            start_active,
+        } = b.dot.as_range();
 
-        (start, end) = match self {
-            TextObject::Buffer => (start, Cur::buffer_end(b)),
-            TextObject::Line => (start, end.arr_w_count(Arrow::Down, 1, b)),
-            TextObject::LineBoundary => {
+        (start, end) = match (self, start_active) {
+            (TextObject::Buffer, true) => (end, Cur::buffer_end(b)),
+            (TextObject::Buffer, false) => (start, Cur::buffer_end(b)),
+            (TextObject::Line, true) => (start.arr_w_count(Arrow::Down, 1, b), end),
+            (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Down, 1, b)),
+            (TextObject::LineBoundary, true) => {
+                start.x = b.lines.get(start.y).map(|l| l.len()).unwrap_or_default();
+                (start, end)
+            }
+            (TextObject::LineBoundary, false) => {
                 end.x = b.lines.get(end.y).map(|l| l.len()).unwrap_or_default();
                 (start, end)
             }
         };
 
         Dot::Range {
-            r: Range {
-                start,
-                end,
-                start_active: false,
-            },
+            r: Range::from_cursors(start, end, start_active),
         }
     }
 
     fn extend_dot_backward(&self, b: &Buffer) -> Dot {
-        let mut start = b.dot.first_cur();
-        let mut end = b.dot.last_cur();
+        let Range {
+            mut start,
+            mut end,
+            start_active,
+        } = b.dot.as_range();
 
-        (start, end) = match self {
-            TextObject::Buffer => (Cur::buffer_start(), end),
-            TextObject::Line => (start.arr_w_count(Arrow::Up, 1, b), end),
-            TextObject::LineBoundary => {
+        (start, end) = match (self, start_active) {
+            (TextObject::Buffer, true) => (Cur::buffer_start(), end),
+            (TextObject::Buffer, false) => (Cur::buffer_start(), start),
+            (TextObject::Line, true) => (start.arr_w_count(Arrow::Up, 1, b), end),
+            (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Up, 1, b)),
+            (TextObject::LineBoundary, true) => {
                 start.x = 0;
+                (start, end)
+            }
+            (TextObject::LineBoundary, false) => {
+                end.x = 0;
                 (start, end)
             }
         };
 
         Dot::Range {
-            r: Range {
-                start,
-                end,
-                start_active: true,
-            },
+            r: Range::from_cursors(start, end, start_active),
         }
     }
 }
