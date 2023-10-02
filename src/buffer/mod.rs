@@ -237,8 +237,10 @@ impl Buffer {
         // Apply highlight if included in current Dot
         if let Some(lr) = self.dot.line_range(y) {
             let (start, end) = match lr {
-                LineRange::Partial { start, end, .. } => (start, end),
-                LineRange::FromStart { end, .. } => (0, end),
+                // LineRange is an inclusive range so we need to insert after `end` if its
+                // not the end of the line
+                LineRange::Partial { start, end, .. } => (start, min(end + 1, rline.len())),
+                LineRange::FromStart { end, .. } => (0, min(end + 1, rline.len())),
                 LineRange::ToEnd { start, .. } => (start, rline.len()),
                 LineRange::Full { .. } => (0, rline.len()),
             };
@@ -380,13 +382,13 @@ impl Buffer {
                 LineRange::ToEnd { y, start } => self.lines[y].modify(|s| s.truncate(start)),
                 LineRange::FromStart { y, end } => {
                     self.lines[y].modify(|s| {
-                        let _: String = s.drain(..end).collect();
+                        let _: String = s.drain(..=end).collect();
                     });
                     had_trailing_chars = true;
                 }
                 LineRange::Partial { y, start, end } => {
                     self.lines[y].modify(|s| {
-                        let _: String = s.drain(start..end).collect();
+                        let _: String = s.drain(start..=end).collect();
                     });
                 }
             }

@@ -1,6 +1,5 @@
 :: TODO
 
-- [ ] Normal mode cursor for ranges is a character past where it should be
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?
 - [ ] copy / paste

@@ -91,7 +91,7 @@ impl Range {
     }
 }
 
-/// A selection of characters within a single line
+/// A an inclusive range of characters within a single line
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LineRange {
     Full { y: usize },
