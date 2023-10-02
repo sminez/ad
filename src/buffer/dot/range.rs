@@ -4,6 +4,7 @@ use crate::buffer::dot::Cur;
 pub struct Range {
     pub start: Cur,
     pub end: Cur,
+    pub(super) start_active: bool,
 }
 
 impl Range {
@@ -12,7 +13,23 @@ impl Range {
     pub fn from_cursors(c1: Cur, c2: Cur) -> Self {
         let (start, end) = if c1 < c2 { (c1, c2) } else { (c2, c1) };
 
-        Self { start, end }
+        Self {
+            start,
+            end,
+            start_active: true,
+        }
+    }
+
+    pub fn flip(&mut self) {
+        self.start_active = !self.start_active;
+    }
+
+    pub fn active_cursor(&self) -> Cur {
+        if self.start_active {
+            self.start
+        } else {
+            self.end
+        }
     }
 
     pub(crate) fn line_range(&self, y: usize) -> Option<LineRange> {
@@ -94,6 +111,7 @@ mod tests {
         let r = Range {
             start: Cur { y: 1, x: 10 },
             end: Cur { y: 3, x: 5 },
+            start_active: true,
         };
 
         assert_eq!(r.line_range(y), expected);
@@ -107,18 +125,19 @@ mod tests {
         let r = Range {
             start: Cur { y: 1, x: 5 },
             end: Cur { y: 1, x: 10 },
+            start_active: true,
         };
 
         assert_eq!(r.line_range(y), expected);
     }
 
     #[test_case(
-        Range { start: Cur { y: 1, x: 5 }, end: Cur { y: 1, x: 10 } },
+        Range { start: Cur { y: 1, x: 5 }, end: Cur { y: 1, x: 10 }, start_active: true },
         vec![Partial { y: 1, start: 5, end: 10 }];
         "single-line"
     )]
     #[test_case(
-        Range { start: Cur { y: 1, x: 10 }, end: Cur { y: 4, x: 5 } },
+        Range { start: Cur { y: 1, x: 10 }, end: Cur { y: 4, x: 5 }, start_active: true },
         vec![ToEnd { y: 1, start: 10 }, Full { y: 2 }, Full { y: 3 }, FromStart { y: 4, end: 5 }];
         "multi-line"
     )]

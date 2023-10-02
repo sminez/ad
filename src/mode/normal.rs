@@ -35,6 +35,7 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('k') ] => [ Move { d: Up } ],
         [ Char('l') ] => [ Move { d: Right } ],
 
+        [ Char(';') ] => [ DotFlip ],
         [ Char(',') ] => [ DotCollapseFirst ],
         [ Alt(',') ] => [ DotCollapseLast ],
 

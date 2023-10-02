@@ -150,7 +150,7 @@ impl Buffer {
     }
 
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
-        let Cur { x, y } = self.dot.first_cur();
+        let Cur { x, y } = self.dot.active_cur();
         self.rx = self.rx_from_x(y, x);
 
         if y < self.row_off {
@@ -257,6 +257,7 @@ impl Buffer {
             Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
             Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
             Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
+            Action::DotFlip => self.dot.flip(),
             Action::DotSet(tobj) => self.dot = tobj.set_dot(self),
             Action::DotExtendForward(tobj) => self.dot = tobj.extend_dot_forward(self),
             Action::DotExtendBackward(tobj) => self.dot = tobj.extend_dot_backward(self),

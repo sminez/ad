@@ -27,6 +27,7 @@ pub enum Action {
     DotSet(TextObject),
     DotExtendForward(TextObject),
     DotExtendBackward(TextObject),
+    DotFlip,
     Exit { force: bool },
     InsertChar { c: char },
     Move { d: Arrow },

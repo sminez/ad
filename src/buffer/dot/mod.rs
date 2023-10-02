@@ -23,7 +23,6 @@ pub(crate) use range::{LineRange, Range};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Dot {
     Cur { c: Cur },
-    // FIXME: need to track which cursor is active
     Range { r: Range },
 }
 
@@ -34,6 +33,14 @@ impl Default for Dot {
 }
 
 impl Dot {
+    #[inline]
+    pub fn active_cur(&self) -> Cur {
+        match self {
+            Self::Cur { c } => *c,
+            Self::Range { r } => r.active_cursor(),
+        }
+    }
+
     #[inline]
     pub fn first_cur(&self) -> Cur {
         match self {
@@ -62,6 +69,13 @@ impl Dot {
         Dot::Cur { c: self.last_cur() }
     }
 
+    #[inline]
+    pub fn flip(&mut self) {
+        if let Dot::Range { r } = self {
+            r.flip();
+        }
+    }
+
     pub(crate) fn line_range(&self, y: usize) -> Option<LineRange> {
         match self {
             Dot::Cur { .. } => None,
@@ -73,7 +87,7 @@ impl Dot {
     fn collapse_null_range(self) -> Self {
         match self {
             Dot::Range {
-                r: Range { start, end },
+                r: Range { start, end, .. },
             } if start == end => Dot::Cur { c: start },
             _ => self,
         }
@@ -143,6 +157,7 @@ impl UpdateDot for TextObject {
                 r: Range {
                     start: Cur::buffer_start(),
                     end: Cur::buffer_end(b),
+                    start_active: true,
                 },
             },
             // For setting dot, line and line boundary operate the same as we are selecting
@@ -154,7 +169,11 @@ impl UpdateDot for TextObject {
                 end.x = b.lines.get(end.y).map(|l| l.len()).unwrap_or_default();
 
                 Dot::Range {
-                    r: Range { start, end },
+                    r: Range {
+                        start,
+                        end,
+                        start_active: false,
+                    },
                 }
             }
         }
@@ -174,7 +193,11 @@ impl UpdateDot for TextObject {
         };
 
         Dot::Range {
-            r: Range { start, end },
+            r: Range {
+                start,
+                end,
+                start_active: false,
+            },
         }
     }
 
@@ -192,7 +215,11 @@ impl UpdateDot for TextObject {
         };
 
         Dot::Range {
-            r: Range { start, end },
+            r: Range {
+                start,
+                end,
+                start_active: true,
+            },
         }
     }
 }

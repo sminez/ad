@@ -77,7 +77,7 @@ impl MiniBuffer {
             y: if self.b.lines.is_empty() {
                 0
             } else {
-                min(self.b.lines.len() - 1, self.b.dot.first_cur().y)
+                min(self.b.lines.len() - 1, self.b.dot.active_cur().y)
             },
         };
 
@@ -111,7 +111,7 @@ impl MiniBuffer {
 
             let n_visible_lines = min(mb.b.lines.len(), mb.max_height);
             mb.b.clamp_scroll(n_visible_lines, screen_cols);
-            let Cur { y, .. } = mb.b.dot.first_cur();
+            let Cur { y, .. } = mb.b.dot.active_cur();
 
             let (selected_line_idx, lines): (usize, &[Line]) = if n_visible_lines == 0 {
                 (0, &[])
