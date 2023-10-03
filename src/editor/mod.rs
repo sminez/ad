@@ -145,6 +145,8 @@ impl Editor {
             Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
             Action::SelectBuffer => self.select_buffer(),
             Action::SetMode { m } => self.set_mode(m),
+            Action::ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
+            Action::ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             Action::Yank => self.yank(),
 
             a => self.buffers.active_mut().handle_action(a, self.screen_rows),

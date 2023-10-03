@@ -7,6 +7,10 @@ use crate::editor::{
 
 impl Editor {
     pub(super) fn parse_command(&mut self, input: &str) -> Option<Actions> {
+        if let Some(actions) = try_parse_single_char_command(input) {
+            return Some(actions);
+        }
+
         let (command, args) = if input.contains(' ') {
             input.split_once(' ')?
         } else {
@@ -36,9 +40,9 @@ impl Editor {
                     self.set_status_message("No filename provided");
                     None
                 } else {
-                    Some(Multi(vec![OpenFile {
+                    Some(Single(OpenFile {
                         path: args.to_string(),
-                    }]))
+                    }))
                 }
             }
 
@@ -61,9 +65,28 @@ impl Editor {
             "" => None,
 
             _ => {
-                self.set_status_message(&format!("Not an editor command: {input}"));
+                self.set_status_message(&format!("Not an editor command: {command}"));
                 None
             }
         }
     }
+}
+
+fn try_parse_single_char_command(input: &str) -> Option<Actions> {
+    return match input.chars().next() {
+        Some('!') => Some(Single(ShellRun {
+            cmd: input[1..].to_string(),
+        })),
+        Some('|') => Some(Single(ShellPipe {
+            cmd: input[1..].to_string(),
+        })),
+        Some('<') => Some(Single(ShellReplace {
+            cmd: input[1..].to_string(),
+        })),
+        Some('>') => Some(Single(ShellSend {
+            cmd: input[1..].to_string(),
+        })),
+
+        _ => None,
+    };
 }

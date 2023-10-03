@@ -1,5 +1,6 @@
 use std::{
-    io::{self, Write},
+    ffi::OsStr,
+    io::{self, Read, Write},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
 };
@@ -32,6 +33,33 @@ pub fn set_clipboard(s: &str) -> io::Result<()> {
 pub fn read_clipboard() -> io::Result<String> {
     let output = Command::new("pbpaste").output()?;
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
+}
+
+pub fn run_command<I, S>(cmd: &str, args: I) -> io::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = Command::new(cmd).args(args).output()?;
+    Ok(String::from_utf8(output.stdout).unwrap_or_default())
+}
+
+pub fn pipe_through_command<I, S>(cmd: &str, args: I, input: &str) -> io::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new(cmd)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()?;
+
+    child.stdin.take().unwrap().write_all(input.as_bytes())?;
+    let mut buf = String::new();
+    child.stdout.take().unwrap().read_to_string(&mut buf)?;
+
+    Ok(buf)
 }
 
 /// Both the base path and p must be absolute paths and base must be a directory

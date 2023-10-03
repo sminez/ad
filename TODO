@@ -1,5 +1,9 @@
 :: TODO
 
+- [ ] Theres a bug around deleting a range up to buffer end and then trying to insert?
+  - Not sure where the issue is yet but the crash is around trying to insert a char into
+    the non-existant "line past EOB" the cursor is allowed to move to
+  - It could also be around inserting to an empty buffer?...
 - [ ] Undo...!
 - [ ] Mouse support
 - [ ] Running shell commands

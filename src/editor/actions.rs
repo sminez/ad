@@ -5,7 +5,7 @@ use crate::{
     editor::Editor,
     key::Key,
     mode::Mode,
-    util::{read_clipboard, set_clipboard},
+    util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
 };
 use std::{env, fs, io::Write, path::PathBuf};
 
@@ -36,6 +36,10 @@ pub enum Action {
     Paste,
     PreviousBuffer,
     RawKey { k: Key },
+    ShellPipe { cmd: String },
+    ShellReplace { cmd: String },
+    ShellRun { cmd: String },
+    ShellSend { cmd: String },
     SaveBuffer,
     SaveBufferAs { path: String },
     SearchInCurrentBuffer,
@@ -197,4 +201,31 @@ impl Editor {
 
         self.modes.remove(0);
     }
+
+    pub(super) fn pipe_dot_through_shell_cmd(&mut self, raw_cmd_str: &str) {
+        let s = self.buffers.active().dot_contents();
+        let res = match raw_cmd_str.split_once(' ') {
+            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s),
+            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s),
+        };
+
+        match res {
+            Ok(s) => self.buffers.active_mut().insert_string(s),
+            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+        }
+    }
+
+    pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
+        let res = match raw_cmd_str.split_once(' ') {
+            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace()),
+            None => run_command(raw_cmd_str, std::iter::empty::<&str>()),
+        };
+
+        match res {
+            Ok(s) => self.buffers.active_mut().insert_string(s),
+            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+        }
+    }
+
+    // TODO: sending to the shell and just running a command needs the read-only minibuffer
 }

@@ -394,6 +394,9 @@ impl Buffer {
 
         for lr in line_ranges.into_iter().rev() {
             match lr {
+                lr if lr.y() == self.lines.len() => {
+                    continue;
+                }
                 lr if lr.is_full_line(self) => {
                     deleted_lines.push(self.lines.remove(lr.y()).raw);
                 }
