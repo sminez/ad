@@ -257,7 +257,6 @@ impl Buffer {
 
     pub fn handle_action(&mut self, a: Action, screen_rows: usize) {
         match a {
-            Action::Move { d } => self.dot = d.set_dot(self),
             Action::Delete => self.delete(),
             Action::InsertChar { c } => self.insert_char(c),
             Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
@@ -391,29 +390,29 @@ impl Buffer {
     fn delete_range(&mut self, r: Range) -> (Cur, String) {
         let line_ranges = r.line_ranges();
         let mut had_trailing_chars = false;
-        let mut removed_lines = Vec::with_capacity(line_ranges.len());
+        let mut deleted_lines = Vec::with_capacity(line_ranges.len());
 
         for lr in line_ranges.into_iter().rev() {
             match lr {
                 lr if lr.is_full_line(self) => {
-                    removed_lines.push(self.lines.remove(lr.y()).raw);
+                    deleted_lines.push(self.lines.remove(lr.y()).raw);
                 }
                 LineRange::Full { y } => {
-                    removed_lines.push(self.lines.remove(y).raw);
+                    deleted_lines.push(self.lines.remove(y).raw);
                 }
                 LineRange::ToEnd { y, start } => {
-                    let (left, removed) = self.lines[y].raw.split_at(start);
-                    removed_lines.push(removed.to_string());
+                    let (left, deleted) = self.lines[y].raw.split_at(start);
+                    deleted_lines.push(deleted.to_string());
                     self.lines[y].raw = left.to_string();
                     self.lines[y].update_render();
                 }
                 LineRange::FromStart { y, end } => {
-                    removed_lines.push(self.lines[y].raw.drain(..=end).collect());
+                    deleted_lines.push(self.lines[y].raw.drain(..=end).collect());
                     self.lines[y].update_render();
                     had_trailing_chars = true;
                 }
                 LineRange::Partial { y, start, end } => {
-                    removed_lines.push(self.lines[y].raw.drain(start..=end).collect());
+                    deleted_lines.push(self.lines[y].raw.drain(start..=end).collect());
                     self.lines[y].update_render();
                 }
             }
@@ -424,8 +423,14 @@ impl Buffer {
             self.lines[r.start.y].modify(|s| s.push_str(&line.raw));
         }
 
-        removed_lines.reverse();
+        let deleted = if deleted_lines.len() == 1 {
+            deleted_lines[0].push('\n');
+            deleted_lines.remove(0)
+        } else {
+            deleted_lines.reverse();
+            deleted_lines.join("\n")
+        };
 
-        (r.start, removed_lines.join("\n"))
+        (r.start, deleted)
     }
 }

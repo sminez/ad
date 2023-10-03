@@ -196,12 +196,14 @@ impl UpdateDot for Arrow {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextObject {
     Arr(Arrow),
-    Buffer,
+    BufferEnd,
+    BufferStart,
     Character,
     // Delimited(char, char),
     // FindChar(char),
     Line,
-    LineBoundary,
+    LineEnd,
+    LineStart,
     // Paragraph,
     // Word,
 }
@@ -210,32 +212,27 @@ impl UpdateDot for TextObject {
     fn set_dot(&self, b: &Buffer) -> Dot {
         match self {
             TextObject::Arr(arr) => arr.set_dot(b),
-            TextObject::Buffer => Dot::Range {
-                r: Range {
-                    start: Cur::buffer_start(),
-                    end: Cur::buffer_end(b),
-                    start_active: b.dot.start_active(),
-                },
+            TextObject::BufferEnd => Dot::Cur {
+                c: Cur::buffer_end(b),
+            },
+            TextObject::BufferStart => Dot::Cur {
+                c: Cur::buffer_start(),
             },
             TextObject::Character => Dot::Cur {
                 c: b.dot.active_cur().arr_w_count(Arrow::Right, 1, b),
             },
-            // For setting dot, line and line boundary operate the same as we are selecting
-            // "the whole line" or "between line boundaries" which are equivalent
-            TextObject::Line | TextObject::LineBoundary => {
-                let mut start = b.dot.first_cur();
-                let mut end = b.dot.last_cur();
-                start.x = 0;
-                end.x = b.lines.get(end.y).map(|l| l.len()).unwrap_or_default();
-
-                Dot::Range {
-                    r: Range {
-                        start,
-                        end,
-                        start_active: b.dot.start_active(),
-                    },
-                }
-            }
+            TextObject::Line => Dot::Range {
+                r: b.dot
+                    .as_range()
+                    .extend_to_line_start()
+                    .extend_to_line_end(b),
+            },
+            TextObject::LineEnd => Dot::Cur {
+                c: b.dot.active_cur().move_to_line_end(b),
+            },
+            TextObject::LineStart => Dot::Cur {
+                c: b.dot.active_cur().move_to_line_start(),
+            },
         }
     }
 
@@ -248,20 +245,38 @@ impl UpdateDot for TextObject {
 
         (start, end) = match (self, start_active) {
             (TextObject::Arr(arr), _) => return arr.extend_dot_forward(b),
-            (TextObject::Buffer, true) => (end, Cur::buffer_end(b)),
-            (TextObject::Buffer, false) => (start, Cur::buffer_end(b)),
+            (TextObject::BufferEnd, true) => (end, Cur::buffer_end(b)),
+            (TextObject::BufferEnd, false) => (start, Cur::buffer_end(b)),
+            (TextObject::BufferStart, _) => return b.dot.clone(), // Can't move forward to the buffer start
             (TextObject::Character, true) => (start.arr_w_count(Arrow::Right, 1, b), end),
             (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Right, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Down, 1, b), end),
             (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Down, 1, b)),
-            (TextObject::LineBoundary, true) => {
-                start.x = b.lines.get(start.y).map(|l| l.len()).unwrap_or_default();
-                (start, end)
+            (TextObject::LineEnd, true) => {
+                // start can only be EOL if start==end
+                if start != end {
+                    (start.move_to_line_end(b), end)
+                } else {
+                    let new_end = start.arr_w_count(Arrow::Down, 1, b).move_to_line_end(b);
+                    (end, new_end)
+                }
             }
-            (TextObject::LineBoundary, false) => {
-                end.x = b.lines.get(end.y).map(|l| l.len()).unwrap_or_default();
-                (start, end)
+            (TextObject::LineEnd, false) => {
+                let mut new_end = end.move_to_line_end(b);
+                if new_end == end {
+                    // already EOL so move to the next
+                    new_end = new_end.arr_w_count(Arrow::Down, 1, b).move_to_line_end(b);
+                }
+                (start, new_end)
             }
+            (TextObject::LineStart, true) => (
+                start.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
+                end,
+            ),
+            (TextObject::LineStart, false) => (
+                start,
+                end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
+            ),
         };
 
         Dot::Range {
@@ -278,17 +293,28 @@ impl UpdateDot for TextObject {
 
         (start, end) = match (self, start_active) {
             (TextObject::Arr(arr), _) => return arr.extend_dot_backward(b),
-            (TextObject::Buffer, true) => (Cur::buffer_start(), end),
-            (TextObject::Buffer, false) => (Cur::buffer_start(), start),
+            (TextObject::BufferEnd, _) => return b.dot.clone(), // Can't move back to the buffer end
+            (TextObject::BufferStart, true) => (Cur::buffer_start(), end),
+            (TextObject::BufferStart, false) => (Cur::buffer_start(), start),
             (TextObject::Character, true) => (start.arr_w_count(Arrow::Left, 1, b), end),
             (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Left, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Up, 1, b), end),
             (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Up, 1, b)),
-            (TextObject::LineBoundary, true) => {
-                start.x = 0;
-                (start, end)
+            (TextObject::LineEnd, true) => {
+                (start.arr_w_count(Arrow::Up, 1, b).move_to_line_end(b), end)
             }
-            (TextObject::LineBoundary, false) => {
+            (TextObject::LineEnd, false) => {
+                (start, end.arr_w_count(Arrow::Up, 1, b).move_to_line_end(b))
+            }
+            (TextObject::LineStart, true) => {
+                if start.x == 0 {
+                    (start.arr_w_count(Arrow::Up, 1, b), end)
+                } else {
+                    start.x = 0;
+                    (start, end)
+                }
+            }
+            (TextObject::LineStart, false) => {
                 end.x = 0;
                 (start, end)
             }

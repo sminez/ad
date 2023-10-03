@@ -2,16 +2,16 @@
 
 - [ ] Undo...!
 - [ ] Mouse support
+- [ ] Running shell commands
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?
 - [ ] Better colors for the status bar
   - Maybe change the color based on the mode?
+- [ ] FUSE filesystem fun...!
 - [ ] mini-buffer tab complete
 - [ ] completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
-- [ ] Running shell commands
-- [ ] FUSE filesystem fun...!
 - [ ] Scroll off / scroll while maintaining cursor position
 - [ ] window splitting
   - This is one where I don't know if I definitely want it or not?

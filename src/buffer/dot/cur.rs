@@ -30,6 +30,18 @@ impl Cur {
         cur
     }
 
+    #[must_use]
+    pub(super) fn move_to_line_start(mut self) -> Self {
+        self.x = 0;
+        self
+    }
+
+    #[must_use]
+    pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
+        self.x = b.lines.get(self.y).map(|l| l.len()).unwrap_or_default();
+        self
+    }
+
     fn arr(&self, arr: Arrow, b: &Buffer) -> Self {
         let mut cur = *self;
 

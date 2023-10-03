@@ -8,7 +8,7 @@ pub struct Range {
 }
 
 impl Range {
-    pub fn from_cursors(c1: Cur, c2: Cur, c1_was_active: bool) -> Self {
+    pub(super) fn from_cursors(c1: Cur, c2: Cur, c1_was_active: bool) -> Self {
         let (start, end, start_active) = if c1 <= c2 {
             (c1, c2, c1_was_active)
         } else if c1_was_active {
@@ -22,6 +22,20 @@ impl Range {
             end,
             start_active,
         }
+    }
+
+    /// Extends the STARTING cursor to its line start
+    #[must_use]
+    pub(super) fn extend_to_line_start(mut self) -> Self {
+        self.start = self.start.move_to_line_start();
+        self
+    }
+
+    /// Extends the ENDING cursor to its line start
+    #[must_use]
+    pub(super) fn extend_to_line_end(mut self, b: &Buffer) -> Self {
+        self.end = self.end.move_to_line_end(b);
+        self
     }
 
     pub fn flip(&mut self) {

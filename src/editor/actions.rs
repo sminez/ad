@@ -3,7 +3,7 @@ use crate::{
     buffer::{BufferKind, Cur, Dot, MiniBuffer, MiniBufferSelection, TextObject},
     die,
     editor::Editor,
-    key::{Arrow, Key},
+    key::Key,
     mode::Mode,
     util::{read_clipboard, set_clipboard},
 };
@@ -31,7 +31,6 @@ pub enum Action {
     DotFlip,
     Exit { force: bool },
     InsertChar { c: char },
-    Move { d: Arrow },
     NextBuffer,
     OpenFile { path: String },
     Paste,
@@ -155,8 +154,9 @@ impl Editor {
     }
 
     pub(super) fn yank(&mut self) {
-        if let Err(e) = set_clipboard(&self.buffers.active().dot_contents()) {
-            self.set_status_message(&format!("Error setting system clipboard: {e}"));
+        match set_clipboard(&self.buffers.active().dot_contents()) {
+            Ok(_) => self.set_status_message("Yanked selection to system clipboard"),
+            Err(e) => self.set_status_message(&format!("Error setting system clipboard: {e}")),
         }
     }
 
