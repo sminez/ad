@@ -1,5 +1,14 @@
 # ad :: an adaptable text editor
 
+## Project Status
+
+This is not even remotely usable or stable enough for real world day-to-day use yet. All aspects of
+the code are changing constantly as I hack on things and try to work out how I want my ideal text
+editor to work.
+
+You have been warned!
+
+
 ## Why?
 
 I've used [vim][0] for years now (more recently [neovim][1] and [kakoune][2]) and I really love the
