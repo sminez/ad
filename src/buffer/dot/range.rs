@@ -1,4 +1,4 @@
-use crate::buffer::{dot::Cur, Buffer};
+use crate::buffer::{dot::Cur, Buffer, Line};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {
@@ -35,6 +35,22 @@ impl Range {
     #[must_use]
     pub(super) fn extend_to_line_end(mut self, b: &Buffer) -> Self {
         self.end = self.end.move_to_line_end(b);
+        self
+    }
+
+    /// Extend end back until cond returns an x position in the given line or we bottom
+    /// out at the end of the buffer
+    #[must_use]
+    pub(super) fn extend_to(mut self, b: &Buffer, cond: fn(&Line) -> Option<usize>) -> Self {
+        self.end = self.end.move_to(b, cond);
+        self
+    }
+
+    /// Extend start back until cond returns an x position in the given line or we bottom
+    /// out at the start of the buffer
+    #[must_use]
+    pub(super) fn extend_back_to(mut self, b: &Buffer, cond: fn(&Line) -> Option<usize>) -> Self {
+        self.start = self.start.move_back_to(b, cond);
         self
     }
 

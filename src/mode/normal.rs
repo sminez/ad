@@ -34,14 +34,15 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('j') ] => [ DotSet(Arr(Down)) ],
         [ Char('k') ] => [ DotSet(Arr(Up)) ],
         [ Char('l') ] => [ DotSet(Arr(Right)) ],
-        [ Alt('h') ] => [ DotSet(LineStart) ],
-        [ Alt('l') ] => [ DotSet(LineEnd) ],
         [ Home ] => [ DotSet(LineStart) ],
         [ End ] => [ DotSet(LineEnd) ],
         [ Char('x') ] => [ DotSet(Line) ],
+        [ Char('X') ] => [ DotSet(Paragraph) ],
         [ Char('%') ] => [ DotSet(BufferStart), DotExtendForward(BufferEnd) ],
         [ Char('g'), Char('g') ] => [ DotSet(BufferStart) ],
         [ Char('g'), Char('e') ] => [ DotSet(BufferEnd) ],
+        [ Char('g'), Char('h') ] => [ DotSet(LineStart) ],
+        [ Char('g'), Char('l') ] => [ DotSet(LineEnd) ],
 
         // Extending dot
         [ Char('H') ] => [ DotExtendBackward(Character) ],
@@ -49,7 +50,15 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('K') ] => [ DotExtendBackward(Line) ],
         [ Char('L') ] => [ DotExtendForward(Character) ],
 
-        // Dot -> Cur
+        [ Char('{') ] => [ DotExtendBackward(Paragraph), DotCollapseFirst ],
+        [ Char('}') ] => [ DotExtendForward(Paragraph), DotCollapseLast ],
+        [ Alt('{') ] => [ DotExtendBackward(Paragraph) ],
+        [ Alt('}') ] => [ DotExtendForward(Paragraph) ],
+
+        [ Alt('h') ] => [ DotExtendBackward(LineStart) ],
+        [ Alt('l') ] => [ DotExtendForward(LineEnd) ],
+
+        // Manipulate dot
         [ Char(';') ] => [ DotFlip ],
         [ Char(',') ] => [ DotCollapseFirst ],
         [ Alt(',') ] => [ DotCollapseLast ],

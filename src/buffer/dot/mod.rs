@@ -7,7 +7,10 @@
 //! All indexing is 0-based when working with the contents of a specific buffer.
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
-use crate::{buffer::Buffer, key::Arrow};
+use crate::{
+    buffer::{Buffer, Line},
+    key::Arrow,
+};
 
 mod cur;
 mod range;
@@ -204,8 +207,12 @@ pub enum TextObject {
     Line,
     LineEnd,
     LineStart,
-    // Paragraph,
+    Paragraph,
     // Word,
+}
+
+fn blank_line(l: &Line) -> Option<usize> {
+    l.is_empty().then_some(0)
 }
 
 impl UpdateDot for TextObject {
@@ -232,6 +239,12 @@ impl UpdateDot for TextObject {
             },
             TextObject::LineStart => Dot::Cur {
                 c: b.dot.active_cur().move_to_line_start(),
+            },
+            TextObject::Paragraph => Dot::Range {
+                r: b.dot
+                    .as_range()
+                    .extend_to(b, blank_line)
+                    .extend_back_to(b, blank_line),
             },
         }
     }
@@ -277,6 +290,8 @@ impl UpdateDot for TextObject {
                 start,
                 end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
             ),
+            (TextObject::Paragraph, true) => (start.move_to(b, blank_line), end),
+            (TextObject::Paragraph, false) => (start, end.move_to(b, blank_line)),
         };
 
         Dot::Range {
@@ -318,6 +333,8 @@ impl UpdateDot for TextObject {
                 end.x = 0;
                 (start, end)
             }
+            (TextObject::Paragraph, true) => (start.move_back_to(b, blank_line), end),
+            (TextObject::Paragraph, false) => (start, end.move_back_to(b, blank_line)),
         };
 
         Dot::Range {

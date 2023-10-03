@@ -1,4 +1,7 @@
-use crate::{buffer::Buffer, key::Arrow};
+use crate::{
+    buffer::{Buffer, Line},
+    key::Arrow,
+};
 use std::cmp::Ordering;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,6 +43,32 @@ impl Cur {
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         self.x = b.lines.get(self.y).map(|l| l.len()).unwrap_or_default();
         self
+    }
+
+    /// Move forward until cond returns an x position in the given line or we bottom out at the end of the buffer
+    #[must_use]
+    pub(super) fn move_to(mut self, b: &Buffer, cond: fn(&Line) -> Option<usize>) -> Self {
+        for line in b.lines.iter().skip(self.y + 1) {
+            self.y += 1;
+            if let Some(x) = (cond)(line) {
+                self.x = x;
+                return self;
+            }
+        }
+        self.move_to_line_end(b)
+    }
+
+    /// Move back until cond returns an x position in the given line or we bottom out at the start of the buffer
+    #[must_use]
+    pub(super) fn move_back_to(mut self, b: &Buffer, cond: fn(&Line) -> Option<usize>) -> Self {
+        for line in b.lines.iter().take(self.y).rev() {
+            self.y -= 1;
+            if let Some(x) = (cond)(line) {
+                self.x = x;
+                return self;
+            }
+        }
+        self.move_to_line_start()
     }
 
     fn arr(&self, arr: Arrow, b: &Buffer) -> Self {
