@@ -149,6 +149,8 @@ impl Editor {
             Action::ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             Action::Yank => self.yank(),
 
+            Action::DebugBufferContents => self.debug_buffer_contents(),
+
             a => self.buffers.active_mut().handle_action(a, self.screen_rows),
         }
     }

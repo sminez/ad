@@ -352,32 +352,41 @@ impl Buffer {
     fn delete(&mut self) {
         let (c, deleted) = match self.dot {
             Dot::Cur { c } => self.delete_cur(c),
-            Dot::Range { r } => self.delete_range(r),
+            Dot::Range { r } => {
+                let (c, deleted) = self.delete_range(r);
+                (c, Some(deleted))
+            }
         };
 
         self.dot = Dot::Cur { c };
         self.dirty = true;
 
         // NOTE: Ignoring errors in setting the system clipboard
-        let _ = set_clipboard(&deleted);
+        if let Some(deleted) = deleted {
+            let _ = set_clipboard(&deleted);
+        }
     }
 
-    fn delete_cur(&mut self, cur: Cur) -> (Cur, String) {
-        if cur.y == self.len_lines() || (cur.x == 0 && cur.y == 0) {
-            return (cur, String::new());
+    fn delete_cur(&mut self, cur: Cur) -> (Cur, Option<String>) {
+        if cur.y == self.len_lines() {
+            return (cur, None);
         }
 
         let deleted = if cur.x < self.lines[cur.y].len() {
             let s = self.lines[cur.y].raw.remove(cur.x).to_string();
             self.lines[cur.y].update_render();
-            s
+            Some(s)
         } else if cur.y < self.lines.len() - 1 {
             // Deleting the newline char at the end of this line
             let line = self.lines.remove(cur.y + 1);
             self.lines[cur.y].modify(|s| s.push_str(&line.raw));
-            "\n".to_string()
+            Some("\n".to_string())
+        } else if cur.x == 0 && self.lines[cur.y].raw.is_empty() {
+            // Deleting an empty line
+            self.lines.remove(cur.y);
+            Some("\n".to_string())
         } else {
-            String::new()
+            None
         };
 
         self.dirty = true;

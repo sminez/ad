@@ -13,7 +13,7 @@ pub struct Line {
 }
 
 impl Line {
-    pub(super) fn new(raw: String) -> Self {
+    pub(crate) fn new(raw: String) -> Self {
         let render = as_render_line(&raw);
         Self { raw, render }
     }

@@ -46,6 +46,7 @@ pub enum Action {
     SelectBuffer,
     SetMode { m: &'static str },
     Yank,
+    DebugBufferContents,
 }
 
 impl Editor {
@@ -188,6 +189,19 @@ impl Editor {
                 self.buffers.focus_id(id);
             }
         }
+    }
+
+    pub(super) fn debug_buffer_contents(&mut self) {
+        MiniBuffer::select_from(
+            "?? ",
+            self.buffers
+                .active()
+                .lines
+                .iter()
+                .map(|l| crate::buffer::Line::new(format!("{:?}", l.raw)))
+                .collect(),
+            self,
+        );
     }
 
     pub(super) fn command_mode(&mut self) {

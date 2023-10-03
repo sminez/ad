@@ -46,6 +46,8 @@ impl fmt::Display for Dot {
 }
 
 impl Dot {
+    /// The address representation of this dot in the form that is enterable by the user.
+    /// Indices are 1-based rather than their internal 0-based representation.
     pub fn addr(&self) -> String {
         self.to_string()
     }
