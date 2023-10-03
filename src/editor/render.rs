@@ -112,15 +112,14 @@ impl Editor {
 
     fn render_status_bar(&self, buf: &mut String) {
         let b = self.buffers.active();
-        let name = b.display_name(&self.cwd);
-        let (n_lines, cy, rx) = (b.len_lines(), b.dot.active_cur().y + 1, b.rx + 1);
-
         let lstatus = format!(
-            "{} {name} - {n_lines} lines {}",
+            "{} {} - {} lines {}",
             self.modes[0],
+            b.display_name(&self.cwd),
+            b.len_lines(),
             if b.dirty { "[+]" } else { "" }
         );
-        let rstatus = format!("{cy}:{rx}");
+        let rstatus = b.dot.addr();
         let width = self.screen_cols - lstatus.len();
         buf.push_str(&format!(
             "{}{lstatus}{rstatus:>width$}{}\r\n",

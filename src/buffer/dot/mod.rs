@@ -11,6 +11,7 @@ use crate::{
     buffer::{Buffer, Line},
     key::Arrow,
 };
+use std::fmt;
 
 mod cur;
 mod range;
@@ -35,7 +36,20 @@ impl Default for Dot {
     }
 }
 
+impl fmt::Display for Dot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cur { c } => write!(f, "{c}"),
+            Self::Range { r } => write!(f, "{r}"),
+        }
+    }
+}
+
 impl Dot {
+    pub fn addr(&self) -> String {
+        self.to_string()
+    }
+
     pub fn content(&self, b: &Buffer) -> String {
         match self {
             Self::Cur { c } => b.lines[c.y].raw[c.x..(c.x + 1)].to_string(),
@@ -233,7 +247,8 @@ impl UpdateDot for TextObject {
                     .as_range()
                     .extend_to_line_start()
                     .extend_to_line_end(b),
-            },
+            }
+            .collapse_null_range(),
             TextObject::LineEnd => Dot::Cur {
                 c: b.dot.active_cur().move_to_line_end(b),
             },
@@ -245,7 +260,8 @@ impl UpdateDot for TextObject {
                     .as_range()
                     .extend_to(b, blank_line)
                     .extend_back_to(b, blank_line),
-            },
+            }
+            .collapse_null_range(),
         }
     }
 
@@ -297,6 +313,7 @@ impl UpdateDot for TextObject {
         Dot::Range {
             r: Range::from_cursors(start, end, start_active),
         }
+        .collapse_null_range()
     }
 
     fn extend_dot_backward(&self, b: &Buffer) -> Dot {
@@ -340,5 +357,6 @@ impl UpdateDot for TextObject {
         Dot::Range {
             r: Range::from_cursors(start, end, start_active),
         }
+        .collapse_null_range()
     }
 }

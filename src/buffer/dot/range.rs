@@ -1,10 +1,17 @@
 use crate::buffer::{dot::Cur, Buffer, Line};
+use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {
     pub start: Cur,
     pub end: Cur,
     pub(super) start_active: bool,
+}
+
+impl fmt::Display for Range {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{},{}", self.start, self.end)
+    }
 }
 
 impl Range {

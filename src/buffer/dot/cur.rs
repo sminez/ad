@@ -2,12 +2,18 @@ use crate::{
     buffer::{Buffer, Line},
     key::Arrow,
 };
-use std::cmp::Ordering;
+use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cur {
     pub y: usize,
     pub x: usize,
+}
+
+impl fmt::Display for Cur {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.y, self.x)
+    }
 }
 
 impl Cur {
