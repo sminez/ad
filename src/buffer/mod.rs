@@ -14,8 +14,11 @@ use std::{
 
 mod buffers;
 mod dot;
+mod edit;
 mod line;
 mod minibuffer;
+
+use edit::EditLog;
 
 pub(crate) use buffers::Buffers;
 pub(crate) use dot::{Cur, Dot, LineRange, Range, TextObject, UpdateDot};
@@ -57,6 +60,7 @@ pub struct Buffer {
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
     pub(crate) dirty: bool,
+    // edit_log: Vec<Edit>,
 }
 
 impl Buffer {
