@@ -520,7 +520,6 @@ impl Buffer {
     /// don't invalidate line offsets
     fn delete_range(&mut self, r: Range) -> (Cur, String) {
         let line_ranges = r.line_ranges();
-        let mut had_trailing_chars = false;
         let mut single_line_had_newline = false;
         let mut deleted_lines = Vec::with_capacity(line_ranges.len());
 
@@ -545,18 +544,12 @@ impl Buffer {
                 LineRange::FromStart { y, end } => {
                     deleted_lines.push(self.lines[y].raw.drain(..=end).collect());
                     self.lines[y].update_render();
-                    had_trailing_chars = true;
                 }
                 LineRange::Partial { y, start, end } => {
                     deleted_lines.push(self.lines[y].raw.drain(start..=end).collect());
                     self.lines[y].update_render();
                 }
             }
-        }
-
-        if had_trailing_chars {
-            let line = self.lines.remove(r.start.y + 1);
-            self.lines[r.start.y].modify(|s| s.push_str(&line.raw));
         }
 
         let deleted = if deleted_lines.len() == 1 && single_line_had_newline {
