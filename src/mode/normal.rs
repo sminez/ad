@@ -20,7 +20,10 @@ pub(crate) fn normal_mode() -> Mode {
         [ leader, Char('b') ] => [ SelectBuffer ],
         [ Char(':') ] => [ CommandMode ],
         [ Char('/') ] => [ SearchInCurrentBuffer ],
+
+        // DEBUG
         [ Alt('?') ] => [ DebugBufferContents ],
+        [ Alt('#') ] => [ DebugEditLog ],
 
         // Entering INSERT mode
         [ Char('i') ] => [ SetMode { m: "INSERT" } ],
@@ -69,6 +72,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('d') ] => [ Delete ],
         [ Char('p') ] => [ Paste ],
         [ Char('y') ] => [ Yank ],
+        [ Char('u') ] => [ Undo ],
+        [ Char('U') ] => [ Redo ],
 
 
     };

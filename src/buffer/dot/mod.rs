@@ -24,7 +24,7 @@ pub(crate) use range::{LineRange, Range};
 /// Most of the editing commands available in ad which manipulate the buffer contents
 /// do so via setting and manipulating the current dot. The name comes from the fact
 /// that the representation of the current Dot in the editing language is `.`
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Dot {
     Cur { c: Cur },
     Range { r: Range },
@@ -278,7 +278,7 @@ impl UpdateDot for TextObject {
             (TextObject::Arr(arr), _) => return arr.extend_dot_forward(b),
             (TextObject::BufferEnd, true) => (end, Cur::buffer_end(b)),
             (TextObject::BufferEnd, false) => (start, Cur::buffer_end(b)),
-            (TextObject::BufferStart, _) => return b.dot.clone(), // Can't move forward to the buffer start
+            (TextObject::BufferStart, _) => return b.dot, // Can't move forward to the buffer start
             (TextObject::Character, true) => (start.arr_w_count(Arrow::Right, 1, b), end),
             (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Right, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Down, 1, b), end),
@@ -327,7 +327,7 @@ impl UpdateDot for TextObject {
 
         (start, end) = match (self, start_active) {
             (TextObject::Arr(arr), _) => return arr.extend_dot_backward(b),
-            (TextObject::BufferEnd, _) => return b.dot.clone(), // Can't move back to the buffer end
+            (TextObject::BufferEnd, _) => return b.dot, // Can't move back to the buffer end
             (TextObject::BufferStart, true) => (Cur::buffer_start(), end),
             (TextObject::BufferStart, false) => (Cur::buffer_start(), start),
             (TextObject::Character, true) => (start.arr_w_count(Arrow::Left, 1, b), end),

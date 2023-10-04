@@ -150,8 +150,14 @@ impl Editor {
             Action::Yank => self.yank(),
 
             Action::DebugBufferContents => self.debug_buffer_contents(),
+            Action::DebugEditLog => self.debug_edit_log(),
 
-            a => self.buffers.active_mut().handle_action(a, self.screen_rows),
+            a => {
+                let res = self.buffers.active_mut().handle_action(a, self.screen_rows);
+                if let Err(msg) = res {
+                    self.set_status_message(&msg);
+                }
+            }
         }
     }
 }

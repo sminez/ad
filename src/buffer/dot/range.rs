@@ -15,7 +15,7 @@ impl fmt::Display for Range {
 }
 
 impl Range {
-    pub(super) fn from_cursors(c1: Cur, c2: Cur, c1_was_active: bool) -> Self {
+    pub(crate) fn from_cursors(c1: Cur, c2: Cur, c1_was_active: bool) -> Self {
         let (start, end, start_active) = if c1 <= c2 {
             (c1, c2, c1_was_active)
         } else if c1_was_active {

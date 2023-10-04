@@ -1,13 +1,14 @@
 use crate::buffer::Cur;
+use std::fmt;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-enum Kind {
+pub(super) enum Kind {
     Insert,
     Delete,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Txt {
+pub(super) enum Txt {
     Char(char),
     String(String),
 }
@@ -51,9 +52,20 @@ impl Txt {
 /// to String based where possible in order to simplify undo state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Edit {
-    kind: Kind,
-    cur: Cur,
-    txt: Txt,
+    pub(super) kind: Kind,
+    pub(super) cur: Cur,
+    pub(super) txt: Txt,
+}
+
+impl fmt::Display for Edit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let indicator = if self.kind == Kind::Insert { "I" } else { "D" };
+
+        match &self.txt {
+            Txt::Char(c) => write!(f, "{indicator} {} '{}'", self.cur, c),
+            Txt::String(s) => write!(f, "{indicator} {} '{}'", self.cur, s.replace('\n', "\\n")),
+        }
+    }
 }
 
 impl Edit {
@@ -128,9 +140,14 @@ impl Edit {
 pub(crate) struct EditLog {
     edits: Vec<Edit>,
     undone_edits: Vec<Edit>,
+    pub(super) paused: bool,
 }
 
 impl EditLog {
+    pub(crate) fn debug_edits(&self) -> Vec<String> {
+        self.edits.iter().map(|e| e.to_string()).collect()
+    }
+
     pub(crate) fn undo(&mut self) -> Option<Edit> {
         let e = self.edits.pop()?;
         self.undone_edits.push(e.clone());
@@ -145,43 +162,57 @@ impl EditLog {
         Some(e)
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        self.edits.is_empty()
+    }
+
     /// Record a single character being inserted at the given cursor position
     pub(crate) fn insert_char(&mut self, cur: Cur, c: char) {
-        self.push(Edit {
-            kind: Kind::Insert,
-            cur,
-            txt: Txt::Char(c),
-        });
+        if !self.paused {
+            self.push(Edit {
+                kind: Kind::Insert,
+                cur,
+                txt: Txt::Char(c),
+            });
+        }
     }
 
     /// Record a string being inserted, starting at the given cursor position
     pub(crate) fn insert_string(&mut self, cur: Cur, s: String) {
-        self.push(Edit {
-            kind: Kind::Insert,
-            cur,
-            txt: Txt::String(s),
-        });
+        if !self.paused {
+            self.push(Edit {
+                kind: Kind::Insert,
+                cur,
+                txt: Txt::String(s),
+            });
+        }
     }
 
     /// Record a single character being deleted from the given cursor position
     pub(crate) fn delete_char(&mut self, cur: Cur, c: char) {
-        self.push(Edit {
-            kind: Kind::Delete,
-            cur,
-            txt: Txt::Char(c),
-        });
+        if !self.paused {
+            self.push(Edit {
+                kind: Kind::Delete,
+                cur,
+                txt: Txt::Char(c),
+            });
+        }
     }
 
     /// Record a string being deleted starting at the given cursor position
     pub(crate) fn delete_string(&mut self, cur: Cur, s: String) {
-        self.push(Edit {
-            kind: Kind::Delete,
-            cur,
-            txt: Txt::String(s),
-        });
+        if !self.paused {
+            self.push(Edit {
+                kind: Kind::Delete,
+                cur,
+                txt: Txt::String(s),
+            });
+        }
     }
 
     fn push(&mut self, e: Edit) {
+        self.undone_edits.clear();
+
         if self.edits.is_empty() {
             self.edits.push(e);
             return;

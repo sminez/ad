@@ -1,6 +1,7 @@
 :: TODO
 
-- [ ] Undo...!
+- [ ] Deleting in insert mode needs to not copy to the clipboard
+- [ ] range delete pulling up partial lines seems to append lines that it shouldn't?
 - [ ] Mouse support
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?

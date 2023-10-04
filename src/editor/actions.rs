@@ -21,32 +21,37 @@ pub enum Action {
     Change,
     ChangeDirectory { path: Option<String> },
     CommandMode,
-    DeleteBuffer { force: bool },
     Delete,
+    DeleteBuffer { force: bool },
     DotCollapseFirst,
     DotCollapseLast,
-    DotSet(TextObject),
-    DotExtendForward(TextObject),
     DotExtendBackward(TextObject),
+    DotExtendForward(TextObject),
     DotFlip,
+    DotSet(TextObject),
     Exit { force: bool },
     InsertChar { c: char },
+    InsertString { s: String },
     NextBuffer,
     OpenFile { path: String },
     Paste,
     PreviousBuffer,
     RawKey { k: Key },
-    ShellPipe { cmd: String },
-    ShellReplace { cmd: String },
-    ShellRun { cmd: String },
-    ShellSend { cmd: String },
+    Redo,
     SaveBuffer,
     SaveBufferAs { path: String },
     SearchInCurrentBuffer,
     SelectBuffer,
     SetMode { m: &'static str },
+    ShellPipe { cmd: String },
+    ShellReplace { cmd: String },
+    ShellRun { cmd: String },
+    ShellSend { cmd: String },
+    Undo,
     Yank,
+
     DebugBufferContents,
+    DebugEditLog,
 }
 
 impl Editor {
@@ -167,7 +172,7 @@ impl Editor {
 
     pub(super) fn paste(&mut self) {
         match read_clipboard() {
-            Ok(s) => self.buffers.active_mut().insert_string(s),
+            Ok(s) => self.handle_action(Action::InsertString { s }),
             Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
         }
     }
@@ -193,7 +198,7 @@ impl Editor {
 
     pub(super) fn debug_buffer_contents(&mut self) {
         MiniBuffer::select_from(
-            "?? ",
+            "<RAW BUFFER> ",
             self.buffers
                 .active()
                 .lines
@@ -202,6 +207,10 @@ impl Editor {
                 .collect(),
             self,
         );
+    }
+
+    pub(super) fn debug_edit_log(&mut self) {
+        MiniBuffer::select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log(), self);
     }
 
     pub(super) fn command_mode(&mut self) {
@@ -224,7 +233,7 @@ impl Editor {
         };
 
         match res {
-            Ok(s) => self.buffers.active_mut().insert_string(s),
+            Ok(s) => self.handle_action(Action::InsertString { s }),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
     }
@@ -236,7 +245,7 @@ impl Editor {
         };
 
         match res {
-            Ok(s) => self.buffers.active_mut().insert_string(s),
+            Ok(s) => self.handle_action(Action::InsertString { s }),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
     }

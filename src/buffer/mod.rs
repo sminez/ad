@@ -18,7 +18,7 @@ mod edit;
 mod line;
 mod minibuffer;
 
-use edit::EditLog;
+use edit::{Edit, EditLog, Kind, Txt};
 
 pub(crate) use buffers::Buffers;
 pub(crate) use dot::{Cur, Dot, LineRange, Range, TextObject, UpdateDot};
@@ -160,6 +160,14 @@ impl Buffer {
         self.lines.is_empty()
     }
 
+    pub(crate) fn debug_edit_log(&self) -> Vec<Line> {
+        self.edit_log
+            .debug_edits()
+            .into_iter()
+            .map(Line::new)
+            .collect()
+    }
+
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
         let Cur { x, y } = self.dot.active_cur();
         self.rx = self.rx_from_x(y, x);
@@ -262,27 +270,60 @@ impl Buffer {
         rline
     }
 
-    pub fn handle_action(&mut self, a: Action, screen_rows: usize) {
+    /// The error result of this function is an error string that should be displayed to the user
+    pub fn handle_action(&mut self, a: Action, screen_rows: usize) -> Result<(), String> {
         match a {
-            Action::Delete => self.delete(),
-            Action::InsertChar { c } => self.insert_char(c),
-            Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
+            Action::Delete => {
+                self.dot = Dot::Cur {
+                    c: self.delete_dot(self.dot),
+                }
+            }
+            Action::InsertChar { c } => {
+                self.dot = Dot::Cur {
+                    c: self.insert_char(self.dot, c),
+                }
+            }
+            Action::InsertString { s } => {
+                self.dot = Dot::Cur {
+                    c: self.insert_string(self.dot, s),
+                }
+            }
+
+            Action::Redo => self.redo()?,
+            Action::Undo => self.undo()?,
+
             Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
             Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
+            Action::DotExtendBackward(tobj) => self.dot = tobj.extend_dot_backward(self),
+            Action::DotExtendForward(tobj) => self.dot = tobj.extend_dot_forward(self),
             Action::DotFlip => self.dot.flip(),
             Action::DotSet(tobj) => self.dot = tobj.set_dot(self),
-            Action::DotExtendForward(tobj) => self.dot = tobj.extend_dot_forward(self),
-            Action::DotExtendBackward(tobj) => self.dot = tobj.extend_dot_backward(self),
+
+            Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
 
             _ => (),
         }
+
+        Ok(())
     }
 
     fn handle_raw_key(&mut self, k: Key, screen_rows: usize) {
         match k {
-            Key::Return => self.insert_char('\n'),
-            Key::Tab => self.insert_char('\t'),
-            Key::Char(c) => self.insert_char(c),
+            Key::Return => {
+                self.dot = Dot::Cur {
+                    c: self.insert_char(self.dot, '\n'),
+                }
+            }
+            Key::Tab => {
+                self.dot = Dot::Cur {
+                    c: self.insert_char(self.dot, '\t'),
+                }
+            }
+            Key::Char(c) => {
+                self.dot = Dot::Cur {
+                    c: self.insert_char(self.dot, c),
+                }
+            }
 
             Key::Arrow(arr) => self.dot = arr.set_dot(self),
             Key::PageUp | Key::PageDown => {
@@ -301,20 +342,60 @@ impl Buffer {
         }
     }
 
-    pub(crate) fn insert_string(&mut self, s: String) {
-        for c in s.chars() {
-            self.insert_char(c)
+    fn undo(&mut self) -> Result<(), String> {
+        match self.edit_log.undo() {
+            Some(edit) => {
+                self.edit_log.paused = true;
+                self.apply_edit(edit);
+                self.edit_log.paused = false;
+                self.dirty = !self.edit_log.is_empty();
+                Ok(())
+            }
+            None => Err("Nothing to undo".to_string()),
         }
     }
 
-    /// ch is inserted based on the current dot
-    fn insert_char(&mut self, ch: char) {
-        if self.dot.last_cur().y == self.lines.len() {
+    fn redo(&mut self) -> Result<(), String> {
+        match self.edit_log.redo() {
+            Some(edit) => {
+                self.edit_log.paused = true;
+                self.apply_edit(edit);
+                self.edit_log.paused = false;
+                Ok(())
+            }
+            None => Err("Nothing to redo".to_string()),
+        }
+    }
+
+    fn apply_edit(&mut self, Edit { kind, cur, txt }: Edit) {
+        let new_cur = match (kind, txt) {
+            (Kind::Insert, Txt::Char(c)) => self.insert_char(Dot::Cur { c: cur }, c),
+            (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s),
+            (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }),
+            (Kind::Delete, Txt::String(s)) => {
+                let (dy, last_line) = s.lines().enumerate().last().unwrap();
+                let mut end = cur;
+                end.x += last_line.len();
+                end.y += dy;
+                self.delete_dot(Dot::Range {
+                    r: Range::from_cursors(cur, end, true),
+                })
+            }
+        };
+
+        self.dot = Dot::Cur { c: new_cur };
+    }
+
+    fn insert_char(&mut self, dot: Dot, ch: char) -> Cur {
+        if dot.last_cur().y == self.lines.len() {
             self.insert_line(self.lines.len(), String::new());
         }
 
-        let c = match self.dot {
-            Dot::Cur { c } => self.insert_char_handling_newline(c, ch),
+        let c = match dot {
+            Dot::Cur { c } => {
+                self.edit_log.insert_char(c, ch);
+                self.insert_char_handling_newline(c, ch)
+            }
             Dot::Range { r } => {
                 let (c, deleted) = self.delete_range(r);
                 let _ = set_clipboard(&deleted);
@@ -322,8 +403,53 @@ impl Buffer {
             }
         };
 
-        self.dot = Dot::Cur { c };
         self.dirty = true;
+        c
+    }
+
+    fn insert_string(&mut self, dot: Dot, s: String) -> Cur {
+        if dot.last_cur().y == self.lines.len() {
+            self.insert_line(self.lines.len(), String::new());
+        }
+
+        self.edit_log.insert_string(dot.first_cur(), s.clone());
+
+        let mut cur = match dot {
+            Dot::Cur { c } => c,
+            Dot::Range { r } => {
+                let (cur, deleted) = self.delete_range(r);
+                let _ = set_clipboard(&deleted);
+                cur
+            }
+        };
+
+        self.edit_log.paused = true;
+        for ch in s.chars() {
+            cur = self.insert_char_handling_newline(cur, ch);
+        }
+        self.edit_log.paused = false;
+        self.dirty = true;
+
+        cur
+    }
+
+    fn delete_dot(&mut self, dot: Dot) -> Cur {
+        let (cur, deleted) = match dot {
+            Dot::Cur { c } => self.delete_cur(c),
+            Dot::Range { r } => {
+                let (cur, deleted) = self.delete_range(r);
+                (cur, Some(deleted))
+            }
+        };
+
+        // NOTE: Ignoring errors in setting the system clipboard
+        if let Some(deleted) = deleted {
+            let _ = set_clipboard(&deleted);
+        }
+
+        self.dirty = true;
+
+        cur
     }
 
     fn insert_char_handling_newline(&mut self, mut cur: Cur, ch: char) -> Cur {
@@ -349,26 +475,14 @@ impl Buffer {
 
     fn insert_line(&mut self, at: usize, line: String) {
         if at <= self.len_lines() {
+            if let Some(l) = self.lines.get(at - 1) {
+                let x = l.raw.len();
+                self.edit_log.insert_char(Cur { y: at - 1, x }, '\n');
+            }
+            let cur = Cur { y: at, x: 0 };
+            self.edit_log.insert_string(cur, line.clone());
             self.lines.insert(at, Line::new(line));
             self.dirty = true;
-        }
-    }
-
-    fn delete(&mut self) {
-        let (c, deleted) = match self.dot {
-            Dot::Cur { c } => self.delete_cur(c),
-            Dot::Range { r } => {
-                let (c, deleted) = self.delete_range(r);
-                (c, Some(deleted))
-            }
-        };
-
-        self.dot = Dot::Cur { c };
-        self.dirty = true;
-
-        // NOTE: Ignoring errors in setting the system clipboard
-        if let Some(deleted) = deleted {
-            let _ = set_clipboard(&deleted);
         }
     }
 
@@ -378,23 +492,26 @@ impl Buffer {
         }
 
         let deleted = if cur.x < self.lines[cur.y].len() {
-            let s = self.lines[cur.y].raw.remove(cur.x).to_string();
+            let c = self.lines[cur.y].raw.remove(cur.x);
             self.lines[cur.y].update_render();
-            Some(s)
+            self.edit_log.delete_char(cur, c);
+            Some(c.to_string())
         } else if cur.y < self.lines.len() - 1 {
             // Deleting the newline char at the end of this line
             let line = self.lines.remove(cur.y + 1);
             self.lines[cur.y].modify(|s| s.push_str(&line.raw));
+            self.edit_log.delete_char(cur, '\n');
             Some("\n".to_string())
         } else if cur.x == 0 && self.lines[cur.y].raw.is_empty() {
             // Deleting an empty line
             self.lines.remove(cur.y);
+            self.edit_log.delete_char(cur, '\n');
             Some("\n".to_string())
         } else {
             None
         };
 
-        self.dirty = true;
+        self.dirty = deleted.is_some();
 
         (cur, deleted)
     }
@@ -404,6 +521,7 @@ impl Buffer {
     fn delete_range(&mut self, r: Range) -> (Cur, String) {
         let line_ranges = r.line_ranges();
         let mut had_trailing_chars = false;
+        let mut single_line_had_newline = false;
         let mut deleted_lines = Vec::with_capacity(line_ranges.len());
 
         for lr in line_ranges.into_iter().rev() {
@@ -413,6 +531,7 @@ impl Buffer {
                 }
                 lr if lr.is_full_line(self) => {
                     deleted_lines.push(self.lines.remove(lr.y()).raw);
+                    single_line_had_newline = true;
                 }
                 LineRange::Full { y } => {
                     deleted_lines.push(self.lines.remove(y).raw);
@@ -440,13 +559,15 @@ impl Buffer {
             self.lines[r.start.y].modify(|s| s.push_str(&line.raw));
         }
 
-        let deleted = if deleted_lines.len() == 1 {
+        let deleted = if deleted_lines.len() == 1 && single_line_had_newline {
             deleted_lines[0].push('\n');
             deleted_lines.remove(0)
         } else {
             deleted_lines.reverse();
             deleted_lines.join("\n")
         };
+
+        self.edit_log.delete_string(r.start, deleted.clone());
 
         (r.start, deleted)
     }
