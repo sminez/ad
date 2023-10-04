@@ -50,40 +50,26 @@ impl Txt {
 /// back if needed. Sequential edits to the Buffer are compressed from char based
 /// to String based where possible in order to simplify undo state.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct Edit {
+pub(crate) struct Edit {
     kind: Kind,
     cur: Cur,
     txt: Txt,
 }
 
 impl Edit {
+    fn into_undo(mut self) -> Self {
+        self.kind = match self.kind {
+            Kind::Insert => Kind::Delete,
+            Kind::Delete => Kind::Insert,
+        };
+
+        self
+    }
+
     fn try_combine(&mut self, e: Edit) -> Option<Edit> {
         match (self.kind, e.kind) {
-            // Adding more text to the existing insert
-            (Kind::Insert, Kind::Insert) => match self.valid_insert_cur(e.cur) {
-                Some(should_append) => {
-                    if should_append {
-                        self.txt.append(e.txt);
-                    } else {
-                        self.txt.prepend(e.txt);
-                    }
-                    None
-                }
-                None => Some(e),
-            },
-
-            // Removing more text to the existing delete
-            (Kind::Delete, Kind::Delete) => match self.valid_delete_cur(&e) {
-                Some(should_append) => {
-                    if should_append {
-                        self.txt.append(e.txt);
-                    } else {
-                        self.txt.prepend(e.txt);
-                    }
-                    None
-                }
-                None => Some(e),
-            },
+            (Kind::Insert, Kind::Insert) => self.try_extend_insert(e),
+            (Kind::Delete, Kind::Delete) => self.try_extend_delete(e),
 
             // There are other cases that _could_ be handled here where the kind is still matching
             // and the characters being inserted/deleted are still part of a continuous region of
@@ -93,26 +79,42 @@ impl Edit {
         }
     }
 
-    fn valid_insert_cur(&self, cur: Cur) -> Option<bool> {
-        if cur == self.cur {
-            Some(false)
+    fn try_extend_insert(&mut self, e: Edit) -> Option<Edit> {
+        if e.cur == self.cur {
+            self.txt.prepend(e.txt);
+            None
         } else {
             match &self.txt {
-                Txt::Char(_) if cur.x == self.cur.x + 1 => Some(true),
-                Txt::String(s) if cur.x == self.cur.x + s.len() => Some(true),
-                _ => None,
+                Txt::Char(_) if e.cur.x == self.cur.x + 1 => {
+                    self.txt.append(e.txt);
+                    None
+                }
+                Txt::String(s) if e.cur.x == self.cur.x + s.len() => {
+                    self.txt.append(e.txt);
+                    None
+                }
+                _ => Some(e),
             }
         }
     }
 
-    fn valid_delete_cur(&self, e: &Edit) -> Option<bool> {
+    fn try_extend_delete(&mut self, e: Edit) -> Option<Edit> {
         if e.cur == self.cur {
-            Some(true)
+            self.txt.append(e.txt);
+            None
         } else {
             match &e.txt {
-                Txt::Char(_) if e.cur.x + 1 == self.cur.x => Some(false),
-                Txt::String(s) if e.cur.x + s.len() == self.cur.x => Some(false),
-                _ => None,
+                Txt::Char(_) if e.cur.x + 1 == self.cur.x => {
+                    self.txt.prepend(e.txt);
+                    self.cur = e.cur;
+                    None
+                }
+                Txt::String(s) if e.cur.x + s.len() == self.cur.x => {
+                    self.txt.prepend(e.txt);
+                    self.cur = e.cur;
+                    None
+                }
+                _ => Some(e),
             }
         }
     }
@@ -122,14 +124,29 @@ impl Edit {
 ///
 /// The log can be unwound, restoring the buffer to a previous state, and rewound as long
 /// as no new edits have been made to the buffer (i.e. it is a flat timeline not a tree).
-#[derive(Default, Debug, Clone)]
-pub struct EditLog {
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
+pub(crate) struct EditLog {
     edits: Vec<Edit>,
+    undone_edits: Vec<Edit>,
 }
 
 impl EditLog {
+    pub(crate) fn undo(&mut self) -> Option<Edit> {
+        let e = self.edits.pop()?;
+        self.undone_edits.push(e.clone());
+
+        Some(e.into_undo())
+    }
+
+    pub(crate) fn redo(&mut self) -> Option<Edit> {
+        let e = self.undone_edits.pop()?;
+        self.push(e.clone());
+
+        Some(e)
+    }
+
     /// Record a single character being inserted at the given cursor position
-    pub fn insert_char(&mut self, cur: Cur, c: char) {
+    pub(crate) fn insert_char(&mut self, cur: Cur, c: char) {
         self.push(Edit {
             kind: Kind::Insert,
             cur,
@@ -138,7 +155,7 @@ impl EditLog {
     }
 
     /// Record a string being inserted, starting at the given cursor position
-    pub fn insert_string(&mut self, cur: Cur, s: String) {
+    pub(crate) fn insert_string(&mut self, cur: Cur, s: String) {
         self.push(Edit {
             kind: Kind::Insert,
             cur,
@@ -147,7 +164,7 @@ impl EditLog {
     }
 
     /// Record a single character being deleted from the given cursor position
-    pub fn delete_char(&mut self, cur: Cur, c: char) {
+    pub(crate) fn delete_char(&mut self, cur: Cur, c: char) {
         self.push(Edit {
             kind: Kind::Delete,
             cur,
@@ -156,7 +173,7 @@ impl EditLog {
     }
 
     /// Record a string being deleted starting at the given cursor position
-    pub fn delete_string(&mut self, cur: Cur, s: String) {
+    pub(crate) fn delete_string(&mut self, cur: Cur, s: String) {
         self.push(Edit {
             kind: Kind::Delete,
             cur,
@@ -268,7 +285,7 @@ mod tests {
 
     #[test_case(
         vec![del_c(0, 1, 'b'), del_c(0, 0, 'a')],
-        &[del_s(0, 1, "ab")];
+        &[del_s(0, 0, "ab")];
         "run of chars"
     )]
     #[test_case(
@@ -278,13 +295,33 @@ mod tests {
     )]
     #[test_case(
         vec![del_c(0, 3, 'd'), del_s(0, 0, "abc")],
-        &[del_s(0, 3, "abcd")];
+        &[del_s(0, 0, "abcd")];
         "char then string"
     )]
     #[test_case(
         vec![del_c(0, 0, 'a'), del_s(0, 0, "bcd")],
         &[del_s(0, 0, "abcd")];
         "char then string at same cursor"
+    )]
+    #[test_case(
+        vec![del_s(0, 2, "cde"), del_s(0, 0, "ab")],
+        &[del_s(0, 0, "abcde")];
+        "run of strings"
+    )]
+    #[test_case(
+        vec![del_s(0, 0, "abc"), del_s(0, 0, "de")],
+        &[del_s(0, 0, "abcde")];
+        "run of strings at same cursor"
+    )]
+    #[test_case(
+        vec![del_s(0, 0, "abc"), del_c(0, 0, 'd')],
+        &[del_s(0, 0, "abcd")];
+        "string then char"
+    )]
+    #[test_case(
+        vec![del_s(0, 0, "abc"), del_c(0, 0, 'd')],
+        &[del_s(0, 0, "abcd")];
+        "string then char at same cursor"
     )]
     #[test]
     fn delete_work(edits: Vec<Edit>, expected: &[Edit]) {

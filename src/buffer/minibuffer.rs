@@ -61,6 +61,7 @@ impl MiniBuffer {
                 row_off: 0,
                 col_off: 0,
                 dirty: false,
+                edit_log: Default::default(),
             },
             max_height,
         }

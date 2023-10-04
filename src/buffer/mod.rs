@@ -60,7 +60,7 @@ pub struct Buffer {
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
     pub(crate) dirty: bool,
-    // edit_log: Vec<Edit>,
+    edit_log: EditLog,
 }
 
 impl Buffer {
@@ -83,6 +83,7 @@ impl Buffer {
             row_off: 0,
             col_off: 0,
             dirty: false,
+            edit_log: EditLog::default(),
         })
     }
 
@@ -96,6 +97,7 @@ impl Buffer {
             row_off: 0,
             col_off: 0,
             dirty: false,
+            edit_log: EditLog::default(),
         }
     }
 
@@ -109,6 +111,7 @@ impl Buffer {
             row_off: 0,
             col_off: 0,
             dirty: false,
+            edit_log: EditLog::default(),
         }
     }
 
@@ -298,8 +301,6 @@ impl Buffer {
         }
     }
 
-    // FIXME: this is a horrible way to do this but it's the simplest thing to do for initial
-    // testing
     pub(crate) fn insert_string(&mut self, s: String) {
         for c in s.chars() {
             self.insert_char(c)
