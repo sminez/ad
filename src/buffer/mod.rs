@@ -1,6 +1,6 @@
 use crate::{
     editor::Action,
-    key::{Arrow, Key},
+    key::Key,
     term::{Color, Style},
     util::relative_path_from,
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
@@ -68,16 +68,22 @@ pub struct Buffer {
     pub(crate) col_off: usize,
     pub(crate) dirty: bool,
     edit_log: EditLog,
+    has_trailing_newline: bool,
 }
 
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
     pub(super) fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
-        let raw = match fs::read_to_string(&path) {
+        let mut raw = match fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
         };
+
+        let has_trailing_newline = raw.ends_with('\n');
+        if has_trailing_newline {
+            raw.pop();
+        }
 
         Ok(Self {
             id,
@@ -89,34 +95,42 @@ impl Buffer {
             col_off: 0,
             dirty: false,
             edit_log: EditLog::default(),
+            has_trailing_newline,
         })
     }
 
-    pub fn new_unnamed(id: usize) -> Self {
+    pub fn new_unnamed(id: usize, content: &str) -> Self {
         Self {
             id,
             kind: BufferKind::Unnamed,
             dot: Dot::default(),
-            txt: Rope::new(),
+            txt: Rope::from_str(content),
             rx: 0,
             row_off: 0,
             col_off: 0,
             dirty: false,
             edit_log: EditLog::default(),
+            has_trailing_newline: true,
         }
     }
 
-    pub fn new_virtual(id: usize, name: String) -> Self {
+    pub fn new_virtual(id: usize, name: String, mut content: String) -> Self {
+        let has_trailing_newline = content.ends_with('\n');
+        if has_trailing_newline {
+            content.pop();
+        }
+
         Self {
             id,
             kind: BufferKind::Virtual(name),
             dot: Dot::default(),
-            txt: Rope::new(),
+            txt: Rope::from_str(&content),
             rx: 0,
             row_off: 0,
             col_off: 0,
             dirty: false,
             edit_log: EditLog::default(),
+            has_trailing_newline,
         }
     }
 
@@ -142,7 +156,12 @@ impl Buffer {
     }
 
     pub fn contents(&self) -> Vec<u8> {
-        self.txt.bytes().collect()
+        let mut contents: Vec<u8> = self.txt.bytes().collect();
+        if self.has_trailing_newline {
+            contents.push(b'\n');
+        }
+
+        contents
     }
 
     pub(crate) fn string_lines(&self) -> Vec<String> {
@@ -296,7 +315,7 @@ impl Buffer {
     }
 
     /// The error result of this function is an error string that should be displayed to the user
-    pub(crate) fn handle_action(&mut self, a: Action, screen_rows: usize) -> Option<ActionOutcome> {
+    pub(crate) fn handle_action(&mut self, a: Action) -> Option<ActionOutcome> {
         match a {
             Action::Delete => {
                 let (c, deleted) = self.delete_dot(self.dot);
@@ -319,12 +338,16 @@ impl Buffer {
 
             Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
             Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
-            Action::DotExtendBackward(tobj) => self.dot = tobj.extend_dot_backward(self),
-            Action::DotExtendForward(tobj) => self.dot = tobj.extend_dot_forward(self),
+            Action::DotExtendBackward(tobj, count) => {
+                self.dot = tobj.extend_dot_backward_n(self.dot, count, self)
+            }
+            Action::DotExtendForward(tobj, count) => {
+                self.dot = tobj.extend_dot_forward_n(self.dot, count, self)
+            }
             Action::DotFlip => self.dot.flip(),
-            Action::DotSet(tobj) => self.dot = tobj.set_dot(self),
+            Action::DotSet(tobj, count) => self.dot = tobj.set_dot_n(self.dot, count, self),
 
-            Action::RawKey { k } => return self.handle_raw_key(k, screen_rows),
+            Action::RawKey { k } => return self.handle_raw_key(k),
 
             _ => (),
         }
@@ -332,7 +355,7 @@ impl Buffer {
         None
     }
 
-    fn handle_raw_key(&mut self, k: Key, screen_rows: usize) -> Option<ActionOutcome> {
+    fn handle_raw_key(&mut self, k: Key) -> Option<ActionOutcome> {
         match k {
             Key::Return => {
                 let (c, deleted) = self.insert_char(self.dot, '\n');
@@ -350,18 +373,7 @@ impl Buffer {
                 return deleted.map(ActionOutcome::SetClipboard);
             }
 
-            Key::Arrow(arr) => self.dot = arr.set_dot(self),
-            Key::PageUp | Key::PageDown => {
-                let arr = if k == Key::PageUp {
-                    Arrow::Up
-                } else {
-                    Arrow::Down
-                };
-
-                for _ in 0..screen_rows {
-                    self.dot = arr.set_dot(self);
-                }
-            }
+            Key::Arrow(arr) => self.dot = arr.set_dot(self.dot, self),
 
             _ => (),
         }
@@ -455,10 +467,12 @@ impl Buffer {
 
     fn delete_cur(&mut self, cur: Cur) -> Cur {
         let idx = cur.as_char_idx(self);
-        let ch = self.txt.char(idx);
-        self.txt.remove(idx..(idx + 1));
-        self.edit_log.delete_char(cur, ch);
-        self.dirty = true;
+        if idx < self.txt.len_chars() {
+            let ch = self.txt.char(idx);
+            self.txt.remove(idx..(idx + 1));
+            self.edit_log.delete_char(cur, ch);
+            self.dirty = true;
+        }
 
         cur
     }
@@ -481,14 +495,18 @@ impl Buffer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use edit::tests::{del_s, in_c, in_s};
+    use crate::key::Arrow;
+    use edit::tests::{del_c, del_s, in_c, in_s};
+
+    const LINE_1: &str = "This is a test";
+    const LINE_2: &str = "involving multiple lines";
 
     fn simple_initial_buffer() -> Buffer {
-        let mut b = Buffer::new_unnamed(0);
-        let s = "This is a test\ninvolving multiple lines";
+        let mut b = Buffer::new_unnamed(0, "");
+        let s = format!("{LINE_1}\n{LINE_2}");
 
         for c in s.chars() {
-            b.handle_action(Action::InsertChar { c }, 80);
+            b.handle_action(Action::InsertChar { c });
         }
 
         b
@@ -499,42 +517,78 @@ mod tests {
         let b = simple_initial_buffer();
         let c = Cur {
             y: 1,
-            x: "involving multiple lines".len(),
+            x: LINE_2.len(),
         };
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "This is a test");
-        assert_eq!(lines[1], "involving multiple lines");
+        assert_eq!(lines[0], LINE_1);
+        assert_eq!(lines[1], LINE_2);
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
-            vec![
-                in_s(0, 0, "This is a test\n"),
-                in_s(1, 0, "involving multiple lines")
-            ]
+            vec![in_s(0, 0, &format!("{LINE_1}\n")), in_s(1, 0, LINE_2)]
         );
     }
 
     #[test]
     fn insert_char_w_range_dot_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line), 80);
-        b.handle_action(Action::InsertChar { c: 'x' }, 80);
+        b.handle_action(Action::DotSet(TextObject::Line, 1));
+        b.handle_action(Action::InsertChar { c: 'x' });
         let c = Cur { y: 1, x: 1 };
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
-        assert_eq!(lines[0], "This is a test");
+        assert_eq!(lines[0], LINE_1);
         assert_eq!(lines[1], "x");
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
             vec![
+                in_s(0, 0, &format!("{LINE_1}\n")),
+                in_s(1, 0, LINE_2),
+                del_s(1, 0, LINE_2),
+                in_c(1, 0, 'x'),
+            ]
+        );
+    }
+
+    #[test]
+    fn delete_in_empty_buffer_is_fine() {
+        let mut b = Buffer::new_unnamed(0, "");
+        b.handle_action(Action::Delete);
+        let c = Cur { y: 0, x: 0 };
+        let lines = b.string_lines();
+
+        assert_eq!(b.dot, Dot::Cur { c });
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0], "");
+        assert_eq!(b.edit_log.edits, vec![]);
+    }
+
+    #[test]
+    fn simple_delete_works() {
+        let mut b = simple_initial_buffer();
+        b.handle_action(Action::DotSet(TextObject::Arr(Arrow::Left), 1));
+        b.handle_action(Action::Delete);
+
+        let c = Cur {
+            y: 1,
+            x: LINE_2.len() - 1,
+        };
+        let lines = b.string_lines();
+
+        assert_eq!(b.dot, Dot::Cur { c });
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], LINE_1);
+        assert_eq!(lines[1], "involving multiple line");
+        assert_eq!(
+            b.edit_log.edits,
+            vec![
                 in_s(0, 0, "This is a test\n"),
                 in_s(1, 0, "involving multiple lines"),
-                del_s(1, 0, "involving multiple lines"),
-                in_c(1, 0, 'x'),
+                del_c(1, 23, 's')
             ]
         );
     }

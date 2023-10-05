@@ -64,6 +64,7 @@ impl MiniBuffer {
                 col_off: 0,
                 dirty: false,
                 edit_log: Default::default(),
+                has_trailing_newline: false,
             },
             max_height,
         }
@@ -98,7 +99,7 @@ impl MiniBuffer {
         let mut mb = MiniBuffer::new(prompt.to_string(), initial_lines, MINI_BUFFER_HEIGHT);
         let mut input = String::new();
         let mut x = 0;
-        let mut line_indices: Vec<usize> = vec![];
+        let mut line_indices: Vec<usize> = Vec::with_capacity(mb.initial_lines.len());
 
         loop {
             mb.prompt = format!("{prompt}{input}");
@@ -119,13 +120,13 @@ impl MiniBuffer {
             mb.b.clamp_scroll(n_visible_lines, screen_cols);
             let Cur { y, .. } = mb.b.dot.active_cur();
 
-            let (selected_line_idx, top, bottom) = if n_visible_lines == 0 {
-                (0, 0, 0)
+            let (selected_line_idx, top, bottom, b) = if n_visible_lines == 0 {
+                (0, 0, 0, None)
             } else if y >= n_visible_lines {
                 let lower = y.saturating_sub(n_visible_lines) + 1;
-                (n_visible_lines - 1, lower, (y + 1))
+                (y, lower, y, Some(&mb.b))
             } else {
-                (y, 0, n_visible_lines - 1)
+                (y, 0, n_visible_lines - 1, Some(&mb.b))
             };
 
             ed.refresh_screen_w_minibuffer(Some(MiniBufferState {
@@ -133,7 +134,7 @@ impl MiniBuffer {
                 cy: screen_rows + 1 + n_visible_lines,
                 prompt_line: &mb.prompt,
                 selected_line_idx,
-                b: Some(&mb.b),
+                b,
                 top,
                 bottom,
             }));
@@ -170,10 +171,10 @@ impl MiniBuffer {
                 Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
                 Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
                 Key::Alt('k') | Key::Arrow(Arrow::Up) => {
-                    mb.b.dot = Arrow::Up.set_dot(&mb.b);
+                    mb.b.dot = Arrow::Up.set_dot(mb.b.dot, &mb.b);
                 }
                 Key::Alt('j') | Key::Arrow(Arrow::Down) => {
-                    mb.b.dot = Arrow::Down.set_dot(&mb.b);
+                    mb.b.dot = Arrow::Down.set_dot(mb.b.dot, &mb.b);
                 }
 
                 _ => (),

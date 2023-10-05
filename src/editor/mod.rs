@@ -1,7 +1,7 @@
 use crate::{
-    buffer::{ActionOutcome, Buffers},
+    buffer::{ActionOutcome, Buffers, TextObject},
     die,
-    key::Key,
+    key::{Arrow, Key},
     mode::{modes, Mode},
     term::{
         clear_screen, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
@@ -152,13 +152,28 @@ impl Editor {
             Action::DebugBufferContents => self.debug_buffer_contents(),
             Action::DebugEditLog => self.debug_edit_log(),
 
-            a => {
-                if let Some(o) = self.buffers.active_mut().handle_action(a, self.screen_rows) {
-                    match o {
-                        ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
-                        ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
-                    }
-                }
+            Action::RawKey { k } if k == Key::PageUp || k == Key::PageDown => {
+                let arr = if k == Key::PageUp {
+                    Arrow::Up
+                } else {
+                    Arrow::Down
+                };
+
+                self.forward_action_to_active_buffer(Action::DotSet(
+                    TextObject::Arr(arr),
+                    self.screen_rows,
+                ));
+            }
+
+            a => self.forward_action_to_active_buffer(a),
+        }
+    }
+
+    fn forward_action_to_active_buffer(&mut self, a: Action) {
+        if let Some(o) = self.buffers.active_mut().handle_action(a) {
+            match o {
+                ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
+                ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
             }
         }
     }

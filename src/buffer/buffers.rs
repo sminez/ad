@@ -19,7 +19,7 @@ impl Buffers {
     pub fn new() -> Self {
         Self {
             next_id: 1,
-            inner: vec![Buffer::new_unnamed(0)].into(),
+            inner: vec![Buffer::new_unnamed(0, "")].into(),
         }
     }
 
@@ -108,7 +108,7 @@ impl Buffers {
     pub fn close_active(&mut self) {
         self.inner.remove(0);
         if self.inner.is_empty() {
-            self.inner.push_back(Buffer::new_unnamed(self.next_id));
+            self.inner.push_back(Buffer::new_unnamed(self.next_id, ""));
             self.next_id += 1;
         }
     }

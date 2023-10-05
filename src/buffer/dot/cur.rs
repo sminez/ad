@@ -20,10 +20,7 @@ impl Cur {
     }
 
     pub fn buffer_end(b: &Buffer) -> Self {
-        Cur {
-            y: b.txt.len_lines(),
-            x: 0,
-        }
+        Cur::from_char_idx(b.txt.len_chars(), b)
     }
 
     pub(crate) fn as_char_idx(&self, b: &Buffer) -> usize {
@@ -63,12 +60,12 @@ impl Cur {
     /// Move forward until cond returns an x position in the given line or we bottom out at the end of the buffer
     #[must_use]
     pub(super) fn move_to(mut self, b: &Buffer, cond: fn(RopeSlice) -> Option<usize>) -> Self {
-        for line in b.txt.lines().skip(self.y + 1) {
-            self.y += 1;
+        for line in b.txt.lines().skip(self.y) {
             if let Some(x) = (cond)(line) {
                 self.x = x;
                 return self;
             }
+            self.y += 1;
         }
         self.move_to_line_end(b)
     }
@@ -135,7 +132,7 @@ impl Cur {
         let len = if self.y >= b.len_lines() {
             0
         } else {
-            b.txt.line(self.y).len_chars()
+            b.txt.line(self.y).len_chars().saturating_sub(1)
         };
 
         if self.x > len {

@@ -2,8 +2,7 @@
 
 - [ ] undo/redo/range delete has some bugs...
   - This needs some proper tests around the edge case behaviour
-- [ ] Deleting in insert mode needs to not copy to the clipboard
-- [ ] Mouse support
+ [ ] Mouse support
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?
 - [ ] Better colors for the status bar
