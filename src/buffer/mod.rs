@@ -399,6 +399,7 @@ impl Buffer {
             Dot::Range { r } => {
                 let (c, deleted) = self.delete_range(r);
                 let _ = set_clipboard(&deleted);
+                self.edit_log.insert_char(c, ch);
                 self.insert_char_handling_newline(c, ch)
             }
         };
@@ -465,6 +466,9 @@ impl Buffer {
 
             cur.y += 1;
             cur.x = 0;
+        } else if cur.y == self.lines.len() {
+            self.lines.push(Line::new(ch.into()));
+            cur.x += 1;
         } else {
             self.lines[cur.y].modify(|s| s.insert(cur.x, ch));
             cur.x += 1;
@@ -475,10 +479,6 @@ impl Buffer {
 
     fn insert_line(&mut self, at: usize, line: String) {
         if at <= self.len_lines() {
-            if let Some(l) = self.lines.get(at - 1) {
-                let x = l.raw.len();
-                self.edit_log.insert_char(Cur { y: at - 1, x }, '\n');
-            }
             let cur = Cur { y: at, x: 0 };
             self.edit_log.insert_string(cur, line.clone());
             self.lines.insert(at, Line::new(line));
@@ -521,6 +521,7 @@ impl Buffer {
     fn delete_range(&mut self, r: Range) -> (Cur, String) {
         let line_ranges = r.line_ranges();
         let mut single_line_had_newline = false;
+        let mut single_line_y = 0;
         let mut deleted_lines = Vec::with_capacity(line_ranges.len());
 
         for lr in line_ranges.into_iter().rev() {
@@ -531,6 +532,7 @@ impl Buffer {
                 lr if lr.is_full_line(self) => {
                     deleted_lines.push(self.lines.remove(lr.y()).raw);
                     single_line_had_newline = true;
+                    single_line_y = lr.y();
                 }
                 LineRange::Full { y } => {
                     deleted_lines.push(self.lines.remove(y).raw);
@@ -552,7 +554,10 @@ impl Buffer {
             }
         }
 
-        let deleted = if deleted_lines.len() == 1 && single_line_had_newline {
+        let deleted = if deleted_lines.len() == 1
+            && single_line_had_newline
+            && single_line_y != self.lines.len()
+        {
             deleted_lines[0].push('\n');
             deleted_lines.remove(0)
         } else {
@@ -563,5 +568,71 @@ impl Buffer {
         self.edit_log.delete_string(r.start, deleted.clone());
 
         (r.start, deleted)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use edit::tests::{del_s, in_c, in_s};
+
+    fn simple_initial_buffer() -> Buffer {
+        let mut b = Buffer::new_unnamed(0);
+        let s = "This is a test\ninvolving multiple lines";
+
+        for c in s.chars() {
+            let res = b.handle_action(Action::InsertChar { c }, 80);
+            assert!(res.is_ok());
+        }
+
+        b
+    }
+
+    #[test]
+    fn simple_insert_works() {
+        let b = simple_initial_buffer();
+        let c = Cur {
+            y: b.lines.len() - 1,
+            x: b.lines[1].len(),
+        };
+
+        assert_eq!(b.lines.len(), 2);
+        assert_eq!(b.lines[0].raw, "This is a test");
+        assert_eq!(b.lines[1].raw, "involving multiple lines");
+        assert_eq!(b.dot, Dot::Cur { c });
+        assert_eq!(
+            b.edit_log.edits,
+            vec![
+                in_s(0, 0, "This is a test\n"),
+                in_s(1, 0, "involving multiple lines")
+            ]
+        );
+    }
+
+    #[test]
+    fn insert_char_w_range_dot_works() -> Result<(), String> {
+        let mut b = simple_initial_buffer();
+        b.handle_action(Action::DotSet(TextObject::Line), 80)?;
+        b.handle_action(Action::InsertChar { c: 'x' }, 80)?;
+        let c = Cur {
+            y: b.lines.len() - 1,
+            x: b.lines[1].len(),
+        };
+
+        assert_eq!(b.lines.len(), 2);
+        assert_eq!(b.lines[0].raw, "This is a test");
+        assert_eq!(b.lines[1].raw, "x");
+        assert_eq!(b.dot, Dot::Cur { c });
+        assert_eq!(
+            b.edit_log.edits,
+            vec![
+                in_s(0, 0, "This is a test\n"),
+                in_s(1, 0, "involving multiple lines"),
+                del_s(1, 0, "involving multiple lines"),
+                in_c(1, 0, 'x'),
+            ]
+        );
+
+        Ok(())
     }
 }

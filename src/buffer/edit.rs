@@ -138,8 +138,8 @@ impl Edit {
 /// as no new edits have been made to the buffer (i.e. it is a flat timeline not a tree).
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EditLog {
-    edits: Vec<Edit>,
-    undone_edits: Vec<Edit>,
+    pub(super) edits: Vec<Edit>,
+    pub(super) undone_edits: Vec<Edit>,
     pub(super) paused: bool,
 }
 
@@ -228,11 +228,11 @@ impl EditLog {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use simple_test_case::test_case;
 
-    fn in_c(y: usize, x: usize, c: char) -> Edit {
+    pub(crate) fn in_c(y: usize, x: usize, c: char) -> Edit {
         Edit {
             kind: Kind::Insert,
             cur: Cur { y, x },
@@ -240,7 +240,7 @@ mod tests {
         }
     }
 
-    fn in_s(y: usize, x: usize, s: &str) -> Edit {
+    pub(crate) fn in_s(y: usize, x: usize, s: &str) -> Edit {
         Edit {
             kind: Kind::Insert,
             cur: Cur { y, x },
@@ -248,7 +248,7 @@ mod tests {
         }
     }
 
-    fn del_c(y: usize, x: usize, c: char) -> Edit {
+    pub(crate) fn del_c(y: usize, x: usize, c: char) -> Edit {
         Edit {
             kind: Kind::Delete,
             cur: Cur { y, x },
@@ -256,7 +256,7 @@ mod tests {
         }
     }
 
-    fn del_s(y: usize, x: usize, s: &str) -> Edit {
+    pub(crate) fn del_s(y: usize, x: usize, s: &str) -> Edit {
         Edit {
             kind: Kind::Delete,
             cur: Cur { y, x },

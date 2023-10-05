@@ -1,5 +1,7 @@
 :: TODO
 
+- [ ] undo/redo/range delete has some bugs...
+  - This needs some proper tests around the edge case behaviour
 - [ ] Deleting in insert mode needs to not copy to the clipboard
 - [ ] Mouse support
 - [ ] implement remaining text objects
