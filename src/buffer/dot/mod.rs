@@ -7,10 +7,8 @@
 //! All indexing is 0-based when working with the contents of a specific buffer.
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
-use crate::{
-    buffer::{Buffer, Line},
-    key::Arrow,
-};
+use crate::{buffer::Buffer, key::Arrow};
+use ropey::RopeSlice;
 use std::fmt;
 
 mod cur;
@@ -54,32 +52,11 @@ impl Dot {
 
     pub fn content(&self, b: &Buffer) -> String {
         match self {
-            Self::Cur { c } => b.lines[c.y].raw[c.x..(c.x + 1)].to_string(),
-            Self::Range { r } => {
-                let lrs = r.line_ranges();
-                let mut lines: Vec<&str> = Vec::with_capacity(lrs.len());
-
-                for lr in lrs.into_iter() {
-                    match lr {
-                        LineRange::Full { y } => lines.push(&b.lines[y].raw),
-                        LineRange::ToEnd { y, start } => {
-                            lines.push(b.lines[y].raw.split_at(start).1)
-                        }
-                        LineRange::FromStart { y, end } => {
-                            lines.push(b.lines[y].raw.split_at(end + 1).0)
-                        }
-                        LineRange::Partial { y, start, end } => {
-                            lines.push(&b.lines[y].raw[start..end])
-                        }
-                    }
-                }
-
-                if lines.len() == 1 {
-                    format!("{}\n", lines[0])
-                } else {
-                    lines.join("\n")
-                }
-            }
+            Self::Cur { c } => b.txt.line(c.y).slice(c.x..(c.x + 1)).to_string(),
+            Self::Range { r } => match r.as_inclusive_char_range(b) {
+                Some(rng) => b.txt.slice(rng).to_string(),
+                None => String::new(),
+            },
         }
     }
 
@@ -227,8 +204,12 @@ pub enum TextObject {
     // Word,
 }
 
-fn blank_line(l: &Line) -> Option<usize> {
-    l.is_empty().then_some(0)
+fn blank_line(l: RopeSlice) -> Option<usize> {
+    if l.len_chars() == 0 {
+        Some(0)
+    } else {
+        None
+    }
 }
 
 impl UpdateDot for TextObject {

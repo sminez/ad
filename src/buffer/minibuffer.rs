@@ -3,24 +3,26 @@
 use crate::{
     buffer::{
         dot::{Cur, Dot, UpdateDot},
-        Buffer, BufferKind, Line,
+        Buffer, BufferKind,
     },
     editor::Editor,
     key::{Arrow, Key},
     MINI_BUFFER_HEIGHT,
 };
+use ropey::Rope;
 use std::cmp::min;
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct MiniBufferState<'a> {
     pub(crate) cx: usize,
     pub(crate) cy: usize,
     pub(crate) selected_line_idx: usize,
     pub(crate) prompt_line: &'a str,
-    pub(crate) lines: &'a [Line],
+    pub(crate) b: Option<&'a Buffer>,
+    pub(crate) top: usize,
+    pub(crate) bottom: usize,
 }
 
-// TODO: remove this allow when line selection fields are in use
 #[allow(dead_code)]
 pub(crate) enum MiniBufferSelection {
     Line {
@@ -42,13 +44,13 @@ pub(crate) enum MiniBufferSelection {
 /// files you are editing) crossed with dmenu.
 pub(crate) struct MiniBuffer {
     prompt: String,
-    initial_lines: Vec<Line>,
+    initial_lines: Vec<String>,
     b: Buffer,
     max_height: usize,
 }
 
 impl MiniBuffer {
-    pub fn new(prompt: String, lines: Vec<Line>, max_height: usize) -> Self {
+    pub fn new(prompt: String, lines: Vec<String>, max_height: usize) -> Self {
         Self {
             prompt,
             initial_lines: lines,
@@ -56,7 +58,7 @@ impl MiniBuffer {
                 id: usize::MAX,
                 kind: BufferKind::MiniBuffer,
                 dot: Default::default(),
-                lines: vec![],
+                txt: Rope::new(),
                 rx: 0,
                 row_off: 0,
                 col_off: 0,
@@ -68,26 +70,26 @@ impl MiniBuffer {
     }
 
     /// Force the cursor to be a single Cur and ensure that its y offset is in bounds
-    fn handle_on_change<F: Fn(&str) -> Option<Vec<Line>>>(&mut self, input: &str, on_change: F) {
+    fn handle_on_change<F: Fn(&str) -> Option<Vec<String>>>(&mut self, input: &str, on_change: F) {
         if let Some(lines) = (on_change)(input) {
-            self.b.lines = lines;
+            self.b.txt = Rope::from_str(&lines.join("\n"));
         };
 
         let c = Cur {
             x: 0,
-            y: if self.b.lines.is_empty() {
+            y: if self.b.is_empty() {
                 0
             } else {
-                min(self.b.lines.len() - 1, self.b.dot.active_cur().y)
+                min(self.b.len_lines() - 1, self.b.dot.active_cur().y)
             },
         };
 
         self.b.dot = Dot::Cur { c };
     }
 
-    pub fn prompt_w_callback<F: Fn(&str) -> Option<Vec<Line>>>(
+    pub fn prompt_w_callback<F: Fn(&str) -> Option<Vec<String>>>(
         prompt: &str,
-        initial_lines: Vec<Line>,
+        initial_lines: Vec<String>,
         on_change: F,
         ed: &mut Editor,
     ) -> MiniBufferSelection {
@@ -100,27 +102,30 @@ impl MiniBuffer {
 
         loop {
             mb.prompt = format!("{prompt}{input}");
-            mb.b.lines.clear();
+            mb.b.txt.remove(..);
             line_indices.clear();
+            let mut visible_lines = vec![];
 
             for (i, line) in mb.initial_lines.iter().enumerate() {
-                if line.raw.contains(&input) {
-                    mb.b.lines.push(line.clone());
+                if line.contains(&input) {
+                    visible_lines.push(line.clone());
                     line_indices.push(i);
                 }
             }
 
-            let n_visible_lines = min(mb.b.lines.len(), mb.max_height);
+            mb.b.txt = Rope::from_str(&visible_lines.join("\n"));
+
+            let n_visible_lines = min(visible_lines.len(), mb.max_height);
             mb.b.clamp_scroll(n_visible_lines, screen_cols);
             let Cur { y, .. } = mb.b.dot.active_cur();
 
-            let (selected_line_idx, lines): (usize, &[Line]) = if n_visible_lines == 0 {
-                (0, &[])
+            let (selected_line_idx, top, bottom) = if n_visible_lines == 0 {
+                (0, 0, 0)
             } else if y >= n_visible_lines {
                 let lower = y.saturating_sub(n_visible_lines) + 1;
-                (n_visible_lines - 1, &mb.b.lines[lower..(y + 1)])
+                (n_visible_lines - 1, lower, (y + 1))
             } else {
-                (y, &mb.b.lines[0..n_visible_lines])
+                (y, 0, n_visible_lines - 1)
             };
 
             ed.refresh_screen_w_minibuffer(Some(MiniBufferState {
@@ -128,7 +133,9 @@ impl MiniBuffer {
                 cy: screen_rows + 1 + n_visible_lines,
                 prompt_line: &mb.prompt,
                 selected_line_idx,
-                lines,
+                b: Some(&mb.b),
+                top,
+                bottom,
             }));
 
             match ed.block_for_key() {
@@ -147,10 +154,13 @@ impl MiniBuffer {
 
                 Key::Esc => return MiniBufferSelection::Cancelled,
                 Key::Return => {
-                    return match mb.b.lines.get(y) {
+                    return match mb.b.line(y) {
+                        Some(_) if line_indices.is_empty() => {
+                            MiniBufferSelection::UserInput { input }
+                        }
                         Some(l) => MiniBufferSelection::Line {
                             cy: line_indices[y],
-                            line: l.raw.clone(),
+                            line: l.chars().collect(),
                             input,
                         },
                         None => MiniBufferSelection::UserInput { input },
@@ -180,7 +190,7 @@ impl MiniBuffer {
 
     pub fn select_from(
         prompt: &str,
-        initial_lines: Vec<Line>,
+        initial_lines: Vec<String>,
         ed: &mut Editor,
     ) -> MiniBufferSelection {
         MiniBuffer::prompt_w_callback(prompt, initial_lines, |_| None, ed)

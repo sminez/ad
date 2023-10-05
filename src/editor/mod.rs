@@ -1,5 +1,5 @@
 use crate::{
-    buffer::Buffers,
+    buffer::{ActionOutcome, Buffers},
     die,
     key::Key,
     mode::{modes, Mode},
@@ -138,7 +138,7 @@ impl Editor {
             Action::Exit { force } => self.exit(force),
             Action::NextBuffer => self.buffers.next(),
             Action::OpenFile { path } => self.open_file(&path),
-            Action::Paste => self.paste(),
+            Action::Paste => self.paste_from_clipboard(),
             Action::PreviousBuffer => self.buffers.previous(),
             Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
             Action::SaveBuffer => self.save_current_buffer(None),
@@ -147,15 +147,17 @@ impl Editor {
             Action::SetMode { m } => self.set_mode(m),
             Action::ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             Action::ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
-            Action::Yank => self.yank(),
+            Action::Yank => self.set_clipboard(self.buffers.active().dot_contents()),
 
             Action::DebugBufferContents => self.debug_buffer_contents(),
             Action::DebugEditLog => self.debug_edit_log(),
 
             a => {
-                let res = self.buffers.active_mut().handle_action(a, self.screen_rows);
-                if let Err(msg) = res {
-                    self.set_status_message(&msg);
+                if let Some(o) = self.buffers.active_mut().handle_action(a, self.screen_rows) {
+                    match o {
+                        ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
+                        ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
+                    }
                 }
             }
         }

@@ -2,11 +2,12 @@ use crate::{
     editor::Action,
     key::{Arrow, Key},
     term::{Color, Style},
-    util::{relative_path_from, set_clipboard},
+    util::relative_path_from,
     MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
 };
+use ropey::{Rope, RopeSlice};
 use std::{
-    cmp::{max, min},
+    cmp::min,
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -15,15 +16,21 @@ use std::{
 mod buffers;
 mod dot;
 mod edit;
-mod line;
 mod minibuffer;
 
 use edit::{Edit, EditLog, Kind, Txt};
 
 pub(crate) use buffers::Buffers;
 pub(crate) use dot::{Cur, Dot, LineRange, Range, TextObject, UpdateDot};
-pub(crate) use line::Line;
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
+
+// Used to inform the editor that further action needs to be taken by it after a Buffer has
+// finished processing a given Action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ActionOutcome {
+    SetClipboard(String),
+    SetStatusMessag(String),
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BufferKind {
@@ -50,12 +57,12 @@ impl BufferKind {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Buffer {
     id: usize,
     pub(crate) kind: BufferKind,
     pub(crate) dot: Dot,
-    pub(crate) lines: Vec<Line>,
+    pub(crate) txt: Rope,
     pub(crate) rx: usize,
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
@@ -72,13 +79,11 @@ impl Buffer {
             Err(e) => return Err(e),
         };
 
-        let lines: Vec<Line> = raw.lines().map(|s| Line::new(s.to_string())).collect();
-
         Ok(Self {
             id,
             kind: BufferKind::File(path),
             dot: Dot::default(),
-            lines,
+            txt: Rope::from_str(&raw),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -92,7 +97,7 @@ impl Buffer {
             id,
             kind: BufferKind::Unnamed,
             dot: Dot::default(),
-            lines: Vec::new(),
+            txt: Rope::new(),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -106,7 +111,7 @@ impl Buffer {
             id,
             kind: BufferKind::Virtual(name),
             dot: Dot::default(),
-            lines: Vec::new(),
+            txt: Rope::new(),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -136,14 +141,15 @@ impl Buffer {
         self.kind == BufferKind::Unnamed
     }
 
-    pub fn contents(&self) -> String {
-        let mut s = String::new();
-        for line in self.lines.iter() {
-            s.push_str(&line.raw);
-            s.push('\n');
-        }
+    pub fn contents(&self) -> Vec<u8> {
+        self.txt.bytes().collect()
+    }
 
-        s
+    pub(crate) fn string_lines(&self) -> Vec<String> {
+        self.txt
+            .lines()
+            .map(|l| l.to_string().trim_end_matches('\n').to_string())
+            .collect()
     }
 
     pub fn dot_contents(&self) -> String {
@@ -152,20 +158,16 @@ impl Buffer {
 
     #[inline]
     pub fn len_lines(&self) -> usize {
-        self.lines.len()
+        self.txt.len_lines()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.lines.is_empty()
+        self.txt.len_chars() == 0
     }
 
-    pub(crate) fn debug_edit_log(&self) -> Vec<Line> {
-        self.edit_log
-            .debug_edits()
-            .into_iter()
-            .map(Line::new)
-            .collect()
+    pub(crate) fn debug_edit_log(&self) -> Vec<String> {
+        self.edit_log.debug_edits().into_iter().collect()
     }
 
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
@@ -190,12 +192,12 @@ impl Buffer {
     }
 
     pub(crate) fn rx_from_x(&self, y: usize, x: usize) -> usize {
-        if y >= self.lines.len() {
+        if y >= self.len_lines() {
             return 0;
         }
 
         let mut rx = 0;
-        for c in self.lines[y].raw.chars().take(x) {
+        for c in self.txt.line(y).chars().take(x) {
             if c == '\t' {
                 rx += (TAB_STOP - 1) - (rx % TAB_STOP);
             }
@@ -206,14 +208,14 @@ impl Buffer {
     }
 
     pub(crate) fn x_from_rx(&self, y: usize) -> usize {
-        if self.lines.is_empty() {
+        if self.is_empty() {
             return 0;
         }
 
         let mut rx = 0;
         let mut cx = 0;
 
-        for c in self.lines[y].raw.chars() {
+        for c in self.txt.line(y).chars() {
             if c == '\t' {
                 rx += (TAB_STOP - 1) - (rx % TAB_STOP);
             }
@@ -228,12 +230,39 @@ impl Buffer {
         cx
     }
 
-    pub fn line(&self, y: usize) -> Option<&Line> {
+    pub fn line(&self, y: usize) -> Option<RopeSlice> {
         if y >= self.len_lines() {
             None
         } else {
-            Some(&self.lines[y])
+            Some(self.txt.line(y))
         }
+    }
+
+    /// The render representation of a given line, truncated to fit within the
+    /// available screen space.
+    /// This includes tab expansion but not any styling that might be applied,
+    /// trailing \r\n or screen clearing escape codes.
+    pub(crate) fn raw_rline_unchecked(&self, y: usize, lpad: usize, screen_cols: usize) -> String {
+        // We need to know if there are any leading tab characters that are padding
+        // the screen so we read the full line up to its max end point for the current
+        // window size and then trim off the column offset once we have expanded tabs.
+        let chars_to_check = self.col_off + screen_cols - lpad;
+        let mut rline = String::with_capacity(chars_to_check);
+        let mut it = self.txt.line(y).chars();
+
+        while rline.len() <= chars_to_check {
+            match it.next() {
+                Some('\n') | None => break,
+                Some('\t') => rline.push_str(&" ".repeat(TAB_STOP)),
+                Some(c) => rline.push(c),
+            }
+        }
+
+        if rline.len() > self.col_off {
+            rline = rline.split_off(self.col_off);
+        }
+
+        rline
     }
 
     /// The render representation of a given line, truncated to fit within the
@@ -247,11 +276,7 @@ impl Buffer {
         screen_cols: usize,
         bg_dot: Color,
     ) -> String {
-        // Truncate to available screen width
-        let mut rline = self.lines[y].render.clone();
-        let mut len = max(0, rline.len() - self.col_off);
-        len = min(screen_cols - lpad, len);
-        rline = rline[self.col_off..min(screen_cols - lpad, len)].to_string();
+        let mut rline = self.raw_rline_unchecked(y, lpad, screen_cols);
 
         // Apply highlight if included in current Dot
         if let Some(lr) = self.dot.line_range(y) {
@@ -271,26 +296,26 @@ impl Buffer {
     }
 
     /// The error result of this function is an error string that should be displayed to the user
-    pub fn handle_action(&mut self, a: Action, screen_rows: usize) -> Result<(), String> {
+    pub(crate) fn handle_action(&mut self, a: Action, screen_rows: usize) -> Option<ActionOutcome> {
         match a {
             Action::Delete => {
-                self.dot = Dot::Cur {
-                    c: self.delete_dot(self.dot),
-                }
+                let (c, deleted) = self.delete_dot(self.dot);
+                self.dot = Dot::Cur { c };
+                return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
-                self.dot = Dot::Cur {
-                    c: self.insert_char(self.dot, c),
-                }
+                let (c, deleted) = self.insert_char(self.dot, c);
+                self.dot = Dot::Cur { c };
+                return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertString { s } => {
-                self.dot = Dot::Cur {
-                    c: self.insert_string(self.dot, s),
-                }
+                let (c, deleted) = self.insert_string(self.dot, s);
+                self.dot = Dot::Cur { c };
+                return deleted.map(ActionOutcome::SetClipboard);
             }
 
-            Action::Redo => self.redo()?,
-            Action::Undo => self.undo()?,
+            Action::Redo => return self.redo(),
+            Action::Undo => return self.undo(),
 
             Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
             Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
@@ -299,30 +324,30 @@ impl Buffer {
             Action::DotFlip => self.dot.flip(),
             Action::DotSet(tobj) => self.dot = tobj.set_dot(self),
 
-            Action::RawKey { k } => self.handle_raw_key(k, screen_rows),
+            Action::RawKey { k } => return self.handle_raw_key(k, screen_rows),
 
             _ => (),
         }
 
-        Ok(())
+        None
     }
 
-    fn handle_raw_key(&mut self, k: Key, screen_rows: usize) {
+    fn handle_raw_key(&mut self, k: Key, screen_rows: usize) -> Option<ActionOutcome> {
         match k {
             Key::Return => {
-                self.dot = Dot::Cur {
-                    c: self.insert_char(self.dot, '\n'),
-                }
+                let (c, deleted) = self.insert_char(self.dot, '\n');
+                self.dot = Dot::Cur { c };
+                return deleted.map(ActionOutcome::SetClipboard);
             }
             Key::Tab => {
-                self.dot = Dot::Cur {
-                    c: self.insert_char(self.dot, '\t'),
-                }
+                let (c, deleted) = self.insert_char(self.dot, '\t');
+                self.dot = Dot::Cur { c };
+                return deleted.map(ActionOutcome::SetClipboard);
             }
-            Key::Char(c) => {
-                self.dot = Dot::Cur {
-                    c: self.insert_char(self.dot, c),
-                }
+            Key::Char(ch) => {
+                let (c, deleted) = self.insert_char(self.dot, ch);
+                self.dot = Dot::Cur { c };
+                return deleted.map(ActionOutcome::SetClipboard);
             }
 
             Key::Arrow(arr) => self.dot = arr.set_dot(self),
@@ -340,38 +365,44 @@ impl Buffer {
 
             _ => (),
         }
+
+        None
     }
 
-    fn undo(&mut self) -> Result<(), String> {
+    fn undo(&mut self) -> Option<ActionOutcome> {
         match self.edit_log.undo() {
             Some(edit) => {
                 self.edit_log.paused = true;
                 self.apply_edit(edit);
                 self.edit_log.paused = false;
                 self.dirty = !self.edit_log.is_empty();
-                Ok(())
+                None
             }
-            None => Err("Nothing to undo".to_string()),
+            None => Some(ActionOutcome::SetStatusMessag(
+                "Nothing to undo".to_string(),
+            )),
         }
     }
 
-    fn redo(&mut self) -> Result<(), String> {
+    fn redo(&mut self) -> Option<ActionOutcome> {
         match self.edit_log.redo() {
             Some(edit) => {
                 self.edit_log.paused = true;
                 self.apply_edit(edit);
                 self.edit_log.paused = false;
-                Ok(())
+                None
             }
-            None => Err("Nothing to redo".to_string()),
+            None => Some(ActionOutcome::SetStatusMessag(
+                "Nothing to redo".to_string(),
+            )),
         }
     }
 
     fn apply_edit(&mut self, Edit { kind, cur, txt }: Edit) {
         let new_cur = match (kind, txt) {
-            (Kind::Insert, Txt::Char(c)) => self.insert_char(Dot::Cur { c: cur }, c),
-            (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s),
-            (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }),
+            (Kind::Insert, Txt::Char(c)) => self.insert_char(Dot::Cur { c: cur }, c).0,
+            (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s).0,
+            (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }).0,
             (Kind::Delete, Txt::String(s)) => {
                 let (dy, last_line) = s.lines().enumerate().last().unwrap();
                 let mut end = cur;
@@ -380,194 +411,70 @@ impl Buffer {
                 self.delete_dot(Dot::Range {
                     r: Range::from_cursors(cur, end, true),
                 })
+                .0
             }
         };
 
         self.dot = Dot::Cur { c: new_cur };
     }
 
-    fn insert_char(&mut self, dot: Dot, ch: char) -> Cur {
-        if dot.last_cur().y == self.lines.len() {
-            self.insert_line(self.lines.len(), String::new());
-        }
-
-        let c = match dot {
-            Dot::Cur { c } => {
-                self.edit_log.insert_char(c, ch);
-                self.insert_char_handling_newline(c, ch)
-            }
-            Dot::Range { r } => {
-                let (c, deleted) = self.delete_range(r);
-                let _ = set_clipboard(&deleted);
-                self.edit_log.insert_char(c, ch);
-                self.insert_char_handling_newline(c, ch)
-            }
-        };
-
-        self.dirty = true;
-        c
-    }
-
-    fn insert_string(&mut self, dot: Dot, s: String) -> Cur {
-        if dot.last_cur().y == self.lines.len() {
-            self.insert_line(self.lines.len(), String::new());
-        }
-
-        self.edit_log.insert_string(dot.first_cur(), s.clone());
-
-        let mut cur = match dot {
-            Dot::Cur { c } => c,
-            Dot::Range { r } => {
-                let (cur, deleted) = self.delete_range(r);
-                let _ = set_clipboard(&deleted);
-                cur
-            }
-        };
-
-        self.edit_log.paused = true;
-        for ch in s.chars() {
-            cur = self.insert_char_handling_newline(cur, ch);
-        }
-        self.edit_log.paused = false;
-        self.dirty = true;
-
-        cur
-    }
-
-    fn delete_dot(&mut self, dot: Dot) -> Cur {
+    fn insert_char(&mut self, dot: Dot, ch: char) -> (Cur, Option<String>) {
         let (cur, deleted) = match dot {
-            Dot::Cur { c } => self.delete_cur(c),
-            Dot::Range { r } => {
-                let (cur, deleted) = self.delete_range(r);
-                (cur, Some(deleted))
-            }
+            Dot::Cur { c } => (c, None),
+            Dot::Range { r } => self.delete_range(r),
         };
 
-        // NOTE: Ignoring errors in setting the system clipboard
-        if let Some(deleted) = deleted {
-            let _ = set_clipboard(&deleted);
-        }
-
+        let idx = cur.as_char_idx(self);
+        self.txt.insert_char(idx, ch);
+        self.edit_log.insert_char(cur, ch);
         self.dirty = true;
 
-        cur
+        (Cur::from_char_idx(idx + 1, self), deleted)
     }
 
-    fn insert_char_handling_newline(&mut self, mut cur: Cur, ch: char) -> Cur {
-        if ch == '\n' {
-            if cur.x == 0 {
-                self.insert_line(cur.y, String::new());
-            } else {
-                let (l1, l2) = self.lines[cur.y].raw.split_at(cur.x);
-                let (l1, l2) = (l1.to_string(), l2.to_string());
-                self.lines[cur.y].modify(|s| *s = l1.clone());
-                self.insert_line(cur.y + 1, l2);
-            }
-
-            cur.y += 1;
-            cur.x = 0;
-        } else if cur.y == self.lines.len() {
-            self.lines.push(Line::new(ch.into()));
-            cur.x += 1;
-        } else {
-            self.lines[cur.y].modify(|s| s.insert(cur.x, ch));
-            cur.x += 1;
-        }
-
-        cur
-    }
-
-    fn insert_line(&mut self, at: usize, line: String) {
-        if at <= self.len_lines() {
-            let cur = Cur { y: at, x: 0 };
-            self.edit_log.insert_string(cur, line.clone());
-            self.lines.insert(at, Line::new(line));
-            self.dirty = true;
-        }
-    }
-
-    fn delete_cur(&mut self, cur: Cur) -> (Cur, Option<String>) {
-        if cur.y == self.len_lines() {
-            return (cur, None);
-        }
-
-        let deleted = if cur.x < self.lines[cur.y].len() {
-            let c = self.lines[cur.y].raw.remove(cur.x);
-            self.lines[cur.y].update_render();
-            self.edit_log.delete_char(cur, c);
-            Some(c.to_string())
-        } else if cur.y < self.lines.len() - 1 {
-            // Deleting the newline char at the end of this line
-            let line = self.lines.remove(cur.y + 1);
-            self.lines[cur.y].modify(|s| s.push_str(&line.raw));
-            self.edit_log.delete_char(cur, '\n');
-            Some("\n".to_string())
-        } else if cur.x == 0 && self.lines[cur.y].raw.is_empty() {
-            // Deleting an empty line
-            self.lines.remove(cur.y);
-            self.edit_log.delete_char(cur, '\n');
-            Some("\n".to_string())
-        } else {
-            None
+    fn insert_string(&mut self, dot: Dot, s: String) -> (Cur, Option<String>) {
+        let (cur, deleted) = match dot {
+            Dot::Cur { c } => (c, None),
+            Dot::Range { r } => self.delete_range(r),
         };
 
-        self.dirty = deleted.is_some();
+        let idx = cur.as_char_idx(self);
+        self.txt.insert(idx, &s);
+        self.edit_log.insert_string(cur, s);
+        self.dirty = true;
 
         (cur, deleted)
     }
 
-    /// Delete all LineRanges from the given range in reverse order so we
-    /// don't invalidate line offsets
-    fn delete_range(&mut self, r: Range) -> (Cur, String) {
-        let line_ranges = r.line_ranges();
-        let mut single_line_had_newline = false;
-        let mut single_line_y = 0;
-        let mut deleted_lines = Vec::with_capacity(line_ranges.len());
-
-        for lr in line_ranges.into_iter().rev() {
-            match lr {
-                lr if lr.y() == self.lines.len() => {
-                    continue;
-                }
-                lr if lr.is_full_line(self) => {
-                    deleted_lines.push(self.lines.remove(lr.y()).raw);
-                    single_line_had_newline = true;
-                    single_line_y = lr.y();
-                }
-                LineRange::Full { y } => {
-                    deleted_lines.push(self.lines.remove(y).raw);
-                }
-                LineRange::ToEnd { y, start } => {
-                    let (left, deleted) = self.lines[y].raw.split_at(start);
-                    deleted_lines.push(deleted.to_string());
-                    self.lines[y].raw = left.to_string();
-                    self.lines[y].update_render();
-                }
-                LineRange::FromStart { y, end } => {
-                    deleted_lines.push(self.lines[y].raw.drain(..=end).collect());
-                    self.lines[y].update_render();
-                }
-                LineRange::Partial { y, start, end } => {
-                    deleted_lines.push(self.lines[y].raw.drain(start..=end).collect());
-                    self.lines[y].update_render();
-                }
-            }
+    fn delete_dot(&mut self, dot: Dot) -> (Cur, Option<String>) {
+        match dot {
+            Dot::Cur { c } => (self.delete_cur(c), None),
+            Dot::Range { r } => self.delete_range(r),
         }
+    }
 
-        let deleted = if deleted_lines.len() == 1
-            && single_line_had_newline
-            && single_line_y != self.lines.len()
-        {
-            deleted_lines[0].push('\n');
-            deleted_lines.remove(0)
-        } else {
-            deleted_lines.reverse();
-            deleted_lines.join("\n")
+    fn delete_cur(&mut self, cur: Cur) -> Cur {
+        let idx = cur.as_char_idx(self);
+        let ch = self.txt.char(idx);
+        self.txt.remove(idx..(idx + 1));
+        self.edit_log.delete_char(cur, ch);
+        self.dirty = true;
+
+        cur
+    }
+
+    fn delete_range(&mut self, r: Range) -> (Cur, Option<String>) {
+        let rng = match r.as_inclusive_char_range(self) {
+            Some(rng) => rng,
+            None => return (r.start, None),
         };
 
-        self.edit_log.delete_string(r.start, deleted.clone());
+        let s = self.txt.slice(rng.clone()).to_string();
+        self.txt.remove(rng);
+        self.edit_log.delete_string(r.start, s.clone());
+        self.dirty = true;
 
-        (r.start, deleted)
+        (r.start, Some(s))
     }
 }
 
@@ -581,8 +488,7 @@ mod tests {
         let s = "This is a test\ninvolving multiple lines";
 
         for c in s.chars() {
-            let res = b.handle_action(Action::InsertChar { c }, 80);
-            assert!(res.is_ok());
+            b.handle_action(Action::InsertChar { c }, 80);
         }
 
         b
@@ -592,13 +498,14 @@ mod tests {
     fn simple_insert_works() {
         let b = simple_initial_buffer();
         let c = Cur {
-            y: b.lines.len() - 1,
-            x: b.lines[1].len(),
+            y: 1,
+            x: "involving multiple lines".len(),
         };
+        let lines = b.string_lines();
 
-        assert_eq!(b.lines.len(), 2);
-        assert_eq!(b.lines[0].raw, "This is a test");
-        assert_eq!(b.lines[1].raw, "involving multiple lines");
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "This is a test");
+        assert_eq!(lines[1], "involving multiple lines");
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
@@ -610,18 +517,16 @@ mod tests {
     }
 
     #[test]
-    fn insert_char_w_range_dot_works() -> Result<(), String> {
+    fn insert_char_w_range_dot_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line), 80)?;
-        b.handle_action(Action::InsertChar { c: 'x' }, 80)?;
-        let c = Cur {
-            y: b.lines.len() - 1,
-            x: b.lines[1].len(),
-        };
+        b.handle_action(Action::DotSet(TextObject::Line), 80);
+        b.handle_action(Action::InsertChar { c: 'x' }, 80);
+        let c = Cur { y: 1, x: 1 };
+        let lines = b.string_lines();
 
-        assert_eq!(b.lines.len(), 2);
-        assert_eq!(b.lines[0].raw, "This is a test");
-        assert_eq!(b.lines[1].raw, "x");
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "This is a test");
+        assert_eq!(lines[1], "x");
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
@@ -632,7 +537,5 @@ mod tests {
                 in_c(1, 0, 'x'),
             ]
         );
-
-        Ok(())
     }
 }

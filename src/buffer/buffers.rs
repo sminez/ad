@@ -1,4 +1,4 @@
-use crate::buffer::{Buffer, BufferKind, Line};
+use crate::buffer::{Buffer, BufferKind};
 use std::{collections::VecDeque, io, path::Path};
 
 /// A non-empty vec of buffers where the active buffer is accessible and default
@@ -48,17 +48,17 @@ impl Buffers {
     }
 
     /// Used to seed the buffer selection mini-buffer
-    pub(crate) fn as_buf_list(&self) -> Vec<Line> {
+    pub(crate) fn as_buf_list(&self) -> Vec<String> {
         let focused = self.inner[0].id;
         self.inner
             .iter()
             .map(|b| {
-                Line::new(format!(
+                format!(
                     "{:<4} {} {}",
                     b.id,
                     if b.id == focused { '*' } else { ' ' },
                     b.full_name()
-                ))
+                )
             })
             .collect()
     }

@@ -1,7 +1,5 @@
-use crate::{
-    buffer::{Buffer, Line},
-    key::Arrow,
-};
+use crate::{buffer::Buffer, key::Arrow};
+use ropey::RopeSlice;
 use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -23,9 +21,20 @@ impl Cur {
 
     pub fn buffer_end(b: &Buffer) -> Self {
         Cur {
-            y: b.lines.len(),
+            y: b.txt.len_lines(),
             x: 0,
         }
+    }
+
+    pub(crate) fn as_char_idx(&self, b: &Buffer) -> usize {
+        b.txt.line_to_char(self.y) + self.x
+    }
+
+    pub(crate) fn from_char_idx(idx: usize, b: &Buffer) -> Self {
+        let y = b.txt.char_to_line(idx);
+        let x = idx - b.txt.line_to_char(y);
+
+        Self { y, x }
     }
 
     pub(super) fn arr_w_count(&self, arr: Arrow, count: usize, b: &Buffer) -> Self {
@@ -47,14 +56,14 @@ impl Cur {
 
     #[must_use]
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
-        self.x = b.lines.get(self.y).map(|l| l.len()).unwrap_or_default();
+        self.x += b.txt.line(self.y).chars().skip(self.x).count();
         self
     }
 
     /// Move forward until cond returns an x position in the given line or we bottom out at the end of the buffer
     #[must_use]
-    pub(super) fn move_to(mut self, b: &Buffer, cond: fn(&Line) -> Option<usize>) -> Self {
-        for line in b.lines.iter().skip(self.y + 1) {
+    pub(super) fn move_to(mut self, b: &Buffer, cond: fn(RopeSlice) -> Option<usize>) -> Self {
+        for line in b.txt.lines().skip(self.y + 1) {
             self.y += 1;
             if let Some(x) = (cond)(line) {
                 self.x = x;
@@ -66,8 +75,10 @@ impl Cur {
 
     /// Move back until cond returns an x position in the given line or we bottom out at the start of the buffer
     #[must_use]
-    pub(super) fn move_back_to(mut self, b: &Buffer, cond: fn(&Line) -> Option<usize>) -> Self {
-        for line in b.lines.iter().take(self.y).rev() {
+    pub(super) fn move_back_to(mut self, b: &Buffer, cond: fn(RopeSlice) -> Option<usize>) -> Self {
+        // Ropey::Lines isn't double ended so we need to collect which is unfortunate
+        let lines: Vec<RopeSlice> = b.txt.lines().take(self.y).collect();
+        for line in lines.into_iter().rev() {
             self.y -= 1;
             if let Some(x) = (cond)(line) {
                 self.x = x;
@@ -88,7 +99,7 @@ impl Cur {
                 }
             }
             Arrow::Down => {
-                if !b.lines.is_empty() && cur.y < b.lines.len() - 1 {
+                if !b.is_empty() && cur.y < b.len_lines() - 1 {
                     cur.y += 1;
                     cur.set_x_from_buffer_rx(b);
                 }
@@ -99,12 +110,12 @@ impl Cur {
                 } else if cur.y > 0 {
                     // Allow <- to move to the end of the previous line
                     cur.y -= 1;
-                    cur.x = b.lines[cur.y].len();
+                    cur.x = b.txt.line(cur.y).len_chars();
                 }
             }
             Arrow::Right => {
                 if let Some(line) = b.line(cur.y) {
-                    match cur.x.cmp(&line.len()) {
+                    match cur.x.cmp(&line.len_chars()) {
                         Ordering::Less => cur.x += 1,
                         Ordering::Equal => {
                             // Allow -> to move to the start of the next line
@@ -124,7 +135,7 @@ impl Cur {
         let len = if self.y >= b.len_lines() {
             0
         } else {
-            b.lines[self.y].len()
+            b.txt.line(self.y).len_chars()
         };
 
         if self.x > len {

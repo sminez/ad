@@ -1,6 +1,6 @@
 //! Rendering the user interface
 use crate::{
-    buffer::{Cur, Line, MiniBufferState},
+    buffer::{Buffer, Cur, MiniBufferState},
     die,
     editor::Editor,
     key::Key,
@@ -28,10 +28,12 @@ impl Editor {
             cy,
             selected_line_idx,
             prompt_line,
-            lines,
+            b,
+            top,
+            bottom,
         } = mb.unwrap_or_default();
 
-        let effective_screen_rows = self.screen_rows - lines.len();
+        let effective_screen_rows = self.screen_rows - (bottom - top);
 
         self.buffers
             .active_mut()
@@ -42,7 +44,7 @@ impl Editor {
         self.render_status_bar(&mut buf);
 
         if w_minibuffer {
-            self.render_minibuffer_state(&mut buf, prompt_line, lines, selected_line_idx);
+            self.render_minibuffer_state(&mut buf, prompt_line, b, selected_line_idx, top, bottom);
         } else {
             self.render_message_bar(&mut buf);
         }
@@ -71,14 +73,15 @@ impl Editor {
         let b = self.buffers.active();
 
         // Sort out dimensions of the sign/number column
-        let max_linum = min(b.lines.len(), screen_rows + b.row_off);
+        let n_lines = b.len_lines();
+        let max_linum = min(n_lines, screen_rows + b.row_off);
         let w_lnum = n_digits(max_linum);
         let w_sgncol = w_lnum + 2;
 
         for y in 0..screen_rows {
             let file_row = y + b.row_off;
 
-            if file_row >= b.lines.len() {
+            if file_row >= n_lines {
                 buf.push_str(&format!(
                     "{}~ {VLINE:>width$}{}",
                     Style::Fg(SGNCOL_FG.into()),
@@ -151,21 +154,26 @@ impl Editor {
         &self,
         buf: &mut String,
         prompt_line: &str,
-        lines: &[Line],
+        b: Option<&Buffer>,
         selected_line_idx: usize,
+        top: usize,
+        bottom: usize,
     ) {
-        let width = self.screen_cols;
-        for (i, Line { render: rline, .. }) in lines.iter().enumerate() {
-            let len = min(self.screen_cols, rline.len());
-            if i == selected_line_idx {
-                buf.push_str(&format!(
-                    "{}{:<width$}{}\r\n",
-                    Style::Bg(MB_HIGHLIGHT.into()),
-                    &rline[0..len],
-                    Style::Reset,
-                ));
-            } else {
-                buf.push_str(&format!("{}{}\r\n", &rline[0..len], Cursor::ClearRight));
+        if let Some(b) = b {
+            let width = self.screen_cols;
+            for i in top..=bottom {
+                let rline = b.raw_rline_unchecked(i, 0, self.screen_cols);
+                let len = min(self.screen_cols, rline.len());
+                if i == selected_line_idx {
+                    buf.push_str(&format!(
+                        "{}{:<width$}{}\r\n",
+                        Style::Bg(MB_HIGHLIGHT.into()),
+                        &rline[0..len],
+                        Style::Reset,
+                    ));
+                } else {
+                    buf.push_str(&format!("{}{}\r\n", &rline[0..len], Cursor::ClearRight));
+                }
             }
         }
 

@@ -127,7 +127,7 @@ impl Editor {
             Ok(cp) => cp.display().to_string(),
             Err(_) => p.display().to_string(),
         };
-        let n_bytes = contents.as_bytes().len();
+        let n_bytes = contents.len();
 
         let msg = match fs::write(p, contents) {
             Ok(_) => {
@@ -163,14 +163,14 @@ impl Editor {
         self.running = false;
     }
 
-    pub(super) fn yank(&mut self) {
-        match set_clipboard(&self.buffers.active().dot_contents()) {
+    pub(super) fn set_clipboard(&mut self, s: String) {
+        match set_clipboard(&s) {
             Ok(_) => self.set_status_message("Yanked selection to system clipboard"),
             Err(e) => self.set_status_message(&format!("Error setting system clipboard: {e}")),
         }
     }
 
-    pub(super) fn paste(&mut self) {
+    pub(super) fn paste_from_clipboard(&mut self) {
         match read_clipboard() {
             Ok(s) => self.handle_action(Action::InsertString { s }),
             Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
@@ -178,7 +178,7 @@ impl Editor {
     }
 
     pub(super) fn search_in_current_buffer(&mut self) {
-        let selection = MiniBuffer::select_from("> ", self.buffers.active().lines.clone(), self);
+        let selection = MiniBuffer::select_from("> ", self.buffers.active().string_lines(), self);
         if let MiniBufferSelection::Line { cy, .. } = selection {
             self.buffers.active_mut().dot = Dot::Cur {
                 c: Cur { y: cy, x: 0 },
@@ -201,9 +201,9 @@ impl Editor {
             "<RAW BUFFER> ",
             self.buffers
                 .active()
-                .lines
-                .iter()
-                .map(|l| crate::buffer::Line::new(format!("{:?}", l.raw)))
+                .string_lines()
+                .into_iter()
+                .map(|l| format!("{:?}", l))
                 .collect(),
             self,
         );
