@@ -130,34 +130,6 @@ impl Cur {
         }
     }
 
-    /// Move forward until cond returns an x position in the given line or we bottom out at the end of the buffer
-    #[must_use]
-    pub(super) fn move_to(mut self, b: &Buffer, cond: fn(RopeSlice) -> Option<usize>) -> Self {
-        for line in b.txt.lines().skip(self.y) {
-            if let Some(x) = (cond)(line) {
-                self.x = x;
-                return self;
-            }
-            self.y += 1;
-        }
-        self.move_to_line_end(b)
-    }
-
-    /// Move back until cond returns an x position in the given line or we bottom out at the start of the buffer
-    #[must_use]
-    pub(super) fn move_back_to(mut self, b: &Buffer, cond: fn(RopeSlice) -> Option<usize>) -> Self {
-        // Ropey::Lines isn't double ended so we need to collect which is unfortunate
-        let lines: Vec<RopeSlice> = b.txt.lines().take(self.y).collect();
-        for line in lines.into_iter().rev() {
-            self.y -= 1;
-            if let Some(x) = (cond)(line) {
-                self.x = x;
-                return self;
-            }
-        }
-        self.move_to_line_start()
-    }
-
     fn arr(&self, arr: Arrow, b: &Buffer) -> Self {
         let mut cur = *self;
 

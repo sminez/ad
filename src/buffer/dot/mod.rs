@@ -18,8 +18,8 @@ pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
 
 use util::{
-    cond::{blank_line, non_blank_line},
-    consumer::{consume_on_boundary, consume_until, consume_while},
+    cond::{blank_line, non_alphanumeric, non_blank_line},
+    consumer::{consume_on_boundary, consume_while},
 };
 
 /// A Dot represents the currently selected contents of a Buffer.
@@ -245,7 +245,7 @@ pub enum TextObject {
     LineEnd,
     LineStart,
     Paragraph,
-    // Word,
+    Word,
 }
 
 impl UpdateDot for TextObject {
@@ -281,9 +281,13 @@ impl UpdateDot for TextObject {
                     .extend_fwd_lines(b, [(consume_while, non_blank_line)]),
             }
             .collapse_null_range(),
-            // TextObject::Word => Dot::Cur {
-            //     c: dot.active_cur().move_to(b, space),
-            // },
+            TextObject::Word => Dot::Range {
+                r: dot
+                    .as_range()
+                    .extend_bwd_chars(b, [(consume_while, non_alphanumeric)])
+                    .extend_fwd_chars(b, [(consume_while, non_alphanumeric)]),
+            }
+            .collapse_null_range(),
         }
     }
 
@@ -328,11 +332,20 @@ impl UpdateDot for TextObject {
                 start,
                 end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
             ),
-            _ => panic!()
-            // (TextObject::Paragraph, true) => (start.move_to(b, blank_line), end),
-            // (TextObject::Paragraph, false) => (start, end.move_to(b, blank_line)),
-            // (TextObject::Word, true) => (start.move_to(b, space), end),
-            // (TextObject::Word, false) => (start, end.move_to(b, space)),
+            (TextObject::Paragraph, true) => {
+                (start.fwd_lines(b, [(consume_on_boundary, blank_line)]), end)
+            }
+            (TextObject::Paragraph, false) => {
+                (start, end.fwd_lines(b, [(consume_on_boundary, blank_line)]))
+            }
+            (TextObject::Word, true) => (
+                start.fwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
+                end,
+            ),
+            (TextObject::Word, false) => (
+                start,
+                end.fwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
+            ),
         };
 
         Dot::Range {
@@ -375,11 +388,20 @@ impl UpdateDot for TextObject {
                 end.x = 0;
                 (start, end)
             }
-            _ => panic!()
-            // (TextObject::Paragraph, true) => (start.move_back_to(b, blank_line), end),
-            // (TextObject::Paragraph, false) => (start, end.move_back_to(b, blank_line)),
-            // (TextObject::Word, true) => (start.move_back_to(b, space), end),
-            // (TextObject::Word, false) => (start, end.move_back_to(b, space)),
+            (TextObject::Paragraph, true) => {
+                (start.bwd_lines(b, [(consume_on_boundary, blank_line)]), end)
+            }
+            (TextObject::Paragraph, false) => {
+                (start, end.bwd_lines(b, [(consume_on_boundary, blank_line)]))
+            }
+            (TextObject::Word, true) => (
+                start.bwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
+                end,
+            ),
+            (TextObject::Word, false) => (
+                start,
+                end.bwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
+            ),
         };
 
         Dot::Range {

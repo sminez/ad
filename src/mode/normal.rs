@@ -40,6 +40,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('l') ] => [ DotSet(Arr(Right), 1) ],
         [ Home ] => [ DotSet(LineStart, 1) ],
         [ End ] => [ DotSet(LineEnd, 1) ],
+        [ Char('w') ] => [ DotExtendForward(Word, 1), DotCollapseLast ],
+        [ Char('b') ] => [ DotExtendBackward(Word, 1), DotCollapseFirst ],
         [ Char('x') ] => [ DotSet(Line, 1) ],
         [ Char('X') ] => [ DotSet(Paragraph, 1) ],
         [ Char('%') ] => [ DotSet(BufferStart, 1), DotExtendForward(BufferEnd, 1) ],
