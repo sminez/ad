@@ -8,14 +8,19 @@
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
 use crate::{buffer::Buffer, key::Arrow};
-use ropey::RopeSlice;
 use std::fmt;
 
 mod cur;
 mod range;
+mod util;
 
 pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
+
+use util::{
+    cond::{blank_line, non_blank_line},
+    consumer::{consume_on_boundary, consume_until, consume_while},
+};
 
 /// A Dot represents the currently selected contents of a Buffer.
 ///
@@ -243,14 +248,6 @@ pub enum TextObject {
     // Word,
 }
 
-fn blank_line(l: RopeSlice) -> Option<usize> {
-    if l.len_chars() == 1 && l.char(0) == '\n' {
-        Some(0)
-    } else {
-        None
-    }
-}
-
 impl UpdateDot for TextObject {
     fn set_dot(&self, dot: Dot, b: &Buffer) -> Dot {
         match self {
@@ -280,8 +277,8 @@ impl UpdateDot for TextObject {
             TextObject::Paragraph => Dot::Range {
                 r: dot
                     .as_range()
-                    .extend_to(b, blank_line)
-                    .extend_back_to(b, blank_line),
+                    .extend_bwd_lines(b, [(consume_while, non_blank_line)])
+                    .extend_fwd_lines(b, [(consume_while, non_blank_line)]),
             }
             .collapse_null_range(),
             // TextObject::Word => Dot::Cur {
@@ -331,8 +328,9 @@ impl UpdateDot for TextObject {
                 start,
                 end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
             ),
-            (TextObject::Paragraph, true) => (start.move_to(b, blank_line), end),
-            (TextObject::Paragraph, false) => (start, end.move_to(b, blank_line)),
+            _ => panic!()
+            // (TextObject::Paragraph, true) => (start.move_to(b, blank_line), end),
+            // (TextObject::Paragraph, false) => (start, end.move_to(b, blank_line)),
             // (TextObject::Word, true) => (start.move_to(b, space), end),
             // (TextObject::Word, false) => (start, end.move_to(b, space)),
         };
@@ -377,8 +375,9 @@ impl UpdateDot for TextObject {
                 end.x = 0;
                 (start, end)
             }
-            (TextObject::Paragraph, true) => (start.move_back_to(b, blank_line), end),
-            (TextObject::Paragraph, false) => (start, end.move_back_to(b, blank_line)),
+            _ => panic!()
+            // (TextObject::Paragraph, true) => (start.move_back_to(b, blank_line), end),
+            // (TextObject::Paragraph, false) => (start, end.move_back_to(b, blank_line)),
             // (TextObject::Word, true) => (start.move_back_to(b, space), end),
             // (TextObject::Word, false) => (start, end.move_back_to(b, space)),
         };
@@ -422,17 +421,15 @@ The third paragraph is even shorter.";
 
     #[test_case(BufferStart, c(0, 0); "buffer start")]
     #[test_case(BufferEnd, c(8, 36); "buffer end")]
-    #[test_case(Character, c(5, 1); "character")]
+    #[test_case(Character, c(5, 2); "character")]
     #[test_case(Line, r(5, 0, 5, 44); "line")]
     #[test_case(LineEnd, c(5, 44); "line end")]
     #[test_case(LineStart, c(5, 0); "line start")]
-    // FIXME: currently this ends up at r(4, 0, 7, 0) due to how the search for start of
-    // paragraph works
-    // #[test_case(Paragraph, r(5, 0, 7, 0); "paragraph")]
+    #[test_case(Paragraph, r(5, 0, 6, 0); "paragraph")]
     #[test]
     fn set_dot_works(to: TextObject, expected: Dot) {
         let mut b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());
-        b.dot = c(5, 0); // Start of paragraph 2
+        b.dot = c(5, 1); // Start of paragraph 2
         let dot = to.set_dot(b.dot, &b);
 
         assert_eq!(dot, expected);

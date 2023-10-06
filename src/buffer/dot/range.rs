@@ -1,4 +1,14 @@
-use crate::buffer::{dot::Cur, Buffer};
+use crate::buffer::{
+    dot::{
+        util::{
+            cond::Cond,
+            consumer::Consumer,
+            iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
+        },
+        Cur,
+    },
+    Buffer,
+};
 use ropey::RopeSlice;
 use std::{cmp::min, fmt, ops::RangeInclusive};
 
@@ -59,23 +69,46 @@ impl Range {
         self
     }
 
-    /// Extend end back until cond returns an x position in the given line or we bottom
-    /// out at the end of the buffer
     #[must_use]
-    pub(super) fn extend_to(mut self, b: &Buffer, cond: fn(RopeSlice) -> Option<usize>) -> Self {
-        self.end = self.end.move_to(b, cond);
+    pub(super) fn extend_fwd_chars<'b, const C: usize>(
+        mut self,
+        b: &'b Buffer,
+        conds: [(Consumer<IdxChars<'b>, char>, Cond<char>); C],
+    ) -> Self {
+        self.end = self.end.fwd_chars(b, conds);
         self
     }
 
-    /// Extend start back until cond returns an x position in the given line or we bottom
-    /// out at the start of the buffer
     #[must_use]
-    pub(super) fn extend_back_to(
+    pub(super) fn extend_bwd_chars<'b, const C: usize>(
         mut self,
-        b: &Buffer,
-        cond: fn(RopeSlice) -> Option<usize>,
+        b: &'b Buffer,
+        conds: [(Consumer<RevIdxChars<'b>, char>, Cond<char>); C],
     ) -> Self {
-        self.start = self.start.move_back_to(b, cond);
+        self.start = self.start.bwd_chars(b, conds);
+        self
+    }
+
+    #[must_use]
+    pub(super) fn extend_fwd_lines<'b, const C: usize>(
+        mut self,
+        b: &'b Buffer,
+        conds: [(Consumer<IdxLines<'b>, RopeSlice<'b>>, Cond<RopeSlice<'b>>); C],
+    ) -> Self {
+        self.end = self.end.fwd_lines(b, conds);
+        self
+    }
+
+    #[must_use]
+    pub(super) fn extend_bwd_lines<'b, const C: usize>(
+        mut self,
+        b: &'b Buffer,
+        conds: [(
+            Consumer<RevIdxLines<'b>, RopeSlice<'b>>,
+            Cond<RopeSlice<'b>>,
+        ); C],
+    ) -> Self {
+        self.start = self.start.bwd_lines(b, conds);
         self
     }
 

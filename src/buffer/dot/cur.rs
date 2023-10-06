@@ -1,4 +1,14 @@
-use crate::{buffer::Buffer, key::Arrow};
+use crate::{
+    buffer::{
+        dot::util::{
+            cond::Cond,
+            consumer::{chain_consume, Consumer},
+            iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
+        },
+        Buffer,
+    },
+    key::Arrow,
+};
 use ropey::RopeSlice;
 use std::{cmp::Ordering, fmt};
 
@@ -55,6 +65,69 @@ impl Cur {
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         self.x += b.txt.line(self.y).chars().skip(self.x).count();
         self
+    }
+
+    /// Move this cursor forward by character through the buffer while the provided conditions are
+    /// satisfied, returning a new Cur pointing to the index where they return Some(index). If the
+    /// conditions never return Some then the resulting Cur will be EOF.
+    #[must_use]
+    pub(super) fn fwd_chars<'b, const C: usize>(
+        self,
+        b: &'b Buffer,
+        conds: [(Consumer<IdxChars<'b>, char>, Cond<char>); C],
+    ) -> Self {
+        match chain_consume(IdxChars::new(self, b), conds) {
+            Some(idx) => Cur::from_char_idx(idx, b),
+            None => Cur::buffer_end(b),
+        }
+    }
+
+    /// Move this cursor backward by character through the buffer while the provided conditions are
+    /// satisfied, returning a new Cur pointing to the index where they return Some(index). If the
+    /// conditions never return Some then the resulting Cur will be 0,0.
+    #[must_use]
+    pub(super) fn bwd_chars<'b, const C: usize>(
+        self,
+        b: &'b Buffer,
+        conds: [(Consumer<RevIdxChars<'b>, char>, Cond<char>); C],
+    ) -> Self {
+        match chain_consume(RevIdxChars::new(self, b), conds) {
+            Some(idx) => Cur::from_char_idx(idx, b),
+            None => Cur::buffer_start(),
+        }
+    }
+
+    /// Move this cursor forward by line through the buffer while the provided conditions are
+    /// satisfied, returning a new Cur pointing to the index where they return Some(index). If the
+    /// conditions never return Some then the resulting Cur will be EOF.
+    #[must_use]
+    pub(super) fn fwd_lines<'b, const C: usize>(
+        self,
+        b: &'b Buffer,
+        conds: [(Consumer<IdxLines<'b>, RopeSlice<'b>>, Cond<RopeSlice<'b>>); C],
+    ) -> Self {
+        match chain_consume(IdxLines::new(self, b), conds) {
+            Some(y) => Cur { y, x: 0 },
+            None => Cur::buffer_end(b),
+        }
+    }
+
+    /// Move this cursor backward by line through the buffer while the provided conditions are
+    /// satisfied, returning a new Cur pointing to the index where they return Some(index). If the
+    /// conditions never return Some then the resulting Cur will be 0,0.
+    #[must_use]
+    pub(super) fn bwd_lines<'b, const C: usize>(
+        self,
+        b: &'b Buffer,
+        conds: [(
+            Consumer<RevIdxLines<'b>, RopeSlice<'b>>,
+            Cond<RopeSlice<'b>>,
+        ); C],
+    ) -> Self {
+        match chain_consume(RevIdxLines::new(self, b), conds) {
+            Some(y) => Cur { y, x: 0 },
+            None => Cur::buffer_start(),
+        }
     }
 
     /// Move forward until cond returns an x position in the given line or we bottom out at the end of the buffer

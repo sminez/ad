@@ -129,7 +129,6 @@ impl Editor {
         }
     }
 
-    #[inline]
     fn handle_action(&mut self, action: Action) {
         match action {
             Action::ChangeDirectory { path } => self.change_directory(path),
