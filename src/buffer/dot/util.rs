@@ -154,12 +154,11 @@ pub(super) mod consumer {
     where
         I: Iterator<Item = (usize, T)>,
     {
-        let mut current = None;
         loop {
-            match it.peek() {
-                Some((i, c)) if cond(c) => return Some(*i),
-                Some(_) => current = it.next(),
-                None => return current.map(|(i, _)| i),
+            match it.next() {
+                Some((i, c)) if cond(&c) => return Some(i),
+                Some(_) => (),
+                None => return None,
             }
         }
     }
@@ -188,8 +187,11 @@ pub(super) mod consumer {
             (Some((_, c1)), Some((_, c2))) if cond(&c1) && !cond(c2) => consume_until(cond, it),
             // x => cond does not hold: consume until we hit cond
             (Some((_, c)), _) if !cond(&c) => consume_until(cond, it),
-            // Condition is holding and will remain or we're already out of input
-            _ => None,
+            // Condition is holding for this position and the next (first case covers the next item
+            // breaking the condition) so return the current position.
+            (Some((i, _)), _) => Some(i),
+            // Out of input
+            (None, _) => None,
         }
     }
 
@@ -210,5 +212,50 @@ pub(super) mod consumer {
         }
 
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cond::*, consumer::*};
+    use simple_test_case::test_case;
+
+    #[test_case("a thing", Some(0), 6; "initially matching on boundary")]
+    #[test_case("an item", Some(0), 6; "initially matching not on boundary")]
+    #[test_case("    foo", Some(4), 2; "not initially matching")]
+    #[test_case("       ", None, 0; "never matching")]
+    #[test]
+    fn consume_until_works(s: &str, expected: Option<usize>, remaining: usize) {
+        let mut it = s.chars().enumerate().peekable();
+        let res = consume_until(alphanumeric, &mut it);
+
+        assert_eq!(res, expected);
+        assert_eq!(it.count(), remaining);
+    }
+
+    #[test_case("a thing", Some(0), 6; "initially matching on boundary")]
+    #[test_case("an item", Some(1), 5; "initially matching not on boundary")]
+    #[test_case("    foo", None, 7; "not initially matching")]
+    #[test_case("       ", None, 7; "never matching")]
+    #[test]
+    fn consume_while_works(s: &str, expected: Option<usize>, remaining: usize) {
+        let mut it = s.chars().enumerate().peekable();
+        let res = consume_while(alphanumeric, &mut it);
+
+        assert_eq!(res, expected);
+        assert_eq!(it.count(), remaining);
+    }
+
+    #[test_case("a thing", Some(2), 4; "initially matching on boundary")]
+    #[test_case("an item", Some(0), 6; "initially matching not on boundary")]
+    #[test_case("    foo", Some(4), 2; "not initially matching")]
+    #[test_case("       ", None, 0; "never matching")]
+    #[test]
+    fn consume_on_boundary_works(s: &str, expected: Option<usize>, remaining: usize) {
+        let mut it = s.chars().enumerate().peekable();
+        let res = consume_on_boundary(alphanumeric, &mut it);
+
+        assert_eq!(res, expected);
+        assert_eq!(it.count(), remaining);
     }
 }

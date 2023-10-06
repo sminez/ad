@@ -18,8 +18,8 @@ pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
 
 use util::{
-    cond::{blank_line, non_alphanumeric, non_blank_line},
-    consumer::{consume_on_boundary, consume_while},
+    cond::{alphanumeric, blank_line, non_alphanumeric, non_blank_line},
+    consumer::{consume_on_boundary, consume_until, consume_while},
 };
 
 /// A Dot represents the currently selected contents of a Buffer.
@@ -339,7 +339,13 @@ impl UpdateDot for TextObject {
                 (start, end.fwd_lines(b, [(consume_on_boundary, blank_line)]))
             }
             (TextObject::Word, true) => (
-                start.fwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
+                start.fwd_chars(
+                    b,
+                    [
+                        (consume_until, non_alphanumeric),
+                        (consume_until, alphanumeric),
+                    ],
+                ),
                 end,
             ),
             (TextObject::Word, false) => (
@@ -413,7 +419,7 @@ impl UpdateDot for TextObject {
 
 #[cfg(test)]
 mod tests {
-    use super::{TextObject::*, *};
+    use super::{util::iter::IdxChars, TextObject::*, *};
     use simple_test_case::test_case;
 
     const EXAMPLE_TEXT: &str = "\
@@ -439,6 +445,15 @@ The third paragraph is even shorter.";
                 start_active: false,
             },
         }
+    }
+
+    #[test]
+    fn idx_chars_works() {
+        let b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());
+        let from_it: Vec<(usize, char)> = IdxChars::new(Cur::buffer_start(), &b).collect();
+        let expected: Vec<(usize, char)> = EXAMPLE_TEXT.chars().enumerate().collect();
+
+        assert_eq!(from_it, expected);
     }
 
     #[test_case(BufferStart, c(0, 0); "buffer start")]
