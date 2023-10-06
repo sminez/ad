@@ -47,7 +47,11 @@ pub(super) mod iter {
             // character we yeild is at the cursor position
             inner.next();
 
-            RevIdxChars { inner, idx }.peekable()
+            RevIdxChars {
+                inner,
+                idx: idx + 1,
+            }
+            .peekable()
         }
     }
 
@@ -122,10 +126,6 @@ pub(super) mod cond {
     use ropey::RopeSlice;
 
     pub type Cond<T> = fn(&T) -> bool;
-
-    pub fn whitespace(c: &char) -> bool {
-        c.is_whitespace()
-    }
 
     pub fn alphanumeric(c: &char) -> bool {
         c.is_alphanumeric()

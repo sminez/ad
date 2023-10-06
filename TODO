@@ -1,7 +1,5 @@
 :: TODO
 
-- [ ] undo/redo/range delete has some bugs...
-  - This needs some proper tests around the edge case behaviour
  [ ] Mouse support
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?

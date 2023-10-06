@@ -55,6 +55,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('J') ] => [ DotExtendForward(Line, 1) ],
         [ Char('K') ] => [ DotExtendBackward(Line, 1) ],
         [ Char('L') ] => [ DotExtendForward(Character, 1) ],
+        [ Char('W') ] => [ DotExtendForward(Word, 1) ],
+        [ Char('B') ] => [ DotExtendBackward(Word, 1) ],
 
         [ Char('{') ] => [ DotExtendBackward(Paragraph, 1), DotCollapseFirst ],
         [ Char('}') ] => [ DotExtendForward(Paragraph, 1), DotCollapseLast ],

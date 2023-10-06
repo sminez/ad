@@ -248,6 +248,49 @@ pub enum TextObject {
     Word,
 }
 
+// This is working alright for now but not behaving quite right if the cursor is on the last
+// line of a paragraph.
+macro_rules! paragraph {
+    (@fwd) => {
+        [
+            (consume_on_boundary, blank_line),
+            (consume_until, non_blank_line),
+        ]
+    };
+
+    (@bwd) => {
+        [
+            (consume_on_boundary, blank_line),
+            (consume_on_boundary, non_blank_line),
+            (consume_on_boundary, blank_line),
+        ]
+    };
+}
+
+// Again, _broadly_ working but not consistent with vim or kakoune in terms of what is treated
+// as the start and end of a word. This is largely down to not being conditional on the previous
+// character (which we would need to move correctly between whitespace, alphanumeric and "other"
+// characters.
+//
+// -> vim and kakoune actually have different behaviours around what they treat as the target of
+//    the "word" and "backwards word" text objects so there isn't even a consistent definition
+//    to align with it seems?
+macro_rules! word {
+    (@fwd) => {
+        [
+            (consume_until, non_alphanumeric),
+            (consume_until, alphanumeric),
+        ]
+    };
+    (@bwd) => {
+        [
+            (consume_until, non_alphanumeric),
+            (consume_until, alphanumeric),
+            (consume_while, alphanumeric),
+        ]
+    };
+}
+
 impl UpdateDot for TextObject {
     fn set_dot(&self, dot: Dot, b: &Buffer) -> Dot {
         match self {
@@ -277,15 +320,15 @@ impl UpdateDot for TextObject {
             TextObject::Paragraph => Dot::Range {
                 r: dot
                     .as_range()
-                    .extend_bwd_lines(b, [(consume_while, non_blank_line)])
-                    .extend_fwd_lines(b, [(consume_while, non_blank_line)]),
+                    .extend_bwd_lines(b, paragraph!(@bwd))
+                    .extend_fwd_lines(b, paragraph!(@fwd)),
             }
             .collapse_null_range(),
             TextObject::Word => Dot::Range {
                 r: dot
                     .as_range()
-                    .extend_bwd_chars(b, [(consume_while, non_alphanumeric)])
-                    .extend_fwd_chars(b, [(consume_while, non_alphanumeric)]),
+                    .extend_bwd_chars(b, word!(@bwd))
+                    .extend_fwd_chars(b, word!(@fwd)),
             }
             .collapse_null_range(),
         }
@@ -332,26 +375,10 @@ impl UpdateDot for TextObject {
                 start,
                 end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
             ),
-            (TextObject::Paragraph, true) => {
-                (start.fwd_lines(b, [(consume_on_boundary, blank_line)]), end)
-            }
-            (TextObject::Paragraph, false) => {
-                (start, end.fwd_lines(b, [(consume_on_boundary, blank_line)]))
-            }
-            (TextObject::Word, true) => (
-                start.fwd_chars(
-                    b,
-                    [
-                        (consume_until, non_alphanumeric),
-                        (consume_until, alphanumeric),
-                    ],
-                ),
-                end,
-            ),
-            (TextObject::Word, false) => (
-                start,
-                end.fwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
-            ),
+            (TextObject::Paragraph, true) => (start.fwd_lines(b, paragraph!(@fwd)), end),
+            (TextObject::Paragraph, false) => (start, end.fwd_lines(b, paragraph!(@fwd))),
+            (TextObject::Word, true) => (start.fwd_chars(b, word!(@fwd)), end),
+            (TextObject::Word, false) => (start, end.fwd_chars(b, word!(@fwd))),
         };
 
         Dot::Range {
@@ -394,20 +421,10 @@ impl UpdateDot for TextObject {
                 end.x = 0;
                 (start, end)
             }
-            (TextObject::Paragraph, true) => {
-                (start.bwd_lines(b, [(consume_on_boundary, blank_line)]), end)
-            }
-            (TextObject::Paragraph, false) => {
-                (start, end.bwd_lines(b, [(consume_on_boundary, blank_line)]))
-            }
-            (TextObject::Word, true) => (
-                start.bwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
-                end,
-            ),
-            (TextObject::Word, false) => (
-                start,
-                end.bwd_chars(b, [(consume_on_boundary, non_alphanumeric)]),
-            ),
+            (TextObject::Paragraph, true) => (start.bwd_lines(b, paragraph!(@fwd)), end),
+            (TextObject::Paragraph, false) => (start, end.bwd_lines(b, paragraph!(@bwd))),
+            (TextObject::Word, true) => (start.bwd_chars(b, word!(@bwd)), end),
+            (TextObject::Word, false) => (start, end.bwd_chars(b, word!(@bwd))),
         };
 
         Dot::Range {
