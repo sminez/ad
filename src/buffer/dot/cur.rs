@@ -3,13 +3,12 @@ use crate::{
         dot::util::{
             cond::Cond,
             consumer::{chain_consume, Consumer},
-            iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
+            iter::{IdxChars, RevIdxChars},
         },
         Buffer,
     },
     key::Arrow,
 };
-use ropey::RopeSlice;
 use std::{cmp::Ordering, fmt};
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -153,39 +152,6 @@ impl Cur {
     ) -> Self {
         match chain_consume(RevIdxChars::new(self, b), conds) {
             Some(idx) => Cur::from_char_idx(idx, b),
-            None => Cur::buffer_start(),
-        }
-    }
-
-    /// Move this cursor forward by line through the buffer while the provided conditions are
-    /// satisfied, returning a new Cur pointing to the index where they return Some(index). If the
-    /// conditions never return Some then the resulting Cur will be EOF.
-    #[must_use]
-    pub(super) fn fwd_lines<'b, const C: usize>(
-        self,
-        b: &'b Buffer,
-        conds: [(Consumer<IdxLines<'b>, RopeSlice<'b>>, Cond<RopeSlice<'b>>); C],
-    ) -> Self {
-        match chain_consume(IdxLines::new(self, b), conds) {
-            Some(y) => Cur { y, x: 0 },
-            None => Cur::buffer_end(b),
-        }
-    }
-
-    /// Move this cursor backward by line through the buffer while the provided conditions are
-    /// satisfied, returning a new Cur pointing to the index where they return Some(index). If the
-    /// conditions never return Some then the resulting Cur will be 0,0.
-    #[must_use]
-    pub(super) fn bwd_lines<'b, const C: usize>(
-        self,
-        b: &'b Buffer,
-        conds: [(
-            Consumer<RevIdxLines<'b>, RopeSlice<'b>>,
-            Cond<RopeSlice<'b>>,
-        ); C],
-    ) -> Self {
-        match chain_consume(RevIdxLines::new(self, b), conds) {
-            Some(y) => Cur { y, x: 0 },
             None => Cur::buffer_start(),
         }
     }

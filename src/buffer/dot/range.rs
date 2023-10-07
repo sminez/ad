@@ -3,13 +3,12 @@ use crate::buffer::{
         util::{
             cond::Cond,
             consumer::Consumer,
-            iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
+            iter::{IdxChars, RevIdxChars},
         },
         Cur,
     },
     Buffer,
 };
-use ropey::RopeSlice;
 use std::{cmp::min, fmt, ops::RangeInclusive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -86,29 +85,6 @@ impl Range {
         conds: [(Consumer<RevIdxChars<'b>, char>, Cond<char>); C],
     ) -> Self {
         self.start = self.start.bwd_chars(b, conds);
-        self
-    }
-
-    #[must_use]
-    pub(super) fn extend_fwd_lines<'b, const C: usize>(
-        mut self,
-        b: &'b Buffer,
-        conds: [(Consumer<IdxLines<'b>, RopeSlice<'b>>, Cond<RopeSlice<'b>>); C],
-    ) -> Self {
-        self.end = self.end.fwd_lines(b, conds);
-        self
-    }
-
-    #[must_use]
-    pub(super) fn extend_bwd_lines<'b, const C: usize>(
-        mut self,
-        b: &'b Buffer,
-        conds: [(
-            Consumer<RevIdxLines<'b>, RopeSlice<'b>>,
-            Cond<RopeSlice<'b>>,
-        ); C],
-    ) -> Self {
-        self.start = self.start.bwd_lines(b, conds);
         self
     }
 

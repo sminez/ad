@@ -176,25 +176,6 @@ pub(super) mod consumer {
         }
     }
 
-    /// If the given condition doesn't currently hold or if currently holds, but the next character
-    /// would break it then consume until the condition holds again.
-    pub fn consume_on_boundary<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
-    where
-        I: Iterator<Item = (usize, T)>,
-    {
-        match (it.next(), it.peek()) {
-            // (x, x+1) => (cond holds, cond does not hold): consume until we hit cond
-            (Some((_, c1)), Some((_, c2))) if cond(&c1) && !cond(c2) => consume_until(cond, it),
-            // x => cond does not hold: consume until we hit cond
-            (Some((_, c)), _) if !cond(&c) => consume_until(cond, it),
-            // Condition is holding for this position and the next (first case covers the next item
-            // breaking the condition) so return the current position.
-            (Some((i, _)), _) => Some(i),
-            // Out of input
-            (None, _) => None,
-        }
-    }
-
     /// Run a list of consumer functions over an iterator to locate a desired point in a buffer.
     ///
     /// If the final consumer returns `None` then the base case will be returned, otherwise the index
@@ -241,19 +222,6 @@ mod tests {
     fn consume_while_works(s: &str, expected: Option<usize>, remaining: usize) {
         let mut it = s.chars().enumerate().peekable();
         let res = consume_while(alphanumeric, &mut it);
-
-        assert_eq!(res, expected);
-        assert_eq!(it.count(), remaining);
-    }
-
-    #[test_case("a thing", Some(2), 4; "initially matching on boundary")]
-    #[test_case("an item", Some(0), 6; "initially matching not on boundary")]
-    #[test_case("    foo", Some(4), 2; "not initially matching")]
-    #[test_case("       ", None, 0; "never matching")]
-    #[test]
-    fn consume_on_boundary_works(s: &str, expected: Option<usize>, remaining: usize) {
-        let mut it = s.chars().enumerate().peekable();
-        let res = consume_on_boundary(alphanumeric, &mut it);
 
         assert_eq!(res, expected);
         assert_eq!(it.count(), remaining);
