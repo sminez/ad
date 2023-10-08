@@ -8,7 +8,8 @@
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
 use crate::{buffer::Buffer, key::Arrow};
-use std::fmt;
+use ropey::RopeSlice;
+use std::{fmt, iter::Peekable};
 
 mod cur;
 mod range;
@@ -18,7 +19,7 @@ pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
 
 use util::{
-    cond::{blank_line, non_blank_line},
+    cond::{blank_line, non_blank_line, Cond},
     consumer::consume_while,
     iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
 };
@@ -430,7 +431,6 @@ impl From<char> for CharKind {
     }
 }
 
-use std::iter::Peekable;
 fn next_word_boundary<I>(b: &Buffer, it: &mut Peekable<I>) -> Option<Cur>
 where
     I: Iterator<Item = (usize, char)>,
@@ -471,7 +471,46 @@ where
     None
 }
 
+fn next_paragraph_boundary<'a, I>(
+    cond1: Cond<RopeSlice<'a>>,
+    cond2: Cond<RopeSlice<'a>>,
+    it: &mut Peekable<I>,
+) -> Option<Cur>
+where
+    I: Iterator<Item = (usize, RopeSlice<'a>)>,
+{
+    match (it.next(), it.peek()) {
+        (Some((_, current)), Some((_, next))) if (cond1)(&current) => {
+            if (cond2)(next) {
+                // On a boundary already so find the next one
+                it.next();
+                consume_while(cond2, it);
+                if let Some(y) = consume_while(cond1, it) {
+                    return Some(Cur { y, x: 0 });
+                }
+            } else if let Some(y) = consume_while(cond1, it) {
+                return Some(Cur { y, x: 0 });
+            }
+        }
+
+        (Some(_), Some(_)) => {
+            consume_while(cond2, it);
+            if let Some(y) = consume_while(cond1, it) {
+                return Some(Cur { y, x: 0 });
+            }
+        }
+
+        // Out of input
+        _ => (),
+    }
+
+    None
+}
+
 impl Cur {
+    // The following marks are where we should be moving to on successive
+    // applications of this function.
+    //
     // "  fn foo(bar: usize) -> anyhow::Result<()>  "
     //     ^   ^^  ^^     ^^  ^      ^ ^     ^   ^ ^
     fn to_next_word_end(self, b: &Buffer) -> Cur {
@@ -492,34 +531,8 @@ impl Cur {
     /// Following the behaviour of kakoune, this is defined as the last blank line before the
     /// next paragraph start.
     fn to_next_paragraph_end(self, b: &Buffer) -> Cur {
-        let mut it = IdxLines::new(self, b);
-
-        match (it.next(), it.peek()) {
-            (Some((_, current)), Some((_, next))) if blank_line(&current) => {
-                if non_blank_line(next) {
-                    // On a paragraph end already so find the next one
-                    it.next();
-                    consume_while(non_blank_line, &mut it);
-                    if let Some(y) = consume_while(blank_line, &mut it) {
-                        return Cur { y, x: 0 };
-                    }
-                } else if let Some(y) = consume_while(blank_line, &mut it) {
-                    return Cur { y, x: 0 };
-                }
-            }
-
-            (Some((_, current)), Some(_)) if non_blank_line(&current) => {
-                consume_while(non_blank_line, &mut it);
-                if let Some(y) = consume_while(blank_line, &mut it) {
-                    return Cur { y, x: 0 };
-                }
-            }
-
-            // Out of input
-            _ => (),
-        }
-
-        Cur::buffer_end(b)
+        next_paragraph_boundary(blank_line, non_blank_line, &mut IdxLines::new(self, b))
+            .unwrap_or_else(|| Cur::buffer_end(b))
     }
 
     /// Reverse the given cursor to the previous "paragraph start".
@@ -527,35 +540,8 @@ impl Cur {
     /// Following the behaviour of kakoune, this is defined as the first character of the
     /// first non-blank line of the previous paragraph.
     fn to_prev_paragraph_start(self, b: &Buffer) -> Cur {
-        let mut it = RevIdxLines::new(self, b);
-
-        match (it.next(), it.peek()) {
-            (Some((_, current)), Some((_, next))) if non_blank_line(&current) => {
-                if blank_line(next) {
-                    // on a paragraph start already
-                    it.next();
-                    consume_while(blank_line, &mut it);
-                    if let Some(y) = consume_while(non_blank_line, &mut it) {
-                        return Cur { y, x: 0 };
-                    }
-                } else if let Some(y) = consume_while(non_blank_line, &mut it) {
-                    return Cur { y, x: 0 };
-                }
-            }
-
-            // On a blank line
-            (Some(_), Some(_)) => {
-                consume_while(blank_line, &mut it);
-                if let Some(y) = consume_while(non_blank_line, &mut it) {
-                    return Cur { y, x: 0 };
-                }
-            }
-
-            // Out of input
-            _ => (),
-        }
-
-        Cur::buffer_start()
+        next_paragraph_boundary(non_blank_line, blank_line, &mut RevIdxLines::new(self, b))
+            .unwrap_or_else(Cur::buffer_start)
     }
 }
 
