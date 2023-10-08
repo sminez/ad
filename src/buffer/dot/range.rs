@@ -1,14 +1,4 @@
-use crate::buffer::{
-    dot::{
-        util::{
-            cond::Cond,
-            consumer::Consumer,
-            iter::{IdxChars, RevIdxChars},
-        },
-        Cur,
-    },
-    Buffer,
-};
+use crate::buffer::{dot::Cur, Buffer};
 use std::{cmp::min, fmt, ops::RangeInclusive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -65,26 +55,6 @@ impl Range {
     #[must_use]
     pub(super) fn extend_to_line_end(mut self, b: &Buffer) -> Self {
         self.end = self.end.move_to_line_end(b);
-        self
-    }
-
-    #[must_use]
-    pub(super) fn extend_fwd_chars<'b, const C: usize>(
-        mut self,
-        b: &'b Buffer,
-        conds: [(Consumer<IdxChars<'b>, char>, Cond<char>); C],
-    ) -> Self {
-        self.end = self.end.fwd_chars(b, conds);
-        self
-    }
-
-    #[must_use]
-    pub(super) fn extend_bwd_chars<'b, const C: usize>(
-        mut self,
-        b: &'b Buffer,
-        conds: [(Consumer<RevIdxChars<'b>, char>, Cond<char>); C],
-    ) -> Self {
-        self.start = self.start.bwd_chars(b, conds);
         self
     }
 

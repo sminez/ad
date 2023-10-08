@@ -18,9 +18,9 @@ pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
 
 use util::{
-    cond::{alphanumeric, blank_line, non_alphanumeric, non_blank_line},
-    consumer::{consume_until, consume_while},
-    iter::{IdxLines, RevIdxLines},
+    cond::{blank_line, non_blank_line},
+    consumer::consume_while,
+    iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
 };
 
 /// A Dot represents the currently selected contents of a Buffer.
@@ -249,30 +249,6 @@ pub enum TextObject {
     Word,
 }
 
-// Again, _broadly_ working but not consistent with vim or kakoune in terms of what is treated
-// as the start and end of a word. This is largely down to not being conditional on the previous
-// character (which we would need to move correctly between whitespace, alphanumeric and "other"
-// characters.
-//
-// -> vim and kakoune actually have different behaviours around what they treat as the target of
-//    the "word" and "backwards word" text objects so there isn't even a consistent definition
-//    to align with it seems?
-macro_rules! word {
-    (@fwd) => {
-        [
-            (consume_until, non_alphanumeric),
-            (consume_until, alphanumeric),
-        ]
-    };
-    (@bwd) => {
-        [
-            (consume_until, non_alphanumeric),
-            (consume_until, alphanumeric),
-            (consume_while, alphanumeric),
-        ]
-    };
-}
-
 impl UpdateDot for TextObject {
     fn set_dot(&self, dot: Dot, b: &Buffer) -> Dot {
         match self {
@@ -315,11 +291,21 @@ impl UpdateDot for TextObject {
                 }
             }
             .collapse_null_range(),
-            TextObject::Word => Dot::Range {
-                r: dot
-                    .as_range()
-                    .extend_bwd_chars(b, word!(@bwd))
-                    .extend_fwd_chars(b, word!(@fwd)),
+
+            TextObject::Word => {
+                let Range {
+                    start,
+                    end,
+                    start_active,
+                } = dot.as_range();
+
+                Dot::Range {
+                    r: Range {
+                        start: start.to_prev_word_start(b),
+                        end: end.to_next_word_end(b),
+                        start_active,
+                    },
+                }
             }
             .collapse_null_range(),
         }
@@ -368,8 +354,8 @@ impl UpdateDot for TextObject {
             ),
             (TextObject::Paragraph, true) => (start.to_next_paragraph_end(b), end),
             (TextObject::Paragraph, false) => (start, end.to_next_paragraph_end(b)),
-            (TextObject::Word, true) => (start.fwd_chars(b, word!(@fwd)), end),
-            (TextObject::Word, false) => (start, end.fwd_chars(b, word!(@fwd))),
+            (TextObject::Word, true) => (start.to_next_word_end(b), end),
+            (TextObject::Word, false) => (start, end.to_next_word_end(b)),
         };
 
         Dot::Range {
@@ -414,8 +400,8 @@ impl UpdateDot for TextObject {
             }
             (TextObject::Paragraph, true) => (start.to_prev_paragraph_start(b), end),
             (TextObject::Paragraph, false) => (start, end.to_prev_paragraph_start(b)),
-            (TextObject::Word, true) => (start.bwd_chars(b, word!(@bwd)), end),
-            (TextObject::Word, false) => (start, end.bwd_chars(b, word!(@bwd))),
+            (TextObject::Word, true) => (start.to_prev_word_start(b), end),
+            (TextObject::Word, false) => (start, end.to_prev_word_start(b)),
         };
 
         Dot::Range {
@@ -425,7 +411,82 @@ impl UpdateDot for TextObject {
     }
 }
 
+#[derive(Copy, Clone, PartialEq)]
+enum CharKind {
+    Whitespace,
+    Alnum,
+    NonAlnum,
+}
+
+impl From<char> for CharKind {
+    fn from(ch: char) -> Self {
+        if ch.is_whitespace() {
+            Self::Whitespace
+        } else if ch.is_alphanumeric() {
+            Self::Alnum
+        } else {
+            Self::NonAlnum
+        }
+    }
+}
+
+use std::iter::Peekable;
+fn next_word_boundary<I>(b: &Buffer, it: &mut Peekable<I>) -> Option<Cur>
+where
+    I: Iterator<Item = (usize, char)>,
+{
+    let (mut idx, k): (usize, CharKind) = match (it.next(), it.peek()) {
+        // If we are on whitespace or the next character is whitespace then we need to
+        // advance until we find the next word and start from there
+        (Some((_, c1)), Some((_, c2))) if c1.is_whitespace() || c2.is_whitespace() => {
+            consume_while(|c| c.is_whitespace(), it);
+            match it.next() {
+                Some((i, k)) => (i, k.into()),
+                None => return None,
+            }
+        }
+
+        // If the next kind doesn't match the current one then we're on a boundary and we
+        // need to start from the following character not this one.
+        (Some((_, c1)), Some((_, c2))) if CharKind::from(c1) != CharKind::from(*c2) => {
+            let (i, c) = it.next().unwrap();
+            (i, c.into())
+        }
+
+        // We're currently within a word
+        (Some((i, c)), Some(_)) => (i, c.into()),
+
+        // The next char is the end of our input
+        _ => return None,
+    };
+
+    for (j, c) in it {
+        let k2 = CharKind::from(c);
+        if k2 != k {
+            return Some(Cur::from_char_idx(idx, b));
+        }
+        idx = j;
+    }
+
+    None
+}
+
 impl Cur {
+    // "  fn foo(bar: usize) -> anyhow::Result<()>  "
+    //     ^   ^^  ^^     ^^  ^      ^ ^     ^   ^ ^
+    fn to_next_word_end(self, b: &Buffer) -> Cur {
+        next_word_boundary(b, &mut IdxChars::new(self, b)).unwrap_or_else(|| Cur::buffer_end(b))
+    }
+
+    // The following marks are where we should be moving to on successive
+    // applications of this function.
+    //
+    // "  fn foo(bar: usize) -> anyhow::Result<()>  "
+    //  ^ ^  ^  ^^  ^ ^    ^ ^  ^     ^ ^     ^
+    fn to_prev_word_start(self, b: &Buffer) -> Cur {
+        next_word_boundary(b, &mut RevIdxChars::new(self, b)).unwrap_or_else(Cur::buffer_start)
+    }
+
     /// Advance the given cursor to the next "paragraph end".
     ///
     /// Following the behaviour of kakoune, this is defined as the last blank line before the
@@ -544,7 +605,6 @@ The third paragraph is even shorter.";
     #[test_case(Line, r(5, 0, 5, 43); "line")]
     #[test_case(LineEnd, c(5, 43); "line end")]
     #[test_case(LineStart, c(5, 0); "line start")]
-    // #[test_case(Paragraph, r(5, 0, 6, 0); "paragraph")]
     #[test]
     fn set_dot_works(to: TextObject, expected: Dot) {
         let mut b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());

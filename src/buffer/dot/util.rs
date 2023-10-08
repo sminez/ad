@@ -127,14 +127,6 @@ pub(super) mod cond {
 
     pub type Cond<T> = fn(&T) -> bool;
 
-    pub fn alphanumeric(c: &char) -> bool {
-        c.is_alphanumeric()
-    }
-
-    pub fn non_alphanumeric(c: &char) -> bool {
-        !c.is_alphanumeric()
-    }
-
     pub fn blank_line(line: &RopeSlice<'_>) -> bool {
         line.chars().all(|c| c.is_whitespace())
     }
@@ -148,20 +140,18 @@ pub(super) mod consumer {
     use super::cond::Cond;
     use std::iter::Peekable;
 
-    pub type Consumer<I, T> = fn(Cond<T>, &mut Peekable<I>) -> Option<usize>;
-
-    pub fn consume_until<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
-    where
-        I: Iterator<Item = (usize, T)>,
-    {
-        loop {
-            match it.next() {
-                Some((i, c)) if cond(&c) => return Some(i),
-                Some(_) => (),
-                None => return None,
-            }
-        }
-    }
+    // pub fn consume_until<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
+    // where
+    //     I: Iterator<Item = (usize, T)>,
+    // {
+    //     loop {
+    //         match it.next() {
+    //             Some((i, c)) if cond(&c) => return Some(i),
+    //             Some(_) => (),
+    //             None => return None,
+    //         }
+    //     }
+    // }
 
     pub fn consume_while<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
     where
@@ -175,44 +165,29 @@ pub(super) mod consumer {
             }
         }
     }
-
-    /// Run a list of consumer functions over an iterator to locate a desired point in a buffer.
-    ///
-    /// If the final consumer returns `None` then the base case will be returned, otherwise the index
-    /// located by that consumer will be returned.
-    pub fn chain_consume<const C: usize, I, T>(
-        mut it: Peekable<I>,
-        funcs: [(Consumer<I, T>, Cond<T>); C],
-    ) -> Option<usize>
-    where
-        I: Iterator<Item = (usize, T)>,
-    {
-        let mut res = None;
-        for (f, cond) in funcs.into_iter() {
-            res = f(cond, &mut it);
-        }
-
-        res
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{cond::*, consumer::*};
+    use super::consumer::*;
     use simple_test_case::test_case;
 
-    #[test_case("a thing", Some(0), 6; "initially matching on boundary")]
-    #[test_case("an item", Some(0), 6; "initially matching not on boundary")]
-    #[test_case("    foo", Some(4), 2; "not initially matching")]
-    #[test_case("       ", None, 0; "never matching")]
-    #[test]
-    fn consume_until_works(s: &str, expected: Option<usize>, remaining: usize) {
-        let mut it = s.chars().enumerate().peekable();
-        let res = consume_until(alphanumeric, &mut it);
-
-        assert_eq!(res, expected);
-        assert_eq!(it.count(), remaining);
+    pub fn alphanumeric(ch: &char) -> bool {
+        ch.is_alphanumeric()
     }
+
+    // #[test_case("a thing", Some(0), 6; "initially matching on boundary")]
+    // #[test_case("an item", Some(0), 6; "initially matching not on boundary")]
+    // #[test_case("    foo", Some(4), 2; "not initially matching")]
+    // #[test_case("       ", None, 0; "never matching")]
+    // #[test]
+    // fn consume_until_works(s: &str, expected: Option<usize>, remaining: usize) {
+    //     let mut it = s.chars().enumerate().peekable();
+    //     let res = consume_until(alphanumeric, &mut it);
+
+    //     assert_eq!(res, expected);
+    //     assert_eq!(it.count(), remaining);
+    // }
 
     #[test_case("a thing", Some(0), 6; "initially matching on boundary")]
     #[test_case("an item", Some(1), 5; "initially matching not on boundary")]
