@@ -183,6 +183,7 @@ impl Editor {
             self.buffers.active_mut().dot = Dot::Cur {
                 c: Cur { y: cy, x: 0 },
             };
+            self.handle_action(Action::DotSet(TextObject::Line, 1));
         }
     }
 
