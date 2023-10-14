@@ -70,6 +70,21 @@ impl Range {
         }
     }
 
+    pub fn set_active_cursor(&mut self, c: Cur) {
+        if self.start_active {
+            if c >= self.start {
+                self.end = self.start;
+            }
+            self.start = c;
+        } else if c <= self.start {
+            self.end = self.start;
+            self.start = c;
+            self.start_active = true;
+        } else {
+            self.end = c;
+        }
+    }
+
     pub(crate) fn line_range(&self, y: usize) -> Option<LineRange> {
         if y == self.start.y {
             if self.start.y == self.end.y {

@@ -25,6 +25,7 @@ pub enum Key {
     Alt(char),
     CtrlAlt(char),
     Tab,
+    BackTab,
     Return,
     Backspace,
     Arrow(Arrow),
@@ -34,6 +35,8 @@ pub enum Key {
     PageUp,
     PageDown,
     Esc,
+    // A little gross to call this a key but
+    Mouse(MouseEvent),
 }
 
 impl Key {
@@ -59,6 +62,7 @@ impl Key {
             ('[', 'C') => Some(Key::Arrow(Arrow::Right)),
             ('[', 'D') => Some(Key::Arrow(Arrow::Left)),
             ('[', 'H') => Some(Key::Home),
+            ('[', 'Z') => Some(Key::BackTab),
             ('\x1b', c) if c.is_ascii() => match Self::from_char(c) {
                 Key::Char(c) => Some(Key::Alt(c)),
                 Key::Ctrl(c) => Some(Key::CtrlAlt(c)),
@@ -75,6 +79,39 @@ impl Key {
             '3' => Some(Key::Del),
             '5' => Some(Key::PageUp),
             '6' => Some(Key::PageDown),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseButton {
+    Left,
+    Middle,
+    Right,
+    WheelUp,
+    WheelDown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseEvent {
+    Press { b: MouseButton, x: usize, y: usize },
+    Hold { x: usize, y: usize },
+    Release { x: usize, y: usize },
+}
+
+impl MouseEvent {
+    pub(crate) fn try_from_raw(b: usize, x: usize, y: usize, m: char) -> Option<Self> {
+        use MouseButton::*;
+
+        match (b, m) {
+            (0, 'M') => Some(Self::Press { b: Left, x, y }),
+            (1, 'M') => Some(Self::Press { b: Middle, x, y }),
+            (2, 'M') => Some(Self::Press { b: Right, x, y }),
+            (64, 'M') => Some(Self::Press { b: WheelUp, x, y }),
+            (65, 'M') => Some(Self::Press { b: WheelDown, x, y }),
+            (0..=2 | 64..=65, 'm') | (3, _) => Some(Self::Release { x, y }),
+            (32, _) => Some(Self::Hold { x, y }),
             _ => None,
         }
     }

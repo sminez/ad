@@ -1,5 +1,9 @@
 //! Fetching and parsing input from the user
-use crate::{editor::Editor, key::Key, term::win_size_changed};
+use crate::{
+    editor::Editor,
+    key::{Key, MouseEvent},
+    term::win_size_changed,
+};
 use std::io::Read;
 
 impl Editor {
@@ -33,6 +37,7 @@ impl Editor {
     pub fn try_read_key(&mut self) -> Option<Key> {
         let c = self.try_read_char()?;
 
+        // Normal key press
         match Key::from_char(c) {
             Key::Esc => (),
             key => return Some(key),
@@ -57,6 +62,28 @@ impl Editor {
                     return Some(key);
                 }
             }
+        }
+
+        // xterm mouse encoding: "^[< Cb;Cx;Cy(;) (M or m) "
+        if c2 == '[' && c3 == '<' {
+            let mut buf = Vec::new();
+            let m;
+
+            loop {
+                match self.try_read_char() {
+                    Some(c @ 'm' | c @ 'M') => {
+                        m = c;
+                        break;
+                    }
+                    Some(c) => buf.push(c as u8),
+                    None => return None,
+                };
+            }
+            let s = String::from_utf8(buf).unwrap();
+            let nums: Vec<usize> = s.split(';').map(|s| s.parse::<usize>().unwrap()).collect();
+            let (b, x, y) = (nums[0], nums[1], nums[2]);
+
+            return MouseEvent::try_from_raw(b, x, y, m).map(Key::Mouse);
         }
 
         Some(Key::Esc)

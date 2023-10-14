@@ -73,15 +73,12 @@ impl Editor {
         let b = self.buffers.active();
 
         // Sort out dimensions of the sign/number column
-        let n_lines = b.len_lines();
-        let max_linum = min(n_lines, screen_rows + b.row_off);
-        let w_lnum = n_digits(max_linum);
-        let w_sgncol = w_lnum + 2;
+        let (w_lnum, w_sgncol) = b.sign_col_dims(screen_rows);
 
         for y in 0..screen_rows {
             let file_row = y + b.row_off;
 
-            if file_row >= n_lines {
+            if file_row >= b.len_lines() {
                 buf.push_str(&format!(
                     "{}~ {VLINE:>width$}{}",
                     Style::Fg(SGNCOL_FG.into()),
@@ -214,36 +211,11 @@ fn render_pending(keys: &[Key]) -> String {
     s
 }
 
-fn n_digits(mut n: usize) -> usize {
-    if n == 0 {
-        return 1;
-    }
-
-    let mut digits = 0;
-    while n != 0 {
-        digits += 1;
-        n /= 10;
-    }
-
-    digits
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::key::Key::*;
     use simple_test_case::test_case;
-
-    #[test_case(0, 1; "n0")]
-    #[test_case(5, 1; "n5")]
-    #[test_case(10, 2; "n10")]
-    #[test_case(13, 2; "n13")]
-    #[test_case(731, 3; "n731")]
-    #[test_case(930, 3; "n930")]
-    #[test]
-    fn n_digits_works(n: usize, digits: usize) {
-        assert_eq!(n_digits(n), digits);
-    }
 
     #[test_case(vec![Char('a')], "a"; "single char")]
     #[test_case(vec![Ctrl('a')], "^a"; "single ctrl")]

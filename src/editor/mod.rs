@@ -1,11 +1,11 @@
 use crate::{
     buffer::{ActionOutcome, Buffers, TextObject},
     die,
-    key::{Arrow, Key},
+    key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
     term::{
-        clear_screen, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
-        set_termios, win_size_changed,
+        clear_screen, disable_mouse_support, enable_mouse_support, enable_raw_mode, get_termios,
+        get_termsize, register_signal_handler, set_termios, win_size_changed,
     },
 };
 use libc::termios as Termios;
@@ -40,6 +40,7 @@ pub struct Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
+        disable_mouse_support(&mut self.stdout);
         set_termios(self.original_termios)
     }
 }
@@ -55,10 +56,13 @@ impl Editor {
 
         enable_raw_mode(original_termios);
 
+        let mut stdout = io::stdout();
+        enable_mouse_support(&mut stdout);
+
         Self {
             screen_rows: 0,
             screen_cols: 0,
-            stdout: io::stdout(),
+            stdout,
             stdin: io::stdin(),
             original_termios,
             cwd,
@@ -164,6 +168,8 @@ impl Editor {
                 ));
             }
 
+            Action::RawKey { k: Key::Mouse(evt) } => self.handle_mouse_event(evt),
+
             a => self.forward_action_to_active_buffer(a),
         }
     }
@@ -174,6 +180,33 @@ impl Editor {
                 ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
             }
+        }
+    }
+
+    fn handle_mouse_event(&mut self, evt: MouseEvent) {
+        use MouseButton::*;
+
+        match evt {
+            MouseEvent::Press { b: Left, x, y } => {
+                self.buffers
+                    .active_mut()
+                    .set_dot_from_screen_coords(x, y, self.screen_rows);
+            }
+
+            MouseEvent::Hold { x, y } => {
+                self.buffers
+                    .active_mut()
+                    .extend_dot_to_screen_coords(x, y, self.screen_rows);
+            }
+
+            MouseEvent::Press { b: WheelUp, .. } => {
+                self.buffers.active_mut().scroll_up();
+            }
+            MouseEvent::Press { b: WheelDown, .. } => {
+                self.buffers.active_mut().scroll_down();
+            }
+
+            _ => (),
         }
     }
 }

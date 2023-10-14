@@ -92,7 +92,7 @@ impl Dot {
     }
 
     #[inline]
-    fn as_range(&self) -> Range {
+    pub fn as_range(&self) -> Range {
         match self {
             Self::Cur { c } => Range {
                 start: *c,

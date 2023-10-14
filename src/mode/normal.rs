@@ -83,7 +83,7 @@ pub(crate) fn normal_mode() -> Mode {
     };
 
     keymap.set_default(|&k| match k {
-        Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawKey { k })),
+        Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawKey { k })),
         _ => None,
     });
 

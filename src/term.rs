@@ -11,6 +11,12 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
 };
 
+// ANSI escape codes:
+//   https://vt100.net/docs/vt100-ug/chapter3.html
+const CLEAR_SCREEN: &str = "\x1b[2J";
+const ENABLE_MOUSE_SUPPORT: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h";
+const DISABLE_MOUSE_SUPPORT: &str = "\x1b[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l";
+
 /// Used for storing and checking whether or not we've received a signal that our window
 /// size has changed.
 static WIN_SIZE_CHANGED: AtomicBool = AtomicBool::new(false);
@@ -46,10 +52,6 @@ pub fn register_signal_handler() {
         }
     }
 }
-
-// ANSI escape codes:
-//   https://vt100.net/docs/vt100-ug/chapter3.html
-pub const CLEAR_SCREEN: &str = "\x1b[2J";
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Color {
@@ -181,6 +183,24 @@ pub(crate) fn clear_screen(stdout: &mut Stdout) {
     }
     if let Err(e) = stdout.flush() {
         panic!("unable to clear screen: {e}");
+    }
+}
+
+pub(crate) fn enable_mouse_support(stdout: &mut Stdout) {
+    if let Err(e) = stdout.write_all(ENABLE_MOUSE_SUPPORT.as_bytes()) {
+        panic!("unable to enable mouse support: {e}");
+    }
+    if let Err(e) = stdout.flush() {
+        panic!("unable to enable mouse support: {e}");
+    }
+}
+
+pub(crate) fn disable_mouse_support(stdout: &mut Stdout) {
+    if let Err(e) = stdout.write_all(DISABLE_MOUSE_SUPPORT.as_bytes()) {
+        panic!("unable to disable mouse support: {e}");
+    }
+    if let Err(e) = stdout.flush() {
+        panic!("unable to disable mouse support: {e}");
     }
 }
 

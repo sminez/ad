@@ -314,6 +314,53 @@ impl Buffer {
         rline
     }
 
+    pub(crate) fn sign_col_dims(&self, screen_rows: usize) -> (usize, usize) {
+        let n_lines = self.len_lines();
+        let max_linum = min(n_lines, screen_rows + self.row_off);
+        let w_lnum = n_digits(max_linum);
+        let w_sgncol = w_lnum + 2;
+
+        (w_lnum, w_sgncol)
+    }
+
+    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+        let (_, w_sgncol) = self.sign_col_dims(screen_rows);
+        self.rx = x - 1 - w_sgncol;
+        let y = y - 1 + self.row_off;
+
+        self.dot = Dot::Cur {
+            c: Cur {
+                y,
+                x: self.x_from_rx(y),
+            },
+        };
+    }
+
+    pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+        let (_, w_sgncol) = self.sign_col_dims(screen_rows);
+        self.rx = x - 1 - w_sgncol;
+        let y = y - 1 + self.row_off;
+
+        let mut r = self.dot.as_range();
+        let c = Cur {
+            y,
+            x: self.x_from_rx(y),
+        };
+        r.set_active_cursor(c);
+
+        self.dot = Dot::Range { r };
+    }
+
+    // FIXME: need to drag cursor with scoll position
+    pub(crate) fn scroll_up(&mut self) {
+        self.row_off = self.row_off.saturating_sub(1);
+    }
+
+    // FIXME: need to drag cursor with scoll position
+    pub(crate) fn scroll_down(&mut self) {
+        self.row_off += 1;
+    }
+
     /// The error result of this function is an error string that should be displayed to the user
     pub(crate) fn handle_action(&mut self, a: Action) -> Option<ActionOutcome> {
         match a {
@@ -492,11 +539,37 @@ impl Buffer {
     }
 }
 
+fn n_digits(mut n: usize) -> usize {
+    if n == 0 {
+        return 1;
+    }
+
+    let mut digits = 0;
+    while n != 0 {
+        digits += 1;
+        n /= 10;
+    }
+
+    digits
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::key::Arrow;
     use edit::tests::{del_c, del_s, in_c, in_s};
+    use simple_test_case::test_case;
+
+    #[test_case(0, 1; "n0")]
+    #[test_case(5, 1; "n5")]
+    #[test_case(10, 2; "n10")]
+    #[test_case(13, 2; "n13")]
+    #[test_case(731, 3; "n731")]
+    #[test_case(930, 3; "n930")]
+    #[test]
+    fn n_digits_works(n: usize, digits: usize) {
+        assert_eq!(n_digits(n), digits);
+    }
 
     const LINE_1: &str = "This is a test";
     const LINE_2: &str = "involving multiple lines";
