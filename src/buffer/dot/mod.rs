@@ -75,6 +75,13 @@ impl Dot {
         }
     }
 
+    pub fn set_active_cur(&mut self, cur: Cur) {
+        match self {
+            Self::Cur { c } => *c = cur,
+            Self::Range { r } => r.set_active_cursor(cur),
+        }
+    }
+
     #[inline]
     pub fn first_cur(&self) -> Cur {
         match self {

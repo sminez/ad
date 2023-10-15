@@ -194,11 +194,14 @@ impl Buffer {
         self.rx = self.rx_from_x(y, x);
 
         if y < self.row_off {
-            self.row_off = y;
+            self.dot.set_active_cur(Cur { y: self.row_off, x });
         }
 
         if y >= self.row_off + screen_rows {
-            self.row_off = y - screen_rows + 1;
+            self.dot.set_active_cur(Cur {
+                y: self.row_off + screen_rows - 1,
+                x,
+            });
         }
 
         if self.rx < self.col_off {
@@ -326,7 +329,7 @@ impl Buffer {
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
-        let y = y - 1 + self.row_off;
+        let y = min(y - 1 + self.row_off, self.len_lines() - 1);
 
         self.dot = Dot::Cur {
             c: Cur {
@@ -351,12 +354,10 @@ impl Buffer {
         self.dot = Dot::Range { r };
     }
 
-    // FIXME: need to drag cursor with scoll position
     pub(crate) fn scroll_up(&mut self) {
         self.row_off = self.row_off.saturating_sub(1);
     }
 
-    // FIXME: need to drag cursor with scoll position
     pub(crate) fn scroll_down(&mut self) {
         self.row_off += 1;
     }
