@@ -22,7 +22,7 @@ pub(crate) use search::Matcher;
 
 use util::{
     cond::{blank_line, non_blank_line, Cond},
-    consumer::consume_while,
+    consumer::{consume_until, consume_while},
     iter::{IdxChars, IdxLines, RevIdxChars, RevIdxLines},
 };
 
@@ -244,6 +244,26 @@ impl UpdateDot for Arrow {
     }
 }
 
+pub fn delimited(
+    from: fn(&char) -> bool,
+    until: fn(&char) -> bool,
+    cur: Cur,
+    b: &Buffer,
+    start_active: bool,
+) -> Dot {
+    let start = consume_until(from, &mut RevIdxChars::new(cur, b)).unwrap_or(0);
+    let end = consume_until(until, &mut IdxChars::new(cur, b)).unwrap_or_else(|| b.txt.len_chars());
+
+    Dot::Range {
+        r: Range::from_cursors(
+            Cur::from_char_idx(start, b),
+            Cur::from_char_idx(end, b),
+            start_active,
+        ),
+    }
+    .collapse_null_range()
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextObject {
     Arr(Arrow),
@@ -309,13 +329,13 @@ impl UpdateDot for TextObject {
                     start_active,
                 } = dot.as_range();
 
-                Dot::Range {
-                    r: Range {
-                        start: start.to_prev_word_start(b),
-                        end: end.to_next_word_end(b),
-                        start_active,
-                    },
-                }
+                delimited(
+                    |&c| c.is_whitespace(),
+                    |&c| c.is_whitespace(),
+                    if start_active { start } else { end },
+                    b,
+                    start_active,
+                )
             }
             .collapse_null_range(),
         }

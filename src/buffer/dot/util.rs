@@ -140,18 +140,18 @@ pub(super) mod consumer {
     use super::cond::Cond;
     use std::iter::Peekable;
 
-    // pub fn consume_until<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
-    // where
-    //     I: Iterator<Item = (usize, T)>,
-    // {
-    //     loop {
-    //         match it.next() {
-    //             Some((i, c)) if cond(&c) => return Some(i),
-    //             Some(_) => (),
-    //             None => return None,
-    //         }
-    //     }
-    // }
+    pub fn consume_until<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
+    where
+        I: Iterator<Item = (usize, T)>,
+    {
+        let mut current = None;
+        loop {
+            match it.peek() {
+                Some((_, c)) if !cond(c) => current = it.next(),
+                _ => return current.map(|(i, _)| i),
+            }
+        }
+    }
 
     pub fn consume_while<I, T>(cond: Cond<T>, it: &mut Peekable<I>) -> Option<usize>
     where

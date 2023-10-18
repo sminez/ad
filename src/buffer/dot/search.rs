@@ -72,6 +72,28 @@ pub trait Matcher {
     }
 }
 
+// Functions that check a single character
+impl Matcher for fn(char) -> bool {
+    type Reversed = fn(char) -> bool;
+
+    fn try_match<I>(&self, it: I) -> Option<(usize, usize)>
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        for (i, ch) in it {
+            if (self)(ch) {
+                return Some((i, i));
+            }
+        }
+
+        None
+    }
+
+    fn reversed(&self) -> Self::Reversed {
+        *self
+    }
+}
+
 // Chars just need to locate themselves.
 impl Matcher for char {
     type Reversed = char;
