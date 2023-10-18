@@ -1,6 +1,5 @@
 :: TODO
 
- [ ] Mouse support
 - [ ] implement remaining text objects
 - [ ] store "desired x" or an "x is at EOL" flag?
 - [ ] Better colors for the status bar
@@ -10,7 +9,6 @@
 - [ ] completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
-- [ ] Scroll off / scroll while maintaining cursor position
 - [ ] window splitting
   - This is one where I don't know if I definitely want it or not?
   - It might be better to just rely on tmux but then that forces me into the multi

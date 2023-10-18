@@ -21,7 +21,7 @@ mod minibuffer;
 use edit::{Edit, EditLog, Kind, Txt};
 
 pub(crate) use buffers::Buffers;
-pub(crate) use dot::{Cur, Dot, LineRange, Range, TextObject, UpdateDot};
+pub(crate) use dot::{Cur, Dot, LineRange, Matcher, Range, TextObject, UpdateDot};
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
@@ -395,6 +395,14 @@ impl Buffer {
             Action::DotFlip => self.dot.flip(),
             Action::DotSet(tobj, count) => self.dot = tobj.set_dot_n(self.dot, count, self),
 
+            Action::LoadDot => {
+                if let Dot::Cur { .. } = self.dot {
+                    self.dot = TextObject::Word.set_dot(self.dot, self);
+                }
+                let s = self.dot.content(self);
+                self.find_forward(s);
+            }
+
             Action::RawKey { k } => return self.handle_raw_key(k),
 
             _ => (),
@@ -537,6 +545,18 @@ impl Buffer {
         self.dirty = true;
 
         (r.start, Some(s))
+    }
+
+    fn find_forward<M: Matcher>(&mut self, m: M) {
+        if let Some(dot) = m.match_forward_from_wrapping(self.dot.active_cur(), self) {
+            self.dot = dot;
+        }
+    }
+
+    fn find_backward<M: Matcher>(&mut self, m: M) {
+        if let Some(dot) = m.match_backward_from_wrapping(self.dot.active_cur(), self) {
+            self.dot = dot;
+        }
     }
 }
 

@@ -95,7 +95,7 @@ impl MiniBuffer {
         ed: &mut Editor,
     ) -> MiniBufferSelection {
         let offset = prompt.len();
-        let (screen_rows, screen_cols) = ed.screen_rowcol();
+        let (screen_rows, _) = ed.screen_rowcol();
         let mut mb = MiniBuffer::new(prompt.to_string(), initial_lines, MINI_BUFFER_HEIGHT);
         let mut input = String::new();
         let mut x = 0;
@@ -105,10 +105,11 @@ impl MiniBuffer {
             mb.prompt = format!("{prompt}{input}");
             mb.b.txt.remove(..);
             line_indices.clear();
+            let input_fragments: Vec<&str> = input.split_whitespace().collect();
             let mut visible_lines = vec![];
 
             for (i, line) in mb.initial_lines.iter().enumerate() {
-                if line.contains(&input) {
+                if input_fragments.iter().all(|f| line.contains(f)) {
                     visible_lines.push(line.clone());
                     line_indices.push(i);
                 }
@@ -117,7 +118,6 @@ impl MiniBuffer {
             mb.b.txt = Rope::from_str(&visible_lines.join("\n"));
 
             let n_visible_lines = min(visible_lines.len(), mb.max_height);
-            mb.b.clamp_scroll(n_visible_lines, screen_cols);
             let Cur { y, .. } = mb.b.dot.active_cur();
 
             let (selected_line_idx, top, bottom, b) = if n_visible_lines == 0 {

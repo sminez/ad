@@ -13,10 +13,12 @@ use std::{fmt, iter::Peekable};
 
 mod cur;
 mod range;
+mod search;
 mod util;
 
 pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
+pub(crate) use search::Matcher;
 
 use util::{
     cond::{blank_line, non_blank_line, Cond},

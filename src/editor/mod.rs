@@ -193,6 +193,13 @@ impl Editor {
                     .set_dot_from_screen_coords(x, y, self.screen_rows);
             }
 
+            MouseEvent::Press { b: Right, x, y } => {
+                self.buffers
+                    .active_mut()
+                    .set_dot_from_screen_coords(x, y, self.screen_rows);
+                self.buffers.active_mut().handle_action(Action::LoadDot);
+            }
+
             MouseEvent::Hold { x, y } => {
                 self.buffers
                     .active_mut()
