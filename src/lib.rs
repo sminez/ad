@@ -3,6 +3,7 @@ pub mod buffer;
 pub mod editor;
 pub mod key;
 pub mod mode;
+pub mod regex;
 pub mod term;
 pub mod trie;
 pub mod util;
