@@ -176,12 +176,8 @@ struct Fragment {
 impl Fragment {
     /// Connect all dangling State pointers for this Fragment to ptr.
     fn patch(&self, ptr: *mut State) {
-        println!(":: patching...");
         for &o in self.out.iter() {
-            unsafe {
-                println!("  {:?} -> {:?}", *o, ptr);
-                *o = ptr;
-            }
+            unsafe { *o = ptr };
         }
     }
 }
@@ -308,7 +304,6 @@ pub struct Regex {
 impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
         let pfix = re_to_postfix(re)?;
-        println!("POSTFIX: {pfix:?}");
 
         Ok(post_to_nfa(pfix))
     }
@@ -318,7 +313,6 @@ impl Regex {
         let mut nlist = Vec::with_capacity(self.nstates);
         let mut list_id = 0;
 
-        println!("START: {:?}", self.start);
         start_list(self.start, &mut clist, &mut list_id);
 
         for c in input.chars() {
@@ -326,7 +320,6 @@ impl Regex {
             (clist, nlist) = (nlist, clist);
         }
 
-        println!("FINAL CLIST: {clist:?}");
         unsafe { clist.iter().any(|&s| (*s).c == NfaState::Match) }
     }
 }
@@ -335,7 +328,6 @@ fn step(ch: char, list_id: &mut usize, clist: &[*mut State], nlist: &mut Vec<*mu
     *list_id += 1;
     nlist.clear();
 
-    println!("STEP CLIST: {clist:?}");
     for &s in clist.iter() {
         unsafe {
             if (*s).matches(ch) {
@@ -391,9 +383,12 @@ mod tests {
         assert_eq!(re_to_postfix(re).unwrap(), expected);
     }
 
-    // FIXME: patching is completely borked currently
-    #[test_case("this", "this is a test", true; "substring at start")]
-    #[test_case("t", "this is a test", true; "first char")]
+    #[test_case("ba*", "baaaaa", true; "zero or more present")]
+    #[test_case("ba*", "b", true; "zero or more not present")]
+    #[test_case("ba+", "baaaaa", true; "one or more present")]
+    #[test_case("ba+", "b", false; "one or more not present")]
+    #[test_case("b?a", "ba", true; "optional present")]
+    #[test_case("b?a", "a", true; "optional not present")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let r = Regex::compile(re).unwrap();
