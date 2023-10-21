@@ -426,6 +426,8 @@ mod tests {
     #[test_case(".*b", "123b", true; "dot star prefix")]
     #[test_case("1.*", "123b", true; "dot star suffix")]
     #[test_case("1.*b", "123b", true; "dot star inner")]
+    #[test_case("(c|C)ase matters", "case matters", true; "alternation first")]
+    #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let r = Regex::compile(re).unwrap();
