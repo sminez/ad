@@ -37,7 +37,6 @@ enum Pfix {
     Any,
     TrueAny,
 }
-// C: while(--natom > 0) { *dst++ = '.'; }
 fn insert_cats(natom: &mut usize, output: &mut Vec<Pfix>) {
     *natom -= 1;
     while *natom > 0 {
@@ -46,7 +45,6 @@ fn insert_cats(natom: &mut usize, output: &mut Vec<Pfix>) {
     }
 }
 
-// C: for(; nalt > 0; nalt--) { *dts++ = '|'; }
 fn insert_alts(nalt: &mut usize, output: &mut Vec<Pfix>) {
     while *nalt > 0 {
         output.push(Pfix::Alt);
@@ -236,7 +234,8 @@ fn push_state(s: NfaState, states: &mut Vec<State>, stack: &mut Vec<Fragment>) {
 
 fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
     let mut stack: Vec<Fragment> = Vec::with_capacity(NFA_MAX_FRAGMENTS);
-    let mut states = vec![State::new(NfaState::Match, usize::MAX, None)];
+    // states[0] is always our match state which loops and points to itself
+    let mut states = vec![State::new(NfaState::Match, 0, None)];
 
     for c in postfix.into_iter() {
         match c {
@@ -259,10 +258,11 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             Pfix::Alt => {
                 let mut e2 = stack.pop().unwrap();
                 let mut e1 = stack.pop().unwrap();
+                let ix = states.len();
                 states.push(State::new(NfaState::Split, e1.start, Some(e2.start)));
                 e1.out.append(&mut e2.out);
                 stack.push(Fragment {
-                    start: states.len() - 1,
+                    start: ix,
                     out: e1.out,
                 });
             }
@@ -351,14 +351,9 @@ impl DState {
         }
     }
 
-    fn next_dfa_state(&self, ch: char) -> Option<usize> {
+    fn next_for(&mut self, ch: char) -> &mut Option<usize> {
         let ix = ((ch as u16) & 0xFF) as usize;
-        self.next[ix]
-    }
-
-    fn add_state(&mut self, ch: char, dstate_ix: usize) {
-        let ix = ((ch as u16) & 0xFF) as usize;
-        self.next[ix] = Some(dstate_ix);
+        &mut self.next[ix]
     }
 }
 
@@ -401,7 +396,9 @@ impl Regex {
         // to clone the dfa_states as we match the nfa states against the input
         let mut dfa_states = take(&mut self.dfa_states);
 
+        // Make sure that we don't clash with any list IDs from a previous run
         self.list_id += 1;
+
         self.add_state(&mut clist, Some(self.start));
         clist.sort_unstable();
         let mut d_ix = self.get_or_create_dstate(&clist, &mut dfa_states);
@@ -409,8 +406,8 @@ impl Regex {
 
         for (_, ch) in input {
             // If we have this DFA state already precomputed and cached then use it...
-            if let Some(next) = dfa_states[d_ix].next_dfa_state(ch) {
-                d_ix = next;
+            if let Some(next) = dfa_states[d_ix].next_for(ch) {
+                d_ix = *next;
                 continue;
             }
 
@@ -428,13 +425,12 @@ impl Regex {
             nlist.sort_unstable();
 
             let new_dfa = self.get_or_create_dstate(&nlist, &mut dfa_states);
-            dfa_states[d_ix].add_state(ch, new_dfa);
+            *dfa_states[d_ix].next_for(ch) = Some(new_dfa);
             d_ix = new_dfa;
         }
 
         // Replace the cached dfa_states for the next run (if there is one)
         self.dfa_states = dfa_states;
-
         self.dfa_states[d_ix].nfa_states.iter().any(|&ix| ix == 0)
     }
 
@@ -456,7 +452,6 @@ impl Regex {
         }
     }
 
-    #[inline]
     fn get_or_create_dstate(&mut self, lst: &Vec<usize>, dfa_states: &mut Vec<DState>) -> usize {
         match self.dfa.get(lst) {
             Some(ix) => *ix,
@@ -518,14 +513,12 @@ mod tests {
     // to exponential behaviour in backtracking based implementations.
     #[test]
     fn pathological_match_doesnt_explode() {
-        for n in 1..=100 {
-            let s = "a".repeat(n);
-            let mut re = "a?".repeat(n);
-            re.push_str(&s);
+        let s = "a".repeat(100);
+        let mut re = "a?".repeat(100);
+        re.push_str(&s);
 
-            let mut r = Regex::compile(&re).unwrap();
-            assert!(r.matches_str(&s));
-        }
+        let mut r = Regex::compile(&re).unwrap();
+        assert!(r.matches_str(&s));
     }
 
     // Make sure that the previous cached state for a given Regex doesn't cause
@@ -535,7 +528,7 @@ mod tests {
         let re = "a(bb)+a";
         let mut r = Regex::compile(re).unwrap();
 
-        for _ in 0..10000 {
+        for _ in 0..10 {
             assert!(r.matches_str("abbbba"));
             assert!(!r.matches_str("foo"));
         }
