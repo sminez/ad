@@ -7,7 +7,7 @@
 //!
 //! Thompson's original paper on writing a regex engine can be found here:
 //!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
-use std::ptr::null_mut;
+use std::{collections::BTreeMap, ptr::null_mut};
 
 const POSTFIX_BUF_SIZE: usize = 2000;
 const POSTFIX_MAX_PARENS: usize = 100;
@@ -296,29 +296,26 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
 
     Regex {
         start: e.start,
+        dfa: Default::default(),
         nstates,
     }
 }
 
-#[derive(Debug)]
-pub struct Regex {
-    start: *mut State,
-    nstates: usize,
+/// A cached copy of nfa states along with a map of the next Dfa state to transition
+/// to for a given input character.
+///
+///   !!-> This will be limited to ascii inputs only under the current implementation
+#[derive(Debug, Clone)]
+struct DState {
+    nfa_states: Vec<*mut State>,
+    next: [*mut DState; 256],
 }
 
-impl Drop for Regex {
-    fn drop(&mut self) {
-        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
-        unsafe {
-            let mut ptrs = Vec::new();
-            child_ptrs(self.start, &mut ptrs);
-            ptrs.push(self.start);
-            ptrs.sort_unstable();
-            ptrs.dedup();
-
-            for p in ptrs.into_iter() {
-                drop(Box::from_raw(p));
-            }
+impl DState {
+    fn new(nfa_states: Vec<*mut State>) -> Self {
+        Self {
+            nfa_states,
+            next: [null_mut(); 256],
         }
     }
 }
@@ -332,6 +329,28 @@ unsafe fn child_ptrs(s: *mut State, current: &mut Vec<*mut State>) {
     }
 }
 
+#[derive(Debug)]
+pub struct Regex {
+    start: *mut State,
+    dfa: BTreeMap<Vec<*mut State>, *mut DState>,
+    nstates: usize,
+}
+
+impl Drop for Regex {
+    fn drop(&mut self) {
+        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
+        unsafe {
+            for &p in self.dfa.values() {
+                drop(Box::from_raw(p));
+            }
+
+            for p in self.state_ptrs().into_iter() {
+                drop(Box::from_raw(p));
+            }
+        }
+    }
+}
+
 // TODO: extract match position and match against a character iterator
 impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
@@ -340,36 +359,67 @@ impl Regex {
         Ok(post_to_nfa(pfix))
     }
 
-    pub fn matches(&self, input: &str) -> bool {
+    unsafe fn state_ptrs(&self) -> Vec<*mut State> {
+        let mut ptrs = Vec::new();
+        child_ptrs(self.start, &mut ptrs);
+        ptrs.push(self.start);
+        ptrs.sort_unstable();
+        ptrs.dedup();
+
+        ptrs
+    }
+
+    fn reset(&mut self) {
+        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
+        unsafe {
+            if (*self.start).last_list != 0 {
+                for p in self.state_ptrs().into_iter() {
+                    (*p).last_list = 0;
+                }
+            }
+        }
+    }
+
+    pub fn matches(&mut self, input: &str) -> bool {
+        self.reset();
+
         let mut clist = Vec::with_capacity(self.nstates);
         let mut nlist = Vec::with_capacity(self.nstates);
-        let mut list_id = 0;
+        let mut list_id = 1;
 
-        start_list(self.start, &mut clist, &mut list_id);
+        add_state(&mut clist, self.start, list_id);
+        let mut d = Box::into_raw(Box::new(DState::new(clist.clone())));
+        self.dfa.insert(clist, d);
 
-        for c in input.chars() {
-            step(c, &mut list_id, &clist, &mut nlist);
-            (clist, nlist) = (nlist, clist);
-        }
-
-        unsafe { clist.iter().any(|&s| (*s).s == NfaState::Match) }
-    }
-}
-
-fn start_list(start: *mut State, lst: &mut Vec<*mut State>, list_id: &mut usize) {
-    *list_id += 1;
-    add_state(lst, start, *list_id);
-}
-
-fn step(ch: char, list_id: &mut usize, clist: &[*mut State], nlist: &mut Vec<*mut State>) {
-    *list_id += 1;
-    nlist.clear();
-
-    for &s in clist.iter() {
         unsafe {
-            if (*s).matches(ch) {
-                add_state(nlist, (*s).out, *list_id);
+            for ch in input.chars() {
+                // If we have this DFA state already precomputed and cached then use it...
+                let ix = ((ch as u16) & 0xFF) as usize;
+                let next = (*d).next[ix];
+                if !next.is_null() {
+                    d = next;
+                    continue;
+                }
+
+                // ...otherwise compute the new DFA state and add it to the cache
+                list_id += 1;
+                nlist.clear();
+                for &s in (*d).nfa_states.iter() {
+                    if (*s).matches(ch) {
+                        add_state(&mut nlist, (*s).out, list_id);
+                    }
+                }
+
+                let new_dfa = self
+                    .dfa
+                    .entry(nlist.clone())
+                    .or_insert_with(|| Box::into_raw(Box::new(DState::new(nlist.clone()))));
+
+                (*d).next[ix] = *new_dfa;
+                d = *new_dfa;
             }
+
+            (*d).nfa_states.iter().any(|&s| (*s).s == NfaState::Match)
         }
     }
 }
@@ -430,7 +480,7 @@ mod tests {
     #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
-        let r = Regex::compile(re).unwrap();
+        let mut r = Regex::compile(re).unwrap();
 
         assert_eq!(r.matches(s), matches);
     }
