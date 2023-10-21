@@ -15,6 +15,7 @@ const POSTFIX_MAX_PARENS: usize = 100;
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     EmptyParens,
+    EmptyRegex,
     InvalidRepetition,
     ReTooLong,
     TooManyParens,
@@ -36,7 +37,9 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
         nalt: usize,
     }
 
-    if re.len() > POSTFIX_BUF_SIZE / 2 {
+    if re.is_empty() {
+        return Err(Error::EmptyRegex);
+    } else if re.len() > POSTFIX_BUF_SIZE / 2 {
         return Err(Error::ReTooLong);
     }
 
@@ -298,10 +301,11 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
         start: e.start,
         dfa: Default::default(),
         nstates,
+        list_id: 0,
     }
 }
 
-/// A cached copy of nfa states along with a map of the next Dfa state to transition
+/// A cached copy of DFA states along with a map of the next DFA state to transition
 /// to for a given input character.
 ///
 ///   !!-> This will be limited to ascii inputs only under the current implementation
@@ -349,6 +353,8 @@ pub struct Regex {
     start: *mut State,
     dfa: BTreeMap<Vec<*mut State>, *mut DState>,
     nstates: usize,
+    // will overflow at some point if a given regex is used a very large number of times
+    list_id: usize,
 }
 
 impl Drop for Regex {
@@ -366,7 +372,7 @@ impl Drop for Regex {
     }
 }
 
-// TODO: extract match position and match against a character iterator
+// TODO: extract match position
 impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
         let pfix = re_to_postfix(re)?;
@@ -374,29 +380,27 @@ impl Regex {
         Ok(post_to_nfa(pfix))
     }
 
-    unsafe fn state_ptrs(&self) -> Vec<*mut State> {
-        let mut ptrs = Vec::new();
-        child_ptrs(self.start, &mut ptrs);
-        ptrs.push(self.start);
-        ptrs.sort_unstable();
-        ptrs.dedup();
-
-        ptrs
+    pub fn matches_str(&mut self, input: &str) -> bool {
+        self.matches_iter(input.chars().enumerate())
     }
 
-    pub fn matches(&mut self, input: &str) -> bool {
-        self.reset();
+    pub fn matches_iter<I>(&mut self, input: I) -> bool
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        // self.reset();
 
         let mut clist = Vec::with_capacity(self.nstates);
         let mut nlist = Vec::with_capacity(self.nstates);
-        let mut list_id = 1;
 
-        add_state(&mut clist, self.start, list_id);
+        self.list_id += 1;
+        self.add_state(&mut clist, self.start);
         let mut d = Box::into_raw(Box::new(DState::new(clist.clone())));
         self.dfa.insert(clist, d);
 
         unsafe {
-            for ch in input.chars() {
+            // TODO: track the start of the match so we can return the range that is matching
+            for (_, ch) in input {
                 // If we have this DFA state already precomputed and cached then use it...
                 if let Some(next) = (*d).next_dfa_state(ch) {
                     d = next;
@@ -404,11 +408,11 @@ impl Regex {
                 }
 
                 // ...otherwise compute the new DFA state and add it to the cache
-                list_id += 1;
+                self.list_id += 1;
                 nlist.clear();
                 for &s in (*d).nfa_states.iter() {
                     if (*s).matches(ch) {
-                        add_state(&mut nlist, (*s).out, list_id);
+                        self.add_state(&mut nlist, (*s).out);
                     }
                 }
 
@@ -421,17 +425,46 @@ impl Regex {
         }
     }
 
-    #[inline]
-    fn reset(&mut self) {
-        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
+    fn add_state(&mut self, lst: &mut Vec<*mut State>, s: *mut State) {
+        if s.is_null() {
+            return;
+        }
+
         unsafe {
-            if (*self.start).last_list != 0 {
-                for p in self.state_ptrs().into_iter() {
-                    (*p).last_list = 0;
+            if (*s).last_list != self.list_id {
+                (*s).last_list = self.list_id;
+                if (*s).s == NfaState::Split {
+                    self.add_state(lst, (*s).out);
+                    self.add_state(lst, (*s).out1);
+                    return;
                 }
+                lst.push(s);
             }
         }
     }
+
+    unsafe fn state_ptrs(&self) -> Vec<*mut State> {
+        let mut ptrs = Vec::new();
+        child_ptrs(self.start, &mut ptrs);
+        ptrs.push(self.start);
+        ptrs.sort_unstable();
+        ptrs.dedup();
+
+        ptrs
+    }
+
+    // #[inline]
+    // fn reset(&mut self) {
+    //     // SAFETY: self.start is non-null and child_ptrs null checks before recursing
+    //     unsafe {
+    //         if (*self.start).last_list != 0 {
+    //             for p in self.state_ptrs().into_iter() {
+    //                 (*p).last_list = 0;
+    //             }
+    //         }
+    //     }
+    //     self.list_id = 0;
+    // }
 
     #[inline]
     fn get_or_create_dstate(&mut self, lst: Vec<*mut State>) -> *mut DState {
@@ -441,24 +474,6 @@ impl Regex {
             .or_insert_with(|| Box::into_raw(Box::new(DState::new(lst.clone()))));
 
         *d
-    }
-}
-
-fn add_state(lst: &mut Vec<*mut State>, s: *mut State, list_id: usize) {
-    if s.is_null() {
-        return;
-    }
-
-    unsafe {
-        if (*s).last_list != list_id {
-            (*s).last_list = list_id;
-            if (*s).s == NfaState::Split {
-                add_state(lst, (*s).out, list_id);
-                add_state(lst, (*s).out1, list_id);
-                return;
-            }
-            lst.push(s);
-        }
     }
 }
 
@@ -502,6 +517,33 @@ mod tests {
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();
 
-        assert_eq!(r.matches(s), matches);
+        assert_eq!(r.matches_str(s), matches);
+    }
+
+    // This is the pathological case that Cox covers in his article which leads
+    // to exponential behaviour in backtracking based implementations.
+    #[test]
+    fn pathological_match_doesnt_explode() {
+        for n in 1..=100 {
+            let s = "a".repeat(n);
+            let mut re = "a?".repeat(n);
+            re.push_str(&s);
+
+            let mut r = Regex::compile(&re).unwrap();
+            assert!(r.matches_str(&s));
+        }
+    }
+
+    // Make sure that the previous cached state for a given Regex doesn't cause
+    // any strange behaviour for future matches
+    #[test]
+    fn repeated_match_works() {
+        let re = "a(bb)+a";
+        let mut r = Regex::compile(re).unwrap();
+
+        for _ in 0..10000 {
+            assert!(r.matches_str("abbbba"));
+            assert!(!r.matches_str("foo"));
+        }
     }
 }
