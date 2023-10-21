@@ -7,7 +7,7 @@
 //!
 //! Thompson's original paper on writing a regex engine can be found here:
 //!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
-use std::{collections::BTreeMap, ptr::null_mut};
+use std::{collections::BTreeMap, mem::take};
 
 const POSTFIX_BUF_SIZE: usize = 2000;
 const POSTFIX_MAX_PARENS: usize = 100;
@@ -148,13 +148,13 @@ enum NfaState {
 #[derive(Debug, Clone, Copy)]
 struct State {
     s: NfaState,
-    out: *mut State,
-    out1: *mut State,
+    out: usize,
+    out1: Option<usize>,
     last_list: usize,
 }
 
 impl State {
-    fn new(s: NfaState, out: *mut State, out1: *mut State) -> Self {
+    fn new(s: NfaState, out: usize, out1: Option<usize>) -> Self {
         Self {
             s,
             out,
@@ -173,23 +173,30 @@ impl State {
 }
 
 #[derive(Debug)]
-struct Fragment {
-    start: *mut State,
-    out: Vec<*mut *mut State>,
+enum Sptr {
+    Out(usize),
+    Out1(usize),
 }
 
-impl Fragment {
-    /// Connect all dangling State pointers for this Fragment to ptr.
-    fn patch(&self, ptr: *mut State) {
-        for &o in self.out.iter() {
-            unsafe { *o = ptr };
+#[derive(Debug)]
+struct Fragment {
+    start: usize,
+    out: Vec<Sptr>,
+}
+
+/// Connect all dangling State pointers for this Fragment to ptr.
+fn patch(states: &mut [State], out: &[Sptr], state_ix: usize) {
+    for s in out.iter() {
+        match s {
+            Sptr::Out(i) => states[*i].out = state_ix,
+            Sptr::Out1(i) => states[*i].out1 = Some(state_ix),
         }
     }
 }
 
 fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
     let mut stack: Vec<Fragment> = Vec::with_capacity(1000);
-    let mut nstates = 0;
+    let mut states = vec![State::new(NfaState::Match, usize::MAX, None)];
 
     for c in postfix.into_iter() {
         match c {
@@ -198,7 +205,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             Pfix::Concat => {
                 let e2 = stack.pop().unwrap();
                 let e1 = stack.pop().unwrap();
-                e1.patch(e2.start);
+                patch(&mut states, &e1.out, e2.start);
                 stack.push(Fragment {
                     start: e1.start,
                     out: e2.out,
@@ -212,11 +219,10 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             Pfix::Char('|') => {
                 let mut e2 = stack.pop().unwrap();
                 let mut e1 = stack.pop().unwrap();
-                let s = Box::new(State::new(NfaState::Split, e1.start, e2.start));
-                nstates += 1;
+                states.push(State::new(NfaState::Split, e1.start, Some(e2.start)));
                 e1.out.append(&mut e2.out);
                 stack.push(Fragment {
-                    start: Box::into_raw(s),
+                    start: states.len() - 1,
                     out: e1.out,
                 });
             }
@@ -227,14 +233,11 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             // -> O
             //    + -------->
             Pfix::Char('?') => {
-                let mut e = stack.pop().unwrap();
-                let mut s = Box::new(State::new(NfaState::Split, e.start, null_mut()));
-                nstates += 1;
-                e.out.push(&mut s.out1 as *mut _);
-                stack.push(Fragment {
-                    start: Box::into_raw(s),
-                    out: e.out,
-                });
+                let Fragment { start, mut out } = stack.pop().unwrap();
+                let ix = states.len();
+                states.push(State::new(NfaState::Split, start, None));
+                out.push(Sptr::Out1(ix));
+                stack.push(Fragment { start: ix, out });
             }
 
             // Zero or more
@@ -245,13 +248,14 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             //    |
             //    + -------->
             Pfix::Char('*') => {
-                let e = stack.pop().unwrap();
-                let mut s = Box::new(State::new(NfaState::Split, e.start, null_mut()));
-                nstates += 1;
-                let out = vec![&mut s.out1 as *mut _];
-                let s_ptr = Box::into_raw(s);
-                e.patch(s_ptr);
-                stack.push(Fragment { start: s_ptr, out });
+                let Fragment { start, out } = stack.pop().unwrap();
+                let ix = states.len();
+                states.push(State::new(NfaState::Split, start, None));
+                patch(&mut states, &out, ix);
+                stack.push(Fragment {
+                    start: ix,
+                    out: vec![Sptr::Out1(ix)],
+                });
             }
 
             // One or more
@@ -260,15 +264,13 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             //     v     |
             // -> [e] -> O ->
             Pfix::Char('+') => {
-                let e = stack.pop().unwrap();
-                let mut s = Box::new(State::new(NfaState::Split, e.start, null_mut()));
-                nstates += 1;
-                let out = vec![&mut s.out1 as *mut _];
-                e.patch(Box::into_raw(s));
-
+                let Fragment { start, out } = stack.pop().unwrap();
+                let ix = states.len();
+                states.push(State::new(NfaState::Split, start, None));
+                patch(&mut states, &out, ix);
                 stack.push(Fragment {
-                    start: e.start,
-                    out,
+                    start,
+                    out: vec![Sptr::Out1(ix)],
                 });
             }
 
@@ -282,25 +284,24 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
                 } else {
                     NfaState::Char(c)
                 };
-                let mut s = Box::new(State::new(nfas, null_mut(), null_mut()));
-                nstates += 1;
-                let out = vec![&mut s.out as *mut _];
+                let ix = states.len();
+                states.push(State::new(nfas, usize::MAX, None));
                 stack.push(Fragment {
-                    start: Box::into_raw(s),
-                    out,
+                    start: ix,
+                    out: vec![Sptr::Out(ix)],
                 });
             }
         }
     }
 
-    let e = stack.pop().expect("to have an element to pop");
-    let matched = Box::new(State::new(NfaState::Match, null_mut(), null_mut()));
-    e.patch(Box::into_raw(matched));
+    let Fragment { start, out } = stack.pop().expect("to have an element to pop");
+    patch(&mut states, &out, 0);
 
     Regex {
-        start: e.start,
+        start,
+        nfa_states: states,
+        dfa_states: Default::default(),
         dfa: Default::default(),
-        nstates,
         list_id: 0,
     }
 }
@@ -311,68 +312,40 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
 ///   !!-> This will be limited to ascii inputs only under the current implementation
 #[derive(Debug, Clone)]
 struct DState {
-    nfa_states: Vec<*mut State>,
-    next: [*mut DState; 256],
+    nfa_states: Vec<usize>,
+    next: [Option<usize>; 256],
 }
 
 impl DState {
-    fn new(nfa_states: Vec<*mut State>) -> Self {
+    fn new(nfa_states: Vec<usize>) -> Self {
         Self {
             nfa_states,
-            next: [null_mut(); 256],
+            next: [None; 256],
         }
     }
 
-    fn next_dfa_state(&self, ch: char) -> Option<*mut DState> {
+    fn next_dfa_state(&self, ch: char) -> Option<usize> {
         let ix = ((ch as u16) & 0xFF) as usize;
-        let next = self.next[ix];
-        if !next.is_null() {
-            Some(next)
-        } else {
-            None
-        }
+        self.next[ix]
     }
 
-    fn add_state(&mut self, ch: char, p: *mut DState) {
+    fn add_state(&mut self, ch: char, dstate_ix: usize) {
         let ix = ((ch as u16) & 0xFF) as usize;
-        self.next[ix] = p;
+        self.next[ix] = Some(dstate_ix);
     }
 }
 
-unsafe fn child_ptrs(s: *mut State, current: &mut Vec<*mut State>) {
-    for ptr in [(*s).out, (*s).out1] {
-        if !ptr.is_null() && !current.contains(&ptr) {
-            current.push(ptr);
-            child_ptrs(ptr, current)
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Regex {
-    start: *mut State,
-    dfa: BTreeMap<Vec<*mut State>, *mut DState>,
-    nstates: usize,
+    start: usize,
+    nfa_states: Vec<State>,
+    dfa_states: Vec<DState>,
+    // map of sets of nfa states to their cached dfa state representation
+    dfa: BTreeMap<Vec<usize>, usize>,
     // will overflow at some point if a given regex is used a very large number of times
     list_id: usize,
 }
 
-impl Drop for Regex {
-    fn drop(&mut self) {
-        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
-        unsafe {
-            for &p in self.dfa.values() {
-                drop(Box::from_raw(p));
-            }
-
-            for p in self.state_ptrs().into_iter() {
-                drop(Box::from_raw(p));
-            }
-        }
-    }
-}
-
-// TODO: extract match position
 impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
         let pfix = re_to_postfix(re)?;
@@ -384,96 +357,81 @@ impl Regex {
         self.matches_iter(input.chars().enumerate())
     }
 
+    // TODO: track the start of the match so we can return the range that is matching
     pub fn matches_iter<I>(&mut self, input: I) -> bool
     where
         I: Iterator<Item = (usize, char)>,
     {
-        // self.reset();
+        let mut clist = Vec::with_capacity(self.nfa_states.len());
+        let mut nlist = Vec::with_capacity(self.nfa_states.len());
 
-        let mut clist = Vec::with_capacity(self.nstates);
-        let mut nlist = Vec::with_capacity(self.nstates);
+        // A little gross but this avoids some ownership issues that result in us needing
+        // to clone the dfa_states as we match the nfa states against the input
+        let mut dfa_states = take(&mut self.dfa_states);
 
         self.list_id += 1;
-        self.add_state(&mut clist, self.start);
-        let mut d = Box::into_raw(Box::new(DState::new(clist.clone())));
-        self.dfa.insert(clist, d);
+        self.add_state(&mut clist, Some(self.start));
+        let mut d_ix = self.get_or_create_dstate(clist.clone(), &mut dfa_states);
+        self.dfa.insert(clist, d_ix);
 
-        unsafe {
-            // TODO: track the start of the match so we can return the range that is matching
-            for (_, ch) in input {
-                // If we have this DFA state already precomputed and cached then use it...
-                if let Some(next) = (*d).next_dfa_state(ch) {
-                    d = next;
-                    continue;
-                }
-
-                // ...otherwise compute the new DFA state and add it to the cache
-                self.list_id += 1;
-                nlist.clear();
-                for &s in (*d).nfa_states.iter() {
-                    if (*s).matches(ch) {
-                        self.add_state(&mut nlist, (*s).out);
-                    }
-                }
-
-                let new_dfa = self.get_or_create_dstate(nlist.clone());
-                (*d).add_state(ch, new_dfa);
-                d = new_dfa;
+        for (_, ch) in input {
+            // If we have this DFA state already precomputed and cached then use it...
+            if let Some(next) = dfa_states[d_ix].next_dfa_state(ch) {
+                d_ix = next;
+                continue;
             }
 
-            (*d).nfa_states.iter().any(|&s| (*s).s == NfaState::Match)
-        }
-    }
+            // ...otherwise compute the new DFA state and add it to the cache
+            self.list_id += 1;
+            nlist.clear();
 
-    fn add_state(&mut self, lst: &mut Vec<*mut State>, s: *mut State) {
-        if s.is_null() {
-            return;
-        }
-
-        unsafe {
-            if (*s).last_list != self.list_id {
-                (*s).last_list = self.list_id;
-                if (*s).s == NfaState::Split {
-                    self.add_state(lst, (*s).out);
-                    self.add_state(lst, (*s).out1);
-                    return;
+            for &s_ix in dfa_states[d_ix].nfa_states.iter() {
+                let s = &self.nfa_states[s_ix];
+                if s.matches(ch) {
+                    self.add_state(&mut nlist, Some(s.out));
                 }
-                lst.push(s);
             }
+
+            let new_dfa = self.get_or_create_dstate(nlist.clone(), &mut dfa_states);
+            dfa_states[d_ix].add_state(ch, new_dfa);
+            d_ix = new_dfa;
+        }
+
+        // Replace the cached dfa_states for the next run (if there is one)
+        self.dfa_states = dfa_states;
+
+        self.dfa_states[d_ix].nfa_states.iter().any(|&ix| ix == 0)
+    }
+
+    fn add_state(&mut self, lst: &mut Vec<usize>, state_ix: Option<usize>) {
+        let s_ix = match state_ix {
+            Some(ix) => ix,
+            None => return,
+        };
+
+        if self.nfa_states[s_ix].last_list != self.list_id {
+            self.nfa_states[s_ix].last_list = self.list_id;
+            let State { s, out, out1, .. } = self.nfa_states[s_ix];
+            if s == NfaState::Split {
+                self.add_state(lst, Some(out));
+                self.add_state(lst, out1);
+                return;
+            }
+            lst.push(s_ix);
         }
     }
-
-    unsafe fn state_ptrs(&self) -> Vec<*mut State> {
-        let mut ptrs = Vec::new();
-        child_ptrs(self.start, &mut ptrs);
-        ptrs.push(self.start);
-        ptrs.sort_unstable();
-        ptrs.dedup();
-
-        ptrs
-    }
-
-    // #[inline]
-    // fn reset(&mut self) {
-    //     // SAFETY: self.start is non-null and child_ptrs null checks before recursing
-    //     unsafe {
-    //         if (*self.start).last_list != 0 {
-    //             for p in self.state_ptrs().into_iter() {
-    //                 (*p).last_list = 0;
-    //             }
-    //         }
-    //     }
-    //     self.list_id = 0;
-    // }
 
     #[inline]
-    fn get_or_create_dstate(&mut self, lst: Vec<*mut State>) -> *mut DState {
-        let d = self
-            .dfa
-            .entry(lst.clone())
-            .or_insert_with(|| Box::into_raw(Box::new(DState::new(lst.clone()))));
+    fn get_or_create_dstate(&mut self, mut lst: Vec<usize>, dfa_states: &mut Vec<DState>) -> usize {
+        lst.sort_unstable(); // ensure we have a consistent key for the cache
 
-        *d
+        match self.dfa.get(&lst) {
+            Some(ix) => *ix,
+            None => {
+                dfa_states.push(DState::new(lst));
+                dfa_states.len() - 1
+            }
+        }
     }
 }
 
