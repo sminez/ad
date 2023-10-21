@@ -22,12 +22,6 @@ pub enum Error {
     UnbalancedParens,
 }
 
-#[derive(Clone, Copy)]
-struct Paren {
-    natom: usize,
-    nalt: usize,
-}
-
 // Postfix form notation for building up the compiled state machine
 #[derive(Debug, PartialEq, Eq)]
 enum Pfix {
@@ -36,6 +30,12 @@ enum Pfix {
 }
 
 fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
+    #[derive(Clone, Copy)]
+    struct Paren {
+        natom: usize,
+        nalt: usize,
+    }
+
     if re.len() > POSTFIX_BUF_SIZE / 2 {
         return Err(Error::ReTooLong);
     }
@@ -137,22 +137,23 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum NfaState {
     Char(char),
+    Any,
     Match,
     Split,
 }
 
 #[derive(Debug, Clone, Copy)]
 struct State {
-    c: NfaState,
+    s: NfaState,
     out: *mut State,
     out1: *mut State,
     last_list: usize,
 }
 
 impl State {
-    fn new(c: NfaState, out: *mut State, out1: *mut State) -> Self {
+    fn new(s: NfaState, out: *mut State, out1: *mut State) -> Self {
         Self {
-            c,
+            s,
             out,
             out1,
             last_list: 0,
@@ -160,8 +161,9 @@ impl State {
     }
 
     fn matches(&self, ch: char) -> bool {
-        match self.c {
+        match self.s {
             NfaState::Char(c) => ch == c,
+            NfaState::Any => true,
             _ => false,
         }
     }
@@ -272,7 +274,12 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             //       c
             //  -> O ->
             Pfix::Char(c) => {
-                let mut s = Box::new(State::new(NfaState::Char(c), null_mut(), null_mut()));
+                let nfas = if c == '.' {
+                    NfaState::Any
+                } else {
+                    NfaState::Char(c)
+                };
+                let mut s = Box::new(State::new(nfas, null_mut(), null_mut()));
                 nstates += 1;
                 let out = vec![&mut s.out as *mut _];
                 stack.push(Fragment {
@@ -293,12 +300,37 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
     }
 }
 
+#[derive(Debug)]
 pub struct Regex {
     start: *mut State,
     nstates: usize,
 }
 
-// TODO: need to impl Drop to clean up the States
+impl Drop for Regex {
+    fn drop(&mut self) {
+        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
+        unsafe {
+            let mut ptrs = Vec::new();
+            child_ptrs(self.start, &mut ptrs);
+            ptrs.push(self.start);
+            ptrs.sort_unstable();
+            ptrs.dedup();
+
+            for p in ptrs.into_iter() {
+                drop(Box::from_raw(p));
+            }
+        }
+    }
+}
+
+unsafe fn child_ptrs(s: *mut State, current: &mut Vec<*mut State>) {
+    for ptr in [(*s).out, (*s).out1] {
+        if !ptr.is_null() && !current.contains(&ptr) {
+            current.push(ptr);
+            child_ptrs(ptr, current)
+        }
+    }
+}
 
 // TODO: extract match position and match against a character iterator
 impl Regex {
@@ -320,8 +352,13 @@ impl Regex {
             (clist, nlist) = (nlist, clist);
         }
 
-        unsafe { clist.iter().any(|&s| (*s).c == NfaState::Match) }
+        unsafe { clist.iter().any(|&s| (*s).s == NfaState::Match) }
     }
+}
+
+fn start_list(start: *mut State, lst: &mut Vec<*mut State>, list_id: &mut usize) {
+    *list_id += 1;
+    add_state(lst, start, *list_id);
 }
 
 fn step(ch: char, list_id: &mut usize, clist: &[*mut State], nlist: &mut Vec<*mut State>) {
@@ -345,7 +382,7 @@ fn add_state(lst: &mut Vec<*mut State>, s: *mut State, list_id: usize) {
     unsafe {
         if (*s).last_list != list_id {
             (*s).last_list = list_id;
-            if (*s).c == NfaState::Split {
+            if (*s).s == NfaState::Split {
                 add_state(lst, (*s).out, list_id);
                 add_state(lst, (*s).out1, list_id);
                 return;
@@ -353,11 +390,6 @@ fn add_state(lst: &mut Vec<*mut State>, s: *mut State, list_id: usize) {
             lst.push(s);
         }
     }
-}
-
-fn start_list(start: *mut State, lst: &mut Vec<*mut State>, list_id: &mut usize) {
-    *list_id += 1;
-    add_state(lst, start, *list_id);
 }
 
 #[cfg(test)]
@@ -389,6 +421,11 @@ mod tests {
     #[test_case("ba+", "b", false; "one or more not present")]
     #[test_case("b?a", "ba", true; "optional present")]
     #[test_case("b?a", "a", true; "optional not present")]
+    #[test_case("a(bb)+a", "abbbba", true; "article example matching")]
+    #[test_case("a(bb)+a", "abbba", false; "article example non matching")]
+    #[test_case(".*b", "123b", true; "dot star prefix")]
+    #[test_case("1.*", "123b", true; "dot star suffix")]
+    #[test_case("1.*b", "123b", true; "dot star inner")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let r = Regex::compile(re).unwrap();
