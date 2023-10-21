@@ -318,6 +318,21 @@ impl DState {
             next: [null_mut(); 256],
         }
     }
+
+    fn next_dfa_state(&self, ch: char) -> Option<*mut DState> {
+        let ix = ((ch as u16) & 0xFF) as usize;
+        let next = self.next[ix];
+        if !next.is_null() {
+            Some(next)
+        } else {
+            None
+        }
+    }
+
+    fn add_state(&mut self, ch: char, p: *mut DState) {
+        let ix = ((ch as u16) & 0xFF) as usize;
+        self.next[ix] = p;
+    }
 }
 
 unsafe fn child_ptrs(s: *mut State, current: &mut Vec<*mut State>) {
@@ -369,17 +384,6 @@ impl Regex {
         ptrs
     }
 
-    fn reset(&mut self) {
-        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
-        unsafe {
-            if (*self.start).last_list != 0 {
-                for p in self.state_ptrs().into_iter() {
-                    (*p).last_list = 0;
-                }
-            }
-        }
-    }
-
     pub fn matches(&mut self, input: &str) -> bool {
         self.reset();
 
@@ -394,9 +398,7 @@ impl Regex {
         unsafe {
             for ch in input.chars() {
                 // If we have this DFA state already precomputed and cached then use it...
-                let ix = ((ch as u16) & 0xFF) as usize;
-                let next = (*d).next[ix];
-                if !next.is_null() {
+                if let Some(next) = (*d).next_dfa_state(ch) {
                     d = next;
                     continue;
                 }
@@ -410,17 +412,35 @@ impl Regex {
                     }
                 }
 
-                let new_dfa = self
-                    .dfa
-                    .entry(nlist.clone())
-                    .or_insert_with(|| Box::into_raw(Box::new(DState::new(nlist.clone()))));
-
-                (*d).next[ix] = *new_dfa;
-                d = *new_dfa;
+                let new_dfa = self.get_or_create_dstate(nlist.clone());
+                (*d).add_state(ch, new_dfa);
+                d = new_dfa;
             }
 
             (*d).nfa_states.iter().any(|&s| (*s).s == NfaState::Match)
         }
+    }
+
+    #[inline]
+    fn reset(&mut self) {
+        // SAFETY: self.start is non-null and child_ptrs null checks before recursing
+        unsafe {
+            if (*self.start).last_list != 0 {
+                for p in self.state_ptrs().into_iter() {
+                    (*p).last_list = 0;
+                }
+            }
+        }
+    }
+
+    #[inline]
+    fn get_or_create_dstate(&mut self, lst: Vec<*mut State>) -> *mut DState {
+        let d = self
+            .dfa
+            .entry(lst.clone())
+            .or_insert_with(|| Box::into_raw(Box::new(DState::new(lst.clone()))));
+
+        *d
     }
 }
 
