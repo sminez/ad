@@ -11,11 +11,13 @@ use std::{collections::BTreeMap, mem::take};
 
 const POSTFIX_BUF_SIZE: usize = 2000;
 const POSTFIX_MAX_PARENS: usize = 100;
+const NFA_MAX_FRAGMENTS: usize = 1000;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum Error {
     EmptyParens,
     EmptyRegex,
+    InvalidEscape(char),
     InvalidRepetition,
     ReTooLong,
     TooManyParens,
@@ -28,6 +30,49 @@ pub enum Error {
 enum Pfix {
     Char(char),
     Concat,
+    Alt,
+    Quest,
+    Star,
+    Plus,
+    Any,
+    TrueAny,
+}
+// C: while(--natom > 0) { *dst++ = '.'; }
+fn insert_cats(natom: &mut usize, output: &mut Vec<Pfix>) {
+    *natom -= 1;
+    while *natom > 0 {
+        output.push(Pfix::Concat);
+        *natom -= 1;
+    }
+}
+
+// C: for(; nalt > 0; nalt--) { *dts++ = '|'; }
+fn insert_alts(nalt: &mut usize, output: &mut Vec<Pfix>) {
+    while *nalt > 0 {
+        output.push(Pfix::Alt);
+        *nalt -= 1;
+    }
+}
+
+fn push_cat(natom: &mut usize, output: &mut Vec<Pfix>) {
+    if *natom > 1 {
+        output.push(Pfix::Concat);
+        *natom -= 1;
+    }
+}
+
+fn push_atom(p: Pfix, natom: &mut usize, output: &mut Vec<Pfix>) {
+    push_cat(natom, output);
+    output.push(p);
+    *natom += 1;
+}
+
+fn push_rep(p: Pfix, natom: usize, output: &mut Vec<Pfix>) -> Result<(), Error> {
+    if natom == 0 {
+        return Err(Error::InvalidRepetition);
+    }
+    output.push(p);
+    Ok(())
 }
 
 fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
@@ -45,38 +90,31 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 
     let mut output = Vec::with_capacity(POSTFIX_BUF_SIZE);
     let mut paren: [Paren; POSTFIX_MAX_PARENS] = [Paren { natom: 0, nalt: 0 }; POSTFIX_MAX_PARENS];
-
     let mut natom = 0;
     let mut nalt = 0;
     let mut p = 0;
-
-    // C: while(--natom > 0) { *dst++ = '.'; }
-    let insert_cats = |natom: &mut usize, output: &mut Vec<Pfix>| {
-        *natom -= 1;
-        while *natom > 0 {
-            output.push(Pfix::Concat);
-            *natom -= 1;
-        }
-    };
-
-    // C: for(; nalt > 0; nalt--) { *dts++ = '|'; }
-    let insert_alts = |nalt: &mut usize, output: &mut Vec<Pfix>| {
-        while *nalt > 0 {
-            output.push(Pfix::Char('|'));
-            *nalt -= 1;
-        }
-    };
+    let mut escaping = false;
 
     for ch in re.chars() {
         match ch {
+            '\\' => escaping = true,
+            ch if escaping => {
+                let atom = match ch {
+                    '\\' | '*' | '+' | '?' | '.' | '@' | '(' | ')' => Pfix::Char(ch),
+                    'n' => Pfix::Char('\n'),
+                    'r' => Pfix::Char('\r'),
+                    't' => Pfix::Char('\t'),
+                    _ => return Err(Error::InvalidEscape(ch)),
+                };
+                push_atom(atom, &mut natom, &mut output);
+                escaping = false;
+            }
+
             '(' => {
-                if natom > 1 {
-                    natom -= 1;
-                    output.push(Pfix::Concat);
-                }
                 if p >= POSTFIX_MAX_PARENS {
                     return Err(Error::TooManyParens);
                 }
+                push_cat(&mut natom, &mut output);
                 paren[p].natom = natom;
                 paren[p].nalt = nalt;
                 p += 1;
@@ -109,21 +147,12 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
                 nalt += 1;
             }
 
-            '*' | '+' | '?' => {
-                if natom == 0 {
-                    return Err(Error::InvalidRepetition);
-                }
-                output.push(Pfix::Char(ch));
-            }
-
-            ch => {
-                if natom > 1 {
-                    output.push(Pfix::Concat);
-                    natom -= 1;
-                }
-                output.push(Pfix::Char(ch));
-                natom += 1;
-            }
+            '*' => push_rep(Pfix::Star, natom, &mut output)?,
+            '+' => push_rep(Pfix::Plus, natom, &mut output)?,
+            '?' => push_rep(Pfix::Quest, natom, &mut output)?,
+            '.' => push_atom(Pfix::Any, &mut natom, &mut output),
+            '@' => push_atom(Pfix::TrueAny, &mut natom, &mut output),
+            ch => push_atom(Pfix::Char(ch), &mut natom, &mut output),
         }
     }
 
@@ -141,6 +170,7 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 enum NfaState {
     Char(char),
     Any,
+    TrueAny,
     Match,
     Split,
 }
@@ -166,7 +196,8 @@ impl State {
     fn matches(&self, ch: char) -> bool {
         match self.s {
             NfaState::Char(c) => ch == c,
-            NfaState::Any => true,
+            NfaState::Any => ch != '\n',
+            NfaState::TrueAny => true,
             _ => false,
         }
     }
@@ -194,13 +225,22 @@ fn patch(states: &mut [State], out: &[Sptr], state_ix: usize) {
     }
 }
 
+fn push_state(s: NfaState, states: &mut Vec<State>, stack: &mut Vec<Fragment>) {
+    let ix = states.len();
+    states.push(State::new(s, usize::MAX, None));
+    stack.push(Fragment {
+        start: ix,
+        out: vec![Sptr::Out(ix)],
+    });
+}
+
 fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
-    let mut stack: Vec<Fragment> = Vec::with_capacity(1000);
+    let mut stack: Vec<Fragment> = Vec::with_capacity(NFA_MAX_FRAGMENTS);
     let mut states = vec![State::new(NfaState::Match, usize::MAX, None)];
 
     for c in postfix.into_iter() {
         match c {
-            // Concatenation of two states
+            // Concatenation
             // -> [e1] -> [e2] ->
             Pfix::Concat => {
                 let e2 = stack.pop().unwrap();
@@ -216,7 +256,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             //    + -> [e1] ->
             // -> O
             //    + -> [e2] ->
-            Pfix::Char('|') => {
+            Pfix::Alt => {
                 let mut e2 = stack.pop().unwrap();
                 let mut e1 = stack.pop().unwrap();
                 states.push(State::new(NfaState::Split, e1.start, Some(e2.start)));
@@ -232,7 +272,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             //    + -> [e] ->
             // -> O
             //    + -------->
-            Pfix::Char('?') => {
+            Pfix::Quest => {
                 let Fragment { start, mut out } = stack.pop().unwrap();
                 let ix = states.len();
                 states.push(State::new(NfaState::Split, start, None));
@@ -247,7 +287,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             // -> O <------+
             //    |
             //    + -------->
-            Pfix::Char('*') => {
+            Pfix::Star => {
                 let Fragment { start, out } = stack.pop().unwrap();
                 let ix = states.len();
                 states.push(State::new(NfaState::Split, start, None));
@@ -263,7 +303,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             //     +-----+
             //     v     |
             // -> [e] -> O ->
-            Pfix::Char('+') => {
+            Pfix::Plus => {
                 let Fragment { start, out } = stack.pop().unwrap();
                 let ix = states.len();
                 states.push(State::new(NfaState::Split, start, None));
@@ -274,23 +314,10 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
                 });
             }
 
-            // Character literal
-            //
-            //       c
-            //  -> O ->
-            Pfix::Char(c) => {
-                let nfas = if c == '.' {
-                    NfaState::Any
-                } else {
-                    NfaState::Char(c)
-                };
-                let ix = states.len();
-                states.push(State::new(nfas, usize::MAX, None));
-                stack.push(Fragment {
-                    start: ix,
-                    out: vec![Sptr::Out(ix)],
-                });
-            }
+            // Match node
+            Pfix::Char(c) => push_state(NfaState::Char(c), &mut states, &mut stack),
+            Pfix::TrueAny => push_state(NfaState::TrueAny, &mut states, &mut stack),
+            Pfix::Any => push_state(NfaState::Any, &mut states, &mut stack),
         }
     }
 
@@ -306,7 +333,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
     }
 }
 
-/// A cached copy of DFA states along with a map of the next DFA state to transition
+/// A cached copy of NFA states along with a map of the next DFA state to transition
 /// to for a given input character.
 ///
 ///   !!-> This will be limited to ascii inputs only under the current implementation
@@ -337,12 +364,17 @@ impl DState {
 
 #[derive(Debug, Clone)]
 pub struct Regex {
+    /// NFA index to start the match from. 0 == matched but 1 might not be the starting
+    /// state depending on the exact regex being executed
     start: usize,
+    /// Compiled NFA states to be matched against the input
     nfa_states: Vec<State>,
+    /// On the fly cached DFA states built up as the machine is executed
     dfa_states: Vec<DState>,
-    // map of sets of nfa states to their cached dfa state representation
+    /// Map of sets of NFA states to their cached DFA state representation
     dfa: BTreeMap<Vec<usize>, usize>,
-    // will overflow at some point if a given regex is used a very large number of times
+    /// Monotonically increasing index used to dedup NFA states.
+    /// Will overflow at some point if a given regex is used a VERY large number of times
     list_id: usize,
 }
 
@@ -371,7 +403,8 @@ impl Regex {
 
         self.list_id += 1;
         self.add_state(&mut clist, Some(self.start));
-        let mut d_ix = self.get_or_create_dstate(clist.clone(), &mut dfa_states);
+        clist.sort_unstable();
+        let mut d_ix = self.get_or_create_dstate(&clist, &mut dfa_states);
         self.dfa.insert(clist, d_ix);
 
         for (_, ch) in input {
@@ -392,7 +425,9 @@ impl Regex {
                 }
             }
 
-            let new_dfa = self.get_or_create_dstate(nlist.clone(), &mut dfa_states);
+            nlist.sort_unstable();
+
+            let new_dfa = self.get_or_create_dstate(&nlist, &mut dfa_states);
             dfa_states[d_ix].add_state(ch, new_dfa);
             d_ix = new_dfa;
         }
@@ -422,13 +457,11 @@ impl Regex {
     }
 
     #[inline]
-    fn get_or_create_dstate(&mut self, mut lst: Vec<usize>, dfa_states: &mut Vec<DState>) -> usize {
-        lst.sort_unstable(); // ensure we have a consistent key for the cache
-
-        match self.dfa.get(&lst) {
+    fn get_or_create_dstate(&mut self, lst: &Vec<usize>, dfa_states: &mut Vec<DState>) -> usize {
+        match self.dfa.get(lst) {
             Some(ix) => *ix,
             None => {
-                dfa_states.push(DState::new(lst));
+                dfa_states.push(DState::new(lst.clone()));
                 dfa_states.len() - 1
             }
         }
@@ -449,7 +482,7 @@ mod tests {
             Pfix::Char('b'),
             Pfix::Char('b'),
             Pfix::Concat,
-            Pfix::Char('+'),
+            Pfix::Plus,
             Pfix::Concat,
             Pfix::Char('a'),
             Pfix::Concat,
@@ -471,6 +504,9 @@ mod tests {
     #[test_case("1.*b", "123b", true; "dot star inner")]
     #[test_case("(c|C)ase matters", "case matters", true; "alternation first")]
     #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
+    #[test_case("this@*works", "this contains\nbut still works", true; "true any")]
+    #[test_case(r"literal\?", "literal?", true; "escape special char")]
+    #[test_case(r"literal\t", "literal\t", true; "escape sequence")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();
