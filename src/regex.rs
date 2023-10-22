@@ -26,7 +26,7 @@ pub enum Error {
 }
 
 // Postfix form notation for building up the compiled state machine
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Pfix {
     Char(char),
     Concat,
@@ -37,6 +37,33 @@ enum Pfix {
     Any,
     TrueAny,
 }
+
+/// Helper for converting characters to 0 based inicies for looking things up in caches.
+const fn char_ix(ch: char) -> usize {
+    ((ch as u16) & 0xFF) as usize
+}
+
+const fn init_escapes() -> [Option<Pfix>; 256] {
+    macro_rules! escape {
+        ($escapes:expr, $($ch:expr),+) => {
+            $($escapes[char_ix($ch)] = Some(Pfix::Char($ch));)+
+        };
+        ($escapes:expr, $($ch:expr => $esc:expr),+) => {
+            $($escapes[char_ix($ch)] = Some(Pfix::Char($esc));)+
+        };
+    }
+
+    let mut escapes = [None; 256];
+    escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '|');
+    escape!(escapes, '\\', '\'', '"');
+    escape!(escapes, 'n'=>'\n', 'r'=>'\r', 't'=>'\t');
+
+    escapes
+}
+
+/// Supported escape sequences
+const ESCAPES: [Option<Pfix>; 256] = init_escapes();
+
 fn insert_cats(natom: &mut usize, output: &mut Vec<Pfix>) {
     *natom -= 1;
     while *natom > 0 {
@@ -97,12 +124,9 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
         match ch {
             '\\' => escaping = true,
             ch if escaping => {
-                let atom = match ch {
-                    '\\' | '*' | '+' | '?' | '.' | '@' | '(' | ')' => Pfix::Char(ch),
-                    'n' => Pfix::Char('\n'),
-                    'r' => Pfix::Char('\r'),
-                    't' => Pfix::Char('\t'),
-                    _ => return Err(Error::InvalidEscape(ch)),
+                let atom = match ESCAPES[char_ix(ch)] {
+                    Some(atom) => atom,
+                    None => return Err(Error::InvalidEscape(ch)),
                 };
                 push_atom(atom, &mut natom, &mut output);
                 escaping = false;
