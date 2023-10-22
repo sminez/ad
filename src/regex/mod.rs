@@ -273,3 +273,92 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 
     Ok(output)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    // This is the example given by Russ in his article
+    #[test]
+    fn postfix_construction_works() {
+        let re = "a(bb)+a";
+        let expected = vec![
+            Pfix::Char('a'),
+            Pfix::Char('b'),
+            Pfix::Char('b'),
+            Pfix::Concat,
+            Pfix::Plus,
+            Pfix::Concat,
+            Pfix::Char('a'),
+            Pfix::Concat,
+        ];
+
+        assert_eq!(re_to_postfix(re).unwrap(), expected);
+    }
+
+    #[test_case("ba*", "baaaaa", true; "zero or more present")]
+    #[test_case("ba*", "b", true; "zero or more not present")]
+    #[test_case("ba+", "baaaaa", true; "one or more present")]
+    #[test_case("ba+", "b", false; "one or more not present")]
+    #[test_case("b?a", "ba", true; "optional present")]
+    #[test_case("b?a", "a", true; "optional not present")]
+    #[test_case("a(bb)+a", "abbbba", true; "article example matching")]
+    #[test_case("a(bb)+a", "abbba", false; "article example non matching")]
+    #[test_case(".*b", "123b", true; "dot star prefix")]
+    #[test_case("1.*", "123b", true; "dot star suffix")]
+    #[test_case("1.*b", "123b", true; "dot star inner")]
+    #[test_case("(c|C)ase matters", "case matters", true; "alternation first")]
+    #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
+    #[test_case("this@*works", "this contains\nbut still works", true; "true any")]
+    #[test_case(r"literal\?", "literal?", true; "escape special char")]
+    #[test_case(r"literal\t", "literal\t", true; "escape sequence")]
+    #[test_case("[abc] happy cow", "a happy cow", true; "character class")]
+    #[test_case("[^abc] happy cow", "a happy cow", false; "negated character class")]
+    #[test_case("[a-zA-Z]*", "camelCaseFtw", true; "char class ranges matching")]
+    #[test_case("[a-zA-Z]*1", "kebab-case-not-so-much", false; "char class ranges non matching")]
+    #[test_case("[a-zA-Z ]*", "this should work", true; "char class mixed")]
+    #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
+    #[test]
+    fn match_works(re: &str, s: &str, matches: bool) {
+        let mut r = dfa::Regex::compile(re).unwrap();
+        assert_eq!(r.matches_str(s), matches, "dfa");
+
+        let mut r = vm::Regex::compile(re).unwrap();
+        assert_eq!(r.matches_str(s), matches, "vm");
+    }
+
+    // This is the pathological case that Cox covers in his article which leads
+    // to exponential behaviour in backtracking based implementations.
+    #[test]
+    fn pathological_match_doesnt_explode() {
+        let s = "a".repeat(100);
+        let mut re = "a?".repeat(100);
+        re.push_str(&s);
+
+        let mut r = dfa::Regex::compile(&re).unwrap();
+        assert!(r.matches_str(&s), "dfa");
+
+        let mut r = vm::Regex::compile(&re).unwrap();
+        assert!(r.matches_str(&s), "vm");
+    }
+
+    // Make sure that the previous cached state for a given Regex doesn't cause
+    // any strange behaviour for future matches
+    #[test]
+    fn repeated_match_works() {
+        let re = "a(bb)+a";
+
+        let mut r = dfa::Regex::compile(re).unwrap();
+        for _ in 0..10 {
+            assert!(r.matches_str("abbbba"), "dfa");
+            assert!(!r.matches_str("foo"), "dfa");
+        }
+
+        let mut r = vm::Regex::compile(re).unwrap();
+        for _ in 0..10 {
+            assert!(r.matches_str("abbbba"), "vm");
+            assert!(!r.matches_str("foo"), "vm");
+        }
+    }
+}
