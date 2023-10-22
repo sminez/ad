@@ -17,6 +17,7 @@ const NFA_MAX_FRAGMENTS: usize = 1000;
 pub enum Error {
     EmptyParens,
     EmptyRegex,
+    InvalidClass,
     InvalidEscape(char),
     InvalidRepetition,
     ReTooLong,
@@ -26,9 +27,10 @@ pub enum Error {
 }
 
 // Postfix form notation for building up the compiled state machine
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum Pfix {
     Char(char),
+    Class(CharClass),
     Concat,
     Alt,
     Quest,
@@ -43,18 +45,18 @@ const fn char_ix(ch: char) -> usize {
     ((ch as u16) & 0xFF) as usize
 }
 
-const fn init_escapes() -> [Option<Pfix>; 256] {
+const fn init_escapes() -> [Option<char>; 256] {
     macro_rules! escape {
         ($escapes:expr, $($ch:expr),+) => {
-            $($escapes[char_ix($ch)] = Some(Pfix::Char($ch));)+
+            $($escapes[char_ix($ch)] = Some($ch);)+
         };
         ($escapes:expr, $($ch:expr => $esc:expr),+) => {
-            $($escapes[char_ix($ch)] = Some(Pfix::Char($esc));)+
+            $($escapes[char_ix($ch)] = Some($esc);)+
         };
     }
 
     let mut escapes = [None; 256];
-    escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '|');
+    escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '[', ']', '|');
     escape!(escapes, '\\', '\'', '"');
     escape!(escapes, 'n'=>'\n', 'r'=>'\r', 't'=>'\t');
 
@@ -62,7 +64,7 @@ const fn init_escapes() -> [Option<Pfix>; 256] {
 }
 
 /// Supported escape sequences
-const ESCAPES: [Option<Pfix>; 256] = init_escapes();
+const ESCAPES: [Option<char>; 256] = init_escapes();
 
 fn insert_cats(natom: &mut usize, output: &mut Vec<Pfix>) {
     *natom -= 1;
@@ -100,6 +102,85 @@ fn push_rep(p: Pfix, natom: usize, output: &mut Vec<Pfix>) -> Result<(), Error> 
     Ok(())
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CharClass {
+    negated: bool,
+    chars: Vec<char>,
+    ranges: Vec<(char, char)>,
+}
+
+impl CharClass {
+    fn try_parse(it: &mut std::str::Chars) -> Result<Self, Error> {
+        let mut next = || next_char(it)?.ok_or(Error::InvalidClass);
+        let (mut ch, _) = next()?;
+
+        let negated = ch == '^';
+        if negated {
+            (ch, _) = next()?
+        };
+        let mut chars = vec![ch];
+        let mut ranges = vec![];
+
+        loop {
+            let (ch, escaped) = next()?;
+            match ch {
+                ']' if !escaped => break,
+
+                '-' => {
+                    let start = chars.pop().ok_or(Error::InvalidClass)?;
+                    let (end, _) = next()?;
+                    ranges.push((start, end));
+                }
+
+                ch => chars.push(ch),
+            }
+        }
+
+        Ok(Self {
+            negated,
+            chars,
+            ranges,
+        })
+    }
+
+    // Negated classes still don't match a newline
+    fn matches_char(&self, ch: char) -> bool {
+        if self.negated && ch == '\n' {
+            return false;
+        }
+
+        let res = self.chars.contains(&ch)
+            || self
+                .ranges
+                .iter()
+                .any(|&(start, end)| ch >= start && ch <= end);
+
+        if self.negated {
+            !res
+        } else {
+            res
+        }
+    }
+}
+
+fn next_char(it: &mut std::str::Chars) -> Result<Option<(char, bool)>, Error> {
+    match it.next() {
+        Some('\\') => (),
+        Some(ch) => return Ok(Some((ch, false))),
+        None => return Ok(None),
+    }
+
+    let ch = match it.next() {
+        Some(ch) => ch,
+        None => return Err(Error::InvalidEscape('\0')),
+    };
+
+    match ESCAPES[char_ix(ch)] {
+        Some(ch) => Ok(Some((ch, true))),
+        None => Err(Error::InvalidEscape(ch)),
+    }
+}
+
 fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
     #[derive(Clone, Copy)]
     struct Paren {
@@ -118,18 +199,19 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
     let mut natom = 0;
     let mut nalt = 0;
     let mut p = 0;
-    let mut escaping = false;
 
-    for ch in re.chars() {
+    let mut it = re.chars();
+
+    while let Some((ch, escaped)) = next_char(&mut it)? {
+        if escaped {
+            push_atom(Pfix::Char(ch), &mut natom, &mut output);
+            continue;
+        }
+
         match ch {
-            '\\' => escaping = true,
-            ch if escaping => {
-                let atom = match ESCAPES[char_ix(ch)] {
-                    Some(atom) => atom,
-                    None => return Err(Error::InvalidEscape(ch)),
-                };
-                push_atom(atom, &mut natom, &mut output);
-                escaping = false;
+            '[' => {
+                let cls = CharClass::try_parse(&mut it)?;
+                push_atom(Pfix::Class(cls), &mut natom, &mut output);
             }
 
             '(' => {
@@ -188,16 +270,17 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
     Ok(output)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum NfaState {
     Char(char),
+    Class(CharClass),
     Any,
     TrueAny,
     Match,
     Split,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct State {
     s: NfaState,
     out: usize,
@@ -216,8 +299,9 @@ impl State {
     }
 
     fn matches(&self, ch: char) -> bool {
-        match self.s {
-            NfaState::Char(c) => ch == c,
+        match &self.s {
+            NfaState::Class(cls) => cls.matches_char(ch),
+            NfaState::Char(c) => ch == *c,
             NfaState::Any => ch != '\n',
             NfaState::TrueAny => true,
             _ => false,
@@ -342,6 +426,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
             Pfix::Char(c) => push_state(NfaState::Char(c), &mut states, &mut stack),
             Pfix::TrueAny => push_state(NfaState::TrueAny, &mut states, &mut stack),
             Pfix::Any => push_state(NfaState::Any, &mut states, &mut stack),
+            Pfix::Class(cls) => push_state(NfaState::Class(cls), &mut states, &mut stack),
         }
     }
 
@@ -466,8 +551,8 @@ impl Regex {
 
         if self.nfa_states[s_ix].last_list != self.list_id {
             self.nfa_states[s_ix].last_list = self.list_id;
-            let State { s, out, out1, .. } = self.nfa_states[s_ix];
-            if s == NfaState::Split {
+            if self.nfa_states[s_ix].s == NfaState::Split {
+                let State { out, out1, .. } = self.nfa_states[s_ix];
                 self.add_state(lst, Some(out));
                 self.add_state(lst, out1);
                 return;
@@ -526,6 +611,12 @@ mod tests {
     #[test_case("this@*works", "this contains\nbut still works", true; "true any")]
     #[test_case(r"literal\?", "literal?", true; "escape special char")]
     #[test_case(r"literal\t", "literal\t", true; "escape sequence")]
+    #[test_case("[abc] happy cow", "a happy cow", true; "character class")]
+    #[test_case("[^abc] happy cow", "a happy cow", false; "negated character class")]
+    #[test_case("[a-zA-Z]*", "camelCaseFtw", true; "char class ranges matching")]
+    #[test_case("[a-zA-Z]*", "kebab-case-not-so-much", false; "char class ranges non matching")]
+    #[test_case("[a-zA-Z ]*", "this should work", true; "char class mixed")]
+    #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();
