@@ -10,23 +10,41 @@ use std::time::Instant;
 //
 // His implementation of Thompson's NFA algorithm runs for the case being benchmarked
 // here in just under 200 microseconds, with Perl 5.8.7 requiring an estimated 10^15
-// years. In comparison, my current approach seems to run in around 1.5 milliseconds?
-// So a factor of 10 slower than the C code from the article, with compile taking
-// around 100 microseconds.
-// Once the DFA states are cached, matching takes a pretty consistent 16 microseconds.
+// years. In comparison, on a release build my current approach seems to run in around
+// the same time of an average of 150 microseconds when matching without the DFA cache
+// and around 1 microsecond once the cache is in place. Compilation of the regex itself
+// takes around 25 microseconds.
 fn main() {
+    println!("Matching without DFA cache");
+    time_match(false);
+    println!("\n\nMatching with DFA cache");
+    time_match(true);
+}
+
+fn compile(report_compile_time: bool) -> (Regex, String) {
     let s = "a".repeat(100);
     let mut re = "a?".repeat(100);
     re.push_str(&s);
 
     let t1 = Instant::now();
-    let mut r = Regex::compile(&re).unwrap();
+    let r = Regex::compile(&re).unwrap();
     let d_compile = Instant::now().duration_since(t1).as_micros();
-    println!("Compile time: {d_compile} microseconds");
 
+    if report_compile_time {
+        println!("Compile time: {d_compile} microseconds");
+    }
+
+    (r, s)
+}
+
+fn time_match(use_cache: bool) {
+    let (mut r, s) = compile(true);
     let mut durations = Vec::with_capacity(100);
 
     for _ in 0..100 {
+        if !use_cache {
+            (r, _) = compile(false);
+        }
         let t1 = Instant::now();
         assert!(r.matches_str(&s));
         durations.push(Instant::now().duration_since(t1).as_micros());
