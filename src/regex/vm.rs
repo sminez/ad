@@ -9,7 +9,7 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use super::{re_to_postfix, CharClass, Error, Pfix};
-use std::mem::take;
+use std::{collections::BTreeSet, mem::take};
 
 pub struct Regex {
     /// The compiled instructions for running the VM
@@ -127,6 +127,12 @@ enum Op {
     Match,
 }
 
+impl Op {
+    fn is_comp(&self) -> bool {
+        !matches!(self, Op::Split(_, _) | Op::Jump(_) | Op::Match)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Inst {
     op: Op,
@@ -209,28 +215,90 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 }
 
 fn optimise(mut ops: Vec<Op>) -> Vec<Op> {
-    for i in 0..ops.len() {
-        if let Op::Jump(j) = ops[i] {
-            // - Chained jumps or jumps to splits can be compressed
-            // - Jump to match is just match
-            if let Op::Jump(l1) = ops[j] {
-                ops[i] = Op::Jump(l1);
-            } else if let Op::Split(l1, l2) = ops[j] {
-                ops[i] = Op::Split(l1, l2);
-            } else if let Op::Match = ops[j] {
-                ops[i] = Op::Match;
-            }
-        } else if let Op::Split(s1, s2) = ops[i] {
-            // - Split to jump can be inlined
-            let new_s1 = if let Op::Jump(j1) = ops[s1] { j1 } else { s1 };
-            let new_s2 = if let Op::Jump(j2) = ops[s2] { j2 } else { s2 };
-            if new_s1 != s1 || new_s2 != s2 {
-                ops[i] = Op::Split(new_s1, new_s2);
-            }
+    let mut optimising = true;
+
+    while optimising {
+        optimising = false;
+        for i in 0..ops.len() {
+            optimising |= inline_jumps(&mut ops, i);
         }
     }
 
+    strip_unreachable_instructions(&mut ops);
+
     ops
+}
+
+// - Chained jumps or jumps to splits can be inlined
+// - Jump to match is just match
+// - Split to jump can be inlined
+#[inline]
+fn inline_jumps(ops: &mut [Op], i: usize) -> bool {
+    if let Op::Jump(j) = ops[i] {
+        if let Op::Jump(l1) = ops[j] {
+            ops[i] = Op::Jump(l1);
+        } else if let Op::Split(l1, l2) = ops[j] {
+            ops[i] = Op::Split(l1, l2);
+        } else if let Op::Match = ops[j] {
+            ops[i] = Op::Match;
+        } else {
+            return false;
+        }
+        return true;
+    } else if let Op::Split(s1, s2) = ops[i] {
+        let new_s1 = if let Op::Jump(j1) = ops[s1] { j1 } else { s1 };
+        let new_s2 = if let Op::Jump(j2) = ops[s2] { j2 } else { s2 };
+        if new_s1 != s1 || new_s2 != s2 {
+            ops[i] = Op::Split(new_s1, new_s2);
+            return true;
+        }
+    }
+
+    false
+}
+
+// An instruction is unreachable if:
+// - it doesn't follow a comparison instruction (pc wouldn't advance to it)
+// - nothing now jumps or splits to it
+fn strip_unreachable_instructions(ops: &mut Vec<Op>) {
+    let mut to_from: Vec<(usize, usize)> = Vec::with_capacity(ops.len());
+    let mut jumps = BTreeSet::new();
+
+    for (i, op) in ops.iter().enumerate() {
+        match op {
+            Op::Jump(j) => {
+                jumps.insert(*j);
+                to_from.push((*j, i));
+            }
+            Op::Split(l1, l2) => {
+                jumps.extend([*l1, *l2]);
+                to_from.push((*l1, i));
+                to_from.push((*l2, i));
+            }
+            _ => (),
+        }
+    }
+
+    let mut to_remove = Vec::new();
+    for i in (1..ops.len() - 1).rev() {
+        if !ops[i - 1].is_comp() && !jumps.contains(&i) {
+            for &(to, from) in to_from.iter() {
+                if to > i {
+                    match &mut ops[from] {
+                        Op::Jump(x) => *x -= 1,
+                        Op::Split(x, _) if *x > i => *x -= 1,
+                        Op::Split(_, x) if *x > i => *x -= 1,
+                        _ => (),
+                    }
+                }
+            }
+            to_remove.push(i);
+        }
+    }
+
+    for i in to_remove.into_iter() {
+        ops.remove(i);
+    }
 }
 
 #[cfg(test)]
@@ -259,9 +327,21 @@ mod tests {
     #[test_case("a(bb)+a", &[c('a'), c('b'), c('b'), sp(1, 4), c('a'), Op::Match]; "rep of cat")]
     #[test_case("ba*", &[c('b'), sp(2, 4), c('a'), jmp(1), Op::Match]; "trailing star")]
     #[test_case("b?a", &[sp(1, 2), c('b'), c('a'), Op::Match]; "first lit is optional")]
+    #[test_case("(a*)*", &[sp(1, 3), c('a'), sp(3, 5), jmp(0), jmp(2), Op::Match]; "star star")]
     #[test]
     fn opcode_compile_works(re: &str, expected: &[Op]) {
         let prog = compile(re_to_postfix(re).unwrap());
+        assert_eq!(&prog, expected);
+    }
+
+    #[test_case("a|b", &[sp(1, 3), c('a'), Op::Match, c('b'), Op::Match]; "single char alt")]
+    #[test_case("ab(c|d)", &[c('a'), c('b'), sp(3, 5), c('c'), Op::Match, c('d'), Op::Match]; "lits then alt")]
+    #[test_case("ab*a", &[c('a'), sp(2, 4), c('b'), sp(2, 4), c('a'), Op::Match]; "star for single lit")]
+    #[test_case("ba*", &[c('b'), sp(2, 4), c('a'), sp(2, 4), Op::Match]; "trailing star")]
+    #[test_case("(a*)*", &[sp(1, 0), c('a'), sp(0, 3), Op::Match ]; "star star")]
+    #[test]
+    fn opcode_optimise_works(re: &str, expected: &[Op]) {
+        let prog = optimise(compile(re_to_postfix(re).unwrap()));
         assert_eq!(&prog, expected);
     }
 }
