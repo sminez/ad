@@ -1,7 +1,122 @@
+//! Hybrib NFA/DFA based state machine that computes DFA states on the fly.
+//! The implementation of this engine is adapted from the one presented by
+//! Russ Cox here:
+//!   https://swtch.com/~rsc/regexp/regexp1.html
+//!
+//! The original attempt at this made use of raw pointers in pretty much
+//! a direct port from the original C source, but this now uses indices
+//! into flat vecs of the states rather than pointer chasing in explicit
+//! heap allocated nodes of a tree data structure.
 use super::{re_to_postfix, CharClass, Error, Pfix};
 use std::{collections::BTreeMap, mem::take};
 
 const NFA_MAX_FRAGMENTS: usize = 1000;
+
+#[derive(Debug, Clone)]
+pub struct Regex {
+    /// NFA index to start the match from. 0 == matched but 1 might not be the starting
+    /// state depending on the exact regex being executed
+    start: usize,
+    /// Compiled NFA states to be matched against the input
+    nfa_states: Vec<State>,
+    /// On the fly cached DFA states built up as the machine is executed
+    dfa_states: Vec<DState>,
+    /// Map of sets of NFA states to their cached DFA state representation
+    dfa: BTreeMap<Vec<usize>, usize>,
+    /// Monotonically increasing index used to dedup NFA states
+    /// Will overflow at some point if a given regex is used a VERY large number of times
+    gen: usize,
+}
+
+impl Regex {
+    pub fn compile(re: &str) -> Result<Self, Error> {
+        let pfix = re_to_postfix(re)?;
+
+        Ok(post_to_nfa(pfix))
+    }
+
+    pub fn matches_str(&mut self, input: &str) -> bool {
+        self.matches_iter(input.chars().enumerate())
+    }
+
+    // TODO: track the start of the match so we can return the range that is matching
+    pub fn matches_iter<I>(&mut self, input: I) -> bool
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        let mut clist = Vec::with_capacity(self.nfa_states.len());
+        let mut nlist = Vec::with_capacity(self.nfa_states.len());
+
+        // A little gross but this avoids some ownership issues that result in us needing
+        // to clone the dfa_states as we match the nfa states against the input
+        let mut dfa_states = take(&mut self.dfa_states);
+
+        // Make sure that we don't clash with any list IDs from a previous run
+        self.gen += 1;
+
+        self.add_state(&mut clist, Some(self.start));
+        clist.sort_unstable();
+        let mut d_ix = self.get_or_create_dstate(&clist, &mut dfa_states);
+        self.dfa.insert(clist, d_ix);
+
+        for (_, ch) in input {
+            // If we have this DFA state already precomputed and cached then use it...
+            if let Some(next) = dfa_states[d_ix].next_for(ch) {
+                d_ix = *next;
+                continue;
+            }
+
+            // ...otherwise compute the new DFA state and add it to the cache
+            self.gen += 1;
+            nlist.clear();
+
+            for &s_ix in dfa_states[d_ix].nfa_states.iter() {
+                let s = &self.nfa_states[s_ix];
+                if s.matches(ch) {
+                    self.add_state(&mut nlist, Some(s.out));
+                }
+            }
+
+            nlist.sort_unstable();
+
+            let new_dfa = self.get_or_create_dstate(&nlist, &mut dfa_states);
+            *dfa_states[d_ix].next_for(ch) = Some(new_dfa);
+            d_ix = new_dfa;
+        }
+
+        // Replace the cached dfa_states for the next run (if there is one)
+        self.dfa_states = dfa_states;
+        self.dfa_states[d_ix].nfa_states.iter().any(|&ix| ix == 0)
+    }
+
+    fn add_state(&mut self, lst: &mut Vec<usize>, state_ix: Option<usize>) {
+        let s_ix = match state_ix {
+            Some(ix) => ix,
+            None => return,
+        };
+
+        if self.nfa_states[s_ix].gen != self.gen {
+            self.nfa_states[s_ix].gen = self.gen;
+            if self.nfa_states[s_ix].s == NfaState::Split {
+                let State { out, out1, .. } = self.nfa_states[s_ix];
+                self.add_state(lst, Some(out));
+                self.add_state(lst, out1);
+                return;
+            }
+            lst.push(s_ix);
+        }
+    }
+
+    fn get_or_create_dstate(&mut self, lst: &Vec<usize>, dfa_states: &mut Vec<DState>) -> usize {
+        match self.dfa.get(lst) {
+            Some(ix) => *ix,
+            None => {
+                dfa_states.push(DState::new(lst.clone()));
+                dfa_states.len() - 1
+            }
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum NfaState {
@@ -18,7 +133,7 @@ struct State {
     s: NfaState,
     out: usize,
     out1: Option<usize>,
-    last_list: usize,
+    gen: usize,
 }
 
 impl State {
@@ -27,7 +142,7 @@ impl State {
             s,
             out,
             out1,
-            last_list: 0,
+            gen: 0,
         }
     }
 
@@ -171,7 +286,7 @@ fn post_to_nfa(postfix: Vec<Pfix>) -> Regex {
         nfa_states: states,
         dfa_states: Default::default(),
         dfa: Default::default(),
-        list_id: 0,
+        gen: 0,
     }
 }
 
@@ -196,111 +311,5 @@ impl DState {
     fn next_for(&mut self, ch: char) -> &mut Option<usize> {
         let ix = ((ch as u16) & 0xFF) as usize;
         &mut self.next[ix]
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Regex {
-    /// NFA index to start the match from. 0 == matched but 1 might not be the starting
-    /// state depending on the exact regex being executed
-    start: usize,
-    /// Compiled NFA states to be matched against the input
-    nfa_states: Vec<State>,
-    /// On the fly cached DFA states built up as the machine is executed
-    dfa_states: Vec<DState>,
-    /// Map of sets of NFA states to their cached DFA state representation
-    dfa: BTreeMap<Vec<usize>, usize>,
-    /// Monotonically increasing index used to dedup NFA states.
-    /// Will overflow at some point if a given regex is used a VERY large number of times
-    list_id: usize,
-}
-
-impl Regex {
-    pub fn compile(re: &str) -> Result<Self, Error> {
-        let pfix = re_to_postfix(re)?;
-
-        Ok(post_to_nfa(pfix))
-    }
-
-    pub fn matches_str(&mut self, input: &str) -> bool {
-        self.matches_iter(input.chars().enumerate())
-    }
-
-    // TODO: track the start of the match so we can return the range that is matching
-    pub fn matches_iter<I>(&mut self, input: I) -> bool
-    where
-        I: Iterator<Item = (usize, char)>,
-    {
-        let mut clist = Vec::with_capacity(self.nfa_states.len());
-        let mut nlist = Vec::with_capacity(self.nfa_states.len());
-
-        // A little gross but this avoids some ownership issues that result in us needing
-        // to clone the dfa_states as we match the nfa states against the input
-        let mut dfa_states = take(&mut self.dfa_states);
-
-        // Make sure that we don't clash with any list IDs from a previous run
-        self.list_id += 1;
-
-        self.add_state(&mut clist, Some(self.start));
-        clist.sort_unstable();
-        let mut d_ix = self.get_or_create_dstate(&clist, &mut dfa_states);
-        self.dfa.insert(clist, d_ix);
-
-        for (_, ch) in input {
-            // If we have this DFA state already precomputed and cached then use it...
-            if let Some(next) = dfa_states[d_ix].next_for(ch) {
-                d_ix = *next;
-                continue;
-            }
-
-            // ...otherwise compute the new DFA state and add it to the cache
-            self.list_id += 1;
-            nlist.clear();
-
-            for &s_ix in dfa_states[d_ix].nfa_states.iter() {
-                let s = &self.nfa_states[s_ix];
-                if s.matches(ch) {
-                    self.add_state(&mut nlist, Some(s.out));
-                }
-            }
-
-            nlist.sort_unstable();
-
-            let new_dfa = self.get_or_create_dstate(&nlist, &mut dfa_states);
-            *dfa_states[d_ix].next_for(ch) = Some(new_dfa);
-            d_ix = new_dfa;
-        }
-
-        // Replace the cached dfa_states for the next run (if there is one)
-        self.dfa_states = dfa_states;
-        self.dfa_states[d_ix].nfa_states.iter().any(|&ix| ix == 0)
-    }
-
-    fn add_state(&mut self, lst: &mut Vec<usize>, state_ix: Option<usize>) {
-        let s_ix = match state_ix {
-            Some(ix) => ix,
-            None => return,
-        };
-
-        if self.nfa_states[s_ix].last_list != self.list_id {
-            self.nfa_states[s_ix].last_list = self.list_id;
-            if self.nfa_states[s_ix].s == NfaState::Split {
-                let State { out, out1, .. } = self.nfa_states[s_ix];
-                self.add_state(lst, Some(out));
-                self.add_state(lst, out1);
-                return;
-            }
-            lst.push(s_ix);
-        }
-    }
-
-    fn get_or_create_dstate(&mut self, lst: &Vec<usize>, dfa_states: &mut Vec<DState>) -> usize {
-        match self.dfa.get(lst) {
-            Some(ix) => *ix,
-            None => {
-                dfa_states.push(DState::new(lst.clone()));
-                dfa_states.len() - 1
-            }
-        }
     }
 }

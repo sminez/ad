@@ -3,7 +3,7 @@ use ad::regex::{dfa, vm};
 use std::time::Instant;
 
 macro_rules! compile {
-    ($mod:ident, $report_compile_time:expr) => {{
+    ($mod:ident, $report_compile:expr) => {{
         let s = "a".repeat(100);
         let mut re = "a?".repeat(100);
         re.push_str(&s);
@@ -12,7 +12,7 @@ macro_rules! compile {
         let r = $mod::Regex::compile(&re).unwrap();
         let d_compile = Instant::now().duration_since(t1).as_micros();
 
-        if $report_compile_time {
+        if $report_compile {
             println!("Compile time: {d_compile} microseconds");
         }
 

@@ -1,10 +1,6 @@
 //! A simple regex engine for operating on character streams and supporting
 //! the Sam text editor's structural regular expressions.
 //!
-//! The implementation of this engine is adapted from the one presented by
-//! Russ Cox here:
-//!   https://swtch.com/~rsc/regexp/regexp1.html
-//!
 //! Thompson's original paper on writing a regex engine can be found here:
 //!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
 

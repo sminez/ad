@@ -1,17 +1,44 @@
-//! Virtual machine based
+//! Virtual machine based implementation based on the instruction set described
+//! in Russ Cox's second article in the series and the source of plan9 Sam:
+//!   https://swtch.com/~rsc/regexp/regexp2.html
+//!   https://github.com/sminez/plan9port/blob/master/src/cmd/sam/regexp.c
+//!
+//! The compilation step used is custom (rather than using a YACC parser).
+//!
+//! We make use of pre-allocated buffers for the Thread lists and track the
+//! index we are up to per-iteration as this results in roughly a 100x speed
+//! up from not having to allocate and free inside of the main loop.
 use super::{re_to_postfix, CharClass, Error, Pfix};
+use std::mem::take;
 
 pub struct Regex {
+    /// The compiled instructions for running the VM
     prog: Prog,
+    /// Pre-allocated Thread list
+    clist: Vec<usize>,
+    /// Pre-allocated Thread list
+    nlist: Vec<usize>,
+    /// Monotonically increasing index used to dedup Threads
+    /// Will overflow at some point if a given regex is used a VERY large number of times
     gen: usize,
+    /// Index into the current Thread list
+    p: usize,
 }
 
 impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
         let pfix = re_to_postfix(re)?;
         let prog = compile(pfix);
+        let clist = vec![0; prog.len()];
+        let nlist = vec![0; prog.len()];
 
-        Ok(Self { prog, gen: 1 })
+        Ok(Self {
+            prog,
+            clist,
+            nlist,
+            gen: 1,
+            p: 0,
+        })
     }
 
     pub fn matches_str(&mut self, input: &str) -> bool {
@@ -23,26 +50,27 @@ impl Regex {
     where
         I: Iterator<Item = (usize, char)>,
     {
-        let mut clist = Vec::with_capacity(self.prog.len());
-        let mut nlist = Vec::with_capacity(self.prog.len());
+        let mut clist = take(&mut self.clist);
+        let mut nlist = take(&mut self.nlist);
+        self.p = 0;
 
         self.add_thread(&mut clist, 0);
         self.gen += 1;
+        let mut n = self.p;
+        let mut matched = false;
 
         for (_, ch) in input {
-            if clist.is_empty() {
-                break;
-            }
-            nlist.clear();
-
-            for tpc in clist.iter() {
-                match &self.prog[*tpc].op {
+            for &tpc in clist.iter().take(n) {
+                match &self.prog[tpc].op {
                     Op::Char(c) if *c == ch => self.add_thread(&mut nlist, tpc + 1),
                     Op::Class(cls) if cls.matches_char(ch) => self.add_thread(&mut nlist, tpc + 1),
                     Op::Any if ch != '\n' => self.add_thread(&mut nlist, tpc + 1),
                     Op::TrueAny => self.add_thread(&mut nlist, tpc + 1),
 
-                    Op::Match => return true,
+                    Op::Match => {
+                        matched = true;
+                        break;
+                    }
 
                     // Jump & Split are handled in add_thread.
                     // Non-matching comparison ops result in that thread dying.
@@ -51,13 +79,22 @@ impl Regex {
             }
 
             (clist, nlist) = (nlist, clist);
+
+            if self.p == 0 {
+                break;
+            }
+
             self.gen += 1;
+            n = self.p;
+            self.p = 0;
         }
 
-        clist.into_iter().any(|tpc| self.prog[tpc].op == Op::Match)
+        self.clist = clist;
+        self.nlist = nlist;
+        matched || self.clist.iter().any(|&tpc| self.prog[tpc].op == Op::Match)
     }
 
-    fn add_thread(&mut self, lst: &mut Vec<usize>, pc: usize) {
+    fn add_thread(&mut self, lst: &mut [usize], pc: usize) {
         if self.prog[pc].gen == self.gen {
             return;
         }
@@ -69,7 +106,8 @@ impl Regex {
             self.add_thread(lst, l1);
             self.add_thread(lst, l2);
         } else {
-            lst.push(pc);
+            lst[self.p] = pc;
+            self.p += 1;
         }
     }
 }
