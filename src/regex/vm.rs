@@ -230,8 +230,11 @@ fn optimise(mut ops: Vec<Op>) -> Vec<Op> {
 }
 
 // - Chained jumps or jumps to splits can be inlined
-// - Jump to match is just match
 // - Split to jump can be inlined
+// - Jump to Match is just Match
+// - Split to Match is Match if both branches are Match,
+//   otherwise there could be a longer match available
+//   on the non-Match branch so we keep the split
 #[inline]
 fn inline_jumps(ops: &mut [Op], i: usize) -> bool {
     if let Op::Jump(j) = ops[i] {
@@ -246,6 +249,11 @@ fn inline_jumps(ops: &mut [Op], i: usize) -> bool {
         }
         return true;
     } else if let Op::Split(s1, s2) = ops[i] {
+        if ops[s1] == Op::Match && ops[s2] == Op::Match {
+            ops[i] = Op::Match;
+            return true;
+        }
+
         let new_s1 = if let Op::Jump(j1) = ops[s1] { j1 } else { s1 };
         let new_s2 = if let Op::Jump(j2) = ops[s2] { j2 } else { s2 };
         if new_s1 != s1 || new_s2 != s2 {
@@ -279,24 +287,21 @@ fn strip_unreachable_instructions(ops: &mut Vec<Op>) {
         }
     }
 
-    let mut to_remove = Vec::new();
     for i in (1..ops.len() - 1).rev() {
-        if !ops[i - 1].is_comp() && !jumps.contains(&i) {
-            for &(to, from) in to_from.iter() {
-                if to > i {
-                    match &mut ops[from] {
-                        Op::Jump(x) => *x -= 1,
-                        Op::Split(x, _) if *x > i => *x -= 1,
-                        Op::Split(_, x) if *x > i => *x -= 1,
-                        _ => (),
-                    }
+        if ops[i - 1].is_comp() || jumps.contains(&i) {
+            continue;
+        }
+
+        for &(to, from) in to_from.iter() {
+            if to > i {
+                match &mut ops[from] {
+                    Op::Jump(x) => *x -= 1,
+                    Op::Split(x, _) if *x > i => *x -= 1,
+                    Op::Split(_, x) if *x > i => *x -= 1,
+                    _ => (),
                 }
             }
-            to_remove.push(i);
         }
-    }
-
-    for i in to_remove.into_iter() {
         ops.remove(i);
     }
 }
