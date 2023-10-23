@@ -28,7 +28,9 @@ pub struct Regex {
 impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
         let pfix = re_to_postfix(re)?;
-        let prog = compile(pfix);
+        let ops = optimise(compile(pfix));
+        let prog: Prog = ops.into_iter().map(|op| Inst { op, gen: 0 }).collect();
+
         let clist = vec![0; prog.len()];
         let nlist = vec![0; prog.len()];
 
@@ -133,7 +135,7 @@ struct Inst {
 
 type Prog = Vec<Inst>;
 
-fn compile(pfix: Vec<Pfix>) -> Prog {
+fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
     let mut prog: Vec<Op> = Vec::with_capacity(pfix.len());
     let mut expr_offsets: Vec<usize> = Vec::with_capacity(pfix.len());
 
@@ -202,7 +204,33 @@ fn compile(pfix: Vec<Pfix>) -> Prog {
     }
 
     prog.push(Op::Match);
-    prog.into_iter().map(|op| Inst { op, gen: 0 }).collect()
+
+    prog
+}
+
+fn optimise(mut ops: Vec<Op>) -> Vec<Op> {
+    for i in 0..ops.len() {
+        if let Op::Jump(j) = ops[i] {
+            // - Chained jumps or jumps to splits can be compressed
+            // - Jump to match is just match
+            if let Op::Jump(l1) = ops[j] {
+                ops[i] = Op::Jump(l1);
+            } else if let Op::Split(l1, l2) = ops[j] {
+                ops[i] = Op::Split(l1, l2);
+            } else if let Op::Match = ops[j] {
+                ops[i] = Op::Match;
+            }
+        } else if let Op::Split(s1, s2) = ops[i] {
+            // - Split to jump can be inlined
+            let new_s1 = if let Op::Jump(j1) = ops[s1] { j1 } else { s1 };
+            let new_s2 = if let Op::Jump(j2) = ops[s2] { j2 } else { s2 };
+            if new_s1 != s1 || new_s2 != s2 {
+                ops[i] = Op::Split(new_s1, new_s2);
+            }
+        }
+    }
+
+    ops
 }
 
 #[cfg(test)]
@@ -234,7 +262,6 @@ mod tests {
     #[test]
     fn opcode_compile_works(re: &str, expected: &[Op]) {
         let prog = compile(re_to_postfix(re).unwrap());
-        let ops: Vec<Op> = prog.into_iter().map(|inst| inst.op).collect();
-        assert_eq!(&ops, expected);
+        assert_eq!(&prog, expected);
     }
 }
