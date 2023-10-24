@@ -1,5 +1,5 @@
 //! Testing the performance of the regex implementation
-use ad::regex::{dfa, vm};
+use ad::regex::vm;
 use std::time::Instant;
 
 macro_rules! compile {
@@ -51,18 +51,7 @@ macro_rules! time_match {
 //
 // The graph from the article can be found here:
 //   https://swtch.com/~rsc/regexp/grep1p.png
-//
-// His implementation of Thompson's NFA algorithm runs for the case being benchmarked
-// here in just under 200 microseconds, with Perl 5.8.7 requiring an estimated 10^15
-// years. In comparison, on a release build my current approach seems to run in around
-// the same time of an average of 150 microseconds when matching without the DFA cache
-// and around 1 microsecond once the cache is in place. Compilation of the regex itself
-// takes around 25 microseconds.
 fn main() {
-    println!("Matching DFA without cache");
-    time_match!(dfa, false);
-    println!("\n\nMatching DFA with cache");
-    time_match!(dfa, true);
-    println!("\n\nMatching VM");
+    println!("Matching VM");
     time_match!(vm, true);
 }

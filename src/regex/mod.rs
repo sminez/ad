@@ -5,7 +5,6 @@
 //!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
 
 // Different impls of the matching algorithm
-pub mod dfa;
 pub mod vm;
 
 const POSTFIX_BUF_SIZE: usize = 2000;
@@ -36,6 +35,7 @@ enum Pfix {
     Quest,
     Star,
     Plus,
+    Save(usize),
 }
 
 /// Helper for converting characters to 0 based inicies for looking things up in caches.
@@ -197,6 +197,7 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
     let mut natom = 0;
     let mut nalt = 0;
     let mut p = 0;
+    let mut s = 2; // Save(0/1) are for the whole match
 
     let mut it = re.chars();
 
@@ -211,6 +212,8 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
                 if p >= POSTFIX_MAX_PARENS {
                     return Err(Error::TooManyParens);
                 }
+                push_atom(Pfix::Save(s), &mut natom, &mut output);
+                s += 1;
                 push_cat(&mut natom, &mut output);
                 paren[p].natom = natom;
                 paren[p].nalt = nalt;
@@ -228,7 +231,8 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 
                 insert_cats(&mut natom, &mut output);
                 insert_alts(&mut nalt, &mut output);
-
+                push_atom(Pfix::Save(s), &mut natom, &mut output);
+                s += 1;
                 p -= 1;
                 natom = paren[p].natom;
                 nalt = paren[p].nalt;
@@ -274,23 +278,26 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 mod tests {
     use super::*;
     use simple_test_case::test_case;
+    use Pfix::*;
 
-    // This is the example given by Russ in his article
+    #[test_case(
+        "a(bb)+a",
+        &[Char('a'), Save(2), Concat, Char('b'), Char('b'), Concat, Save(3), Plus, Concat, Char('a'), Concat ];
+        "article example"
+    )]
+    #[test_case(
+        "a(bc|cd)+a",
+        &[Char('a'), Save(2), Concat, Char('b'), Char('c'), Concat, Char('c'), Char('d'), Concat, Alt, Save(3), Plus, Concat, Char('a'), Concat];
+        "repeated alt"
+    )]
+    #[test_case(
+        "(a*)*",
+        &[Save(2), Char('a'), Star, Save(3), Star, Concat];
+        "star star"
+    )]
     #[test]
-    fn postfix_construction_works() {
-        let re = "a(bb)+a";
-        let expected = vec![
-            Pfix::Char('a'),
-            Pfix::Char('b'),
-            Pfix::Char('b'),
-            Pfix::Concat,
-            Pfix::Plus,
-            Pfix::Concat,
-            Pfix::Char('a'),
-            Pfix::Concat,
-        ];
-
-        assert_eq!(re_to_postfix(re).unwrap(), expected);
+    fn postfix_construction_works(re: &str, expected: &[Pfix]) {
+        assert_eq!(&re_to_postfix(re).unwrap(), expected);
     }
 
     #[test_case("ba*", "baaaaa", true; "zero or more present")]
@@ -317,9 +324,6 @@ mod tests {
     #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
-        let mut r = dfa::Regex::compile(re).unwrap();
-        assert_eq!(r.matches_str(s), matches, "dfa");
-
         let mut r = vm::Regex::compile(re).unwrap();
         assert_eq!(r.matches_str(s), matches, "vm");
     }
@@ -332,9 +336,6 @@ mod tests {
         let mut re = "a?".repeat(100);
         re.push_str(&s);
 
-        let mut r = dfa::Regex::compile(&re).unwrap();
-        assert!(r.matches_str(&s), "dfa");
-
         let mut r = vm::Regex::compile(&re).unwrap();
         assert!(r.matches_str(&s), "vm");
     }
@@ -344,12 +345,6 @@ mod tests {
     #[test]
     fn repeated_match_works() {
         let re = "a(bb)+a";
-
-        let mut r = dfa::Regex::compile(re).unwrap();
-        for _ in 0..10 {
-            assert!(r.matches_str("abbbba"), "dfa");
-            assert!(!r.matches_str("foo"), "dfa");
-        }
 
         let mut r = vm::Regex::compile(re).unwrap();
         for _ in 0..10 {

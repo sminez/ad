@@ -47,7 +47,6 @@ impl Regex {
         self.matches_iter(input.chars().enumerate())
     }
 
-    // TODO: track the start of the match so we can return the range that is matching
     pub fn matches_iter<I>(&mut self, input: I) -> bool
     where
         I: Iterator<Item = (usize, char)>,
@@ -61,8 +60,14 @@ impl Regex {
         let mut n = self.p;
         let mut matched = false;
 
+        println!(
+            "PROG: {:?}",
+            self.prog.iter().map(|i| i.op.clone()).collect::<Vec<_>>()
+        );
         for (_, ch) in input {
+            println!("CHAR: {ch} :: CLIST: {clist:?}");
             for &tpc in clist.iter().take(n) {
+                println!("OP: {:?}", self.prog[tpc].op);
                 match &self.prog[tpc].op {
                     Op::Char(c) if *c == ch => self.add_thread(&mut nlist, tpc + 1),
                     Op::Class(cls) if cls.matches_char(ch) => self.add_thread(&mut nlist, tpc + 1),
@@ -74,7 +79,7 @@ impl Regex {
                         break;
                     }
 
-                    // Jump & Split are handled in add_thread.
+                    // Save, Jump & Split are handled in add_thread.
                     // Non-matching comparison ops result in that thread dying.
                     _ => (),
                 }
@@ -107,6 +112,9 @@ impl Regex {
         } else if let Op::Split(l1, l2) = self.prog[pc].op {
             self.add_thread(lst, l1);
             self.add_thread(lst, l2);
+        } else if let Op::Save(_) = self.prog[pc].op {
+            // TODO: impl submatch captures
+            self.add_thread(lst, pc + 1);
         } else {
             lst[self.p] = pc;
             self.p += 1;
@@ -124,12 +132,28 @@ enum Op {
     // Control ops
     Split(usize, usize),
     Jump(usize),
+    Save(usize),
     Match,
 }
 
 impl Op {
     fn is_comp(&self) -> bool {
         !matches!(self, Op::Split(_, _) | Op::Jump(_) | Op::Match)
+    }
+
+    fn inc(&mut self, i: usize) {
+        match self {
+            Op::Jump(j) if *j >= i => *j += 1,
+            Op::Split(l1, l2) => {
+                if *l1 >= i {
+                    *l1 += 1;
+                }
+                if *l2 >= i {
+                    *l2 += 1;
+                }
+            }
+            _ => (),
+        }
     }
 }
 
@@ -153,6 +177,18 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
         (@expr $exp:expr) => {{
             expr_offsets.push(prog.len());
             prog.append(&mut $exp);
+        }};
+        (@save $s:expr) => {{
+            if $s % 2 == 0 {
+                expr_offsets.push(prog.len());
+            } else {
+                let ix = prog
+                    .iter()
+                    .position(|op| op == &Op::Save($s - 1))
+                    .expect("to have save start");
+                expr_offsets.truncate(ix + 1);
+            }
+            prog.push(Op::Save($s));
         }};
     }
 
@@ -180,8 +216,13 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                 let ix = prog.len(); // index of the split we are inserting
 
                 push!(Op::Split(ix + 1, ix + 2 + e1.len()));
+                e1.iter_mut().for_each(|op| op.inc(ix));
+                e2.iter_mut().for_each(|op| op.inc(ix));
                 push!(@expr e1);
-                push!(Op::Jump(prog.len() + 1 + e2.len()));
+
+                let ix2 = prog.len();
+                push!(Op::Jump(ix2 + 1 + e2.len()));
+                e2.iter_mut().for_each(|op| op.inc(ix2));
                 push!(@expr e2);
             }
 
@@ -195,6 +236,7 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                 let ix = prog.len(); // index of the split we are inserting
 
                 push!(Op::Split(ix + 1, ix + 1 + e.len()));
+                e.iter_mut().for_each(|op| op.inc(ix));
                 push!(@expr e);
             }
 
@@ -203,9 +245,12 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                 let ix = prog.len(); // index of the split we are inserting
 
                 push!(Op::Split(ix + 1, ix + 2 + e.len()));
+                e.iter_mut().for_each(|op| op.inc(ix));
                 push!(@expr e);
                 push!(Op::Jump(ix))
             }
+
+            Pfix::Save(s) => push!(@save s),
         }
     }
 
@@ -323,16 +368,21 @@ mod tests {
         Op::Char(ch)
     }
 
+    fn sv(s: usize) -> Op {
+        Op::Save(s)
+    }
+
     #[test_case("abc", &[c('a'), c('b'), c('c'), Op::Match]; "lit only")]
     #[test_case("a|b", &[sp(1, 3), c('a'), jmp(4), c('b'), Op::Match]; "single char alt")]
-    #[test_case("ab(c|d)", &[c('a'), c('b'), sp(3, 5), c('c'), jmp(6), c('d'), Op::Match]; "lits then alt")]
+    #[test_case("ab(c|d)", &[c('a'), c('b'), sv(2), sp(4, 6), c('c'), jmp(7), c('d'), sv(3), Op::Match]; "lits then alt")]
     #[test_case("ab+a", &[c('a'), c('b'), sp(1, 3), c('a'), Op::Match]; "plus for single lit")]
     #[test_case("ab?a", &[c('a'), sp(2, 3), c('b'), c('a'), Op::Match]; "quest for single lit")]
     #[test_case("ab*a", &[c('a'), sp(2, 4), c('b'), jmp(1), c('a'), Op::Match]; "star for single lit")]
-    #[test_case("a(bb)+a", &[c('a'), c('b'), c('b'), sp(1, 4), c('a'), Op::Match]; "rep of cat")]
+    #[test_case("a(bb)+a", &[c('a'), sv(2), c('b'), c('b'), sv(3), sp(2, 6), c('a'), Op::Match]; "rep of cat")]
     #[test_case("ba*", &[c('b'), sp(2, 4), c('a'), jmp(1), Op::Match]; "trailing star")]
     #[test_case("b?a", &[sp(1, 2), c('b'), c('a'), Op::Match]; "first lit is optional")]
-    #[test_case("(a*)*", &[sp(1, 3), c('a'), sp(3, 5), jmp(0), jmp(2), Op::Match]; "star star")]
+    #[test_case("(a*)", &[sv(2), sp(2, 4), c('a'), jmp(1), sv(3), Op::Match]; "star")]
+    #[test_case("(a*)*", &[sp(1, 7), sv(2), sp(3, 5), c('a'), jmp(2), sv(3), jmp(0), Op::Match]; "star star")]
     #[test]
     fn opcode_compile_works(re: &str, expected: &[Op]) {
         let prog = compile(re_to_postfix(re).unwrap());
@@ -340,10 +390,10 @@ mod tests {
     }
 
     #[test_case("a|b", &[sp(1, 3), c('a'), Op::Match, c('b'), Op::Match]; "single char alt")]
-    #[test_case("ab(c|d)", &[c('a'), c('b'), sp(3, 5), c('c'), Op::Match, c('d'), Op::Match]; "lits then alt")]
+    #[test_case("ab(c|d)", &[c('a'), c('b'), sv(2), sp(4, 6), c('c'), jmp(7), c('d'), sv(3), Op::Match]; "lits then alt")]
     #[test_case("ab*a", &[c('a'), sp(2, 4), c('b'), sp(2, 4), c('a'), Op::Match]; "star for single lit")]
     #[test_case("ba*", &[c('b'), sp(2, 4), c('a'), sp(2, 4), Op::Match]; "trailing star")]
-    #[test_case("(a*)*", &[sp(1, 0), c('a'), sp(0, 3), Op::Match ]; "star star")]
+    #[test_case("(a*)*", &[sp(1, 7), sv(2), sp(3, 5), c('a'), sp(3, 5), sv(3), sp(1, 7), Op::Match]; "star star")]
     #[test]
     fn opcode_optimise_works(re: &str, expected: &[Op]) {
         let prog = optimise(compile(re_to_postfix(re).unwrap()));
