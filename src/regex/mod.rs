@@ -7,6 +7,8 @@
 // Different impls of the matching algorithm
 pub mod vm;
 
+pub use vm::{Match, Regex};
+
 const POSTFIX_BUF_SIZE: usize = 2000;
 const POSTFIX_MAX_PARENS: usize = 100;
 
@@ -35,7 +37,21 @@ enum Pfix {
     Quest,
     Star,
     Plus,
+    LazyQuest,
+    LazyStar,
+    LazyPlus,
     Save(usize),
+}
+
+impl Pfix {
+    fn make_lazy(&mut self) {
+        match self {
+            Self::Quest => *self = Self::LazyQuest,
+            Self::Star => *self = Self::LazyStar,
+            Self::Plus => *self = Self::LazyPlus,
+            _ => (),
+        }
+    }
 }
 
 /// Helper for converting characters to 0 based inicies for looking things up in caches.
@@ -142,7 +158,7 @@ impl CharClass {
     }
 
     // Negated classes still don't match a newline
-    fn matches_char(&self, ch: char) -> bool {
+    fn matches(&self, ch: char) -> bool {
         if self.negated && ch == '\n' {
             return false;
         }
@@ -250,7 +266,14 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 
             '*' => push_rep(Pfix::Star, natom, &mut output)?,
             '+' => push_rep(Pfix::Plus, natom, &mut output)?,
-            '?' => push_rep(Pfix::Quest, natom, &mut output)?,
+
+            '?' => {
+                if matches!(output.last(), Some(Pfix::Star | Pfix::Plus | Pfix::Quest)) {
+                    output.last_mut().unwrap().make_lazy();
+                } else {
+                    push_rep(Pfix::Quest, natom, &mut output)?;
+                }
+            }
 
             '[' => {
                 let cls = CharClass::try_parse(&mut it)?;
@@ -324,8 +347,20 @@ mod tests {
     #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
-        let mut r = vm::Regex::compile(re).unwrap();
-        assert_eq!(r.matches_str(s), matches, "vm");
+        let mut r = Regex::compile(re).unwrap();
+        assert_eq!(r.match_str(s).is_some(), matches);
+    }
+
+    #[test]
+    fn match_extraction_works() {
+        let re = "([0-9]+)-([0-9]+)";
+        let mut r = Regex::compile(re).unwrap();
+        let s = "this should work 123-456 other stuff";
+        let m = r.match_str(s).unwrap();
+
+        assert_eq!(m.str_submatch_text(1, s), Some("123"));
+        assert_eq!(m.str_submatch_text(2, s), Some("456"));
+        assert_eq!(m.str_match_text(s), "123-456");
     }
 
     // This is the pathological case that Cox covers in his article which leads
@@ -336,8 +371,8 @@ mod tests {
         let mut re = "a?".repeat(100);
         re.push_str(&s);
 
-        let mut r = vm::Regex::compile(&re).unwrap();
-        assert!(r.matches_str(&s), "vm");
+        let mut r = Regex::compile(&re).unwrap();
+        assert!(r.match_str(&s).is_some());
     }
 
     // Make sure that the previous cached state for a given Regex doesn't cause
@@ -346,10 +381,10 @@ mod tests {
     fn repeated_match_works() {
         let re = "a(bb)+a";
 
-        let mut r = vm::Regex::compile(re).unwrap();
+        let mut r = Regex::compile(re).unwrap();
         for _ in 0..10 {
-            assert!(r.matches_str("abbbba"), "vm");
-            assert!(!r.matches_str("foo"), "vm");
+            assert!(r.match_str("abbbba").is_some());
+            assert!(r.match_str("foo").is_none());
         }
     }
 }

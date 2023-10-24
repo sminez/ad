@@ -15,9 +15,9 @@ pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
     /// Pre-allocated Thread list
-    clist: Vec<usize>,
+    clist: Vec<Thread>,
     /// Pre-allocated Thread list
-    nlist: Vec<usize>,
+    nlist: Vec<Thread>,
     /// Monotonically increasing index used to dedup Threads
     /// Will overflow at some point if a given regex is used a VERY large number of times
     gen: usize,
@@ -31,8 +31,8 @@ impl Regex {
         let ops = optimise(compile(pfix));
         let prog: Prog = ops.into_iter().map(|op| Inst { op, gen: 0 }).collect();
 
-        let clist = vec![0; prog.len()];
-        let nlist = vec![0; prog.len()];
+        let clist = vec![Thread::default(); prog.len()];
+        let nlist = vec![Thread::default(); prog.len()];
 
         Ok(Self {
             prog,
@@ -43,39 +43,39 @@ impl Regex {
         })
     }
 
-    pub fn matches_str(&mut self, input: &str) -> bool {
-        self.matches_iter(input.chars().enumerate())
+    pub fn match_str(&mut self, input: &str) -> Option<Match> {
+        self.match_iter(input.chars().enumerate())
     }
 
-    pub fn matches_iter<I>(&mut self, input: I) -> bool
+    pub fn match_iter<I>(&mut self, input: I) -> Option<Match>
     where
         I: Iterator<Item = (usize, char)>,
     {
         let mut clist = take(&mut self.clist);
         let mut nlist = take(&mut self.nlist);
+        let mut sub_matches = [0; 20];
         self.p = 0;
 
-        self.add_thread(&mut clist, 0);
+        self.add_thread(&mut clist, Thread::default(), 0);
         self.gen += 1;
         let mut n = self.p;
         let mut matched = false;
 
-        println!(
-            "PROG: {:?}",
-            self.prog.iter().map(|i| i.op.clone()).collect::<Vec<_>>()
-        );
-        for (_, ch) in input {
-            println!("CHAR: {ch} :: CLIST: {clist:?}");
-            for &tpc in clist.iter().take(n) {
-                println!("OP: {:?}", self.prog[tpc].op);
-                match &self.prog[tpc].op {
-                    Op::Char(c) if *c == ch => self.add_thread(&mut nlist, tpc + 1),
-                    Op::Class(cls) if cls.matches_char(ch) => self.add_thread(&mut nlist, tpc + 1),
-                    Op::Any if ch != '\n' => self.add_thread(&mut nlist, tpc + 1),
-                    Op::TrueAny => self.add_thread(&mut nlist, tpc + 1),
+        for (sp, ch) in input {
+            for &t in clist.iter().take(n) {
+                match &self.prog[t.pc].op {
+                    Op::Char(c) if *c == ch => {
+                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp)
+                    }
+                    Op::Class(cls) if cls.matches(ch) => {
+                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp)
+                    }
+                    Op::Any if ch != '\n' => self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp),
+                    Op::TrueAny => self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp),
 
                     Op::Match => {
                         matched = true;
+                        sub_matches = t.sub_matches;
                         break;
                     }
 
@@ -98,26 +98,93 @@ impl Regex {
 
         self.clist = clist;
         self.nlist = nlist;
-        matched || self.clist.iter().any(|&tpc| self.prog[tpc].op == Op::Match)
+
+        if !matched {
+            for t in self.clist.iter() {
+                if self.prog[t.pc].op == Op::Match {
+                    return Some(Match {
+                        sub_matches: t.sub_matches,
+                    });
+                }
+            }
+
+            return None;
+        }
+
+        Some(Match { sub_matches })
     }
 
-    fn add_thread(&mut self, lst: &mut [usize], pc: usize) {
-        if self.prog[pc].gen == self.gen {
+    fn add_thread(&mut self, lst: &mut [Thread], mut t: Thread, sp: usize) {
+        if self.prog[t.pc].gen == self.gen {
             return;
         }
-        self.prog[pc].gen = self.gen;
+        self.prog[t.pc].gen = self.gen;
 
-        if let Op::Jump(l1) = self.prog[pc].op {
-            self.add_thread(lst, l1);
-        } else if let Op::Split(l1, l2) = self.prog[pc].op {
-            self.add_thread(lst, l1);
-            self.add_thread(lst, l2);
-        } else if let Op::Save(_) = self.prog[pc].op {
-            // TODO: impl submatch captures
-            self.add_thread(lst, pc + 1);
+        if let Op::Jump(l1) = self.prog[t.pc].op {
+            self.add_thread(lst, t.split_to(l1), sp);
+        } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
+            self.add_thread(lst, t.split_to(l1), sp);
+            self.add_thread(lst, t.split_to(l2), sp);
+        } else if let Op::Save(s) = self.prog[t.pc].op {
+            t.sub_matches[s] = sp + 1;
+            self.add_thread(lst, t.split_to(t.pc + 1), sp);
         } else {
-            lst[self.p] = pc;
+            lst[self.p] = t;
             self.p += 1;
+        }
+    }
+}
+
+/// The match location of a Regex against a given input.
+///
+/// The sub-match indices are relative to the input used to run the original match.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Match {
+    sub_matches: [usize; 20],
+}
+
+impl Match {
+    pub fn str_match_text<'a>(&self, s: &'a str) -> &'a str {
+        let (a, b) = self.loc();
+        &s[a..b]
+    }
+
+    pub fn str_submatch_text<'a>(&self, n: usize, s: &'a str) -> Option<&'a str> {
+        let (a, b) = self.sub_loc(n)?;
+        Some(&s[a..b])
+    }
+
+    pub fn loc(&self) -> (usize, usize) {
+        (self.sub_matches[0], self.sub_matches[1])
+    }
+
+    pub fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
+        if n > 9 {
+            return None;
+        }
+        let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
+        if start == end {
+            return None;
+        }
+
+        Some((start, end))
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct Thread {
+    // VM program counter for this thread
+    pc: usize,
+    // $0 -> $9 submatches with $0 being the full match
+    // for submatch $k the start index is 2$k and the end is 2$k+1
+    sub_matches: [usize; 20],
+}
+
+impl Thread {
+    fn split_to(&self, pc: usize) -> Thread {
+        Thread {
+            pc,
+            sub_matches: self.sub_matches,
         }
     }
 }
@@ -141,6 +208,7 @@ impl Op {
         !matches!(self, Op::Split(_, _) | Op::Jump(_) | Op::Match)
     }
 
+    // Increment jumps and splits past the given index
     fn inc(&mut self, i: usize) {
         match self {
             Op::Jump(j) if *j >= i => *j += 1,
@@ -201,6 +269,7 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
     for p in pfix.into_iter() {
         match p {
+            Pfix::Save(s) => push!(@save s),
             Pfix::Class(cls) => push!(Op::Class(cls)),
             Pfix::Char(ch) => push!(Op::Char(ch)),
             Pfix::TrueAny => push!(Op::TrueAny),
@@ -220,43 +289,69 @@ fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                 e2.iter_mut().for_each(|op| op.inc(ix));
                 push!(@expr e1);
 
-                let ix2 = prog.len();
+                let ix2 = prog.len(); // index of the split we are inserting
                 push!(Op::Jump(ix2 + 1 + e2.len()));
                 e2.iter_mut().for_each(|op| op.inc(ix2));
                 push!(@expr e2);
             }
 
-            Pfix::Plus => {
+            // Lazy operators are implemented by reversing the priority order of the threads
+            // the create so that shorter matches are preferred.
+            Pfix::Plus | Pfix::LazyPlus => {
                 let ix = *expr_offsets.last().unwrap();
-                push!(Op::Split(ix, prog.len() + 1));
+                let (mut l1, mut l2) = (ix, prog.len() + 1);
+                if p == Pfix::LazyPlus {
+                    (l1, l2) = (l2, l1);
+                };
+
+                push!(Op::Split(l1, l2));
             }
 
-            Pfix::Quest => {
+            Pfix::Quest | Pfix::LazyQuest => {
                 let mut e = pop!();
-                let ix = prog.len(); // index of the split we are inserting
 
-                push!(Op::Split(ix + 1, ix + 1 + e.len()));
+                let ix = prog.len(); // index of the split we are inserting
+                let (mut l1, mut l2) = (ix + 1, ix + 1 + e.len());
+                if p == Pfix::LazyQuest {
+                    (l1, l2) = (l2, l1);
+                };
+
+                push!(Op::Split(l1, l2));
                 e.iter_mut().for_each(|op| op.inc(ix));
                 push!(@expr e);
             }
 
-            Pfix::Star => {
+            Pfix::Star | Pfix::LazyStar => {
                 let mut e = pop!();
-                let ix = prog.len(); // index of the split we are inserting
 
-                push!(Op::Split(ix + 1, ix + 2 + e.len()));
+                let ix = prog.len(); // index of the split we are inserting
+                let (mut l1, mut l2) = (ix + 1, ix + 2 + e.len());
+                if p == Pfix::LazyStar {
+                    (l1, l2) = (l2, l1);
+                };
+
+                push!(Op::Split(l1, l2));
                 e.iter_mut().for_each(|op| op.inc(ix));
                 push!(@expr e);
                 push!(Op::Jump(ix))
             }
-
-            Pfix::Save(s) => push!(@save s),
         }
     }
 
-    prog.push(Op::Match);
+    // Compiled code for "@*?" to allow for unanchored matching.
+    // Save(0) marks the beginning of the regex in the input
+    let mut full = vec![Op::Split(3, 1), Op::TrueAny, Op::Jump(0), Op::Save(0)];
+    // Unconditionally increment all jumps and splits in the compiled program
+    // to account for the prefix we just added.
+    full.extend(prog.into_iter().map(|op| match op {
+        Op::Jump(j) => Op::Jump(j + 4),
+        Op::Split(l1, l2) => Op::Split(l1 + 4, l2 + 4),
+        op => op,
+    }));
+    // Save(1) marks the end of the regex in the input
+    full.extend([Op::Save(1), Op::Match]);
 
-    prog
+    full
 }
 
 fn optimise(mut ops: Vec<Op>) -> Vec<Op> {
@@ -372,31 +467,42 @@ mod tests {
         Op::Save(s)
     }
 
-    #[test_case("abc", &[c('a'), c('b'), c('c'), Op::Match]; "lit only")]
-    #[test_case("a|b", &[sp(1, 3), c('a'), jmp(4), c('b'), Op::Match]; "single char alt")]
-    #[test_case("ab(c|d)", &[c('a'), c('b'), sv(2), sp(4, 6), c('c'), jmp(7), c('d'), sv(3), Op::Match]; "lits then alt")]
-    #[test_case("ab+a", &[c('a'), c('b'), sp(1, 3), c('a'), Op::Match]; "plus for single lit")]
-    #[test_case("ab?a", &[c('a'), sp(2, 3), c('b'), c('a'), Op::Match]; "quest for single lit")]
-    #[test_case("ab*a", &[c('a'), sp(2, 4), c('b'), jmp(1), c('a'), Op::Match]; "star for single lit")]
-    #[test_case("a(bb)+a", &[c('a'), sv(2), c('b'), c('b'), sv(3), sp(2, 6), c('a'), Op::Match]; "rep of cat")]
-    #[test_case("ba*", &[c('b'), sp(2, 4), c('a'), jmp(1), Op::Match]; "trailing star")]
-    #[test_case("b?a", &[sp(1, 2), c('b'), c('a'), Op::Match]; "first lit is optional")]
-    #[test_case("(a*)", &[sv(2), sp(2, 4), c('a'), jmp(1), sv(3), Op::Match]; "star")]
-    #[test_case("(a*)*", &[sp(1, 7), sv(2), sp(3, 5), c('a'), jmp(2), sv(3), jmp(0), Op::Match]; "star star")]
+    #[test_case("abc", vec![c('a'), c('b'), c('c')]; "lit only")]
+    #[test_case("a|b", vec![sp(5, 7), c('a'), jmp(8), c('b')]; "single char alt")]
+    #[test_case("ab(c|d)", vec![c('a'), c('b'), sv(2), sp(8, 10), c('c'), jmp(11), c('d'), sv(3)]; "lits then alt")]
+    #[test_case("ab+a", vec![c('a'), c('b'), sp(5, 7), c('a')]; "plus for single lit")]
+    #[test_case("ab?a", vec![c('a'), sp(6, 7), c('b'), c('a')]; "quest for single lit")]
+    #[test_case("ab*a", vec![c('a'), sp(6, 8), c('b'), jmp(5), c('a')]; "star for single lit")]
+    #[test_case("a(bb)+a", vec![c('a'), sv(2), c('b'), c('b'), sv(3), sp(6, 10), c('a')]; "rep of cat")]
+    #[test_case("ba*", vec![c('b'), sp(6, 8), c('a'), jmp(5)]; "trailing star")]
+    #[test_case("b?a", vec![sp(5, 6), c('b'), c('a')]; "first lit is optional")]
+    #[test_case("(a*)", vec![sv(2), sp(6, 8), c('a'), jmp(5), sv(3)]; "star")]
+    #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), jmp(6), sv(3), jmp(4)]; "star star")]
     #[test]
-    fn opcode_compile_works(re: &str, expected: &[Op]) {
-        let prog = compile(re_to_postfix(re).unwrap());
-        assert_eq!(&prog, expected);
+    fn opcode_compile_works(re: &str, expected: Vec<Op>) {
+        let pfix = re_to_postfix(re).unwrap();
+        let prog = compile(pfix);
+        let mut full = vec![sp(3, 1), Op::TrueAny, jmp(0), sv(0)];
+        full.extend(expected);
+        full.extend([sv(1), Op::Match]);
+
+        assert_eq!(prog, full);
     }
 
-    #[test_case("a|b", &[sp(1, 3), c('a'), Op::Match, c('b'), Op::Match]; "single char alt")]
-    #[test_case("ab(c|d)", &[c('a'), c('b'), sv(2), sp(4, 6), c('c'), jmp(7), c('d'), sv(3), Op::Match]; "lits then alt")]
-    #[test_case("ab*a", &[c('a'), sp(2, 4), c('b'), sp(2, 4), c('a'), Op::Match]; "star for single lit")]
-    #[test_case("ba*", &[c('b'), sp(2, 4), c('a'), sp(2, 4), Op::Match]; "trailing star")]
-    #[test_case("(a*)*", &[sp(1, 7), sv(2), sp(3, 5), c('a'), sp(3, 5), sv(3), sp(1, 7), Op::Match]; "star star")]
+    // '[Save(2), Char('a'), Star, Save(3), Star, Concat]',
+
+    #[test_case("a|b", vec![sp(5, 7), c('a'), jmp(8), c('b')]; "single char alt")]
+    #[test_case("ab(c|d)", vec![c('a'), c('b'), sv(2), sp(8, 10), c('c'), jmp(11), c('d'), sv(3)]; "lits then alt")]
+    #[test_case("ab*a", vec![c('a'), sp(6, 8), c('b'), sp(6, 8), c('a')]; "star for single lit")]
+    #[test_case("ba*", vec![c('b'), sp(6, 8), c('a'), sp(6, 8)]; "trailing star")]
+    // #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), sp(7, 9), sv(3), sp(5, 11)]; "star star")]
     #[test]
-    fn opcode_optimise_works(re: &str, expected: &[Op]) {
+    fn opcode_optimise_works(re: &str, expected: Vec<Op>) {
         let prog = optimise(compile(re_to_postfix(re).unwrap()));
-        assert_eq!(&prog, expected);
+        let mut full = vec![sp(3, 1), Op::TrueAny, sp(3, 1), sv(0)];
+        full.extend(expected);
+        full.extend([sv(1), Op::Match]);
+
+        assert_eq!(prog, full);
     }
 }

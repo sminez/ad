@@ -30,7 +30,7 @@ macro_rules! time_match {
                 (r, _) = compile!($mod, false);
             }
             let t1 = Instant::now();
-            assert!(r.matches_str(&s), "n={n}");
+            assert!(r.match_str(&s).is_some(), "n={n}");
             durations.push(Instant::now().duration_since(t1).as_micros());
             print!(".");
         }
