@@ -553,11 +553,11 @@ impl Buffer {
         }
     }
 
-    fn find_backward<M: Matcher>(&mut self, m: M) {
-        if let Some(dot) = m.match_backward_from_wrapping(self.dot.active_cur(), self) {
-            self.dot = dot;
-        }
-    }
+    // fn find_backward<M: Matcher>(&mut self, m: M) {
+    //     if let Some(dot) = m.match_backward_from_wrapping(self.dot.active_cur(), self) {
+    //         self.dot = dot;
+    //     }
+    // }
 }
 
 fn n_digits(mut n: usize) -> usize {

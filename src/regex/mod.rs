@@ -5,7 +5,8 @@
 //!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
 
 // Different impls of the matching algorithm
-pub mod vm;
+mod compile;
+mod vm;
 
 pub use vm::{Match, Regex};
 
@@ -321,70 +322,5 @@ mod tests {
     #[test]
     fn postfix_construction_works(re: &str, expected: &[Pfix]) {
         assert_eq!(&re_to_postfix(re).unwrap(), expected);
-    }
-
-    #[test_case("ba*", "baaaaa", true; "zero or more present")]
-    #[test_case("ba*", "b", true; "zero or more not present")]
-    #[test_case("ba+", "baaaaa", true; "one or more present")]
-    #[test_case("ba+", "b", false; "one or more not present")]
-    #[test_case("b?a", "ba", true; "optional present")]
-    #[test_case("b?a", "a", true; "optional not present")]
-    #[test_case("a(bb)+a", "abbbba", true; "article example matching")]
-    #[test_case("a(bb)+a", "abbba", false; "article example non matching")]
-    #[test_case(".*b", "123b", true; "dot star prefix")]
-    #[test_case("1.*", "123b", true; "dot star suffix")]
-    #[test_case("1.*b", "123b", true; "dot star inner")]
-    #[test_case("(c|C)ase matters", "case matters", true; "alternation first")]
-    #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
-    #[test_case("this@*works", "this contains\nbut still works", true; "true any")]
-    #[test_case(r"literal\?", "literal?", true; "escape special char")]
-    #[test_case(r"literal\t", "literal\t", true; "escape sequence")]
-    #[test_case("[abc] happy cow", "a happy cow", true; "character class")]
-    #[test_case("[^abc] happy cow", "a happy cow", false; "negated character class")]
-    #[test_case("[a-zA-Z]*", "camelCaseFtw", true; "char class ranges matching")]
-    #[test_case("[a-zA-Z]*1", "kebab-case-not-so-much", false; "char class ranges non matching")]
-    #[test_case("[a-zA-Z ]*", "this should work", true; "char class mixed")]
-    #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
-    #[test]
-    fn match_works(re: &str, s: &str, matches: bool) {
-        let mut r = Regex::compile(re).unwrap();
-        assert_eq!(r.match_str(s).is_some(), matches);
-    }
-
-    #[test]
-    fn match_extraction_works() {
-        let re = "([0-9]+)-([0-9]+)";
-        let mut r = Regex::compile(re).unwrap();
-        let s = "this should work 123-456 other stuff";
-        let m = r.match_str(s).unwrap();
-
-        assert_eq!(m.str_submatch_text(1, s), Some("123"));
-        assert_eq!(m.str_submatch_text(2, s), Some("456"));
-        assert_eq!(m.str_match_text(s), "123-456");
-    }
-
-    // This is the pathological case that Cox covers in his article which leads
-    // to exponential behaviour in backtracking based implementations.
-    #[test]
-    fn pathological_match_doesnt_explode() {
-        let s = "a".repeat(100);
-        let mut re = "a?".repeat(100);
-        re.push_str(&s);
-
-        let mut r = Regex::compile(&re).unwrap();
-        assert!(r.match_str(&s).is_some());
-    }
-
-    // Make sure that the previous cached state for a given Regex doesn't cause
-    // any strange behaviour for future matches
-    #[test]
-    fn repeated_match_works() {
-        let re = "a(bb)+a";
-
-        let mut r = Regex::compile(re).unwrap();
-        for _ in 0..10 {
-            assert!(r.match_str("abbbba").is_some());
-            assert!(r.match_str("foo").is_none());
-        }
     }
 }
