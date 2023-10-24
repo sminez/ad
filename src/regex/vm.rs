@@ -9,8 +9,15 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use super::{re_to_postfix, CharClass, Error, Pfix};
+use ropey::{Rope, RopeSlice};
 use std::{collections::BTreeSet, mem::take};
 
+/// A regular expression engine designed for use within the ad text editor.
+///
+/// This is a relatively naive implementation though it does have some
+/// optimisations and runs reasonably quickly. It is not at all designed to
+/// be robust against mallicious input and it does not attempt to support
+/// full PCRE syntax or functionality.
 pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
@@ -45,6 +52,10 @@ impl Regex {
 
     pub fn match_str(&mut self, input: &str) -> Option<Match> {
         self.match_iter(input.chars().enumerate())
+    }
+
+    pub fn match_rope(&mut self, rope: &Rope) -> Option<Match> {
+        self.match_iter(rope.chars().enumerate())
     }
 
     pub fn match_iter<I>(&mut self, input: I) -> Option<Match>
@@ -152,6 +163,16 @@ impl Match {
     pub fn str_submatch_text<'a>(&self, n: usize, s: &'a str) -> Option<&'a str> {
         let (a, b) = self.sub_loc(n)?;
         Some(&s[a..b])
+    }
+
+    pub fn rope_match_text<'a>(&self, r: &'a Rope) -> RopeSlice<'a> {
+        let (a, b) = self.loc();
+        r.slice(a..b)
+    }
+
+    pub fn rope_submatch_text<'a>(&self, n: usize, r: &'a Rope) -> Option<RopeSlice<'a>> {
+        let (a, b) = self.sub_loc(n)?;
+        Some(r.slice(a..b))
     }
 
     pub fn loc(&self) -> (usize, usize) {
