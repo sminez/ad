@@ -13,22 +13,22 @@ pub struct Match {
 impl Match {
     pub fn str_match_text<'a>(&self, s: &'a str) -> &'a str {
         let (a, b) = self.loc();
-        &s[a..b]
+        &s[a..=b]
     }
 
     pub fn str_submatch_text<'a>(&self, n: usize, s: &'a str) -> Option<&'a str> {
         let (a, b) = self.sub_loc(n)?;
-        Some(&s[a..b])
+        Some(&s[a..=b])
     }
 
     pub fn rope_match_text<'a>(&self, r: &'a Rope) -> RopeSlice<'a> {
         let (a, b) = self.loc();
-        r.slice(a..b)
+        r.slice(a..=b)
     }
 
     pub fn rope_submatch_text<'a>(&self, n: usize, r: &'a Rope) -> Option<RopeSlice<'a>> {
         let (a, b) = self.sub_loc(n)?;
-        Some(r.slice(a..b))
+        Some(r.slice(a..=b))
     }
 
     pub fn loc(&self) -> (usize, usize) {
@@ -50,14 +50,18 @@ impl Match {
 
 pub trait IndexedChars {
     type I: Iterator<Item = (usize, char)>;
-    fn iter_from(&self, from: usize) -> Self::I;
+    fn iter_from(&self, from: usize) -> Option<Self::I>;
 }
 
 impl<'a> IndexedChars for &'a str {
     type I = Skip<CharIndices<'a>>;
 
-    fn iter_from(&self, from: usize) -> Self::I {
-        self.char_indices().skip(from)
+    fn iter_from(&self, from: usize) -> Option<Self::I> {
+        if from >= self.len() {
+            None
+        } else {
+            Some(self.char_indices().skip(from))
+        }
     }
 }
 
@@ -82,10 +86,14 @@ impl<'a> Iterator for IdxRopeChars<'a> {
 impl<'a> IndexedChars for &'a Rope {
     type I = IdxRopeChars<'a>;
 
-    fn iter_from(&self, from: usize) -> Self::I {
-        IdxRopeChars {
-            inner: self.chars_at(from),
-            from,
+    fn iter_from(&self, from: usize) -> Option<Self::I> {
+        if from >= self.len_chars() {
+            None
+        } else {
+            Some(IdxRopeChars {
+                inner: self.chars_at(from),
+                from,
+            })
         }
     }
 }
@@ -108,8 +116,11 @@ where
     type Item = Match;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let m = self.r.match_iter(&mut self.it.iter_from(self.from))?;
+        let m = self
+            .r
+            .match_iter(&mut self.it.iter_from(self.from)?, self.from)?;
         (_, self.from) = m.loc();
+        self.from += 1;
 
         Some(m)
     }

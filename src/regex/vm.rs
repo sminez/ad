@@ -55,7 +55,7 @@ impl Regex {
     }
 
     pub fn match_str(&mut self, input: &str) -> Option<Match> {
-        self.match_iter(&mut input.chars().enumerate())
+        self.match_iter(&mut input.char_indices(), 0)
     }
 
     pub fn match_str_all<'a, 'b>(&'a mut self, input: &'b str) -> MatchIter<'a, &'b str> {
@@ -67,7 +67,7 @@ impl Regex {
     }
 
     pub fn match_rope(&mut self, rope: &Rope) -> Option<Match> {
-        self.match_iter(&mut rope.chars().enumerate())
+        self.match_iter(&mut rope.chars().enumerate(), 0)
     }
 
     pub fn match_rope_all<'a, 'b>(&'a mut self, input: &'b Rope) -> MatchIter<'a, &'b Rope> {
@@ -78,7 +78,7 @@ impl Regex {
         }
     }
 
-    pub fn match_iter<I>(&mut self, input: &mut I) -> Option<Match>
+    pub fn match_iter<I>(&mut self, mut input: &mut I, mut sp: usize) -> Option<Match>
     where
         I: Iterator<Item = (usize, char)>,
     {
@@ -89,7 +89,7 @@ impl Regex {
         // We bump the generation to ensure we don't collide with anything from
         // a previous run while initialising the VM.
         self.gen += 1;
-        self.add_thread(&mut clist, Thread::default(), 0);
+        self.add_thread(&mut clist, Thread::default(), sp, true);
         self.gen += 1;
 
         // Same as at the end of the outer for-loop, we need to reset self.p to 0
@@ -97,22 +97,27 @@ impl Regex {
         let mut n = self.p;
         self.p = 0;
         let mut matched = false;
+        let mut did_break = false;
 
-        for (sp, ch) in input {
+        for (i, ch) in &mut input {
+            sp = i;
             for t in clist.iter_mut().take(n) {
                 match &self.prog[t.pc].op {
                     Op::Char(c) if *c == ch => {
-                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp)
+                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false)
                     }
                     Op::Class(cls) if cls.matches(ch) => {
-                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp)
+                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false)
                     }
-                    Op::Any if ch != '\n' => self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp),
-                    Op::TrueAny => self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp),
+                    Op::Any if ch != '\n' => {
+                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false)
+                    }
+                    Op::TrueAny => self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false),
 
                     Op::Match => {
                         matched = true;
                         sub_matches = t.sub_matches;
+                        sub_matches[1] = sp; // Save end of the match
                         break;
                     }
 
@@ -125,6 +130,7 @@ impl Regex {
             (clist, nlist) = (nlist, clist);
 
             if self.p == 0 {
+                did_break = true;
                 break;
             }
 
@@ -137,34 +143,44 @@ impl Regex {
         self.nlist = nlist;
 
         if !matched {
-            for t in self.clist.iter() {
+            for t in self.clist.iter_mut().take(n) {
                 if self.prog[t.pc].op == Op::Match {
-                    return Some(Match {
-                        sub_matches: t.sub_matches,
-                    });
+                    t.sub_matches[1] = sp; // Save end of the match
+                    if t.sub_matches[1] >= t.sub_matches[0] {
+                        return Some(Match {
+                            sub_matches: t.sub_matches,
+                        });
+                    }
                 }
             }
 
             return None;
         }
 
+        // If we broke before the end of input when matching then the index we have for
+        // the end of the match is one character too far so we need to back it up.
+        if did_break {
+            sub_matches[1] -= 1;
+        }
+
         Some(Match { sub_matches })
     }
 
-    fn add_thread(&mut self, lst: &mut [Thread], mut t: Thread, sp: usize) {
+    fn add_thread(&mut self, lst: &mut [Thread], mut t: Thread, sp: usize, initial: bool) {
         if self.prog[t.pc].gen == self.gen {
             return;
         }
         self.prog[t.pc].gen = self.gen;
 
         if let Op::Jump(l1) = self.prog[t.pc].op {
-            self.add_thread(lst, t.split_to(l1), sp);
+            self.add_thread(lst, t.split_to(l1), sp, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
-            self.add_thread(lst, t.split_to(l1), sp);
-            self.add_thread(lst, t.split_to(l2), sp);
+            self.add_thread(lst, t.split_to(l1), sp, initial);
+            self.add_thread(lst, t.split_to(l2), sp, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
-            t.sub_matches[s] = sp + 1;
-            self.add_thread(lst, t.split_to(t.pc + 1), sp);
+            // Save start is for the NEXT char and Save end is for CURRENT char
+            t.sub_matches[s] = if s % 2 == 0 && !initial { sp + 1 } else { sp };
+            self.add_thread(lst, t.split_to(t.pc + 1), sp, initial);
         } else {
             lst[self.p] = t;
             self.p += 1;
@@ -242,6 +258,18 @@ mod tests {
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();
         assert_eq!(r.match_str(s).is_some(), matches);
+    }
+
+    #[test_case("[0-9]+", " 42 3 127 9991 ", &["42", "3", "127", "9991"]; "integers")]
+    #[test_case("[0-9]+", " 42 3 127 9991", &["42", "3", "127", "9991"]; "integers to EOF")]
+    #[test_case("[0-9]+", "42 3 127 9991 ", &["42", "3", "127", "9991"]; "integers from BOF")]
+    #[test_case("[0-9]+", "42 3 127 9991", &["42", "3", "127", "9991"]; "integers full input")]
+    #[test]
+    fn match_all_works(re: &str, s: &str, expected: &[&str]) {
+        let mut r = Regex::compile(re).unwrap();
+        let matches: Vec<&str> = r.match_str_all(s).map(|m| m.str_match_text(s)).collect();
+
+        assert_eq!(&matches, expected);
     }
 
     #[test]

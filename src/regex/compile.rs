@@ -155,7 +155,7 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
     // Compiled code for "@*?" to allow for unanchored matching.
     // Save(0) marks the beginning of the regex in the input
-    let mut full = vec![Op::Split(3, 1), Op::TrueAny, Op::Jump(0), Op::Save(0)];
+    let mut full = vec![Op::Split(3, 1), Op::TrueAny, Op::Split(3, 1), Op::Save(0)];
     // Unconditionally increment all jumps and splits in the compiled program
     // to account for the prefix we just added.
     full.extend(prog.into_iter().map(|op| match op {
@@ -165,6 +165,7 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
     }));
     // Save(1) marks the end of the regex in the input
     full.extend([Op::Save(1), Op::Match]);
+    // full.extend([Op::Match]);
 
     full
 }
@@ -294,11 +295,12 @@ mod tests {
     #[test_case("b?a", vec![sp(5, 6), c('b'), c('a')]; "first lit is optional")]
     #[test_case("(a*)", vec![sv(2), sp(6, 8), c('a'), jmp(5), sv(3)]; "star")]
     #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), jmp(6), sv(3), jmp(4)]; "star star")]
+    #[test_case("a|b|c", vec![sp(5, 7), c('a'), jmp(11), sp(8, 10), c('b'), jmp(11), c('c')]; "chained alternation")]
     #[test]
     fn opcode_compile_works(re: &str, expected: Vec<Op>) {
         let pfix = re_to_postfix(re).unwrap();
         let prog = compile(pfix);
-        let mut full = vec![sp(3, 1), Op::TrueAny, jmp(0), sv(0)];
+        let mut full = vec![sp(3, 1), Op::TrueAny, sp(3, 1), sv(0)];
         full.extend(expected);
         full.extend([sv(1), Op::Match]);
 
