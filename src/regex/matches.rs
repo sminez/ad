@@ -40,7 +40,7 @@ impl Match {
             return None;
         }
         let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
-        if start == end {
+        if n > 0 && start == 0 && end == 0 {
             return None;
         }
 
