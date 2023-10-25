@@ -208,6 +208,7 @@ mod tests {
     #[test_case("1.*b", "123b", true; "dot star inner")]
     #[test_case("(c|C)ase matters", "case matters", true; "alternation first")]
     #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
+    #[test_case("(a|b|c)", "c", true; "chained alternation")]
     #[test_case("this@*works", "this contains\nbut still works", true; "true any")]
     #[test_case(r"literal\?", "literal?", true; "escape special char")]
     #[test_case(r"literal\t", "literal\t", true; "escape sequence")]
@@ -217,6 +218,26 @@ mod tests {
     #[test_case("[a-zA-Z]*1", "kebab-case-not-so-much", false; "char class ranges non matching")]
     #[test_case("[a-zA-Z ]*", "this should work", true; "char class mixed")]
     #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
+    #[test_case("[0-9]+", "0123", true; "digit range")]
+    #[test_case("[0-9]+", "0", true; "digit range range start only")]
+    #[test_case("25[0-5]", "255", true; "ipv4 element one")]
+    #[test_case("2[0-4][0-9]", "231", true; "ipv4 element two")]
+    #[test_case("1?[0-9]?[0-9]", "155", true; "ipv4 element three three digit")]
+    #[test_case("1?[0-9]?[0-9]", "72", true; "ipv4 element three two digit")]
+    #[test_case("1?[0-9]?[0-9]", "8", true; "ipv4 element three one digit")]
+    #[test_case("1?[0-9]?[0-9]", "0", true; "ipv4 element three zero")]
+    #[test_case("(25[0-5]|2[0-4][0-9])", "255", true; "ipv4 elements one and two matching one")]
+    #[test_case("(25[0-5]|2[0-4][0-9])", "219", true; "ipv4 elements one and two matching two")]
+    #[test_case("(25[0-5]|2[0-4][0-9])", "42", false; "ipv4 elements one and two not matching")]
+    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "251", true; "ipv4 all elements matching one")]
+    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "237", true; "ipv4 all elements matching two")]
+    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "142", true; "ipv4 all elements matching three")]
+    #[test_case(
+        r"(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])",
+        "127.0.0.1",
+        true;
+        "ipv4 full"
+    )]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();

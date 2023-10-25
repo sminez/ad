@@ -55,8 +55,10 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
             expr_offsets.push(prog.len());
             prog.push($op);
         }};
-        (@expr $exp:expr) => {{
-            expr_offsets.push(prog.len());
+        (@concat $op:expr) => {{
+            prog.push($op);
+        }};
+        (@extend $exp:expr) => {{
             prog.append(&mut $exp);
         }};
         (@save $s:expr) => {{
@@ -100,12 +102,12 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                 push!(Op::Split(ix + 1, ix + 2 + e1.len()));
                 e1.iter_mut().for_each(|op| op.inc(ix));
                 e2.iter_mut().for_each(|op| op.inc(ix));
-                push!(@expr e1);
+                push!(@extend e1);
 
                 let ix2 = prog.len(); // index of the split we are inserting
-                push!(Op::Jump(ix2 + 1 + e2.len()));
+                push!(@concat Op::Jump(ix2 + 1 + e2.len()));
                 e2.iter_mut().for_each(|op| op.inc(ix2));
-                push!(@expr e2);
+                push!(@extend e2);
             }
 
             // Lazy operators are implemented by reversing the priority order of the threads
@@ -117,7 +119,7 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                     (l1, l2) = (l2, l1);
                 };
 
-                push!(Op::Split(l1, l2));
+                push!(@concat Op::Split(l1, l2));
             }
 
             Pfix::Quest | Pfix::LazyQuest => {
@@ -131,7 +133,7 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
                 push!(Op::Split(l1, l2));
                 e.iter_mut().for_each(|op| op.inc(ix));
-                push!(@expr e);
+                push!(@extend e);
             }
 
             Pfix::Star | Pfix::LazyStar => {
@@ -145,8 +147,8 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
                 push!(Op::Split(l1, l2));
                 e.iter_mut().for_each(|op| op.inc(ix));
-                push!(@expr e);
-                push!(Op::Jump(ix))
+                push!(@extend e);
+                push!(@concat Op::Jump(ix))
             }
         }
     }
