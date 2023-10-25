@@ -10,9 +10,10 @@
 //! up from not having to allocate and free inside of the main loop.
 use super::{
     compile::{compile, optimise, Inst, Op, Prog},
+    matches::{Match, MatchIter},
     re_to_postfix, Error,
 };
-use ropey::{Rope, RopeSlice};
+use ropey::Rope;
 use std::mem::take;
 
 /// A regular expression engine designed for use within the ad text editor.
@@ -48,35 +49,57 @@ impl Regex {
             prog,
             clist,
             nlist,
-            gen: 1,
+            gen: 0,
             p: 0,
         })
     }
 
     pub fn match_str(&mut self, input: &str) -> Option<Match> {
-        self.match_iter(input.chars().enumerate())
+        self.match_iter(&mut input.chars().enumerate())
+    }
+
+    pub fn match_str_all<'a, 'b>(&'a mut self, input: &'b str) -> MatchIter<'a, &'b str> {
+        MatchIter {
+            it: input,
+            r: self,
+            from: 0,
+        }
     }
 
     pub fn match_rope(&mut self, rope: &Rope) -> Option<Match> {
-        self.match_iter(rope.chars().enumerate())
+        self.match_iter(&mut rope.chars().enumerate())
     }
 
-    pub fn match_iter<I>(&mut self, input: I) -> Option<Match>
+    pub fn match_rope_all<'a, 'b>(&'a mut self, input: &'b Rope) -> MatchIter<'a, &'b Rope> {
+        MatchIter {
+            it: input,
+            r: self,
+            from: 0,
+        }
+    }
+
+    pub fn match_iter<I>(&mut self, input: &mut I) -> Option<Match>
     where
         I: Iterator<Item = (usize, char)>,
     {
         let mut clist = take(&mut self.clist);
         let mut nlist = take(&mut self.nlist);
         let mut sub_matches = [0; 20];
-        self.p = 0;
 
+        // We bump the generation to ensure we don't collide with anything from
+        // a previous run while initialising the VM.
+        self.gen += 1;
         self.add_thread(&mut clist, Thread::default(), 0);
         self.gen += 1;
+
+        // Same as at the end of the outer for-loop, we need to reset self.p to 0
+        // so that we are correctly tracking the length of the new nlist.
         let mut n = self.p;
+        self.p = 0;
         let mut matched = false;
 
         for (sp, ch) in input {
-            for &t in clist.iter().take(n) {
+            for t in clist.iter_mut().take(n) {
                 match &self.prog[t.pc].op {
                     Op::Char(c) if *c == ch => {
                         self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp)
@@ -146,52 +169,6 @@ impl Regex {
             lst[self.p] = t;
             self.p += 1;
         }
-    }
-}
-
-/// The match location of a Regex against a given input.
-///
-/// The sub-match indices are relative to the input used to run the original match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Match {
-    sub_matches: [usize; 20],
-}
-
-impl Match {
-    pub fn str_match_text<'a>(&self, s: &'a str) -> &'a str {
-        let (a, b) = self.loc();
-        &s[a..b]
-    }
-
-    pub fn str_submatch_text<'a>(&self, n: usize, s: &'a str) -> Option<&'a str> {
-        let (a, b) = self.sub_loc(n)?;
-        Some(&s[a..b])
-    }
-
-    pub fn rope_match_text<'a>(&self, r: &'a Rope) -> RopeSlice<'a> {
-        let (a, b) = self.loc();
-        r.slice(a..b)
-    }
-
-    pub fn rope_submatch_text<'a>(&self, n: usize, r: &'a Rope) -> Option<RopeSlice<'a>> {
-        let (a, b) = self.sub_loc(n)?;
-        Some(r.slice(a..b))
-    }
-
-    pub fn loc(&self) -> (usize, usize) {
-        (self.sub_matches[0], self.sub_matches[1])
-    }
-
-    pub fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
-        if n > 9 {
-            return None;
-        }
-        let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
-        if start == end {
-            return None;
-        }
-
-        Some((start, end))
     }
 }
 

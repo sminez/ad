@@ -6,9 +6,11 @@
 
 // Different impls of the matching algorithm
 mod compile;
+mod matches;
 mod vm;
 
-pub use vm::{Match, Regex};
+pub use matches::{Match, MatchIter};
+pub use vm::Regex;
 
 const POSTFIX_BUF_SIZE: usize = 2000;
 const POSTFIX_MAX_PARENS: usize = 100;
