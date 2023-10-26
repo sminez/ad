@@ -17,3 +17,15 @@
     In the client/server model then _everything_ needs to be RPC...which might be
     ok given the current `Action` driven model? The main issue becomes where the
     buffer state lives and how thin the client is.
+- [ ] sort out sam-style structural regular expressions:
+  - The single character names for things in Sam might be nice to augment with some
+    longer names as well:
+    - x/re/    -> for/re/
+    - y/re/    -> !for/re/
+    - g/re/    -> if/re/
+    - v/re/    -> !if/re/
+    - s/re/new -> fine as is?
+    - ... d    -> deletematch
+    - ... D    -> delete dot
+    - ... p    -> print
+    - ... p/s  -> print w format string

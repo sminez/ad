@@ -303,6 +303,15 @@ mod tests {
     #[test_case("foo$", "a line that ends with foo", true; "BOL holding")]
     #[test_case("foo$", "a line that ends with foo\nnow bar", true; "BOL holding before newline")]
     #[test_case("foo$", "a line with foo in the middle", false; "BOL not holding")]
+    #[test_case("a{3}", "aaa", true; "counted repetition")]
+    #[test_case("a{3}", "aa", false; "counted repetition non matching")]
+    #[test_case("a{3,}", "aaaaaa", true; "counted repetition at least")]
+    #[test_case("a{3,}", "aa", false; "counted repetition at least non matching")]
+    #[test_case("a{3,5}", "aaa", true; "counted repetition between lower")]
+    #[test_case("a{3,5}", "aaaaa", true; "counted repetition between upper")]
+    #[test_case("a{3,5}", "aaaa", true; "counted repetition in range")]
+    #[test_case("a{3,5}", "aa", false; "counted repetition less")]
+    #[test_case("^a{3,5}$", "aaaaaa", false; "counted repetition more")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();

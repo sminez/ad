@@ -42,6 +42,9 @@ enum Pfix {
     Quest,
     Star,
     Plus,
+    Rep(usize),               // {n}
+    RepAtLeast(usize),        // {n,}
+    RepBetween(usize, usize), // {n,m}
     LazyQuest,
     LazyStar,
     LazyPlus,
@@ -79,7 +82,7 @@ const fn init_escapes() -> [Option<char>; 256] {
     }
 
     let mut escapes = [None; 256];
-    escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '[', ']', '|');
+    escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '[', ']', '{', '}', '|');
     escape!(escapes, '\\', '\'', '"', '^', '$');
     escape!(escapes, 'n'=>'\n', 'r'=>'\r', 't'=>'\t');
 
@@ -186,6 +189,40 @@ impl CharClass {
     }
 }
 
+fn try_parse_counted_repetition(it: &mut std::str::Chars) -> Result<Pfix, Error> {
+    let mut next = || next_char(it)?.ok_or(Error::InvalidRepetition);
+    let (mut ch, _) = next()?;
+
+    let n = ch.to_digit(10).ok_or(Error::InvalidRepetition)? as usize;
+    if n == 0 {
+        return Err(Error::InvalidRepetition);
+    }
+
+    (ch, _) = next()?;
+    if ch == '}' {
+        return Ok(Pfix::Rep(n));
+    } else if ch != ',' {
+        return Err(Error::InvalidRepetition);
+    }
+
+    (ch, _) = next()?;
+    if ch == '}' {
+        return Ok(Pfix::RepAtLeast(n));
+    }
+
+    let m = ch.to_digit(10).ok_or(Error::InvalidRepetition)? as usize;
+    if m == 0 {
+        return Err(Error::InvalidRepetition);
+    }
+
+    (ch, _) = next()?;
+    if ch == '}' {
+        Ok(Pfix::RepBetween(n, m))
+    } else {
+        Err(Error::InvalidRepetition)
+    }
+}
+
 fn next_char(it: &mut std::str::Chars) -> Result<Option<(char, bool)>, Error> {
     match it.next() {
         Some('\\') => (),
@@ -282,6 +319,11 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
                 } else {
                     push_rep(Pfix::Quest, natom, &mut output)?;
                 }
+            }
+
+            '{' => {
+                let rep = try_parse_counted_repetition(&mut it)?;
+                push_rep(rep, natom, &mut output)?;
             }
 
             '[' => {

@@ -88,6 +88,10 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
         (@concat $op:expr) => {{
             prog.push($op);
         }};
+        (@expr $exp:expr) => {{
+            expr_offsets.push(prog.len());
+            prog.append(&mut $exp);
+        }};
         (@extend $exp:expr) => {{
             prog.append(&mut $exp);
         }};
@@ -109,6 +113,30 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
         () => {{
             let ix = expr_offsets.pop().unwrap();
             prog.split_off(ix)
+        }};
+    }
+
+    macro_rules! plus {
+        ($p:expr) => {{
+            let ix = *expr_offsets.last().unwrap();
+            let (mut l1, mut l2) = (ix, prog.len() + 1);
+            if $p == Pfix::LazyPlus {
+                (l1, l2) = (l2, l1);
+            };
+            push!(@concat Op::Split(l1, l2));
+        }};
+    }
+
+    macro_rules! quest {
+        ($p:expr, $e:expr) => {{
+            let ix = prog.len(); // index of the split we are inserting
+            let (mut l1, mut l2) = (ix + 1, ix + 1 + $e.len());
+            if $p == Pfix::LazyQuest {
+                (l1, l2) = (l2, l1);
+            };
+            push!(Op::Split(l1, l2));
+            $e.iter_mut().for_each(|op| op.inc(ix));
+            push!(@extend $e);
         }};
     }
 
@@ -145,28 +173,11 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
             // Lazy operators are implemented by reversing the priority order of the threads
             // the create so that shorter matches are preferred.
-            Pfix::Plus | Pfix::LazyPlus => {
-                let ix = *expr_offsets.last().unwrap();
-                let (mut l1, mut l2) = (ix, prog.len() + 1);
-                if p == Pfix::LazyPlus {
-                    (l1, l2) = (l2, l1);
-                };
-
-                push!(@concat Op::Split(l1, l2));
-            }
+            Pfix::Plus | Pfix::LazyPlus => plus!(p),
 
             Pfix::Quest | Pfix::LazyQuest => {
                 let mut e = pop!();
-
-                let ix = prog.len(); // index of the split we are inserting
-                let (mut l1, mut l2) = (ix + 1, ix + 1 + e.len());
-                if p == Pfix::LazyQuest {
-                    (l1, l2) = (l2, l1);
-                };
-
-                push!(Op::Split(l1, l2));
-                e.iter_mut().for_each(|op| op.inc(ix));
-                push!(@extend e);
+                quest!(p, e);
             }
 
             Pfix::Star | Pfix::LazyStar => {
@@ -182,6 +193,40 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
                 e.iter_mut().for_each(|op| op.inc(ix));
                 push!(@extend e);
                 push!(@concat Op::Jump(ix))
+            }
+
+            // Counted repetitions are expanded explicitly into
+            // larger single expressions
+
+            // e{3} -> eee
+            Pfix::Rep(n) => {
+                if n == 1 {
+                    continue;
+                }
+                let e = pop!();
+                for _ in 0..n {
+                    push!(@expr e.clone());
+                }
+            }
+
+            // e{3,} -> eee+
+            Pfix::RepAtLeast(n) => {
+                let e = pop!();
+                for _ in 0..n {
+                    push!(@expr e.clone());
+                }
+                plus!(Pfix::Plus);
+            }
+
+            // e{3,5} -> eeee?e?
+            Pfix::RepBetween(n, m) => {
+                let e = pop!();
+                for _ in 0..n {
+                    push!(@expr e.clone());
+                }
+                for _ in n..m {
+                    quest!(Pfix::Quest, e.clone());
+                }
             }
         }
     }
