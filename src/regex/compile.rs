@@ -10,6 +10,21 @@ pub(super) struct Inst {
 
 pub(super) type Prog = Vec<Inst>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Assertion {
+    LineStart,
+    LineEnd,
+}
+
+impl Assertion {
+    pub(super) fn holds_for(&self, prev: Option<char>, next: Option<char>) -> bool {
+        match self {
+            Assertion::LineStart => matches!(prev, Some('\n') | None),
+            Assertion::LineEnd => matches!(next, Some('\n') | None),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Op {
     // Comparison ops
@@ -17,6 +32,8 @@ pub(super) enum Op {
     Class(CharClass),
     Any,
     TrueAny,
+    // Assertions
+    Assertion(Assertion),
     // Control ops
     Split(usize, usize),
     Jump(usize),
@@ -25,6 +42,19 @@ pub(super) enum Op {
 }
 
 impl Op {
+    /// Whether or not this Op matches the current VM state.
+    /// This will panic if not called on a comparison or assertion Op.
+    pub(super) fn matches(&self, ch: char) -> bool {
+        match self {
+            Op::Char(c) => *c == ch,
+            Op::Class(cls) => cls.matches(ch),
+            Op::Any => ch != '\n',
+            Op::TrueAny => true,
+
+            op => panic!("matches called on invalid op: {op:?}"),
+        }
+    }
+
     fn is_comp(&self) -> bool {
         !matches!(self, Op::Split(_, _) | Op::Jump(_) | Op::Match)
     }
@@ -89,6 +119,9 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
             Pfix::Char(ch) => push!(Op::Char(ch)),
             Pfix::TrueAny => push!(Op::TrueAny),
             Pfix::Any => push!(Op::Any),
+
+            Pfix::LineStart => push!(Op::Assertion(Assertion::LineStart)),
+            Pfix::LineEnd => push!(Op::Assertion(Assertion::LineEnd)),
 
             Pfix::Concat => {
                 expr_offsets.pop();
@@ -268,6 +301,9 @@ mod tests {
     use crate::regex::re_to_postfix;
     use simple_test_case::test_case;
 
+    const BOL: Op = Op::Assertion(Assertion::LineStart);
+    const EOL: Op = Op::Assertion(Assertion::LineEnd);
+
     fn sp(l1: usize, l2: usize) -> Op {
         Op::Split(l1, l2)
     }
@@ -296,6 +332,8 @@ mod tests {
     #[test_case("(a*)", vec![sv(2), sp(6, 8), c('a'), jmp(5), sv(3)]; "star")]
     #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), jmp(6), sv(3), jmp(4)]; "star star")]
     #[test_case("a|b|c", vec![sp(5, 7), c('a'), jmp(11), sp(8, 10), c('b'), jmp(11), c('c')]; "chained alternation")]
+    #[test_case("^foo", vec![BOL, c('f'), c('o'), c('o')]; "BOL then literals")]
+    #[test_case("foo$", vec![c('f'), c('o'), c('o'), EOL]; "literals then EOL")]
     #[test]
     fn opcode_compile_works(re: &str, expected: Vec<Op>) {
         let pfix = re_to_postfix(re).unwrap();

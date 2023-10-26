@@ -9,7 +9,7 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use super::{
-    compile::{compile, optimise, Inst, Op, Prog},
+    compile::{compile, optimise, Assertion, Inst, Op, Prog},
     matches::{Match, MatchIter},
     re_to_postfix, Error,
 };
@@ -25,15 +25,19 @@ use std::mem::take;
 pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
-    /// Pre-allocated Thread list
+    /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
     clist: Vec<Thread>,
-    /// Pre-allocated Thread list
+    /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
     nlist: Vec<Thread>,
     /// Monotonically increasing index used to dedup Threads
     /// Will overflow at some point if a given regex is used a VERY large number of times
     gen: usize,
     /// Index into the current Thread list
     p: usize,
+    /// Previous character from the input
+    prev: Option<char>,
+    /// Next character in the input after the one currently being processed
+    next: Option<char>,
 }
 
 impl Regex {
@@ -51,6 +55,8 @@ impl Regex {
             nlist,
             gen: 0,
             p: 0,
+            prev: None,
+            next: None,
         })
     }
 
@@ -78,7 +84,7 @@ impl Regex {
         }
     }
 
-    pub fn match_iter<I>(&mut self, mut input: &mut I, mut sp: usize) -> Option<Match>
+    pub fn match_iter<I>(&mut self, input: &mut I, mut sp: usize) -> Option<Match>
     where
         I: Iterator<Item = (usize, char)>,
     {
@@ -99,48 +105,40 @@ impl Regex {
         let mut matched = false;
         let mut did_break = false;
 
-        for (i, ch) in &mut input {
+        let mut it = input.peekable();
+        self.prev = None;
+        self.next = None;
+
+        while let Some((i, ch)) = it.next() {
             sp = i;
-            for t in clist.iter_mut().take(n) {
-                match &self.prog[t.pc].op {
-                    Op::Char(c) if *c == ch => {
-                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false)
-                    }
-                    Op::Class(cls) if cls.matches(ch) => {
-                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false)
-                    }
-                    Op::Any if ch != '\n' => {
-                        self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false)
-                    }
-                    Op::TrueAny => self.add_thread(&mut nlist, t.split_to(t.pc + 1), sp, false),
+            self.next = it.peek().map(|(_, c)| *c);
 
-                    Op::Match => {
-                        matched = true;
-                        sub_matches = t.sub_matches;
-                        sub_matches[1] = sp; // Save end of the match
-                        break;
-                    }
-
-                    // Save, Jump & Split are handled in add_thread.
-                    // Non-matching comparison ops result in that thread dying.
-                    _ => (),
+            for t in clist.iter().take(n) {
+                if let Some(sms) = self.step_thread(t, &mut nlist, sp, ch) {
+                    matched = true;
+                    sub_matches = sms;
+                    sub_matches[1] = sp; // Save end of the match
+                    break;
                 }
             }
 
             (clist, nlist) = (nlist, clist);
+            self.prev = Some(ch);
+            self.gen += 1;
 
             if self.p == 0 {
                 did_break = true;
                 break;
             }
 
-            self.gen += 1;
             n = self.p;
             self.p = 0;
         }
 
         self.clist = clist;
         self.nlist = nlist;
+        self.prev = None;
+        self.next = None;
 
         if !matched {
             for t in self.clist.iter_mut().take(n) {
@@ -166,21 +164,57 @@ impl Regex {
         Some(Match { sub_matches })
     }
 
+    fn step_thread(
+        &mut self,
+        t: &Thread,
+        nlist: &mut [Thread],
+        sp: usize,
+        ch: char,
+    ) -> Option<[usize; 20]> {
+        match &self.prog[t.pc].op {
+            // If comparisons and their assertions hold then queue the resulting threads
+            op @ (Op::Char(_) | Op::Class(_) | Op::Any | Op::TrueAny) if op.matches(ch) => {
+                match t.assertion {
+                    Some(a) if !a.holds_for(self.prev, self.next) => return None,
+                    _ => self.add_thread(nlist, thread(t.pc + 1, t.sub_matches), sp, false),
+                }
+            }
+
+            Op::Match => return Some(t.sub_matches),
+
+            // Save, Jump & Split are handled in add_thread.
+            // Non-matching comparison ops result in that thread dying.
+            _ => (),
+        }
+
+        None
+    }
+
     fn add_thread(&mut self, lst: &mut [Thread], mut t: Thread, sp: usize, initial: bool) {
         if self.prog[t.pc].gen == self.gen {
-            return;
+            return; // already on the list we are currently building
         }
         self.prog[t.pc].gen = self.gen;
 
+        // We do this as chained if-let as we need to recursively call add_thread with data
+        // from self.prog but add_thread required &mut self, so matching would mean we had
+        // to Clone as Op::Class does not implement Copy
         if let Op::Jump(l1) = self.prog[t.pc].op {
-            self.add_thread(lst, t.split_to(l1), sp, initial);
+            self.add_thread(lst, thread(l1, t.sub_matches), sp, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
-            self.add_thread(lst, t.split_to(l1), sp, initial);
-            self.add_thread(lst, t.split_to(l2), sp, initial);
+            self.add_thread(lst, thread(l1, t.sub_matches), sp, initial);
+            self.add_thread(lst, thread(l2, t.sub_matches), sp, initial);
+        } else if let Op::Assertion(a) = self.prog[t.pc].op {
+            self.add_thread(lst, assert_thread(t.pc + 1, t.sub_matches, a), sp, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
-            // Save start is for the NEXT char and Save end is for CURRENT char
-            t.sub_matches[s] = if s % 2 == 0 && !initial { sp + 1 } else { sp };
-            self.add_thread(lst, t.split_to(t.pc + 1), sp, initial);
+            match t.assertion {
+                Some(a) if !a.holds_for(self.prev, self.next) => (),
+                _ => {
+                    // Save start is for the NEXT char and Save end is for CURRENT char
+                    t.sub_matches[s] = if s % 2 == 0 && !initial { sp + 1 } else { sp };
+                    self.add_thread(lst, thread(t.pc + 1, t.sub_matches), sp, initial);
+                }
+            }
         } else {
             lst[self.p] = t;
             self.p += 1;
@@ -190,19 +224,28 @@ impl Regex {
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 struct Thread {
-    // VM program counter for this thread
+    /// VM program counter for this thread
     pc: usize,
-    // $0 -> $9 submatches with $0 being the full match
-    // for submatch $k the start index is 2$k and the end is 2$k+1
+    /// An assertion that must hold for this instruction to be runnable
+    assertion: Option<Assertion>,
+    /// $0 -> $9 submatches with $0 being the full match
+    /// for submatch $k the start index is 2$k and the end is 2$k+1
     sub_matches: [usize; 20],
 }
 
-impl Thread {
-    fn split_to(&self, pc: usize) -> Thread {
-        Thread {
-            pc,
-            sub_matches: self.sub_matches,
-        }
+fn thread(pc: usize, sub_matches: [usize; 20]) -> Thread {
+    Thread {
+        pc,
+        sub_matches,
+        assertion: None,
+    }
+}
+
+fn assert_thread(pc: usize, sub_matches: [usize; 20], a: Assertion) -> Thread {
+    Thread {
+        pc,
+        sub_matches,
+        assertion: Some(a),
     }
 }
 
@@ -254,6 +297,12 @@ mod tests {
         true;
         "ipv4 full"
     )]
+    #[test_case("^foo", "foo at the start", true; "SOL holding")]
+    #[test_case("^foo", "bar\nfoo at the start", true; "SOL holding after newline")]
+    #[test_case("^foo", "we have foo but not at the start", false; "SOL not holding")]
+    #[test_case("foo$", "a line that ends with foo", true; "BOL holding")]
+    #[test_case("foo$", "a line that ends with foo\nnow bar", true; "BOL holding before newline")]
+    #[test_case("foo$", "a line with foo in the middle", false; "BOL not holding")]
     #[test]
     fn match_works(re: &str, s: &str, matches: bool) {
         let mut r = Regex::compile(re).unwrap();

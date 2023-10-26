@@ -31,10 +31,12 @@ pub enum Error {
 // Postfix form notation for building up the compiled state machine
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pfix {
+    // Comparisons
     Char(char),
     Class(CharClass),
     Any,
     TrueAny,
+    // Repetitions and control flow
     Concat,
     Alt,
     Quest,
@@ -43,6 +45,10 @@ enum Pfix {
     LazyQuest,
     LazyStar,
     LazyPlus,
+    // Assertions
+    LineStart,
+    LineEnd,
+    // Sub match save
     Save(usize),
 }
 
@@ -74,7 +80,7 @@ const fn init_escapes() -> [Option<char>; 256] {
 
     let mut escapes = [None; 256];
     escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '[', ']', '|');
-    escape!(escapes, '\\', '\'', '"');
+    escape!(escapes, '\\', '\'', '"', '^', '$');
     escape!(escapes, 'n'=>'\n', 'r'=>'\r', 't'=>'\t');
 
     escapes
@@ -285,6 +291,8 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 
             '.' => push_atom(Pfix::Any, &mut natom, &mut output),
             '@' => push_atom(Pfix::TrueAny, &mut natom, &mut output),
+            '^' => push_atom(Pfix::LineStart, &mut natom, &mut output),
+            '$' => push_atom(Pfix::LineEnd, &mut natom, &mut output),
 
             ch => push_atom(Pfix::Char(ch), &mut natom, &mut output),
         }
@@ -316,11 +324,8 @@ mod tests {
         &[Char('a'), Save(2), Concat, Char('b'), Char('c'), Concat, Char('c'), Char('d'), Concat, Alt, Save(3), Plus, Concat, Char('a'), Concat];
         "repeated alt"
     )]
-    #[test_case(
-        "(a*)*",
-        &[Save(2), Char('a'), Star, Save(3), Star, Concat];
-        "star star"
-    )]
+    #[test_case("(a*)*", &[Save(2), Char('a'), Star, Save(3), Star, Concat]; "star star")]
+    #[test_case("foo$", &[Char('f'), Char('o'), Concat, Char('o'), Concat, LineEnd, Concat]; "line end")]
     #[test]
     fn postfix_construction_works(re: &str, expected: &[Pfix]) {
         assert_eq!(&re_to_postfix(re).unwrap(), expected);
