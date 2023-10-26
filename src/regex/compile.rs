@@ -14,6 +14,8 @@ pub(super) type Prog = Vec<Inst>;
 pub(super) enum Assertion {
     LineStart,
     LineEnd,
+    WordBoundary,
+    NonWordBoundary,
 }
 
 impl Assertion {
@@ -21,6 +23,14 @@ impl Assertion {
         match self {
             Assertion::LineStart => matches!(prev, Some('\n') | None),
             Assertion::LineEnd => matches!(next, Some('\n') | None),
+            Assertion::WordBoundary => match (prev, next) {
+                (_, None) | (None, _) => true,
+                (Some(p), Some(n)) => p.is_alphanumeric() != n.is_alphanumeric(),
+            },
+            Assertion::NonWordBoundary => match (prev, next) {
+                (_, None) | (None, _) => false,
+                (Some(p), Some(n)) => p.is_alphanumeric() == n.is_alphanumeric(),
+            },
         }
     }
 }
@@ -150,6 +160,8 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
             Pfix::LineStart => push!(Op::Assertion(Assertion::LineStart)),
             Pfix::LineEnd => push!(Op::Assertion(Assertion::LineEnd)),
+            Pfix::WordBoundary => push!(Op::Assertion(Assertion::WordBoundary)),
+            Pfix::NonWordBoundary => push!(Op::Assertion(Assertion::NonWordBoundary)),
 
             Pfix::Concat => {
                 expr_offsets.pop();

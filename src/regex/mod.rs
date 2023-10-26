@@ -51,6 +51,8 @@ enum Pfix {
     // Assertions
     LineStart,
     LineEnd,
+    WordBoundary,
+    NonWordBoundary,
     // Sub match save
     Save(usize),
 }
@@ -84,6 +86,7 @@ const fn init_escapes() -> [Option<char>; 256] {
     let mut escapes = [None; 256];
     escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '[', ']', '{', '}', '|');
     escape!(escapes, '\\', '\'', '"', '^', '$');
+    escape!(escapes, 'b', 'B', 'd', 'D', 'w', 'W', 's', 'S');
     escape!(escapes, 'n'=>'\n', 'r'=>'\r', 't'=>'\t');
 
     escapes
@@ -136,6 +139,14 @@ struct CharClass {
 }
 
 impl CharClass {
+    fn new(negated: bool, chars: Vec<char>, ranges: Vec<(char, char)>) -> Self {
+        Self {
+            negated,
+            chars,
+            ranges,
+        }
+    }
+
     fn try_parse(it: &mut std::str::Chars) -> Result<Self, Error> {
         let mut next = || next_char(it)?.ok_or(Error::InvalidClass);
         let (mut ch, _) = next()?;
@@ -265,7 +276,54 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
 
     while let Some((ch, escaped)) = next_char(&mut it)? {
         if escaped {
-            push_atom(Pfix::Char(ch), &mut natom, &mut output);
+            match ch {
+                'b' => push_atom(Pfix::WordBoundary, &mut natom, &mut output),
+                'B' => push_atom(Pfix::NonWordBoundary, &mut natom, &mut output),
+                // digits
+                'd' => push_atom(
+                    Pfix::Class(CharClass::new(false, vec![], vec![('0', '9')])),
+                    &mut natom,
+                    &mut output,
+                ),
+                'D' => push_atom(
+                    Pfix::Class(CharClass::new(true, vec![], vec![('0', '9')])),
+                    &mut natom,
+                    &mut output,
+                ),
+                // alphanumeric
+                'w' => push_atom(
+                    Pfix::Class(CharClass::new(
+                        false,
+                        vec!['_'],
+                        vec![('a', 'z'), ('A', 'Z'), ('0', '9')],
+                    )),
+                    &mut natom,
+                    &mut output,
+                ),
+                'W' => push_atom(
+                    Pfix::Class(CharClass::new(
+                        true,
+                        vec!['_'],
+                        vec![('a', 'z'), ('A', 'Z'), ('0', '9')],
+                    )),
+                    &mut natom,
+                    &mut output,
+                ),
+                // whitespace (this is not the full utf8 whitespace character semantics used by
+                // other engines currently)
+                's' => push_atom(
+                    Pfix::Class(CharClass::new(false, vec![' ', '\t', '\n', '\r'], vec![])),
+                    &mut natom,
+                    &mut output,
+                ),
+                'S' => push_atom(
+                    Pfix::Class(CharClass::new(true, vec![' ', '\t', '\n', '\r'], vec![])),
+                    &mut natom,
+                    &mut output,
+                ),
+
+                ch => push_atom(Pfix::Char(ch), &mut natom, &mut output),
+            }
             continue;
         }
 
