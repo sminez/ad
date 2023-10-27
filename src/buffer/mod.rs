@@ -331,18 +331,20 @@ impl Buffer {
         self.rx = x - 1 - w_sgncol;
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
 
-        self.dot = Dot::Cur {
+        let mut dot = Dot::Cur {
             c: Cur {
                 y,
                 x: self.x_from_rx(y),
             },
         };
+        dot.clamp_for(self);
+        self.dot = dot;
     }
 
     pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
-        let y = y - 1 + self.row_off;
+        let y = min(y - 1 + self.row_off, self.len_lines() - 1);
 
         let mut r = self.dot.as_range();
         let c = Cur {
@@ -351,7 +353,9 @@ impl Buffer {
         };
         r.set_active_cursor(c);
 
-        self.dot = Dot::Range { r };
+        let mut dot = Dot::Range { r };
+        dot.clamp_for(self);
+        self.dot = dot;
     }
 
     pub(crate) fn scroll_up(&mut self) {
@@ -595,15 +599,19 @@ mod tests {
     const LINE_1: &str = "This is a test";
     const LINE_2: &str = "involving multiple lines";
 
-    fn simple_initial_buffer() -> Buffer {
+    pub fn buffer_from_lines(lines: &[&str]) -> Buffer {
         let mut b = Buffer::new_unnamed(0, "");
-        let s = format!("{LINE_1}\n{LINE_2}");
+        let s = lines.join("\n");
 
         for c in s.chars() {
             b.handle_action(Action::InsertChar { c });
         }
 
         b
+    }
+
+    fn simple_initial_buffer() -> Buffer {
+        buffer_from_lines(&[LINE_1, LINE_2])
     }
 
     #[test]

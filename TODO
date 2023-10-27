@@ -1,31 +1,17 @@
 :: TODO
 
+- [!] Fix keyboard driven scrolling
+  - The decision to not drag the cursor while scrolling with the mouse seems to have
+    completely broken auto-scrolling.
+- [ ] Implement Sam style structural regex
 - [ ] implement remaining text objects
+  - Target character
+  - Delimited between a given character pair
 - [ ] store "desired x" or an "x is at EOL" flag?
-- [ ] Better colors for the status bar
-  - Maybe change the color based on the mode?
 - [ ] FUSE filesystem fun...!
+  - Whether or not this uses FUSE in the end or not, the Acme style interface for
+    supporting extension of the editor is still the plan for how to handle things.
 - [ ] mini-buffer tab complete
 - [ ] completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
-- [ ] window splitting
-  - This is one where I don't know if I definitely want it or not?
-  - It might be better to just rely on tmux but then that forces me into the multi
-    process route with a server/client model rather than a single editor and then
-    the filesystem stuff for external programs to _extend_ functionality.
-    In the client/server model then _everything_ needs to be RPC...which might be
-    ok given the current `Action` driven model? The main issue becomes where the
-    buffer state lives and how thin the client is.
-- [ ] sort out sam-style structural regular expressions:
-  - The single character names for things in Sam might be nice to augment with some
-    longer names as well:
-    - x/re/    -> for/re/
-    - y/re/    -> !for/re/
-    - g/re/    -> if/re/
-    - v/re/    -> !if/re/
-    - s/re/new -> fine as is?
-    - ... d    -> deletematch
-    - ... D    -> delete dot
-    - ... p    -> print
-    - ... p/s  -> print w format string

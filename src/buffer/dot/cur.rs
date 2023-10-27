@@ -40,7 +40,7 @@ impl Cur {
             cur = cur.arr(arr, b);
         }
 
-        cur.clamp_x(b);
+        cur.clamp_for(b);
         cur
     }
 
@@ -87,15 +87,23 @@ impl Cur {
         cur
     }
 
-    fn clamp_x(&mut self, b: &Buffer) {
-        let len = if self.y >= b.len_lines() {
-            0
-        } else {
-            b.txt.line(self.y).len_chars().saturating_sub(1)
-        };
+    pub(super) fn clamp_for(&mut self, b: &Buffer) {
+        let y_max = b.len_lines();
+        if self.y > y_max {
+            self.y = y_max;
+            self.x = 0;
+            return;
+        }
 
-        if self.x > len {
-            self.x = len;
+        // On the last line we allow focusing the cursor at the index
+        // after the end of the buffer to allow for appending
+        let mut max_x = b.txt.line(self.y).len_chars();
+        if self.y < y_max - 1 {
+            max_x = max_x.saturating_sub(1);
+        }
+
+        if self.x > max_x {
+            self.x = max_x;
         }
     }
 
@@ -112,7 +120,29 @@ impl Cur {
     #[must_use]
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         self.x += b.txt.line(self.y).chars().skip(self.x).count();
-        self.x = self.x.saturating_sub(1);
+        self.clamp_for(b);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::buffer::tests::buffer_from_lines;
+
+    #[test]
+    fn clamp_for_focuses_eol() {
+        let lines = &["a", "ab", "abc", "abcd"];
+        let b = buffer_from_lines(lines);
+
+        for (n, s) in lines.iter().enumerate() {
+            let mut c = Cur { y: n, x: 100 };
+            c.clamp_for(&b);
+
+            // Should be focused on the newline character at the end of the line
+            // In the case of the last line we should be focused on the index after
+            // the end of the string so that we are appending to the buffer.
+            assert_eq!(c, Cur { y: n, x: s.len() }, "line='{s}'");
+        }
     }
 }
