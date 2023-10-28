@@ -22,6 +22,7 @@ use std::mem::take;
 /// optimisations and runs reasonably quickly. It is not at all designed to
 /// be robust against mallicious input and it does not attempt to support
 /// full PCRE syntax or functionality.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,

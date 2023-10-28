@@ -1,5 +1,6 @@
 use super::vm::Regex;
-use ropey::{iter::Chars, Rope, RopeSlice};
+use crate::util::IdxRopeChars;
+use ropey::{Rope, RopeSlice};
 use std::{iter::Skip, str::CharIndices};
 
 /// The match location of a Regex against a given input.
@@ -11,6 +12,13 @@ pub struct Match {
 }
 
 impl Match {
+    pub(crate) fn synthetic(from: usize, to: usize) -> Self {
+        let mut sub_matches = [0; 20];
+        sub_matches[0] = from;
+        sub_matches[1] = to;
+        Self { sub_matches }
+    }
+
     pub fn str_match_text<'a>(&self, s: &'a str) -> &'a str {
         let (a, b) = self.loc();
         &s[a..=b]
@@ -65,24 +73,6 @@ impl<'a> IndexedChars for &'a str {
     }
 }
 
-pub struct IdxRopeChars<'a> {
-    inner: Chars<'a>,
-    from: usize,
-}
-
-impl<'a> Iterator for IdxRopeChars<'a> {
-    type Item = (usize, char);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.inner.next().map(|c| {
-            let res = (self.from, c);
-            self.from += 1;
-
-            res
-        })
-    }
-}
-
 impl<'a> IndexedChars for &'a Rope {
     type I = IdxRopeChars<'a>;
 
@@ -90,10 +80,7 @@ impl<'a> IndexedChars for &'a Rope {
         if from >= self.len_chars() {
             None
         } else {
-            Some(IdxRopeChars {
-                inner: self.chars_at(from),
-                from,
-            })
+            Some(IdxRopeChars::new(self, from, self.len_chars()))
         }
     }
 }

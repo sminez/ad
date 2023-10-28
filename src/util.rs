@@ -1,8 +1,10 @@
 use std::{
     ffi::OsStr,
     io::{self, Read, Write},
+    iter::Peekable,
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
+    str::Chars,
 };
 
 #[cfg(target_os = "linux")]
@@ -92,6 +94,55 @@ pub(crate) fn relative_path_from(base: &Path, p: &Path) -> PathBuf {
     }
 
     comps.iter().collect()
+}
+
+// returns the parsed number and following character if there was one.
+// initial must be a valid ascii digit
+pub(crate) fn parse_num(initial: char, it: &mut Peekable<Chars>) -> usize {
+    let mut s = String::from(initial);
+    loop {
+        match it.peek() {
+            Some(ch) if ch.is_ascii_digit() => {
+                s.push(it.next().unwrap());
+            }
+            _ => return s.parse().unwrap(),
+        }
+    }
+}
+
+pub struct IdxRopeChars<'a> {
+    inner: ropey::iter::Chars<'a>,
+    from: usize,
+    to: usize,
+}
+
+impl<'a> IdxRopeChars<'a> {
+    pub fn new(r: &'a ropey::Rope, from: usize, to: usize) -> Self {
+        IdxRopeChars {
+            inner: r.chars_at(from),
+            from,
+            to,
+        }
+    }
+}
+
+impl<'a> Iterator for IdxRopeChars<'a> {
+    type Item = (usize, char);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // self.from == self.to is the last character so
+        // we catch end of iteration on the subsequent call
+        if self.from > self.to {
+            None
+        } else {
+            self.inner.next().map(|c| {
+                let res = (self.from, c);
+                self.from += 1;
+
+                res
+            })
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,7 @@
 //! ad :: the adaptable editor
 pub mod buffer;
 pub mod editor;
+pub mod exec;
 pub mod key;
 pub mod mode;
 pub mod regex;

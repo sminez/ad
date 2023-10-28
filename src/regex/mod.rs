@@ -3,8 +3,9 @@
 //!
 //! Thompson's original paper on writing a regex engine can be found here:
 //!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
+use crate::util::parse_num;
+use std::{iter::Peekable, str::Chars};
 
-// Different impls of the matching algorithm
 mod compile;
 mod matches;
 mod vm;
@@ -15,7 +16,7 @@ pub use vm::Regex;
 const POSTFIX_BUF_SIZE: usize = 2000;
 const POSTFIX_MAX_PARENS: usize = 100;
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     EmptyParens,
     EmptyRegex,
@@ -147,7 +148,7 @@ impl CharClass {
         }
     }
 
-    fn try_parse(it: &mut std::str::Chars) -> Result<Self, Error> {
+    fn try_parse(it: &mut Peekable<Chars>) -> Result<Self, Error> {
         let mut next = || next_char(it)?.ok_or(Error::InvalidClass);
         let (mut ch, _) = next()?;
 
@@ -200,33 +201,38 @@ impl CharClass {
     }
 }
 
-fn try_parse_counted_repetition(it: &mut std::str::Chars) -> Result<Pfix, Error> {
-    let mut next = || next_char(it)?.ok_or(Error::InvalidRepetition);
-    let (mut ch, _) = next()?;
+fn try_parse_counted_repetition(it: &mut Peekable<Chars>) -> Result<Pfix, Error> {
+    let (mut ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
 
-    let n = ch.to_digit(10).ok_or(Error::InvalidRepetition)? as usize;
+    if !ch.is_ascii_digit() {
+        return Err(Error::InvalidRepetition);
+    }
+    let n = parse_num(ch, it);
     if n == 0 {
         return Err(Error::InvalidRepetition);
     }
 
-    (ch, _) = next()?;
+    (ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
     if ch == '}' {
         return Ok(Pfix::Rep(n));
     } else if ch != ',' {
         return Err(Error::InvalidRepetition);
     }
 
-    (ch, _) = next()?;
+    (ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
     if ch == '}' {
         return Ok(Pfix::RepAtLeast(n));
     }
 
-    let m = ch.to_digit(10).ok_or(Error::InvalidRepetition)? as usize;
+    if !ch.is_ascii_digit() {
+        return Err(Error::InvalidRepetition);
+    }
+    let m = parse_num(ch, it);
     if m == 0 {
         return Err(Error::InvalidRepetition);
     }
 
-    (ch, _) = next()?;
+    (ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
     if ch == '}' {
         Ok(Pfix::RepBetween(n, m))
     } else {
@@ -234,7 +240,7 @@ fn try_parse_counted_repetition(it: &mut std::str::Chars) -> Result<Pfix, Error>
     }
 }
 
-fn next_char(it: &mut std::str::Chars) -> Result<Option<(char, bool)>, Error> {
+fn next_char(it: &mut Peekable<Chars>) -> Result<Option<(char, bool)>, Error> {
     match it.next() {
         Some('\\') => (),
         Some(ch) => return Ok(Some((ch, false))),
@@ -272,7 +278,7 @@ fn re_to_postfix(re: &str) -> Result<Vec<Pfix>, Error> {
     let mut p = 0;
     let mut s = 2; // Save(0/1) are for the whole match
 
-    let mut it = re.chars();
+    let mut it = re.chars().peekable();
 
     while let Some((ch, escaped)) = next_char(&mut it)? {
         if escaped {
