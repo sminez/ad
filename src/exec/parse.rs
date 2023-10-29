@@ -56,6 +56,8 @@ impl Program {
     ) -> Result<(usize, usize), Error> {
         let (mut from, mut to) = m.loc();
 
+        // FIXME: we don't want to be cloning here but the use of Regex makes this
+        // problematic otherwise
         match self.exprs[pc].clone() {
             Expr::LoopMatches(mut re) => loop {
                 let mut it = IdxRopeChars::new(r, from, to);
@@ -131,25 +133,25 @@ impl Program {
             }
 
             Expr::Print(pat) => {
-                let s = template_match(pat, m, r, fname)?;
+                let s = template_match(&pat, m, r, fname)?;
                 writeln!(out, "{s}").expect("to be able to write");
                 Ok((from, to))
             }
 
             Expr::Insert(pat) => {
-                let s = template_match(pat, m, r, fname)?;
+                let s = template_match(&pat, m, r, fname)?;
                 r.insert(from, &s);
                 Ok((from, to + s.len()))
             }
 
             Expr::Append(pat) => {
-                let s = template_match(pat, m, r, fname)?;
+                let s = template_match(&pat, m, r, fname)?;
                 r.insert(to + 1, &s);
                 Ok((from, to + s.len()))
             }
 
             Expr::Change(pat) => {
-                let s = template_match(pat, m, r, fname)?;
+                let s = template_match(&pat, m, r, fname)?;
                 r.remove(from..=to);
                 r.insert(from, &s);
                 Ok((from, from + s.len()))
@@ -165,7 +167,7 @@ impl Program {
                 match re.match_iter(&mut it, from) {
                     Some(m) => {
                         let (mfrom, mto) = m.loc();
-                        let s = template_match(pat, m, r, fname)?;
+                        let s = template_match(&pat, m, r, fname)?;
                         r.remove(mfrom..=mto);
                         r.insert(mfrom, &s);
                         Ok((from, to + mto - mfrom + s.len()))
@@ -180,7 +182,7 @@ impl Program {
                     Some(m) => {
                         let cur_len = r.len_chars();
                         let (mfrom, mto) = m.loc();
-                        let s = template_match(pat.clone(), m, r, fname)?;
+                        let s = template_match(&pat, m, r, fname)?;
                         r.remove(mfrom..=mto);
                         r.insert(mfrom, &s);
                         let new_len = r.len_chars();
@@ -282,10 +284,14 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
     }
 }
 
-fn template_match(mut s: String, m: Match, r: &Rope, fname: &str) -> Result<String, Error> {
-    if s.contains(FNAME_VAR) {
-        s = s.replace(FNAME_VAR, fname);
-    }
+// FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
+// then we end up attempting to template THAT in a later iteration of the loop.
+fn template_match(s: &str, m: Match, r: &Rope, fname: &str) -> Result<String, Error> {
+    let mut output = if s.contains(FNAME_VAR) {
+        s.replace(FNAME_VAR, fname)
+    } else {
+        s.to_string()
+    };
 
     let vars = ["$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"];
     for (n, var) in vars.iter().enumerate() {
@@ -293,12 +299,12 @@ fn template_match(mut s: String, m: Match, r: &Rope, fname: &str) -> Result<Stri
             continue;
         }
         match m.rope_submatch_text(n, r) {
-            Some(txt) => s = s.replace(var, &txt.to_string()),
+            Some(txt) => output = output.replace(var, &txt.to_string()),
             None => return Err(Error::InvalidSubstitution(n)),
         }
     }
 
-    Ok(s)
+    Ok(output)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
