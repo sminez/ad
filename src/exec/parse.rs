@@ -25,7 +25,7 @@ impl From<regex::Error> for Error {
 /// A parsed and compiled program that can be executed against an input
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    initial_dot: (usize, usize),
+    initial_dot: (usize, Option<usize>),
     exprs: Vec<Expr>,
 }
 
@@ -33,7 +33,7 @@ impl Program {
     /// Execute this program against a given Rope
     pub fn execute(&mut self, r: &mut Rope) -> Result<(usize, usize), Error> {
         let (from, to) = self.initial_dot;
-        let initial = Match::synthetic(from, to);
+        let initial = Match::synthetic(from, to.unwrap_or_else(|| r.len_chars() - 1));
         self.step(r, initial, 0)
     }
 
@@ -188,7 +188,7 @@ impl Program {
     }
 
     /// Attempt to parse a given program input using a known max dot position
-    pub fn try_parse(s: &str, max_dot: usize) -> Result<Self, Error> {
+    pub fn try_parse(s: &str) -> Result<Self, Error> {
         let mut exprs = vec![];
         let mut it = s.trim().chars().peekable();
 
@@ -196,7 +196,7 @@ impl Program {
             return Err(Error::EmptyProgram);
         }
 
-        let initial_dot = parse_initial_dot(&mut it, max_dot)?;
+        let initial_dot = parse_initial_dot(&mut it)?;
         consume_whitespace(&mut it);
 
         loop {
@@ -243,9 +243,9 @@ fn validate(exprs: &mut Vec<Expr>) -> Result<(), Error> {
     Ok(())
 }
 
-fn parse_initial_dot(it: &mut Peekable<Chars>, max_dot: usize) -> Result<(usize, usize), Error> {
+fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>), Error> {
     match it.next() {
-        Some(',') => Ok((0, max_dot)),
+        Some(',') => Ok((0, None)),
         // n,m | n,
         Some(c) if c.is_ascii_digit() => {
             let n = parse_num(c, it);
@@ -253,9 +253,9 @@ fn parse_initial_dot(it: &mut Peekable<Chars>, max_dot: usize) -> Result<(usize,
                 Some(',') => match it.next() {
                     Some(c) if c.is_ascii_digit() => {
                         let m = parse_num(c, it);
-                        Ok((n, m))
+                        Ok((n, Some(m)))
                     }
-                    Some(' ') | None => Ok((n, max_dot)),
+                    Some(' ') | None => Ok((n, None)),
                     _ => Err(Error::InvalidExpr),
                 },
                 _ => Err(Error::InvalidExpr),
@@ -361,14 +361,14 @@ mod tests {
         Regex::compile(s).unwrap()
     }
 
-    #[test_case(",", (0, 100); "full")]
-    #[test_case("5,", (5, 100); "from n")]
-    #[test_case("50,", (50, 100); "from n multi digit")]
-    #[test_case("5,9", (5, 9); "from n to m")]
-    #[test_case("25,90", (25, 90); "from n to m multi digit")]
+    #[test_case(",", (0, None); "full")]
+    #[test_case("5,", (5, None); "from n")]
+    #[test_case("50,", (50, None); "from n multi digit")]
+    #[test_case("5,9", (5, Some(9)); "from n to m")]
+    #[test_case("25,90", (25, Some(90)); "from n to m multi digit")]
     #[test]
-    fn parse_initial_dot_works(s: &str, expected: (usize, usize)) {
-        let dot = parse_initial_dot(&mut s.chars().peekable(), 100).expect("valid input");
+    fn parse_initial_dot_works(s: &str, expected: (usize, Option<usize>)) {
+        let dot = parse_initial_dot(&mut s.chars().peekable()).expect("valid input");
         assert_eq!(dot, expected);
     }
 
@@ -394,11 +394,11 @@ mod tests {
     #[test_case(", x/^.*$/ g/emacs/ d", vec![LoopMatches(re("^.*$")), IfContains(re("emacs")), Delete]; "loop filter")]
     #[test]
     fn parse_program_works(s: &str, expected: Vec<Expr>) {
-        let p = Program::try_parse(s, 100).expect("valid input");
+        let p = Program::try_parse(s).expect("valid input");
         assert_eq!(
             p,
             Program {
-                initial_dot: (0, 100),
+                initial_dot: (0, None),
                 exprs: expected
             }
         );
@@ -409,7 +409,7 @@ mod tests {
     #[test_case(", x/.*/", Error::MissingAction; "missing action")]
     #[test]
     fn parse_program_errors_correctly(s: &str, expected: Error) {
-        let res = Program::try_parse(s, 100);
+        let res = Program::try_parse(s);
         assert_eq!(res, Err(expected));
     }
 
@@ -420,7 +420,7 @@ mod tests {
     #[test]
     fn step_works(expr: Expr, expected: &str) {
         let mut prog = Program {
-            initial_dot: (0, 10),
+            initial_dot: (0, None),
             exprs: vec![expr],
         };
         let mut r = Rope::from_str("foo foo foo");
@@ -442,7 +442,7 @@ mod tests {
     #[test_case(", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
-        let mut prog = Program::try_parse(s, 10).unwrap();
+        let mut prog = Program::try_parse(s).unwrap();
         let mut r = Rope::from_str("foo foo foo");
         prog.execute(&mut r).unwrap();
 

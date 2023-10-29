@@ -1,15 +1,16 @@
 // A minimal example of the exec language functionality
 use ad::exec::{Error, Program};
 use ropey::Rope;
-use std::{env::args, fs};
+use std::{env, fs};
 
 fn main() -> Result<(), Error> {
-    let args: Vec<String> = args().collect();
-    let s = fs::read_to_string(&args[2]).expect("unable to open file");
-    let mut r = Rope::from_str(&s);
-    let mut prog = Program::try_parse(&args[1], r.len_chars() - 1)?;
+    let mut args = env::args().skip(1);
+    let mut prog = Program::try_parse(&args.next().expect("no program provided"))?;
 
-    prog.execute(&mut r)?;
+    for path in args {
+        let s = fs::read_to_string(&path).expect("unable to open file");
+        prog.execute(&mut Rope::from_str(&s))?;
+    }
 
     Ok(())
 }
