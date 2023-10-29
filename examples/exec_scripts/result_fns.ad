@@ -1,0 +1,5 @@
+,
+x/fn@*?\{/
+g/->.*Result.*\{/
+x/fn (\w+)@*?-> (.*?) \{/
+p/($FILENAME) $1 returns $2/

@@ -77,11 +77,15 @@ fn parse_args() -> Args {
             Args { script, files }
         }
 
+        // help and version info
         Some("-h" | "--help") => show_help(),
         Some("-v" | "--version") => show_version_info(),
 
-        _ => {
-            let files: Vec<String> = args.collect();
+        // files to open
+        Some(fname) => {
+            let mut files = vec![fname.to_string()];
+            files.extend(args);
+
             Args {
                 script: None,
                 files,
