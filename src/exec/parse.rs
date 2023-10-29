@@ -4,7 +4,7 @@ use crate::{
     util::{parse_num, IdxRopeChars},
 };
 use ropey::Rope;
-use std::{iter::Peekable, str::Chars};
+use std::{cmp::Ordering, iter::Peekable, str::Chars};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -31,80 +31,160 @@ pub struct Program {
 
 impl Program {
     /// Execute this program against a given Rope
-    pub fn execute(&mut self, r: &mut Rope) -> Result<(), Error> {
+    pub fn execute(&mut self, r: &mut Rope) -> Result<(usize, usize), Error> {
         let (from, to) = self.initial_dot;
         let initial = Match::synthetic(from, to);
         self.step(r, initial, 0)
     }
 
-    fn step(&mut self, r: &mut Rope, m: Match, pc: usize) -> Result<(), Error> {
-        let (outer_from, outer_to) = m.loc();
+    fn step(&mut self, r: &mut Rope, m: Match, pc: usize) -> Result<(usize, usize), Error> {
+        let (mut from, mut to) = m.loc();
 
         match self.exprs[pc].clone() {
-            Expr::LoopMatches(mut re) => {
-                let mut from = outer_from;
-                loop {
-                    let mut it = IdxRopeChars::new(r, from, outer_to);
-                    match re.match_iter(&mut it, from) {
-                        Some(m) => {
-                            self.step(r, m, pc + 1)?;
-                            (_, from) = m.loc();
-                            from += 1;
-                        }
-                        None => break,
-                    }
-                }
-            }
+            Expr::LoopMatches(mut re) => loop {
+                let mut it = IdxRopeChars::new(r, from, to);
+                match re.match_iter(&mut it, from) {
+                    Some(m) => {
+                        let cur_len = r.len_chars();
+                        (_, from) = self.step(r, m, pc + 1)?;
+                        let new_len = r.len_chars();
+                        from += 1;
 
-            Expr::LoopBetweenMatches(mut re) => {
-                let (mut from, mut to) = (outer_from, outer_to);
-                loop {
-                    let mut it = IdxRopeChars::new(r, from, to);
-                    match re.match_iter(&mut it, from) {
-                        Some(m) => {
-                            let new_from;
-                            (to, new_from) = m.loc();
-                            let m = Match::synthetic(from, to);
-                            self.step(r, m, pc + 1)?;
-                            from = new_from + 1;
+                        match new_len.cmp(&cur_len) {
+                            Ordering::Greater => to += new_len - cur_len,
+                            Ordering::Less => to -= cur_len - new_len,
+                            _ => (),
                         }
-                        None if from < to => {
-                            let m = Match::synthetic(from, to);
-                            self.step(r, m, pc + 1)?;
-                            break;
+
+                        if from > to {
+                            return Ok((from, to));
                         }
-                        None => break,
                     }
+                    None => return Ok((from, to)),
                 }
-            }
+            },
+
+            Expr::LoopBetweenMatches(mut re) => loop {
+                let mut it = IdxRopeChars::new(r, from, to);
+                match re.match_iter(&mut it, from) {
+                    Some(m) => {
+                        let (initial_to, new_from) = m.loc();
+                        if initial_to == 0 {
+                            // skip matches of the null string at the start of input
+                            from = new_from + 1;
+                            continue;
+                        }
+
+                        let m = Match::synthetic(from, initial_to - 1);
+                        let cur_len = r.len_chars();
+                        (_, _) = self.step(r, m, pc + 1)?;
+                        let new_len = r.len_chars();
+
+                        match new_len.cmp(&cur_len) {
+                            Ordering::Greater => to += new_len - cur_len,
+                            Ordering::Less => to -= cur_len - new_len,
+                            _ => (),
+                        }
+
+                        from = new_from + new_len - cur_len + 1;
+
+                        if from > to {
+                            return Ok((from, to));
+                        }
+                    }
+                    None => return Ok((from, to)),
+                }
+            },
 
             Expr::IfContains(mut re) => {
-                let mut it = IdxRopeChars::new(r, outer_from, outer_to);
-                if re.match_iter(&mut it, outer_from).is_some() {
-                    self.step(r, m, pc + 1)?;
+                let mut it = IdxRopeChars::new(r, from, to);
+                if re.match_iter(&mut it, from).is_some() {
+                    self.step(r, m, pc + 1)
+                } else {
+                    Ok((from, to))
                 }
             }
 
             Expr::IfNotContains(mut re) => {
-                let mut it = IdxRopeChars::new(r, outer_from, outer_to);
-                if re.match_iter(&mut it, outer_from).is_none() {
-                    self.step(r, m, pc + 1)?;
+                let mut it = IdxRopeChars::new(r, from, to);
+                if re.match_iter(&mut it, from).is_none() {
+                    self.step(r, m, pc + 1)
+                } else {
+                    Ok((from, to))
                 }
             }
 
-            // TODO: should be using something that impls Write so we can redirect
-            // output to a buffer
-            Expr::Print(pat) => println!("{}", template_match(pat, m, r)?),
+            // FIXME: should be using something that impls Write so we can redirect output to a buffer
+            Expr::Print(pat) => {
+                println!("{}", template_match(pat, m, r)?);
+                Ok((from, to))
+            }
 
-            // Insert(String),
-            // Append(String),
-            // Change(String),
-            // Sub(Regex, String),
-            // Delete,
-            e => panic!("unhandled expr: {e:?}"),
+            Expr::Insert(pat) => {
+                let s = template_match(pat, m, r)?;
+                r.insert(from, &s);
+                Ok((from, to + s.len()))
+            }
+
+            Expr::Append(pat) => {
+                let s = template_match(pat, m, r)?;
+                r.insert(to + 1, &s);
+                Ok((from, to + s.len()))
+            }
+
+            Expr::Change(pat) => {
+                let s = template_match(pat, m, r)?;
+                r.remove(from..=to);
+                r.insert(from, &s);
+                Ok((from, from + s.len()))
+            }
+
+            Expr::Delete => {
+                r.remove(from..=to);
+                Ok((from, from))
+            }
+
+            Expr::Sub(mut re, pat, false) => {
+                let mut it = IdxRopeChars::new(r, from, to);
+                match re.match_iter(&mut it, from) {
+                    Some(m) => {
+                        let (mfrom, mto) = m.loc();
+                        let s = template_match(pat, m, r)?;
+                        r.remove(mfrom..=mto);
+                        r.insert(mfrom, &s);
+                        Ok((from, to + mto - mfrom + s.len()))
+                    }
+                    None => Ok((from, to)),
+                }
+            }
+
+            Expr::Sub(mut re, pat, true) => loop {
+                let mut it = IdxRopeChars::new(r, from, to);
+                match re.match_iter(&mut it, from) {
+                    Some(m) => {
+                        let cur_len = r.len_chars();
+                        let (mfrom, mto) = m.loc();
+                        let s = template_match(pat.clone(), m, r)?;
+                        r.remove(mfrom..=mto);
+                        r.insert(mfrom, &s);
+                        let new_len = r.len_chars();
+
+                        from = to + mto - mfrom + s.len() - 1;
+
+                        match new_len.cmp(&cur_len) {
+                            Ordering::Greater => to += new_len - cur_len,
+                            Ordering::Less => to -= cur_len - new_len,
+                            _ => (),
+                        }
+
+                        if from > to {
+                            return Ok((from, to));
+                        }
+                    }
+                    None => return Ok((from, to)),
+                }
+            },
         }
-
-        Ok(())
     }
 
     /// Attempt to parse a given program input using a known max dot position
@@ -155,7 +235,7 @@ fn validate(exprs: &mut Vec<Expr>) -> Result<(), Error> {
     // Must end with an action
     if !matches!(
         exprs[exprs.len() - 1],
-        Insert(_) | Append(_) | Change(_) | Sub(_, _) | Print(_) | Delete
+        Insert(_) | Append(_) | Change(_) | Sub(_, _, _) | Print(_) | Delete
     ) {
         return Err(Error::MissingAction);
     }
@@ -212,7 +292,7 @@ pub(super) enum Expr {
     Insert(String),
     Append(String),
     Change(String),
-    Sub(Regex, String),
+    Sub(Regex, String, bool),
     Print(String),
     Delete,
 }
@@ -231,7 +311,12 @@ impl Expr {
                 let delim = it.next().ok_or(Error::InvalidExpr)?;
                 let re = Regex::compile(&try_read_until(delim, it)?)?;
                 let s = try_read_until(delim, it)?;
-                Ok(Expr::Sub(re, s))
+                if let Some('g') = it.peek() {
+                    it.next();
+                    Ok(Expr::Sub(re, s, true))
+                } else {
+                    Ok(Expr::Sub(re, s, false))
+                }
             }
             Some('p') => Ok(Expr::Print(try_parse_delimited_str(it)?)),
             Some('d') => Ok(Expr::Delete),
@@ -294,7 +379,8 @@ mod tests {
     #[test_case("i/foo/", Insert("foo".to_string()); "insert")]
     #[test_case("a/foo/", Append("foo".to_string()); "append")]
     #[test_case("c/foo/", Change("foo".to_string()); "change")]
-    #[test_case("s/.*/foo/", Sub(re(".*"), "foo".to_string()); "substitute")]
+    #[test_case("s/.*/foo/", Sub(re(".*"), "foo".to_string(), false); "substitute")]
+    #[test_case("s/.*/foo/g", Sub(re(".*"), "foo".to_string(), true); "substitute all")]
     #[test_case("p/$0/", Print("$0".to_string()); "print")]
     #[test_case("d", Delete; "delete")]
     #[test]
@@ -304,7 +390,7 @@ mod tests {
     }
 
     #[test_case(", p/$0/", vec![Print("$0".to_string())]; "print all")]
-    #[test_case(", x/^.*$/ s/foo/bar/", vec![LoopMatches(re("^.*$")), Sub(re("foo"), "bar".to_string())]; "simple loop")]
+    #[test_case(", x/^.*$/ s/foo/bar/", vec![LoopMatches(re("^.*$")), Sub(re("foo"), "bar".to_string(), false)]; "simple loop")]
     #[test_case(", x/^.*$/ g/emacs/ d", vec![LoopMatches(re("^.*$")), IfContains(re("emacs")), Delete]; "loop filter")]
     #[test]
     fn parse_program_works(s: &str, expected: Vec<Expr>) {
@@ -325,5 +411,41 @@ mod tests {
     fn parse_program_errors_correctly(s: &str, expected: Error) {
         let res = Program::try_parse(s, 100);
         assert_eq!(res, Err(expected));
+    }
+
+    #[test_case(Insert("X".to_string()), "Xfoo foo foo"; "insert")]
+    #[test_case(Append("X".to_string()), "fooX foo foo"; "append")]
+    #[test_case(Change("X".to_string()), "X foo foo"; "change")]
+    #[test_case(Delete, " foo foo"; "delete")]
+    #[test]
+    fn step_works(expr: Expr, expected: &str) {
+        let mut prog = Program {
+            initial_dot: (0, 10),
+            exprs: vec![expr],
+        };
+        let mut r = Rope::from_str("foo foo foo");
+        // matching the first 'foo'
+        prog.step(&mut r, Match::synthetic(0, 2), 0).unwrap();
+
+        assert_eq!(&r.to_string(), expected);
+    }
+
+    #[test_case(", x/foo/ p/$0/", "foo foo foo"; "x print")]
+    #[test_case(", x/foo/ i/X/", "Xfoo Xfoo Xfoo"; "x insert")]
+    #[test_case(", x/foo/ a/X/", "fooX fooX fooX"; "x append")]
+    #[test_case(", x/foo/ c/X/", "X X X"; "x change")]
+    #[test_case(", x/foo/ s/o/X/", "fXo fXo fXo"; "x substitute")]
+    #[test_case(", x/foo/ s/o/X/g", "fXX fXX fXX"; "x substitute all")]
+    #[test_case(", y/foo/ p/>$0</", "foo foo foo"; "y print")]
+    #[test_case(", y/foo/ i/X/", "fooX fooX foo"; "y insert")]
+    #[test_case(", y/foo/ a/X/", "foo Xfoo Xfoo"; "y append")]
+    #[test_case(", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
+    #[test]
+    fn execute_produces_the_correct_string(s: &str, expected: &str) {
+        let mut prog = Program::try_parse(s, 10).unwrap();
+        let mut r = Rope::from_str("foo foo foo");
+        prog.execute(&mut r).unwrap();
+
+        assert_eq!(&r.to_string(), expected);
     }
 }
