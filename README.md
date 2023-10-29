@@ -41,8 +41,52 @@ but the whole thing will be a lot easier to write if there isn't really any conf
 - Virtual buffers for command output that can be hidden
 
 
+## Sam style structural regular expressions
+
+One aim of this project is to provide an implementation of "Structural Regular Expressions" as first
+presented (to my knowledge) in the [Sam text editor][5] from plan9 by Rob Pike. [This tutorial][6]
+from Pike covers the command language of Sam which I am using as a starting point for the command
+language for `ad`. So far I'm not aiming for a perfect match with the functionality of Sam or Acme
+but I _am_ looking to make use of the pieces that feel particularly useful. As the project develops
+I may well end up pulling in more but for now I'm happy to have a decent starting point for an
+implementation of the structural regular expression engine.
+
+There is still a fair amount to do but so far the idea is to allow for repeated narrowing and looping
+over sub-matches within a buffer or file loaded from disk. (A streaming interface working over stdin
+is coming but I need to have a think about how best to buffer the input and track partial matches in
+the regex engine to avoid slowing things down too much or requiring the engine to buffer and collect
+_all_ of its standard input before matching).
+
+The current engine can be used via the `-e` and `-f` flags to run `ad` in headless mode, but hooking
+things into the interactive editor directly should be coming soon. For now, here is a demo of some
+simple functionality of the engine:
+
+```sh
+$ cat examples/exec_scripts/result_fns.ad
+,                              # set dot to be the full input (not required as this is the default)
+x/fn@*?\{/                     # select all Rust function signatures up to the opening brace
+g/->.*Result.*\{/              # keep those that return some form of Result
+x/fn (\w+)@*?-> (.*?) \{/      # extract the function name and return type from the signature
+p/($FILENAME) $1 returns $2/   # print them along with the filename using a template
+
+
+$ ad -f examples/exec_scripts/result_fns.ad src/**/*.rs | head
+(src/buffer/buffers.rs) open_or_focus returns io::Result<()>
+(src/buffer/dot/cur.rs) fmt returns fmt::Result
+(src/buffer/dot/mod.rs) fmt returns fmt::Result
+(src/buffer/dot/range.rs) fmt returns fmt::Result
+(src/buffer/edit.rs) fmt returns fmt::Result
+(src/buffer/mod.rs) new_from_canonical_file_path returns io::Result<Self>
+(src/exec/parse.rs) execute returns Result<(usize, usize), Error>
+(src/exec/parse.rs) step returns Result<(usize, usize), Error>
+(src/exec/parse.rs) try_parse returns Result<Self, Error>
+(src/exec/parse.rs) validate returns Result<(), Error>
+```
+
   [0]: https://www.vim.org/
   [1]: https://neovim.io/
   [2]: https://github.com/mawww/kakoune
   [3]: https://en.wikipedia.org/wiki/Acme_(text_editor)
   [4]: https://www.youtube.com/watch?v=dP1xVpMPn8M
+  [5]: http://doc.cat-v.org/plan_9/4th_edition/papers/sam/
+  [6]: http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf

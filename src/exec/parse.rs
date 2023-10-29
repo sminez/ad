@@ -16,8 +16,8 @@ pub enum Error {
     InvalidExpr,
     InvalidRegex(regex::Error),
     InvalidSubstitution(usize),
-    MissingInitialDot,
     MissingAction,
+    Eof,
 }
 
 impl From<regex::Error> for Error {
@@ -222,8 +222,14 @@ impl Program {
                 break;
             }
 
-            exprs.push(Expr::try_parse(&mut it)?);
-            consume_whitespace(&mut it);
+            match Expr::try_parse(&mut it) {
+                Ok(expr) => {
+                    exprs.push(expr);
+                    consume_whitespace(&mut it);
+                }
+                Err(Error::Eof) => break,
+                Err(e) => return Err(e),
+            }
         }
 
         validate(&mut exprs)?;
@@ -262,10 +268,15 @@ fn validate(exprs: &mut Vec<Expr>) -> Result<(), Error> {
 }
 
 fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>), Error> {
-    match it.next() {
-        Some(',') => Ok((0, None)),
+    match it.peek() {
+        Some(',') => {
+            it.next();
+            Ok((0, None))
+        }
+
         // n,m | n,
-        Some(c) if c.is_ascii_digit() => {
+        Some(&c) if c.is_ascii_digit() => {
+            it.next();
             let n = parse_num(c, it);
             match it.next() {
                 Some(',') => match it.next() {
@@ -280,7 +291,8 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
             }
         }
 
-        _ => Err(Error::MissingInitialDot),
+        // Allow omitting the initial dot
+        _ => Ok((0, None)),
     }
 }
 
@@ -346,6 +358,18 @@ impl Expr {
             }
             Some('p') => Ok(Expr::Print(try_parse_delimited_str(it)?)),
             Some('d') => Ok(Expr::Delete),
+
+            // Comments run until the end of the current line
+            Some('#') => loop {
+                match it.next() {
+                    Some('\n') => {
+                        consume_whitespace(it);
+                        return Expr::try_parse(it);
+                    }
+                    None => return Err(Error::Eof),
+                    _ => (),
+                }
+            },
 
             _ => Err(Error::InvalidExpr),
         }
@@ -431,7 +455,6 @@ mod tests {
     }
 
     #[test_case("", Error::EmptyProgram; "empty program")]
-    #[test_case("x/.*/ d", Error::MissingInitialDot; "missing initial dot")]
     #[test_case(", x/.*/", Error::MissingAction; "missing action")]
     #[test]
     fn parse_program_errors_correctly(s: &str, expected: Error) {
