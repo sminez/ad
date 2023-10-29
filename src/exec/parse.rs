@@ -4,7 +4,11 @@ use crate::{
     util::{parse_num, IdxRopeChars},
 };
 use ropey::Rope;
-use std::{cmp::Ordering, iter::Peekable, str::Chars};
+use std::{cmp::Ordering, io::Write, iter::Peekable, str::Chars};
+
+/// Variable usable in templates for injecting the current filename.
+/// (Following the naming convention used in Awk)
+const FNAME_VAR: &str = "$FILENAME";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -31,13 +35,25 @@ pub struct Program {
 
 impl Program {
     /// Execute this program against a given Rope
-    pub fn execute(&mut self, r: &mut Rope) -> Result<(usize, usize), Error> {
+    pub fn execute<W: Write>(
+        &mut self,
+        r: &mut Rope,
+        fname: &str,
+        out: &mut W,
+    ) -> Result<(usize, usize), Error> {
         let (from, to) = self.initial_dot;
         let initial = Match::synthetic(from, to.unwrap_or_else(|| r.len_chars() - 1));
-        self.step(r, initial, 0)
+        self.step(r, initial, 0, fname, out)
     }
 
-    fn step(&mut self, r: &mut Rope, m: Match, pc: usize) -> Result<(usize, usize), Error> {
+    fn step<W: Write>(
+        &mut self,
+        r: &mut Rope,
+        m: Match,
+        pc: usize,
+        fname: &str,
+        out: &mut W,
+    ) -> Result<(usize, usize), Error> {
         let (mut from, mut to) = m.loc();
 
         match self.exprs[pc].clone() {
@@ -46,7 +62,7 @@ impl Program {
                 match re.match_iter(&mut it, from) {
                     Some(m) => {
                         let cur_len = r.len_chars();
-                        (_, from) = self.step(r, m, pc + 1)?;
+                        (_, from) = self.step(r, m, pc + 1, fname, out)?;
                         let new_len = r.len_chars();
                         from += 1;
 
@@ -77,7 +93,7 @@ impl Program {
 
                         let m = Match::synthetic(from, initial_to - 1);
                         let cur_len = r.len_chars();
-                        (_, _) = self.step(r, m, pc + 1)?;
+                        (_, _) = self.step(r, m, pc + 1, fname, out)?;
                         let new_len = r.len_chars();
 
                         match new_len.cmp(&cur_len) {
@@ -99,7 +115,7 @@ impl Program {
             Expr::IfContains(mut re) => {
                 let mut it = IdxRopeChars::new(r, from, to);
                 if re.match_iter(&mut it, from).is_some() {
-                    self.step(r, m, pc + 1)
+                    self.step(r, m, pc + 1, fname, out)
                 } else {
                     Ok((from, to))
                 }
@@ -108,32 +124,32 @@ impl Program {
             Expr::IfNotContains(mut re) => {
                 let mut it = IdxRopeChars::new(r, from, to);
                 if re.match_iter(&mut it, from).is_none() {
-                    self.step(r, m, pc + 1)
+                    self.step(r, m, pc + 1, fname, out)
                 } else {
                     Ok((from, to))
                 }
             }
 
-            // FIXME: should be using something that impls Write so we can redirect output to a buffer
             Expr::Print(pat) => {
-                println!("{}", template_match(pat, m, r)?);
+                let s = template_match(pat, m, r, fname)?;
+                writeln!(out, "{s}").expect("to be able to write");
                 Ok((from, to))
             }
 
             Expr::Insert(pat) => {
-                let s = template_match(pat, m, r)?;
+                let s = template_match(pat, m, r, fname)?;
                 r.insert(from, &s);
                 Ok((from, to + s.len()))
             }
 
             Expr::Append(pat) => {
-                let s = template_match(pat, m, r)?;
+                let s = template_match(pat, m, r, fname)?;
                 r.insert(to + 1, &s);
                 Ok((from, to + s.len()))
             }
 
             Expr::Change(pat) => {
-                let s = template_match(pat, m, r)?;
+                let s = template_match(pat, m, r, fname)?;
                 r.remove(from..=to);
                 r.insert(from, &s);
                 Ok((from, from + s.len()))
@@ -149,7 +165,7 @@ impl Program {
                 match re.match_iter(&mut it, from) {
                     Some(m) => {
                         let (mfrom, mto) = m.loc();
-                        let s = template_match(pat, m, r)?;
+                        let s = template_match(pat, m, r, fname)?;
                         r.remove(mfrom..=mto);
                         r.insert(mfrom, &s);
                         Ok((from, to + mto - mfrom + s.len()))
@@ -164,7 +180,7 @@ impl Program {
                     Some(m) => {
                         let cur_len = r.len_chars();
                         let (mfrom, mto) = m.loc();
-                        let s = template_match(pat.clone(), m, r)?;
+                        let s = template_match(pat.clone(), m, r, fname)?;
                         r.remove(mfrom..=mto);
                         r.insert(mfrom, &s);
                         let new_len = r.len_chars();
@@ -266,7 +282,11 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
     }
 }
 
-fn template_match(mut s: String, m: Match, r: &Rope) -> Result<String, Error> {
+fn template_match(mut s: String, m: Match, r: &Rope, fname: &str) -> Result<String, Error> {
+    if s.contains(FNAME_VAR) {
+        s = s.replace(FNAME_VAR, fname);
+    }
+
     let vars = ["$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"];
     for (n, var) in vars.iter().enumerate() {
         if !s.contains(var) {
@@ -425,7 +445,8 @@ mod tests {
         };
         let mut r = Rope::from_str("foo foo foo");
         // matching the first 'foo'
-        prog.step(&mut r, Match::synthetic(0, 2), 0).unwrap();
+        prog.step(&mut r, Match::synthetic(0, 2), 0, "test", &mut vec![])
+            .unwrap();
 
         assert_eq!(&r.to_string(), expected);
     }
@@ -444,7 +465,7 @@ mod tests {
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
         let mut r = Rope::from_str("foo foo foo");
-        prog.execute(&mut r).unwrap();
+        prog.execute(&mut r, "test", &mut vec![]).unwrap();
 
         assert_eq!(&r.to_string(), expected);
     }
