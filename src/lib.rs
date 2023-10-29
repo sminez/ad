@@ -10,6 +10,7 @@ pub mod trie;
 pub mod util;
 
 pub use editor::Editor;
+pub use exec::Program;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UNNAMED_BUFFER: &str = "[No Name]";
