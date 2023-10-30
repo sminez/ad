@@ -169,6 +169,10 @@ impl Dot {
 }
 
 /// Something that can be applied to an existing Dot to update it to a new state
+///
+/// Implementors should NOT call clamp_for themselves: the buffer is responsible
+/// for ensuring that cursors are corrected and always in bounds so calling the
+/// method a second time is redundant.
 pub trait UpdateDot {
     #[must_use]
     fn set_dot(&self, dot: Dot, b: &Buffer) -> Dot;
@@ -179,7 +183,6 @@ pub trait UpdateDot {
             dot = self.set_dot(dot, b);
         }
 
-        dot.clamp_for(b);
         dot
     }
 
@@ -192,7 +195,6 @@ pub trait UpdateDot {
             dot = self.extend_dot_forward(dot, b);
         }
 
-        dot.clamp_for(b);
         dot
     }
 
@@ -205,7 +207,6 @@ pub trait UpdateDot {
             dot = self.extend_dot_backward(dot, b);
         }
 
-        dot.clamp_for(b);
         dot
     }
 }
@@ -294,10 +295,10 @@ pub enum TextObject {
 }
 
 impl UpdateDot for TextObject {
-    fn set_dot(&self, mut dot: Dot, b: &Buffer) -> Dot {
-        dot = match self {
+    fn set_dot(&self, dot: Dot, b: &Buffer) -> Dot {
+        match self {
             // Arrow does its own clamping so we don't need to apply it again
-            TextObject::Arr(arr) => return arr.set_dot(dot, b),
+            TextObject::Arr(arr) => arr.set_dot(dot, b),
 
             TextObject::BufferEnd => Dot::Cur {
                 c: Cur::buffer_end(b),
@@ -353,13 +354,10 @@ impl UpdateDot for TextObject {
                 )
             }
             .collapse_null_range(),
-        };
-
-        dot.clamp_for(b);
-        dot
+        }
     }
 
-    fn extend_dot_forward(&self, mut dot: Dot, b: &Buffer) -> Dot {
+    fn extend_dot_forward(&self, dot: Dot, b: &Buffer) -> Dot {
         let Range {
             mut start,
             mut end,
@@ -406,13 +404,10 @@ impl UpdateDot for TextObject {
             (TextObject::Word, false) => (start, end.to_next_word_end(b)),
         };
 
-        dot = Dot::Range {
+        Dot::Range {
             r: Range::from_cursors(start, end, start_active),
         }
-        .collapse_null_range();
-
-        dot.clamp_for(b);
-        dot
+        .collapse_null_range()
     }
 
     fn extend_dot_backward(&self, dot: Dot, b: &Buffer) -> Dot {
@@ -455,13 +450,10 @@ impl UpdateDot for TextObject {
             (TextObject::Word, false) => (start, end.to_prev_word_start(b)),
         };
 
-        let mut dot = Dot::Range {
+        Dot::Range {
             r: Range::from_cursors(start, end, start_active),
         }
-        .collapse_null_range();
-
-        dot.clamp_for(b);
-        dot
+        .collapse_null_range()
     }
 }
 

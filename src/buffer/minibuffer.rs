@@ -2,8 +2,8 @@
 //! modifying the current buffer state.
 use crate::{
     buffer::{
-        dot::{Cur, Dot, UpdateDot},
-        Buffer, BufferKind,
+        dot::{Cur, Dot},
+        Buffer, BufferKind, TextObject,
     },
     editor::Editor,
     key::{Arrow, Key},
@@ -171,10 +171,10 @@ impl MiniBuffer {
                 Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
                 Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
                 Key::Alt('k') | Key::Arrow(Arrow::Up) => {
-                    mb.b.dot = Arrow::Up.set_dot(mb.b.dot, &mb.b);
+                    mb.b.set_dot(TextObject::Arr(Arrow::Up), 1);
                 }
                 Key::Alt('j') | Key::Arrow(Arrow::Down) => {
-                    mb.b.dot = Arrow::Down.set_dot(mb.b.dot, &mb.b);
+                    mb.b.set_dot(TextObject::Arr(Arrow::Down), 1);
                 }
 
                 _ => (),

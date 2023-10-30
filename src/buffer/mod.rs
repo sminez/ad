@@ -390,18 +390,14 @@ impl Buffer {
 
             Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
             Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
-            Action::DotExtendBackward(tobj, count) => {
-                self.dot = tobj.extend_dot_backward_n(self.dot, count, self)
-            }
-            Action::DotExtendForward(tobj, count) => {
-                self.dot = tobj.extend_dot_forward_n(self.dot, count, self)
-            }
+            Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
+            Action::DotExtendForward(tobj, count) => self.extend_dot_forward(tobj, count),
             Action::DotFlip => self.dot.flip(),
-            Action::DotSet(tobj, count) => self.dot = tobj.set_dot_n(self.dot, count, self),
+            Action::DotSet(t, count) => self.set_dot(t, count),
 
             Action::LoadDot => {
                 if let Dot::Cur { .. } = self.dot {
-                    self.dot = TextObject::Word.set_dot(self.dot, self);
+                    self.set_dot(TextObject::Word, 1);
                 }
                 let s = self.dot.content(self);
                 self.find_forward(s);
@@ -433,12 +429,33 @@ impl Buffer {
                 return deleted.map(ActionOutcome::SetClipboard);
             }
 
-            Key::Arrow(arr) => self.dot = arr.set_dot(self.dot, self),
+            Key::Arrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
 
             _ => (),
         }
 
         None
+    }
+
+    /// Set dot and clamp to ensure it is within bounds
+    fn set_dot(&mut self, t: TextObject, n: usize) {
+        let mut dot = t.set_dot_n(self.dot, n, self);
+        dot.clamp_for(self);
+        self.dot = dot;
+    }
+
+    /// Extend dot foward and clamp to ensure it is within bounds
+    fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
+        let mut dot = t.extend_dot_forward_n(self.dot, n, self);
+        dot.clamp_for(self);
+        self.dot = dot;
+    }
+
+    /// Extend dot backward and clamp to ensure it is within bounds
+    fn extend_dot_backward(&mut self, t: TextObject, n: usize) {
+        let mut dot = t.extend_dot_backward_n(self.dot, n, self);
+        dot.clamp_for(self);
+        self.dot = dot;
     }
 
     fn undo(&mut self) -> Option<ActionOutcome> {
@@ -654,6 +671,15 @@ mod tests {
                 in_c(1, 0, 'x'),
             ]
         );
+    }
+
+    #[test]
+    fn move_forward_at_end_of_buffer_is_fine() {
+        let mut b = Buffer::new_unnamed(0, "");
+        b.handle_raw_key(Key::Arrow(Arrow::Right));
+
+        let c = Cur { y: 0, x: 0 };
+        assert_eq!(b.dot, Dot::Cur { c });
     }
 
     #[test]

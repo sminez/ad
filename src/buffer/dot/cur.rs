@@ -88,17 +88,17 @@ impl Cur {
     }
 
     pub(super) fn clamp_for(&mut self, b: &Buffer) {
-        let y_max = b.len_lines();
+        let y_max = b.len_lines() - 1;
         if self.y > y_max {
             self.y = y_max;
-            self.x = 0;
+            self.x = b.txt.line(y_max).len_chars();
             return;
         }
 
         // On the last line we allow focusing the cursor at the index
         // after the end of the buffer to allow for appending
         let mut max_x = b.txt.line(self.y).len_chars();
-        if self.y < y_max - 1 {
+        if self.y < y_max {
             max_x = max_x.saturating_sub(1);
         }
 
@@ -144,5 +144,42 @@ mod tests {
             // the end of the string so that we are appending to the buffer.
             assert_eq!(c, Cur { y: n, x: s.len() }, "line='{s}'");
         }
+    }
+
+    #[test]
+    fn clamp_past_eof_focuses_eof() {
+        let lines = &["a", "ab", "abc", "abcd"];
+        let b = buffer_from_lines(lines);
+        let mut c = Cur { y: 100, x: 100 };
+
+        c.clamp_for(&b);
+        assert_eq!(c, Cur { y: 3, x: 4 });
+    }
+
+    #[test]
+    fn arr_right_at_eof_focuses_eof() {
+        let lines = &["a", "ab", "abc", "abcd"];
+        let b = buffer_from_lines(lines);
+        let mut c = Cur { y: 100, x: 100 };
+
+        c.clamp_for(&b);
+        assert_eq!(c, Cur { y: 3, x: 4 });
+
+        let final_c = c.arr(Arrow::Right, &b);
+        assert_eq!(final_c, Cur { y: 3, x: 4 });
+    }
+
+    #[test]
+    fn arr_right_at_last_char_focuses_eof() {
+        let lines = &["a", "ab", "abc", "abcd"];
+        let b = buffer_from_lines(lines);
+        let mut c = Cur { y: 3, x: 3 };
+
+        c.clamp_for(&b);
+        assert_eq!(c, Cur { y: 3, x: 3 });
+
+        let mut final_c = c.arr(Arrow::Right, &b);
+        final_c.clamp_for(&b);
+        assert_eq!(final_c, Cur { y: 3, x: 4 });
     }
 }
