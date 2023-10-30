@@ -11,7 +11,7 @@ use crate::{
 pub(crate) fn insert_mode() -> Mode {
     let mut keymap = keymap! {
         [ Esc ] => [ SetMode { m: "NORMAL" } ],
-        [ Char('f'), Char('d') ] => [ SetMode { m: "NORMAL" } ],
+        // [ Char('f'), Char('d') ] => [ SetMode { m: "NORMAL" } ],
         [ Backspace ] => [ DotSet(TextObject::Arr(Left), 1), Delete ],
         [ Del ] => [ Delete ],
         [ Home ] => [ DotSet(TextObject::LineStart, 1) ],

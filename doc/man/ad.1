@@ -1,0 +1,41 @@
+.TH AD "1" "October 2023" "github.com/sminez/ad" "User Commands"
+.SH NAME
+ad \- adaptable text editor and CLI for filtering and transforming text
+.SH SYNOPSIS
+.nf
+ad [-v] [--version] [-h] [--help]
+   [-e script] [--expression=script]
+   [-f script-file] [--script-file=script-file]
+   [file...]
+.fi
+.SH DESCRIPTION
+.ds ad \fIad\fP
+\*(ad is a text editor and command line stream editor.
+The text editor interface f \*(ad is inspired by the likes of \fIvim\fP,
+\fIkakoune\fP and plan9's \fIacme\fP and \fIsam\fP editors. \*(ad aims to
+provide an "integrating develpment environment" as opposed to an "integrated"
+one: leveraging the surrounding system for the majority of functionality
+outside of core text editing actions.
+.HP
+\fB\-e\fR, \fB\-\-expression\fR=\fI\,script\/\fR
+.IP
+specify an editing script to be executed
+.HP
+\fB\-f\fR, \fB\-\-script\-file\fR=\fI\,script\-file\/\fR
+.IP
+specify a file containing an editing script to be executed
+.HP
+\fB\-h\fR, \fB\-\-help\fR
+.IP
+display help text and exit
+.HP
+\fB\-v\fR, \fB\-\-version\fR
+.IP
+output version information and exit
+.PP
+If no \fB\-e\fR, \fB\-\-expression\fR, \fB\-f\fR, or \fB\-\-script\-file\fR option
+is given, then all arguments are taken to be input files to be edited interactively.
+If an editing script is specified then the remaining arguments are taken to be files
+to which the script should be applied.
+.PP
+Project home page: https://github.com/sminez/ad
