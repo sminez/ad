@@ -335,6 +335,9 @@ fn template_match(s: &str, m: Match, r: &Rope, fname: &str) -> Result<String, Er
         s.to_string()
     };
 
+    // replace newline and tab escapes with their literal equivalents
+    output = output.replace("\\n", "\n").replace("\\t", "\t");
+
     let vars = ["$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"];
     for (n, var) in vars.iter().enumerate() {
         if !s.contains(var) {
