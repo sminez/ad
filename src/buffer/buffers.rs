@@ -1,5 +1,9 @@
 use crate::buffer::{Buffer, BufferKind};
-use std::{collections::VecDeque, io, path::Path};
+use std::{
+    collections::VecDeque,
+    io::{self, ErrorKind},
+    path::Path,
+};
 
 /// A non-empty vec of buffers where the active buffer is accessible and default
 /// buffers are inserted where needed to maintain invariants
@@ -24,7 +28,11 @@ impl Buffers {
     }
 
     pub fn open_or_focus<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
-        let path = path.as_ref().canonicalize()?;
+        let path = match path.as_ref().canonicalize() {
+            Ok(p) => p,
+            Err(e) if e.kind() == ErrorKind::NotFound => path.as_ref().to_path_buf(),
+            Err(e) => return Err(e),
+        };
         let idx = self.inner.iter().position(|b| match &b.kind {
             BufferKind::File(p) => p == &path,
             _ => false,

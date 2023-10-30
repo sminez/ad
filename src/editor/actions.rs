@@ -87,7 +87,7 @@ impl Editor {
     }
 
     pub fn open_file(&mut self, path: &str) {
-        if let Err(e) = self.buffers.open_or_focus(path) {
+        if let Err(e) = self.buffers.open_or_focus(self.cwd.join(path)) {
             self.set_status_message(&format!("Error opening file: {e}"));
         };
     }
