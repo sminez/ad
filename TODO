@@ -3,7 +3,6 @@
 - [!] Fix keyboard driven scrolling
   - The decision to not drag the cursor while scrolling with the mouse seems to have
     completely broken auto-scrolling.
-- [ ] Implement Sam style structural regex
 - [ ] implement remaining text objects
   - Target character
   - Delimited between a given character pair

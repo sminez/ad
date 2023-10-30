@@ -42,6 +42,10 @@ pub struct Regex {
 }
 
 impl Regex {
+    /// Attempt to compile the given regular expression into its optimised VM opcode form.
+    ///
+    /// This method handles pre-allocation of the memory required for running the VM so
+    /// that the allocation cost is paid once up front rather than on each use of the Regex.
     pub fn compile(re: &str) -> Result<Self, Error> {
         let pfix = re_to_postfix(re)?;
         let ops = optimise(compile(pfix));
@@ -61,10 +65,13 @@ impl Regex {
         })
     }
 
+    /// Attempt to match this Regex against a given `&str` input, returning the position
+    /// of the match and all submatches if successful.
     pub fn match_str(&mut self, input: &str) -> Option<Match> {
         self.match_iter(&mut input.char_indices(), 0)
     }
 
+    /// Iterate over all non-overlapping matches of this Regex for a given `&str` input.
     pub fn match_str_all<'a, 'b>(&'a mut self, input: &'b str) -> MatchIter<'a, &'b str> {
         MatchIter {
             it: input,
@@ -73,19 +80,65 @@ impl Regex {
         }
     }
 
-    pub fn match_rope(&mut self, rope: &Rope) -> Option<Match> {
-        self.match_iter(&mut rope.chars().enumerate(), 0)
+    /// Attempt to match this Regex against a given `Rope` input, returning the position
+    /// of the match and all submatches if successful.
+    pub fn match_rope(&mut self, r: &Rope) -> Option<Match> {
+        self.match_iter(&mut r.chars().enumerate(), 0)
     }
 
-    pub fn match_rope_all<'a, 'b>(&'a mut self, input: &'b Rope) -> MatchIter<'a, &'b Rope> {
+    /// Iterate over all non-overlapping matches of this Regex for a given `Rope` input.
+    pub fn match_rope_all<'a, 'b>(&'a mut self, r: &'b Rope) -> MatchIter<'a, &'b Rope> {
         MatchIter {
-            it: input,
+            it: r,
             r: self,
             from: 0,
         }
     }
 
-    pub fn match_iter<I>(&mut self, input: &mut I, mut sp: usize) -> Option<Match>
+    /// Attempt to match this Regex against an arbitrary iterator input, returning the
+    /// position of the match and all submatches if successful.
+    pub fn match_iter<I>(&mut self, input: &mut I, sp: usize) -> Option<Match>
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        self._match_iter(input, sp, false)
+    }
+
+    /// Determine whether or not this Regex matches the input `&str` without searching for
+    /// the leftmost-longest match and associated submatch boundaries.
+    pub fn matches_str(&mut self, input: &str) -> bool {
+        self.matches_iter(&mut input.char_indices(), 0)
+    }
+
+    /// Determine whether or not this Regex matches the input `Rope` without searching for
+    /// the leftmost-longest match and associated submatch boundaries.
+    pub fn matches_rope(&mut self, r: &Rope) -> bool {
+        self.matches_iter(&mut r.chars().enumerate(), 0)
+    }
+
+    /// Determine whether or not this Regex matches the input iterator without searching
+    /// for the leftmost-longest match and associated submatch boundaries.
+    pub fn matches_iter<I>(&mut self, input: &mut I, sp: usize) -> bool
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        self._match_iter(input, sp, true).is_some()
+    }
+
+    /// This is the main VM implementation that is used by all other matching methods on Regex.
+    ///
+    /// The `return_on_first_match` flag is used to early return a dummy Match as soon as we
+    /// can tell that the given regular expression matches the input (rather than looking for
+    /// the leftmost-longest match).
+    /// >> The Match returned in this case will always point to the null string at the start
+    ///    of the string and should only be used for conversion to a bool in `matches_*`
+    ///    methods.
+    fn _match_iter<I>(
+        &mut self,
+        input: &mut I,
+        mut sp: usize,
+        return_on_first_match: bool,
+    ) -> Option<Match>
     where
         I: Iterator<Item = (usize, char)>,
     {
@@ -116,6 +169,10 @@ impl Regex {
 
             for t in clist.iter().take(n) {
                 if let Some(sms) = self.step_thread(t, &mut nlist, sp, ch) {
+                    if return_on_first_match {
+                        return Some(Match::synthetic(0, 0));
+                    }
+
                     matched = true;
                     sub_matches = sms;
                     sub_matches[1] = sp; // Save end of the match

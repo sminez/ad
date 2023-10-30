@@ -136,7 +136,7 @@ impl Program {
 
             Expr::IfContains(mut re) => {
                 let mut it = IdxRopeChars::new(r, from, to);
-                if re.match_iter(&mut it, from).is_some() {
+                if re.matches_iter(&mut it, from) {
                     self.step(r, m, pc + 1, fname, out)
                 } else {
                     Ok((from, to))
@@ -145,7 +145,7 @@ impl Program {
 
             Expr::IfNotContains(mut re) => {
                 let mut it = IdxRopeChars::new(r, from, to);
-                if re.match_iter(&mut it, from).is_none() {
+                if !re.matches_iter(&mut it, from) {
                     self.step(r, m, pc + 1, fname, out)
                 } else {
                     Ok((from, to))
