@@ -1,0 +1,5 @@
+x/^impl.*? (\w+)@*?^\}/         # select top level impl blocks
+{                               # start an expression group
+    p/impl $1/;                 # print the type the impl block is for
+    x/fn@*? (\w+)/ p/  $1/;     # print the function name indented
+}                               # close the command group
