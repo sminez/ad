@@ -1,4 +1,4 @@
-use ad::{Editor, Program};
+use ad::{CachedStdin, Editor, Program};
 use ropey::Rope;
 use std::{
     env, fs,
@@ -98,6 +98,18 @@ fn run_script(script: &str, files: Vec<String>) {
     let mut prog = Program::try_parse(script).unwrap();
     let mut buf = vec![];
 
+    if files.is_empty() {
+        // Read from stdin and write directly to stdout
+        match prog.execute(&mut CachedStdin::new(), "stdin", &mut io::stdout()) {
+            Ok(_) => return,
+            Err(e) => {
+                eprintln!("error running script: {e:?}");
+                exit(1);
+            }
+        }
+    }
+
+    // Buffer output from running over each provided file
     for path in files.iter() {
         let s = match fs::read_to_string(path) {
             Ok(s) => s,

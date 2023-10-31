@@ -65,6 +65,7 @@ impl IterableStream for Rope {
 
 pub struct CachedStdin {
     inner: RefCell<CachedStdinInner>,
+    buf: RefCell<String>,
     r: RefCell<Rope>,
 }
 
@@ -86,6 +87,7 @@ impl CachedStdin {
                 stdin: stdin(),
                 closed: false,
             }),
+            buf: RefCell::new(String::with_capacity(LINE_BUF_LEN)),
             r: RefCell::new(Rope::new()),
         }
     }
@@ -98,23 +100,19 @@ impl CachedStdin {
         self.r.borrow().get_char(ix)
     }
 
-    fn read_next_line(&self) -> bool {
+    fn try_read_next_line(&self) {
         let mut inner = self.inner.borrow_mut();
-        let mut buf = String::with_capacity(LINE_BUF_LEN);
+        let mut buf = self.buf.borrow_mut();
+        buf.clear();
 
-        let closed = match inner.stdin.read_line(&mut buf) {
-            Ok(_) => {
+        match inner.stdin.read_line(&mut buf) {
+            Ok(n) => {
                 let len = self.r.borrow().len_chars();
                 self.r.borrow_mut().insert(len, &buf);
-                false
+                inner.closed = n == 0;
             }
-            Err(_) => {
-                inner.closed = true;
-                true
-            }
+            Err(_) => inner.closed = true,
         };
-
-        closed
     }
 }
 
@@ -130,11 +128,15 @@ impl<'a> Iterator for CachedStdinIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         // self.from == self.to is the last character so
         // we catch end of iteration on the subsequent call
-        if self.from > self.to || self.inner.is_closed() {
+        if self.from > self.to {
             return None;
         }
 
         loop {
+            if self.inner.is_closed() {
+                return None;
+            }
+
             match self.inner.get_char(self.from) {
                 Some(ch) => {
                     let res = (self.from, ch);
@@ -142,11 +144,7 @@ impl<'a> Iterator for CachedStdinIter<'a> {
 
                     return Some(res);
                 }
-                None => {
-                    if self.inner.read_next_line() {
-                        return None;
-                    }
-                }
+                None => self.inner.try_read_next_line(),
             }
         }
     }

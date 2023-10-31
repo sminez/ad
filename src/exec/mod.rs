@@ -9,8 +9,7 @@ mod expr;
 mod stream;
 
 use expr::Expr;
-pub use stream::IterableStream;
-// pub use stream::{CachedStdin, CachedStdinIter, IterableStream};
+pub use stream::{CachedStdin, IterableStream};
 
 /// Variable usable in templates for injecting the current filename.
 /// (Following the naming convention used in Awk)
@@ -167,20 +166,20 @@ impl Program {
             Expr::Insert(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 stream.insert(from, &s);
-                Ok((from, to + s.len()))
+                Ok((from, to + s.chars().count()))
             }
 
             Expr::Append(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 stream.insert(to + 1, &s);
-                Ok((from, to + s.len()))
+                Ok((from, to + s.chars().count()))
             }
 
             Expr::Change(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 stream.remove(from, to);
                 stream.insert(from, &s);
-                Ok((from, from + s.len()))
+                Ok((from, from + s.chars().count()))
             }
 
             Expr::Delete => {
@@ -195,7 +194,7 @@ impl Program {
                         let s = template_match(&pat, m, stream.contents(), fname)?;
                         stream.remove(mfrom, mto);
                         stream.insert(mfrom, &s);
-                        Ok((from, to + mto - mfrom + s.len()))
+                        Ok((from, to + mto - mfrom + s.chars().count()))
                     }
                     None => Ok((from, to)),
                 }
@@ -211,7 +210,7 @@ impl Program {
                         stream.insert(mfrom, &s);
                         let new_len = stream.len_chars();
 
-                        from = to + mto - mfrom + s.len() - 1;
+                        from = to + mto - mfrom + s.chars().count() - 1;
 
                         match new_len.cmp(&cur_len) {
                             Ordering::Greater => to += new_len - cur_len,
@@ -348,7 +347,7 @@ fn template_match(s: &str, m: Match, txt: String, fname: &str) -> Result<String,
             continue;
         }
         match m.str_submatch_text(n, &txt) {
-            Some(sm) => output = output.replace(var, sm),
+            Some(sm) => output = output.replace(var, &sm),
             None => return Err(Error::InvalidSubstitution(n)),
         }
     }
@@ -420,20 +419,20 @@ mod tests {
         assert_eq!(&r.to_string(), expected);
     }
 
-    #[test_case(", x/foo/ p/$0/", "foo foo foo"; "x print")]
-    #[test_case(", x/foo/ i/X/", "Xfoo Xfoo Xfoo"; "x insert")]
-    #[test_case(", x/foo/ a/X/", "fooX fooX fooX"; "x append")]
-    #[test_case(", x/foo/ c/X/", "X X X"; "x change")]
-    #[test_case(", x/foo/ s/o/X/", "fXo fXo fXo"; "x substitute")]
-    #[test_case(", x/foo/ s/o/X/g", "fXX fXX fXX"; "x substitute all")]
-    #[test_case(", y/foo/ p/>$0</", "foo foo foo"; "y print")]
-    #[test_case(", y/foo/ i/X/", "fooX fooX foo"; "y insert")]
-    #[test_case(", y/foo/ a/X/", "foo Xfoo Xfoo"; "y append")]
+    #[test_case(", x/foo/ p/$0/", "foo│foo│foo"; "x print")]
+    #[test_case(", x/foo/ i/X/", "Xfoo│Xfoo│Xfoo"; "x insert")]
+    #[test_case(", x/foo/ a/X/", "fooX│fooX│fooX"; "x append")]
+    #[test_case(", x/foo/ c/X/", "X│X│X"; "x change")]
+    #[test_case(", x/foo/ s/o/X/", "fXo│fXo│fXo"; "x substitute")]
+    #[test_case(", x/foo/ s/o/X/g", "fXX│fXX│fXX"; "x substitute all")]
+    #[test_case(", y/foo/ p/>$0</", "foo│foo│foo"; "y print")]
+    #[test_case(", y/foo/ i/X/", "fooX│fooX│foo"; "y insert")]
+    #[test_case(", y/foo/ a/X/", "foo│Xfoo│Xfoo"; "y append")]
     #[test_case(", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
-        let mut r = Rope::from_str("foo foo foo");
+        let mut r = Rope::from_str("foo│foo│foo");
         prog.execute(&mut r, "test", &mut vec![]).unwrap();
 
         assert_eq!(&r.to_string(), expected);

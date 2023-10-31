@@ -68,7 +68,7 @@ impl Regex {
     /// Attempt to match this Regex against a given `&str` input, returning the position
     /// of the match and all submatches if successful.
     pub fn match_str(&mut self, input: &str) -> Option<Match> {
-        self.match_iter(&mut input.char_indices(), 0)
+        self.match_iter(&mut input.chars().enumerate(), 0)
     }
 
     /// Iterate over all non-overlapping matches of this Regex for a given `&str` input.
@@ -107,7 +107,7 @@ impl Regex {
     /// Determine whether or not this Regex matches the input `&str` without searching for
     /// the leftmost-longest match and associated submatch boundaries.
     pub fn matches_str(&mut self, input: &str) -> bool {
-        self.matches_iter(&mut input.char_indices(), 0)
+        self.matches_iter(&mut input.chars().enumerate(), 0)
     }
 
     /// Determine whether or not this Regex matches the input `Rope` without searching for
@@ -383,7 +383,7 @@ mod tests {
     #[test]
     fn match_all_works(re: &str, s: &str, expected: &[&str]) {
         let mut r = Regex::compile(re).unwrap();
-        let matches: Vec<&str> = r.match_str_all(s).map(|m| m.str_match_text(s)).collect();
+        let matches: Vec<String> = r.match_str_all(s).map(|m| m.str_match_text(s)).collect();
 
         assert_eq!(&matches, expected);
     }
@@ -395,9 +395,24 @@ mod tests {
         let s = "this should work 123-456 other stuff";
         let m = r.match_str(s).unwrap();
 
-        assert_eq!(m.str_submatch_text(1, s), Some("123"));
-        assert_eq!(m.str_submatch_text(2, s), Some("456"));
+        assert_eq!(m.str_submatch_text(1, s).as_deref(), Some("123"));
+        assert_eq!(m.str_submatch_text(2, s).as_deref(), Some("456"));
         assert_eq!(m.str_match_text(s), "123-456");
+    }
+
+    #[test]
+    fn match_extraction_works_when_multibyte_characters_are_present() {
+        let s: &str = "const VLINE: char = '│';
+
+impl Editor {
+";
+
+        let re = r"impl (\w+) \{";
+        let mut r = Regex::compile(re).unwrap();
+        let m = r.match_str(s).unwrap();
+
+        assert_eq!(m.str_submatch_text(1, s).as_deref(), Some("Editor"));
+        assert_eq!(m.str_match_text(s), "impl Editor {");
     }
 
     // This is the pathological case that Cox covers in his article which leads

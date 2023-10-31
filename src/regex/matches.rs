@@ -1,7 +1,10 @@
 use super::vm::Regex;
 use crate::util::IdxRopeChars;
 use ropey::{Rope, RopeSlice};
-use std::{iter::Skip, str::CharIndices};
+use std::{
+    iter::{Enumerate, Skip},
+    str::Chars,
+};
 
 /// The match location of a Regex against a given input.
 ///
@@ -19,14 +22,14 @@ impl Match {
         Self { sub_matches }
     }
 
-    pub fn str_match_text<'a>(&self, s: &'a str) -> &'a str {
+    pub fn str_match_text(&self, s: &str) -> String {
         let (a, b) = self.loc();
-        &s[a..=b]
+        s.chars().skip(a).take(b - a + 1).collect()
     }
 
-    pub fn str_submatch_text<'a>(&self, n: usize, s: &'a str) -> Option<&'a str> {
+    pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
         let (a, b) = self.sub_loc(n)?;
-        Some(&s[a..=b])
+        Some(s.chars().skip(a).take(b - a + 1).collect())
     }
 
     pub fn rope_match_text<'a>(&self, r: &'a Rope) -> RopeSlice<'a> {
@@ -62,13 +65,13 @@ pub trait IndexedChars {
 }
 
 impl<'a> IndexedChars for &'a str {
-    type I = Skip<CharIndices<'a>>;
+    type I = Skip<Enumerate<Chars<'a>>>;
 
     fn iter_from(&self, from: usize) -> Option<Self::I> {
         if from >= self.len() {
             None
         } else {
-            Some(self.char_indices().skip(from))
+            Some(self.chars().enumerate().skip(from))
         }
     }
 }
