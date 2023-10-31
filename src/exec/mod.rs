@@ -4,7 +4,12 @@ use crate::{
     util::parse_num,
 };
 use ropey::Rope;
-use std::{cmp::Ordering, io::Write, iter::Peekable, str::Chars};
+use std::{
+    cmp::{min, Ordering},
+    io::Write,
+    iter::Peekable,
+    str::Chars,
+};
 
 mod expr;
 mod stream;
@@ -57,9 +62,19 @@ impl Program {
         S: IterableStream,
         W: Write,
     {
-        let (from, to) = self.initial_dot;
-        let initial = Match::synthetic(from, to.unwrap_or_else(|| stream.max_dot()));
-        self.step(stream, initial, 0, fname, out)
+        let (line_from, line_to) = self.initial_dot;
+        let (from, to) = stream.map_initial_dot(line_from, line_to);
+
+        let (from, to) = if !self.exprs.is_empty() {
+            let initial = Match::synthetic(from, to);
+            self.step(stream, initial, 0, fname, out)?
+        } else {
+            (from, to)
+        };
+
+        let ix_max = stream.len_chars() - 1;
+
+        Ok((min(from, ix_max), min(to, ix_max)))
     }
 
     fn step<S, W>(
@@ -254,6 +269,10 @@ impl Program {
                 Err(Error::Eof) => break,
                 Err(e) => return Err(e),
             }
+        }
+
+        if exprs.is_empty() {
+            return Ok(Self { initial_dot, exprs });
         }
 
         validate(&exprs)?;

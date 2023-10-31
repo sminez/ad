@@ -219,7 +219,7 @@ impl Editor {
     }
 
     pub(super) fn command_mode(&mut self) {
-        self.modes.insert(0, Mode::command_mode());
+        self.modes.insert(0, Mode::ephemeral_mode("COMMAND"));
 
         if let Some(input) = MiniBuffer::prompt(":", self) {
             if let Some(actions) = self.parse_command(&input) {
@@ -231,7 +231,7 @@ impl Editor {
     }
 
     pub(super) fn sam_mode(&mut self) {
-        self.modes.insert(0, Mode::command_mode());
+        self.modes.insert(0, Mode::ephemeral_mode("EDIT"));
 
         let input = match MiniBuffer::prompt("Edit> ", self) {
             Some(input) => input,
@@ -252,8 +252,12 @@ impl Editor {
 
         let mut buf = Vec::new();
         let fname = self.buffers.active().full_name().to_string();
-        if let Err(e) = prog.execute(self.buffers.active_mut(), &fname, &mut buf) {
-            self.set_status_message(&format!("Error running edit command: {e:?}"));
+        match prog.execute(self.buffers.active_mut(), &fname, &mut buf) {
+            Ok((to, from)) => {
+                self.buffers.active_mut().dot =
+                    Dot::from_char_indices(from, to, self.buffers.active_mut())
+            }
+            Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
         }
 
         // FIXME: this is just using a selection mini-buffer for now to test things out. Ideally

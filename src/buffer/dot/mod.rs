@@ -53,6 +53,12 @@ impl fmt::Display for Dot {
 }
 
 impl Dot {
+    pub fn from_char_indices(from: usize, to: usize, b: &Buffer) -> Self {
+        Self::Range {
+            r: Range::from_cursors(Cur::from_char_idx(from, b), Cur::from_char_idx(to, b), true),
+        }
+    }
+
     /// The address representation of this dot in the form that is enterable by the user.
     /// Indices are 1-based rather than their internal 0-based representation.
     pub fn addr(&self) -> String {

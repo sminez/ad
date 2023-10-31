@@ -2,8 +2,13 @@
 
 - [!] Fix keyboard driven scrolling
   - The decision to not drag the cursor while scrolling with the mouse seems to have
-    completely broken auto-scrolling.
+    completely broken auto-scrolling...
+  - The more I look at vim's behaviour around this the more it feels like there isn't
+    a "nice" way to handle maintaining the current selection if it scrolls off screen.
 - [ ] implement remaining text objects
+   >> The implementation for these is yet another way of hunting through the buffer for
+      a certain position. Now that the regex engine works it might actually be simpler
+     (though probably not faster) to just use that for all text object style Dot changes?
   - Target character
   - Delimited between a given character pair
 - [ ] store "desired x" or an "x is at EOL" flag?
@@ -14,3 +19,19 @@
 - [ ] completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
+- [!] Dragging the cursor back over itself is broken in a way I don't fully understand
+      yet.
+
+-- Structural regular expressions --
+- [ ] Support '.' as an initial dot (the current buffer dot)
+- [ ] Fix Buffer Undo state following use of the new Edit mode
+   >> It looks like the changes are not being correctly stored in the edit log which
+      results in them being played back incorrectly when undoing?
+      Should hopefully be simple enough to get a test set up for reproducing the issue
+      and debugging what's up.
+- [ ] Storing the history of previous edit commands and allowing for cycling through
+      them would be helpful (same for Command mode).
+- [ ] Update the current "Command Mode" dummy mode to just take a string for the mode
+      name so that it can be re-used nicely rather than just calling EVERYTHING using
+      the single line mini-buffer "command mode" in the UI.
+- [!] s/../../g isn't running for all matches for some reason?

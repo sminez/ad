@@ -21,7 +21,7 @@ pub trait IterableStream {
     fn contents(&self) -> Rope;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
-    fn max_dot(&self) -> usize;
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize);
     fn len_chars(&self) -> usize;
 }
 
@@ -58,8 +58,17 @@ impl IterableStream for Rope {
         self.remove(from..=to)
     }
 
-    fn max_dot(&self) -> usize {
-        self.len_chars() - 1
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
+        let from = self.try_line_to_char(line_from).unwrap_or(usize::MAX);
+        let to = match line_to {
+            Some(n) => match self.try_line_to_char(n) {
+                Ok(ix) => ix + self.line(n).len_chars().saturating_sub(1),
+                Err(_) => usize::MAX,
+            },
+            None => usize::MAX,
+        };
+
+        (from, to)
     }
 
     fn len_chars(&self) -> usize {
@@ -94,8 +103,17 @@ impl IterableStream for Buffer {
         self.handle_action(Action::Delete);
     }
 
-    fn max_dot(&self) -> usize {
-        self.len_chars() - 1
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
+        let from = self.txt.try_line_to_char(line_from).unwrap_or(usize::MAX);
+        let to = match line_to {
+            Some(n) => match self.txt.try_line_to_char(n) {
+                Ok(ix) => ix + self.txt.line(n).len_chars().saturating_sub(1),
+                Err(_) => usize::MAX,
+            },
+            None => usize::MAX,
+        };
+
+        (from, to)
     }
 
     fn len_chars(&self) -> usize {
@@ -211,8 +229,27 @@ impl IterableStream for CachedStdin {
         self.r.borrow_mut().remove(from..=to)
     }
 
-    fn max_dot(&self) -> usize {
-        usize::MAX
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
+        let n = match line_to {
+            Some(n) => n,
+            None => line_from,
+        };
+
+        for _ in 0..=n {
+            self.try_read_next_line();
+            if self.is_closed() {
+                break;
+            }
+        }
+
+        let r = self.contents();
+        let from = r.try_line_to_char(line_from).unwrap_or(usize::MAX);
+        let to = match line_to {
+            Some(n) => r.try_line_to_char(n).unwrap_or(usize::MAX),
+            None => usize::MAX,
+        };
+
+        (from, to)
     }
 
     fn len_chars(&self) -> usize {

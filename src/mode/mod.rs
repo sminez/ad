@@ -28,9 +28,9 @@ impl fmt::Display for Mode {
 }
 
 impl Mode {
-    pub(crate) fn command_mode() -> Self {
+    pub(crate) fn ephemeral_mode(name: &str) -> Self {
         Mode {
-            name: "COMMAND".to_string(),
+            name: name.to_string(),
             cur_shape: CurShape::Block,
             keymap: Trie::from_pairs(vec![]),
             handle_expired_pending: |_| None,
