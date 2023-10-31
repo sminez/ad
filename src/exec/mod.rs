@@ -46,7 +46,7 @@ impl From<regex::Error> for Error {
 /// A parsed and compiled program that can be executed against an input
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    initial_dot: (usize, Option<usize>),
+    initial_dot: InitialDot,
     exprs: Vec<Expr>,
 }
 
@@ -62,8 +62,12 @@ impl Program {
         S: IterableStream,
         W: Write,
     {
-        let (line_from, line_to) = self.initial_dot;
-        let (from, to) = stream.map_initial_dot(line_from, line_to);
+        let (from, to) = match self.initial_dot {
+            InitialDot::Full => stream.map_initial_dot(0, None),
+            InitialDot::Start(f) => stream.map_initial_dot(f, None),
+            InitialDot::Range(f, t) => stream.map_initial_dot(f, Some(t)),
+            InitialDot::Current => stream.current_dot(),
+        };
 
         let (from, to) = if !self.exprs.is_empty() {
             let initial = Match::synthetic(from, to);
@@ -96,7 +100,7 @@ impl Program {
                 let mut res = (from, to);
                 for exprs in g {
                     let mut p = Program {
-                        initial_dot: (from, Some(to)),
+                        initial_dot: InitialDot::Range(from, to),
                         exprs: exprs.clone(),
                     };
                     res = p.step(stream, m, 0, fname, out)?;
@@ -319,11 +323,24 @@ fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
     Ok(())
 }
 
-fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>), Error> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum InitialDot {
+    Full,
+    Current,
+    Start(usize),
+    Range(usize, usize),
+}
+
+fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<InitialDot, Error> {
     match it.peek() {
         Some(',') => {
             it.next();
-            Ok((0, None))
+            Ok(InitialDot::Full)
+        }
+
+        Some('.') => {
+            it.next();
+            Ok(InitialDot::Current)
         }
 
         // n,m | n,
@@ -334,9 +351,9 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
                 Some(',') => match it.next() {
                     Some(c) if c.is_ascii_digit() => {
                         let m = parse_num(c, it);
-                        Ok((n, Some(m)))
+                        Ok(InitialDot::Range(n, m))
                     }
-                    Some(' ') | None => Ok((n, None)),
+                    Some(' ') | None => Ok(InitialDot::Start(n)),
                     Some(ch) => Err(Error::UnexpectedCharacter(ch)),
                 },
                 Some(ch) => Err(Error::UnexpectedCharacter(ch)),
@@ -345,7 +362,7 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
         }
 
         // Allow omitting the initial dot
-        _ => Ok((0, None)),
+        _ => Ok(InitialDot::Full),
     }
 }
 
@@ -387,13 +404,13 @@ mod tests {
         Regex::compile(s).unwrap()
     }
 
-    #[test_case(",", (0, None); "full")]
-    #[test_case("5,", (5, None); "from n")]
-    #[test_case("50,", (50, None); "from n multi digit")]
-    #[test_case("5,9", (5, Some(9)); "from n to m")]
-    #[test_case("25,90", (25, Some(90)); "from n to m multi digit")]
+    #[test_case(",", InitialDot::Full; "full")]
+    #[test_case("5,", InitialDot::Start(5); "from n")]
+    #[test_case("50,", InitialDot::Start(50); "from n multi digit")]
+    #[test_case("5,9", InitialDot::Range(5, 9); "from n to m")]
+    #[test_case("25,90", InitialDot::Range(25, 90); "from n to m multi digit")]
     #[test]
-    fn parse_initial_dot_works(s: &str, expected: (usize, Option<usize>)) {
+    fn parse_initial_dot_works(s: &str, expected: InitialDot) {
         let dot = parse_initial_dot(&mut s.chars().peekable()).expect("valid input");
         assert_eq!(dot, expected);
     }
@@ -407,7 +424,7 @@ mod tests {
         assert_eq!(
             p,
             Program {
-                initial_dot: (0, None),
+                initial_dot: InitialDot::Full,
                 exprs: expected
             }
         );
@@ -428,7 +445,7 @@ mod tests {
     #[test]
     fn step_works(expr: Expr, expected: &str) {
         let mut prog = Program {
-            initial_dot: (0, None),
+            initial_dot: InitialDot::Full,
             exprs: vec![expr],
         };
         let mut r = Rope::from_str("foo foo foo");

@@ -23,6 +23,13 @@ pub trait IterableStream {
     fn remove(&mut self, from: usize, to: usize);
     fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize);
     fn len_chars(&self) -> usize;
+
+    /// This only really makes sense for use with a buffer but is supported
+    /// so that don't need to special case running programs against an in-editor
+    /// buffer vs stdin or a file read from disk.
+    fn current_dot(&self) -> (usize, usize) {
+        (0, 0)
+    }
 }
 
 pub enum StreamIter<'a> {
@@ -59,13 +66,15 @@ impl IterableStream for Rope {
     }
 
     fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
-        let from = self.try_line_to_char(line_from).unwrap_or(usize::MAX);
+        let from = self
+            .try_line_to_char(line_from)
+            .unwrap_or_else(|_| self.len_chars() - 1);
         let to = match line_to {
             Some(n) => match self.try_line_to_char(n) {
                 Ok(ix) => ix + self.line(n).len_chars().saturating_sub(1),
-                Err(_) => usize::MAX,
+                Err(_) => self.len_chars() - 1,
             },
-            None => usize::MAX,
+            None => self.len_chars() - 1,
         };
 
         (from, to)
@@ -104,16 +113,23 @@ impl IterableStream for Buffer {
     }
 
     fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
-        let from = self.txt.try_line_to_char(line_from).unwrap_or(usize::MAX);
+        let from = self
+            .txt
+            .try_line_to_char(line_from)
+            .unwrap_or_else(|_| self.txt.len_chars() - 1);
         let to = match line_to {
             Some(n) => match self.txt.try_line_to_char(n) {
                 Ok(ix) => ix + self.txt.line(n).len_chars().saturating_sub(1),
-                Err(_) => usize::MAX,
+                Err(_) => self.txt.len_chars() - 1,
             },
-            None => usize::MAX,
+            None => self.txt.len_chars() - 1,
         };
 
         (from, to)
+    }
+
+    fn current_dot(&self) -> (usize, usize) {
+        self.dot.as_range().as_char_indices(self)
     }
 
     fn len_chars(&self) -> usize {

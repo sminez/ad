@@ -31,6 +31,13 @@ impl Range {
         }
     }
 
+    pub(crate) fn as_char_indices(&self, b: &Buffer) -> (usize, usize) {
+        let start = self.start.as_char_idx(b);
+        let end = self.end.as_char_idx(b);
+
+        (start, end)
+    }
+
     pub(crate) fn as_inclusive_char_range(&self, b: &Buffer) -> Option<RangeInclusive<usize>> {
         let start = self.start.as_char_idx(b);
         let end = self.end.as_char_idx(b);
