@@ -255,7 +255,6 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
     }));
     // Save(1) marks the end of the regex in the input
     full.extend([Op::Save(1), Op::Match]);
-    // full.extend([Op::Match]);
 
     full
 }
@@ -406,7 +405,7 @@ mod tests {
     #[test_case("ab(c|d)", vec![c('a'), c('b'), sv(2), sp(8, 10), c('c'), jmp(11), c('d'), sv(3)]; "lits then alt")]
     #[test_case("ab*a", vec![c('a'), sp(6, 8), c('b'), sp(6, 8), c('a')]; "star for single lit")]
     #[test_case("ba*", vec![c('b'), sp(6, 8), c('a'), sp(6, 8)]; "trailing star")]
-    // #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), sp(7, 9), sv(3), sp(5, 11)]; "star star")]
+    #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), sp(7, 9), sv(3), sp(5, 11)]; "star star")]
     #[test]
     fn opcode_optimise_works(re: &str, expected: Vec<Op>) {
         let prog = optimise(compile(re_to_postfix(re).unwrap()));

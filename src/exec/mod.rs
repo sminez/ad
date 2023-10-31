@@ -1,14 +1,16 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
     regex::{self, Match},
-    util::{parse_num, IdxRopeChars},
+    util::parse_num,
 };
-use ropey::Rope;
 use std::{cmp::Ordering, io::Write, iter::Peekable, str::Chars};
 
 mod expr;
+mod stream;
 
 use expr::Expr;
+pub use stream::IterableStream;
+// pub use stream::{CachedStdin, CachedStdinIter, IterableStream};
 
 /// Variable usable in templates for injecting the current filename.
 /// (Following the naming convention used in Awk)
@@ -45,25 +47,33 @@ pub struct Program {
 
 impl Program {
     /// Execute this program against a given Rope
-    pub fn execute<W: Write>(
+    pub fn execute<S, W>(
         &mut self,
-        r: &mut Rope,
+        stream: &mut S,
         fname: &str,
         out: &mut W,
-    ) -> Result<(usize, usize), Error> {
+    ) -> Result<(usize, usize), Error>
+    where
+        S: IterableStream,
+        W: Write,
+    {
         let (from, to) = self.initial_dot;
-        let initial = Match::synthetic(from, to.unwrap_or_else(|| r.len_chars() - 1));
-        self.step(r, initial, 0, fname, out)
+        let initial = Match::synthetic(from, to.unwrap_or_else(|| stream.max_dot()));
+        self.step(stream, initial, 0, fname, out)
     }
 
-    fn step<W: Write>(
+    fn step<S, W>(
         &mut self,
-        r: &mut Rope,
+        stream: &mut S,
         m: Match,
         pc: usize,
         fname: &str,
         out: &mut W,
-    ) -> Result<(usize, usize), Error> {
+    ) -> Result<(usize, usize), Error>
+    where
+        S: IterableStream,
+        W: Write,
+    {
         let (mut from, mut to) = m.loc();
 
         match self.exprs[pc].clone() {
@@ -74,18 +84,17 @@ impl Program {
                         initial_dot: (from, Some(to)),
                         exprs: exprs.clone(),
                     };
-                    res = p.step(r, m, 0, fname, out)?;
+                    res = p.step(stream, m, 0, fname, out)?;
                 }
                 Ok(res)
             }
 
             Expr::LoopMatches(mut re) => loop {
-                let mut it = IdxRopeChars::new(r, from, to);
-                match re.match_iter(&mut it, from) {
+                match re.match_iter(&mut stream.iter_between(from, to), from) {
                     Some(m) => {
-                        let cur_len = r.len_chars();
-                        (_, from) = self.step(r, m, pc + 1, fname, out)?;
-                        let new_len = r.len_chars();
+                        let cur_len = stream.len_chars();
+                        (_, from) = self.step(stream, m, pc + 1, fname, out)?;
+                        let new_len = stream.len_chars();
                         from += 1;
 
                         match new_len.cmp(&cur_len) {
@@ -103,8 +112,7 @@ impl Program {
             },
 
             Expr::LoopBetweenMatches(mut re) => loop {
-                let mut it = IdxRopeChars::new(r, from, to);
-                match re.match_iter(&mut it, from) {
+                match re.match_iter(&mut stream.iter_between(from, to), from) {
                     Some(m) => {
                         let (initial_to, new_from) = m.loc();
                         if initial_to == 0 {
@@ -114,9 +122,9 @@ impl Program {
                         }
 
                         let m = Match::synthetic(from, initial_to - 1);
-                        let cur_len = r.len_chars();
-                        (_, _) = self.step(r, m, pc + 1, fname, out)?;
-                        let new_len = r.len_chars();
+                        let cur_len = stream.len_chars();
+                        (_, _) = self.step(stream, m, pc + 1, fname, out)?;
+                        let new_len = stream.len_chars();
 
                         match new_len.cmp(&cur_len) {
                             Ordering::Greater => to += new_len - cur_len,
@@ -135,61 +143,58 @@ impl Program {
             },
 
             Expr::IfContains(mut re) => {
-                let mut it = IdxRopeChars::new(r, from, to);
-                if re.matches_iter(&mut it, from) {
-                    self.step(r, m, pc + 1, fname, out)
+                if re.matches_iter(&mut stream.iter_between(from, to), from) {
+                    self.step(stream, m, pc + 1, fname, out)
                 } else {
                     Ok((from, to))
                 }
             }
 
             Expr::IfNotContains(mut re) => {
-                let mut it = IdxRopeChars::new(r, from, to);
-                if !re.matches_iter(&mut it, from) {
-                    self.step(r, m, pc + 1, fname, out)
+                if !re.matches_iter(&mut stream.iter_between(from, to), from) {
+                    self.step(stream, m, pc + 1, fname, out)
                 } else {
                     Ok((from, to))
                 }
             }
 
             Expr::Print(pat) => {
-                let s = template_match(&pat, m, r, fname)?;
+                let s = template_match(&pat, m, stream.contents(), fname)?;
                 writeln!(out, "{s}").expect("to be able to write");
                 Ok((from, to))
             }
 
             Expr::Insert(pat) => {
-                let s = template_match(&pat, m, r, fname)?;
-                r.insert(from, &s);
+                let s = template_match(&pat, m, stream.contents(), fname)?;
+                stream.insert(from, &s);
                 Ok((from, to + s.len()))
             }
 
             Expr::Append(pat) => {
-                let s = template_match(&pat, m, r, fname)?;
-                r.insert(to + 1, &s);
+                let s = template_match(&pat, m, stream.contents(), fname)?;
+                stream.insert(to + 1, &s);
                 Ok((from, to + s.len()))
             }
 
             Expr::Change(pat) => {
-                let s = template_match(&pat, m, r, fname)?;
-                r.remove(from..=to);
-                r.insert(from, &s);
+                let s = template_match(&pat, m, stream.contents(), fname)?;
+                stream.remove(from, to);
+                stream.insert(from, &s);
                 Ok((from, from + s.len()))
             }
 
             Expr::Delete => {
-                r.remove(from..=to);
+                stream.remove(from, to);
                 Ok((from, from))
             }
 
             Expr::Sub(mut re, pat, false) => {
-                let mut it = IdxRopeChars::new(r, from, to);
-                match re.match_iter(&mut it, from) {
+                match re.match_iter(&mut stream.iter_between(from, to), from) {
                     Some(m) => {
                         let (mfrom, mto) = m.loc();
-                        let s = template_match(&pat, m, r, fname)?;
-                        r.remove(mfrom..=mto);
-                        r.insert(mfrom, &s);
+                        let s = template_match(&pat, m, stream.contents(), fname)?;
+                        stream.remove(mfrom, mto);
+                        stream.insert(mfrom, &s);
                         Ok((from, to + mto - mfrom + s.len()))
                     }
                     None => Ok((from, to)),
@@ -197,15 +202,14 @@ impl Program {
             }
 
             Expr::Sub(mut re, pat, true) => loop {
-                let mut it = IdxRopeChars::new(r, from, to);
-                match re.match_iter(&mut it, from) {
+                match re.match_iter(&mut stream.iter_between(from, to), from) {
                     Some(m) => {
-                        let cur_len = r.len_chars();
+                        let cur_len = stream.len_chars();
                         let (mfrom, mto) = m.loc();
-                        let s = template_match(&pat, m, r, fname)?;
-                        r.remove(mfrom..=mto);
-                        r.insert(mfrom, &s);
-                        let new_len = r.len_chars();
+                        let s = template_match(&pat, m, stream.contents(), fname)?;
+                        stream.remove(mfrom, mto);
+                        stream.insert(mfrom, &s);
+                        let new_len = stream.len_chars();
 
                         from = to + mto - mfrom + s.len() - 1;
 
@@ -328,7 +332,7 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
 
 // FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
 // then we end up attempting to template THAT in a later iteration of the loop.
-fn template_match(s: &str, m: Match, r: &Rope, fname: &str) -> Result<String, Error> {
+fn template_match(s: &str, m: Match, txt: String, fname: &str) -> Result<String, Error> {
     let mut output = if s.contains(FNAME_VAR) {
         s.replace(FNAME_VAR, fname)
     } else {
@@ -343,8 +347,8 @@ fn template_match(s: &str, m: Match, r: &Rope, fname: &str) -> Result<String, Er
         if !s.contains(var) {
             continue;
         }
-        match m.rope_submatch_text(n, r) {
-            Some(txt) => output = output.replace(var, &txt.to_string()),
+        match m.str_submatch_text(n, &txt) {
+            Some(sm) => output = output.replace(var, sm),
             None => return Err(Error::InvalidSubstitution(n)),
         }
     }
@@ -356,6 +360,7 @@ fn template_match(s: &str, m: Match, r: &Rope, fname: &str) -> Result<String, Er
 mod tests {
     use super::*;
     use crate::regex::Regex;
+    use ropey::Rope;
     use simple_test_case::test_case;
     use Expr::*;
 

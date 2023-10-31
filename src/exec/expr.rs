@@ -32,6 +32,7 @@ impl Expr {
             Some('c') => Ok(Expr::Change(parse_delimited_str(it, "c")?)),
             Some('s') => parse_sub(it),
             Some('p') => Ok(Expr::Print(parse_delimited_str(it, "p")?)),
+            Some('P') => Ok(Expr::Print("$0".to_string())),
             Some('d') => Ok(Expr::Delete),
             Some('{') => Ok(Expr::Group(parse_group(it)?)),
 
@@ -150,9 +151,10 @@ mod tests {
     #[test_case("s/.*/foo/", Sub(re(".*"), "foo".to_string(), false); "substitute")]
     #[test_case("s/.*/foo/g", Sub(re(".*"), "foo".to_string(), true); "substitute all")]
     #[test_case("p/$0/", Print("$0".to_string()); "print")]
+    #[test_case("P", Print("$0".to_string()); "print full match")]
     #[test_case("d", Delete; "delete")]
     #[test_case(
-        "{p/$0/; g/bar/ a/foo/;}",
+        "{P; g/bar/ a/foo/;}",
         Group(vec![
             vec![Print("$0".to_string())],
             vec![IfContains(re("bar")), Append("foo".to_string())]
