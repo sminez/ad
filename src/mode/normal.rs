@@ -19,6 +19,7 @@ pub(crate) fn normal_mode() -> Mode {
         // Modes
         [ leader, Char('b') ] => [ SelectBuffer ],
         [ Char(':') ] => [ CommandMode ],
+        [ Char('.') ] => [ SamMode ],
         [ Char('/') ] => [ SearchInCurrentBuffer ],
 
         // DEBUG

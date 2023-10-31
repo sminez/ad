@@ -1,6 +1,10 @@
 //! An abstraction over a rope so that we can cache streaming input and apply edits
 //! on the fly as needed.
-use crate::util::IdxRopeChars;
+use crate::{
+    buffer::{Buffer, Cur, Dot, Range},
+    editor::Action,
+    util::IdxRopeChars,
+};
 use ropey::Rope;
 use std::{
     cell::RefCell,
@@ -14,7 +18,7 @@ const LINE_BUF_LEN: usize = 100;
 /// lazy character stream and access to the historic text via a Rope.
 pub trait IterableStream {
     fn iter_between(&self, from: usize, to: usize) -> StreamIter<'_>;
-    fn contents(&self) -> String;
+    fn contents(&self) -> Rope;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
     fn max_dot(&self) -> usize;
@@ -42,8 +46,8 @@ impl IterableStream for Rope {
         StreamIter::Rope(IdxRopeChars::new(self, from, to))
     }
 
-    fn contents(&self) -> String {
-        self.to_string()
+    fn contents(&self) -> Rope {
+        self.clone()
     }
 
     fn insert(&mut self, ix: usize, s: &str) {
@@ -60,6 +64,42 @@ impl IterableStream for Rope {
 
     fn len_chars(&self) -> usize {
         Rope::len_chars(self)
+    }
+}
+
+impl IterableStream for Buffer {
+    fn iter_between(&self, from: usize, to: usize) -> StreamIter<'_> {
+        StreamIter::Rope(IdxRopeChars::new(&self.txt, from, to))
+    }
+
+    fn contents(&self) -> Rope {
+        self.txt.clone()
+    }
+
+    fn insert(&mut self, ix: usize, s: &str) {
+        self.dot = Dot::Cur {
+            c: Cur::from_char_idx(ix, self),
+        };
+        self.handle_action(Action::InsertString { s: s.to_string() });
+    }
+
+    fn remove(&mut self, from: usize, to: usize) {
+        self.dot = Dot::Range {
+            r: Range::from_cursors(
+                Cur::from_char_idx(from, self),
+                Cur::from_char_idx(to, self),
+                true,
+            ),
+        };
+        self.handle_action(Action::Delete);
+    }
+
+    fn max_dot(&self) -> usize {
+        self.len_chars() - 1
+    }
+
+    fn len_chars(&self) -> usize {
+        Rope::len_chars(&self.txt)
     }
 }
 
@@ -159,8 +199,8 @@ impl IterableStream for CachedStdin {
         })
     }
 
-    fn contents(&self) -> String {
-        self.r.borrow().to_string()
+    fn contents(&self) -> Rope {
+        self.r.borrow().clone()
     }
 
     fn insert(&mut self, ix: usize, s: &str) {

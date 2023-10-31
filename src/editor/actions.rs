@@ -3,6 +3,7 @@ use crate::{
     buffer::{BufferKind, Cur, Dot, MiniBuffer, MiniBufferSelection, TextObject},
     die,
     editor::Editor,
+    exec::Program,
     key::Key,
     mode::Mode,
     util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
@@ -40,6 +41,7 @@ pub enum Action {
     PreviousBuffer,
     RawKey { k: Key },
     Redo,
+    SamMode,
     SaveBuffer,
     SaveBufferAs { path: String },
     SearchInCurrentBuffer,
@@ -223,6 +225,50 @@ impl Editor {
             if let Some(actions) = self.parse_command(&input) {
                 self.handle_actions(actions);
             }
+        }
+
+        self.modes.remove(0);
+    }
+
+    pub(super) fn sam_mode(&mut self) {
+        self.modes.insert(0, Mode::command_mode());
+
+        let input = match MiniBuffer::prompt("Edit> ", self) {
+            Some(input) => input,
+            None => {
+                self.modes.remove(0);
+                return;
+            }
+        };
+
+        let mut prog = match Program::try_parse(&input) {
+            Ok(prog) => prog,
+            Err(e) => {
+                self.set_status_message(&format!("Invalid edit command: {e:?}"));
+                self.modes.remove(0);
+                return;
+            }
+        };
+
+        let mut buf = Vec::new();
+        let fname = self.buffers.active().full_name().to_string();
+        if let Err(e) = prog.execute(self.buffers.active_mut(), &fname, &mut buf) {
+            self.set_status_message(&format!("Error running edit command: {e:?}"));
+        }
+
+        // FIXME: this is just using a selection mini-buffer for now to test things out. Ideally
+        // this should be a scratchpad that we can dismiss and bring back but that will require
+        // support in the main Buffers struct and a new way of creating a MiniBuffer.
+        if !buf.is_empty() {
+            MiniBuffer::select_from(
+                "%>",
+                String::from_utf8(buf)
+                    .unwrap()
+                    .lines()
+                    .map(|l| l.to_string())
+                    .collect(),
+                self,
+            );
         }
 
         self.modes.remove(0);

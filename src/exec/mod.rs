@@ -3,6 +3,7 @@ use crate::{
     regex::{self, Match},
     util::parse_num,
 };
+use ropey::Rope;
 use std::{cmp::Ordering, io::Write, iter::Peekable, str::Chars};
 
 mod expr;
@@ -45,7 +46,7 @@ pub struct Program {
 }
 
 impl Program {
-    /// Execute this program against a given Rope
+    /// Execute this program against a given IterableStream
     pub fn execute<S, W>(
         &mut self,
         stream: &mut S,
@@ -331,7 +332,7 @@ fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<(usize, Option<usize>),
 
 // FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
 // then we end up attempting to template THAT in a later iteration of the loop.
-fn template_match(s: &str, m: Match, txt: String, fname: &str) -> Result<String, Error> {
+fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Error> {
     let mut output = if s.contains(FNAME_VAR) {
         s.replace(FNAME_VAR, fname)
     } else {
@@ -346,8 +347,8 @@ fn template_match(s: &str, m: Match, txt: String, fname: &str) -> Result<String,
         if !s.contains(var) {
             continue;
         }
-        match m.str_submatch_text(n, &txt) {
-            Some(sm) => output = output.replace(var, &sm),
+        match m.rope_submatch_text(n, &r) {
+            Some(sm) => output = output.replace(var, &sm.to_string()),
             None => return Err(Error::InvalidSubstitution(n)),
         }
     }

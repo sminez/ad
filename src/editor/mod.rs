@@ -143,6 +143,7 @@ impl Editor {
             Action::OpenFile { path } => self.open_file(&path),
             Action::Paste => self.paste_from_clipboard(),
             Action::PreviousBuffer => self.buffers.previous(),
+            Action::SamMode => self.sam_mode(),
             Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
             Action::SaveBuffer => self.save_current_buffer(None),
             Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
