@@ -23,7 +23,6 @@
       yet.
 
 -- Structural regular expressions --
-- [ ] Support '.' as an initial dot (the current buffer dot)
 - [ ] Fix Buffer Undo state following use of the new Edit mode
    >> It looks like the changes are not being correctly stored in the edit log which
       results in them being played back incorrectly when undoing?
@@ -34,4 +33,3 @@
 - [ ] Update the current "Command Mode" dummy mode to just take a string for the mode
       name so that it can be re-used nicely rather than just calling EVERYTHING using
       the single line mini-buffer "command mode" in the UI.
-- [!] s/../../g isn't running for all matches for some reason?

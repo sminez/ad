@@ -13,7 +13,8 @@ pub(super) enum Expr {
     Insert(String),
     Append(String),
     Change(String),
-    Sub(Regex, String, bool),
+    Sub(Regex, String),
+    SubAll(Regex, String),
     Print(String),
     Delete,
 
@@ -85,9 +86,9 @@ fn parse_sub(it: &mut Peekable<Chars>) -> Result<Expr, Error> {
     let s = read_until(delim, it, "s")?;
     if let Some('g') = it.peek() {
         it.next();
-        Ok(Expr::Sub(re, s, true))
+        Ok(Expr::SubAll(re, s))
     } else {
-        Ok(Expr::Sub(re, s, false))
+        Ok(Expr::Sub(re, s))
     }
 }
 
@@ -148,8 +149,8 @@ mod tests {
     #[test_case("i/foo/", Insert("foo".to_string()); "insert")]
     #[test_case("a/foo/", Append("foo".to_string()); "append")]
     #[test_case("c/foo/", Change("foo".to_string()); "change")]
-    #[test_case("s/.*/foo/", Sub(re(".*"), "foo".to_string(), false); "substitute")]
-    #[test_case("s/.*/foo/g", Sub(re(".*"), "foo".to_string(), true); "substitute all")]
+    #[test_case("s/.*/foo/", Sub(re(".*"), "foo".to_string()); "substitute")]
+    #[test_case("s/.*/foo/g", SubAll(re(".*"), "foo".to_string()); "substitute all")]
     #[test_case("p/$0/", Print("$0".to_string()); "print")]
     #[test_case("P", Print("$0".to_string()); "print full match")]
     #[test_case("d", Delete; "delete")]

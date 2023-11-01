@@ -50,6 +50,7 @@ impl<'a> Iterator for StreamIter<'a> {
 
 impl IterableStream for Rope {
     fn iter_between(&self, from: usize, to: usize) -> StreamIter<'_> {
+        println!("iter_between from={from}");
         StreamIter::Rope(IdxRopeChars::new(self, from, to))
     }
 
@@ -68,13 +69,13 @@ impl IterableStream for Rope {
     fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
         let from = self
             .try_line_to_char(line_from)
-            .unwrap_or_else(|_| self.len_chars() - 1);
+            .unwrap_or_else(|_| self.len_chars().saturating_sub(1));
         let to = match line_to {
             Some(n) => match self.try_line_to_char(n) {
                 Ok(ix) => ix + self.line(n).len_chars().saturating_sub(1),
-                Err(_) => self.len_chars() - 1,
+                Err(_) => self.len_chars().saturating_sub(1),
             },
-            None => self.len_chars() - 1,
+            None => self.len_chars().saturating_sub(1),
         };
 
         (from, to)
@@ -116,13 +117,13 @@ impl IterableStream for Buffer {
         let from = self
             .txt
             .try_line_to_char(line_from)
-            .unwrap_or_else(|_| self.txt.len_chars() - 1);
+            .unwrap_or_else(|_| self.txt.len_chars().saturating_sub(1));
         let to = match line_to {
             Some(n) => match self.txt.try_line_to_char(n) {
                 Ok(ix) => ix + self.txt.line(n).len_chars().saturating_sub(1),
-                Err(_) => self.txt.len_chars() - 1,
+                Err(_) => self.txt.len_chars().saturating_sub(1),
             },
-            None => self.txt.len_chars() - 1,
+            None => self.txt.len_chars().saturating_sub(1),
         };
 
         (from, to)

@@ -207,44 +207,49 @@ impl Program {
                 Ok((from, from))
             }
 
-            Expr::Sub(mut re, pat, false) => {
+            Expr::Sub(mut re, pat) => {
                 match re.match_iter(&mut stream.iter_between(from, to), from) {
                     Some(m) => {
                         let (mfrom, mto) = m.loc();
                         let s = template_match(&pat, m, stream.contents(), fname)?;
                         stream.remove(mfrom, mto);
                         stream.insert(mfrom, &s);
-                        Ok((from, to + mto - mfrom + s.chars().count()))
+                        Ok((from, to - (mto - mfrom + 1) + s.chars().count()))
                     }
                     None => Ok((from, to)),
                 }
             }
 
-            Expr::Sub(mut re, pat, true) => loop {
-                match re.match_iter(&mut stream.iter_between(from, to), from) {
-                    Some(m) => {
-                        let cur_len = stream.len_chars();
-                        let (mfrom, mto) = m.loc();
-                        let s = template_match(&pat, m, stream.contents(), fname)?;
-                        stream.remove(mfrom, mto);
-                        stream.insert(mfrom, &s);
-                        let new_len = stream.len_chars();
+            Expr::SubAll(mut re, pat) => {
+                let mut inner_from = from;
+                loop {
+                    match re.match_iter(&mut stream.iter_between(inner_from, to), inner_from) {
+                        Some(m) => {
+                            let cur_len = stream.len_chars();
 
-                        from = to + mto - mfrom + s.chars().count() - 1;
+                            let (mfrom, mto) = m.loc();
+                            let s = template_match(&pat, m, stream.contents(), fname)?;
+                            stream.remove(mfrom, mto);
+                            stream.insert(mfrom, &s);
 
-                        match new_len.cmp(&cur_len) {
-                            Ordering::Greater => to += new_len - cur_len,
-                            Ordering::Less => to -= cur_len - new_len,
-                            _ => (),
+                            let new_len = stream.len_chars();
+
+                            inner_from = mfrom + s.chars().count();
+
+                            match new_len.cmp(&cur_len) {
+                                Ordering::Greater => to += new_len - cur_len,
+                                Ordering::Less => to -= cur_len - new_len,
+                                _ => (),
+                            }
+
+                            if inner_from > to {
+                                return Ok((from, to));
+                            }
                         }
-
-                        if from > to {
-                            return Ok((from, to));
-                        }
+                        None => return Ok((from, to)),
                     }
-                    None => return Ok((from, to)),
                 }
-            },
+            }
         }
     }
 
@@ -315,7 +320,7 @@ fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
     // Must end with an action
     if !matches!(
         exprs[exprs.len() - 1],
-        Group(_) | Insert(_) | Append(_) | Change(_) | Sub(_, _, _) | Print(_) | Delete
+        Group(_) | Insert(_) | Append(_) | Change(_) | Sub(_, _) | SubAll(_, _) | Print(_) | Delete
     ) {
         return Err(Error::MissingAction);
     }
@@ -416,7 +421,7 @@ mod tests {
     }
 
     #[test_case(", p/$0/", vec![Print("$0".to_string())]; "print all")]
-    #[test_case(", x/^.*$/ s/foo/bar/", vec![LoopMatches(re("^.*$")), Sub(re("foo"), "bar".to_string(), false)]; "simple loop")]
+    #[test_case(", x/^.*$/ s/foo/bar/", vec![LoopMatches(re("^.*$")), Sub(re("foo"), "bar".to_string())]; "simple loop")]
     #[test_case(", x/^.*$/ g/emacs/ d", vec![LoopMatches(re("^.*$")), IfContains(re("emacs")), Delete]; "loop filter")]
     #[test]
     fn parse_program_works(s: &str, expected: Vec<Expr>) {
@@ -438,22 +443,25 @@ mod tests {
         assert_eq!(res, Err(expected));
     }
 
-    #[test_case(Insert("X".to_string()), "Xfoo foo foo"; "insert")]
-    #[test_case(Append("X".to_string()), "fooX foo foo"; "append")]
-    #[test_case(Change("X".to_string()), "X foo foo"; "change")]
-    #[test_case(Delete, " foo foo"; "delete")]
+    #[test_case(Insert("X".to_string()), "Xfoo foo foo", (0, 11); "insert")]
+    #[test_case(Append("X".to_string()), "foo foo fooX", (0, 11); "append")]
+    #[test_case(Change("X".to_string()), "X", (0, 1); "change")]
+    #[test_case(Delete, "", (0, 0); "delete")]
+    #[test_case(Sub(re("oo"), "X".to_string()), "fX foo foo", (0, 9); "sub single")]
+    #[test_case(SubAll(re("oo"), "X".to_string()), "fX fX fX", (0, 7); "sub all")]
     #[test]
-    fn step_works(expr: Expr, expected: &str) {
+    fn step_works(expr: Expr, expected: &str, expected_dot: (usize, usize)) {
         let mut prog = Program {
             initial_dot: InitialDot::Full,
             exprs: vec![expr],
         };
         let mut r = Rope::from_str("foo foo foo");
-        // matching the first 'foo'
-        prog.step(&mut r, Match::synthetic(0, 2), 0, "test", &mut vec![])
+        let dot = prog
+            .step(&mut r, Match::synthetic(0, 10), 0, "test", &mut vec![])
             .unwrap();
 
         assert_eq!(&r.to_string(), expected);
+        assert_eq!(dot, expected_dot);
     }
 
     #[test_case(", x/foo/ p/$0/", "foo│foo│foo"; "x print")]
@@ -466,6 +474,11 @@ mod tests {
     #[test_case(", y/foo/ i/X/", "fooX│fooX│foo"; "y insert")]
     #[test_case(", y/foo/ a/X/", "foo│Xfoo│Xfoo"; "y append")]
     #[test_case(", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
+    #[test_case(", s/oo/X/", "fX│foo│foo"; "sub single")]
+    #[test_case(", s/\\w+/X/", "X│foo│foo"; "sub word single")]
+    #[test_case(", s/oo/X/g", "fX│fX│fX"; "sub all")]
+    #[test_case(", s/.*/X/g", "X"; "sub all dot star")]
+    #[test_case(", x/oo/ s/.*/X/g", "fX│fX│fX"; "x sub all dot star")]
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
@@ -473,5 +486,18 @@ mod tests {
         prog.execute(&mut r, "test", &mut vec![]).unwrap();
 
         assert_eq!(&r.to_string(), expected);
+    }
+
+    #[test]
+    fn sub_g_is_sugar_for_xc() {
+        let mut prog1 = Program::try_parse(", s/oo/X/g").unwrap();
+        let mut r1 = Rope::from_str("foo│foo│foo");
+        prog1.execute(&mut r1, "test", &mut vec![]).unwrap();
+
+        let mut prog2 = Program::try_parse(", x/oo/ c/X/").unwrap();
+        let mut r2 = Rope::from_str("foo│foo│foo");
+        prog2.execute(&mut r2, "test", &mut vec![]).unwrap();
+
+        assert_eq!(r1.to_string(), r2.to_string());
     }
 }
