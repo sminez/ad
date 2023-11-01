@@ -4,17 +4,12 @@ use crate::{
     util::parse_num,
 };
 use ropey::Rope;
-use std::{
-    cmp::{min, Ordering},
-    io::Write,
-    iter::Peekable,
-    str::Chars,
-};
+use std::{cmp::min, io::Write, iter::Peekable, str::Chars};
 
 mod expr;
 mod stream;
 
-use expr::Expr;
+use expr::{Expr, ParseOutput};
 pub use stream::{CachedStdin, IterableStream};
 
 /// Variable usable in templates for injecting the current filename.
@@ -76,7 +71,7 @@ impl Program {
             (from, to)
         };
 
-        let ix_max = stream.len_chars() - 1;
+        let ix_max = stream.len_chars().saturating_sub(1);
 
         Ok((min(from, ix_max), min(to, ix_max)))
     }
@@ -93,7 +88,7 @@ impl Program {
         S: IterableStream,
         W: Write,
     {
-        let (mut from, mut to) = m.loc();
+        let (mut from, to) = m.loc();
 
         match self.exprs[pc].clone() {
             Expr::Group(g) => {
@@ -108,58 +103,39 @@ impl Program {
                 Ok(res)
             }
 
-            Expr::LoopMatches(mut re) => loop {
-                match re.match_iter(&mut stream.iter_between(from, to), from) {
-                    Some(m) => {
-                        let cur_len = stream.len_chars();
-                        (_, from) = self.step(stream, m, pc + 1, fname, out)?;
-                        let new_len = stream.len_chars();
-                        from += 1;
-
-                        match new_len.cmp(&cur_len) {
-                            Ordering::Greater => to += new_len - cur_len,
-                            Ordering::Less => to -= cur_len - new_len,
-                            _ => (),
-                        }
-
-                        if from > to {
-                            return Ok((from, to));
-                        }
+            Expr::LoopMatches(mut re) => {
+                let mut initial_matches = Vec::new();
+                while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
+                    initial_matches.push(m);
+                    from = m.loc().1 + 1;
+                    if from > to {
+                        break;
                     }
-                    None => return Ok((from, to)),
                 }
-            },
 
-            Expr::LoopBetweenMatches(mut re) => loop {
-                match re.match_iter(&mut stream.iter_between(from, to), from) {
-                    Some(m) => {
-                        let (initial_to, new_from) = m.loc();
-                        if initial_to == 0 {
-                            // skip matches of the null string at the start of input
-                            from = new_from + 1;
-                            continue;
-                        }
+                self.apply_matches(initial_matches, stream, m, pc, fname, out)
+            }
 
-                        let m = Match::synthetic(from, initial_to - 1);
-                        let cur_len = stream.len_chars();
-                        (_, _) = self.step(stream, m, pc + 1, fname, out)?;
-                        let new_len = stream.len_chars();
+            Expr::LoopBetweenMatches(mut re) => {
+                let mut initial_matches = Vec::new();
 
-                        match new_len.cmp(&cur_len) {
-                            Ordering::Greater => to += new_len - cur_len,
-                            Ordering::Less => to -= cur_len - new_len,
-                            _ => (),
-                        }
-
-                        from = new_from + new_len - cur_len + 1;
-
-                        if from > to {
-                            return Ok((from, to));
-                        }
+                while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
+                    let (new_from, new_to) = m.loc();
+                    if from < new_from {
+                        initial_matches.push(Match::synthetic(from, new_from - 1));
                     }
-                    None => return Ok((from, to)),
+                    from = new_to + 1;
+                    if from > to {
+                        break;
+                    }
                 }
-            },
+
+                if from < to {
+                    initial_matches.push(Match::synthetic(from, to));
+                }
+
+                self.apply_matches(initial_matches, stream, m, pc, fname, out)
+            }
 
             Expr::IfContains(mut re) => {
                 if re.matches_iter(&mut stream.iter_between(from, to), from) {
@@ -219,38 +195,43 @@ impl Program {
                     None => Ok((from, to)),
                 }
             }
-
-            Expr::SubAll(mut re, pat) => {
-                let mut inner_from = from;
-                loop {
-                    match re.match_iter(&mut stream.iter_between(inner_from, to), inner_from) {
-                        Some(m) => {
-                            let cur_len = stream.len_chars();
-
-                            let (mfrom, mto) = m.loc();
-                            let s = template_match(&pat, m, stream.contents(), fname)?;
-                            stream.remove(mfrom, mto);
-                            stream.insert(mfrom, &s);
-
-                            let new_len = stream.len_chars();
-
-                            inner_from = mfrom + s.chars().count();
-
-                            match new_len.cmp(&cur_len) {
-                                Ordering::Greater => to += new_len - cur_len,
-                                Ordering::Less => to -= cur_len - new_len,
-                                _ => (),
-                            }
-
-                            if inner_from > to {
-                                return Ok((from, to));
-                            }
-                        }
-                        None => return Ok((from, to)),
-                    }
-                }
-            }
         }
+    }
+
+    /// When looping over disjoint matches in the input we need to determin all of the initial
+    /// match points before we start making any edits as the edits may alter the semantics of
+    /// future matches.
+    fn apply_matches<S, W>(
+        &mut self,
+        initial_matches: Vec<Match>,
+        stream: &mut S,
+        m: Match,
+        pc: usize,
+        fname: &str,
+        out: &mut W,
+    ) -> Result<(usize, usize), Error>
+    where
+        S: IterableStream,
+        W: Write,
+    {
+        let (mut from, mut to) = m.loc();
+        let mut offset: isize = 0;
+
+        for m in initial_matches.into_iter() {
+            (from, to) = m.loc();
+            let m = Match::synthetic(
+                (from as isize + offset) as usize,
+                (to as isize + offset) as usize,
+            );
+
+            let cur_len = stream.len_chars();
+            (_, from) = self.step(stream, m, pc + 1, fname, out)?;
+            let new_len = stream.len_chars();
+
+            offset += new_len as isize - cur_len as isize;
+        }
+
+        Ok((from, to))
     }
 
     /// Attempt to parse a given program input using a known max dot position
@@ -271,8 +252,12 @@ impl Program {
             }
 
             match Expr::try_parse(&mut it) {
-                Ok(expr) => {
+                Ok(ParseOutput::Single(expr)) => {
                     exprs.push(expr);
+                    consume_whitespace(&mut it);
+                }
+                Ok(ParseOutput::Pair(e1, e2)) => {
+                    exprs.extend([e1, e2]);
                     consume_whitespace(&mut it);
                 }
                 Err(Error::Eof) => break,
@@ -320,7 +305,7 @@ fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
     // Must end with an action
     if !matches!(
         exprs[exprs.len() - 1],
-        Group(_) | Insert(_) | Append(_) | Change(_) | Sub(_, _) | SubAll(_, _) | Print(_) | Delete
+        Group(_) | Insert(_) | Append(_) | Change(_) | Sub(_, _) | Print(_) | Delete
     ) {
         return Err(Error::MissingAction);
     }
@@ -400,7 +385,7 @@ fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Err
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::regex::Regex;
+    use crate::{buffer::Buffer, editor::Action, regex::Regex};
     use ropey::Rope;
     use simple_test_case::test_case;
     use Expr::*;
@@ -448,7 +433,6 @@ mod tests {
     #[test_case(Change("X".to_string()), "X", (0, 1); "change")]
     #[test_case(Delete, "", (0, 0); "delete")]
     #[test_case(Sub(re("oo"), "X".to_string()), "fX foo foo", (0, 9); "sub single")]
-    #[test_case(SubAll(re("oo"), "X".to_string()), "fX fX fX", (0, 7); "sub all")]
     #[test]
     fn step_works(expr: Expr, expected: &str, expected_dot: (usize, usize)) {
         let mut prog = Program {
@@ -488,16 +472,25 @@ mod tests {
         assert_eq!(&r.to_string(), expected);
     }
 
+    #[test_case(", d"; "delete buffer")]
+    #[test_case(", x/th/ d"; "delete each th")]
+    #[test_case(", x/ / d"; "delete spaces")]
+    #[test_case(", s/ //g"; "sub remove spaces")]
+    #[test_case(", x/\\b\\w+\\b/ d"; "delete each word")]
+    // #[test_case(", x/. / d"; "delete things before a space")]
+    // #[test_case(", x/\\b\\w+\\b/ c/buffalo/"; "change each word")]
+    // #[test_case(", x/\\b\\w+\\b/ a/buffalo/"; "append to each word")]
+    // #[test_case(", x/\\b\\w+\\b/ i/buffalo/"; "insert before each word")]
     #[test]
-    fn sub_g_is_sugar_for_xc() {
-        let mut prog1 = Program::try_parse(", s/oo/X/g").unwrap();
-        let mut r1 = Rope::from_str("foo│foo│foo");
-        prog1.execute(&mut r1, "test", &mut vec![]).unwrap();
+    fn buffer_execute_undo_all_is_a_noop(s: &str) {
+        let mut prog = Program::try_parse(s).unwrap();
+        let initial_content = "this is a line\nand another\n- [ ] something to do\n";
+        let mut b = Buffer::new_unnamed(0, initial_content);
 
-        let mut prog2 = Program::try_parse(", x/oo/ c/X/").unwrap();
-        let mut r2 = Rope::from_str("foo│foo│foo");
-        prog2.execute(&mut r2, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        while b.handle_action(Action::Undo).is_none() {}
+        let final_content = String::from_utf8(b.contents()).unwrap();
 
-        assert_eq!(r1.to_string(), r2.to_string());
+        assert_eq!(&final_content, initial_content);
     }
 }

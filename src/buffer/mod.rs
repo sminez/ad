@@ -68,22 +68,16 @@ pub struct Buffer {
     pub(crate) col_off: usize,
     pub(crate) dirty: bool,
     edit_log: EditLog,
-    has_trailing_newline: bool,
 }
 
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
     pub(super) fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
-        let mut raw = match fs::read_to_string(&path) {
+        let raw = match fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
         };
-
-        let has_trailing_newline = raw.ends_with('\n');
-        if has_trailing_newline {
-            raw.pop();
-        }
 
         Ok(Self {
             id,
@@ -95,7 +89,6 @@ impl Buffer {
             col_off: 0,
             dirty: false,
             edit_log: EditLog::default(),
-            has_trailing_newline,
         })
     }
 
@@ -110,7 +103,6 @@ impl Buffer {
             col_off: 0,
             dirty: false,
             edit_log: EditLog::default(),
-            has_trailing_newline: true,
         }
     }
 
@@ -130,7 +122,6 @@ impl Buffer {
             col_off: 0,
             dirty: false,
             edit_log: EditLog::default(),
-            has_trailing_newline,
         }
     }
 
@@ -156,12 +147,7 @@ impl Buffer {
     }
 
     pub fn contents(&self) -> Vec<u8> {
-        let mut contents: Vec<u8> = self.txt.bytes().collect();
-        if self.has_trailing_newline {
-            contents.push(b'\n');
-        }
-
-        contents
+        self.txt.bytes().collect()
     }
 
     pub(crate) fn string_lines(&self) -> Vec<String> {
@@ -493,13 +479,16 @@ impl Buffer {
             (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s).0,
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }).0,
             (Kind::Delete, Txt::String(s)) => {
-                let (dy, last_line) = s.lines().enumerate().last().unwrap();
+                let (dy, last_line) = s.lines().enumerate().last().unwrap_or((0, ""));
                 let mut end = cur;
                 end.x += last_line.len();
                 end.y += dy;
-                self.delete_dot(Dot::Range {
-                    r: Range::from_cursors(cur, end, true),
-                })
+                self.delete_dot(
+                    Dot::Range {
+                        r: Range::from_cursors(cur, end, true),
+                    }
+                    .collapse_null_range(),
+                )
                 .0
             }
         };
@@ -527,9 +516,15 @@ impl Buffer {
             Dot::Range { r } => self.delete_range(r),
         };
 
-        let idx = cur.as_char_idx(self);
-        self.txt.insert(idx, &s);
-        self.edit_log.insert_string(cur, s);
+        // Inserting an empty string should not be recorded as an edit (and is
+        // a no-op for the content of self.txt) but we support it as inserting
+        // an empty string while dot is a range has the same effect as a delete.
+        if !s.is_empty() {
+            let idx = cur.as_char_idx(self);
+            self.txt.insert(idx, &s);
+            self.edit_log.insert_string(cur, s);
+        }
+
         self.dirty = true;
 
         (cur, deleted)

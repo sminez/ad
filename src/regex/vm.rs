@@ -13,6 +13,7 @@ use super::{
     matches::{Match, MatchIter},
     re_to_postfix, Error,
 };
+use crate::buffer::Buffer;
 use ropey::Rope;
 use std::mem::take;
 
@@ -90,6 +91,15 @@ impl Regex {
     pub fn match_rope_all<'a, 'b>(&'a mut self, r: &'b Rope) -> MatchIter<'a, &'b Rope> {
         MatchIter {
             it: r,
+            r: self,
+            from: 0,
+        }
+    }
+
+    /// Iterate over all non-overlapping matches of this Regex for a given `Buffer` input.
+    pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b Rope> {
+        MatchIter {
+            it: &b.txt,
             r: self,
             from: 0,
         }

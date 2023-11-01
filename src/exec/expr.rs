@@ -14,28 +14,49 @@ pub(super) enum Expr {
     Append(String),
     Change(String),
     Sub(Regex, String),
-    SubAll(Regex, String),
     Print(String),
     Delete,
 
     Group(Vec<Vec<Expr>>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum ParseOutput {
+    Single(Expr),
+    Pair(Expr, Expr),
+}
+
 impl Expr {
-    pub(super) fn try_parse(it: &mut Peekable<Chars>) -> Result<Self, Error> {
+    pub(super) fn try_parse(it: &mut Peekable<Chars>) -> Result<ParseOutput, Error> {
         match it.next() {
-            Some('x') => Ok(Expr::LoopMatches(parse_delimited_regex(it, "x")?)),
-            Some('y') => Ok(Expr::LoopBetweenMatches(parse_delimited_regex(it, "y")?)),
-            Some('g') => Ok(Expr::IfContains(parse_delimited_regex(it, "g")?)),
-            Some('v') => Ok(Expr::IfNotContains(parse_delimited_regex(it, "v")?)),
-            Some('i') => Ok(Expr::Insert(parse_delimited_str(it, "i")?)),
-            Some('a') => Ok(Expr::Append(parse_delimited_str(it, "a")?)),
-            Some('c') => Ok(Expr::Change(parse_delimited_str(it, "c")?)),
+            Some('x') => Ok(ParseOutput::Single(Expr::LoopMatches(
+                parse_delimited_regex(it, "x")?,
+            ))),
+            Some('y') => Ok(ParseOutput::Single(Expr::LoopBetweenMatches(
+                parse_delimited_regex(it, "y")?,
+            ))),
+            Some('g') => Ok(ParseOutput::Single(Expr::IfContains(
+                parse_delimited_regex(it, "g")?,
+            ))),
+            Some('v') => Ok(ParseOutput::Single(Expr::IfNotContains(
+                parse_delimited_regex(it, "v")?,
+            ))),
+            Some('i') => Ok(ParseOutput::Single(Expr::Insert(parse_delimited_str(
+                it, "i",
+            )?))),
+            Some('a') => Ok(ParseOutput::Single(Expr::Append(parse_delimited_str(
+                it, "a",
+            )?))),
+            Some('c') => Ok(ParseOutput::Single(Expr::Change(parse_delimited_str(
+                it, "c",
+            )?))),
             Some('s') => parse_sub(it),
-            Some('p') => Ok(Expr::Print(parse_delimited_str(it, "p")?)),
-            Some('P') => Ok(Expr::Print("$0".to_string())),
-            Some('d') => Ok(Expr::Delete),
-            Some('{') => Ok(Expr::Group(parse_group(it)?)),
+            Some('p') => Ok(ParseOutput::Single(Expr::Print(parse_delimited_str(
+                it, "p",
+            )?))),
+            Some('P') => Ok(ParseOutput::Single(Expr::Print("$0".to_string()))),
+            Some('d') => Ok(ParseOutput::Single(Expr::Delete)),
+            Some('{') => Ok(ParseOutput::Single(Expr::Group(parse_group(it)?))),
 
             // Comments run until the end of the current line
             Some('#') => loop {
@@ -80,15 +101,15 @@ fn read_until(delim: char, it: &mut Peekable<Chars>, kind: &'static str) -> Resu
     Err(Error::UnclosedDelimiter(kind, delim))
 }
 
-fn parse_sub(it: &mut Peekable<Chars>) -> Result<Expr, Error> {
+fn parse_sub(it: &mut Peekable<Chars>) -> Result<ParseOutput, Error> {
     let delim = it.next().ok_or(Error::MissingDelimiter("s"))?;
     let re = Regex::compile(&read_until(delim, it, "s")?)?;
     let s = read_until(delim, it, "s")?;
     if let Some('g') = it.peek() {
         it.next();
-        Ok(Expr::SubAll(re, s))
+        Ok(ParseOutput::Pair(Expr::LoopMatches(re), Expr::Change(s)))
     } else {
-        Ok(Expr::Sub(re, s))
+        Ok(ParseOutput::Single(Expr::Sub(re, s)))
     }
 }
 
@@ -126,7 +147,10 @@ fn parse_group(it: &mut Peekable<Chars>) -> Result<Vec<Vec<Expr>>, Error> {
                 }
             },
 
-            Some(_) => branch.push(Expr::try_parse(it)?),
+            Some(_) => match Expr::try_parse(it)? {
+                ParseOutput::Single(e) => branch.push(e),
+                ParseOutput::Pair(e1, e2) => branch.extend([e1, e2]),
+            },
             None => return Err(Error::UnclosedExpressionGroup),
         }
     }
@@ -142,29 +166,37 @@ mod tests {
         Regex::compile(s).unwrap()
     }
 
-    #[test_case("x/.*/", LoopMatches(re(".*")); "x loop")]
-    #[test_case("y/.*/", LoopBetweenMatches(re(".*")); "y loop")]
-    #[test_case("g/.*/", IfContains(re(".*")); "g filter")]
-    #[test_case("v/.*/", IfNotContains(re(".*")); "v filter")]
-    #[test_case("i/foo/", Insert("foo".to_string()); "insert")]
-    #[test_case("a/foo/", Append("foo".to_string()); "append")]
-    #[test_case("c/foo/", Change("foo".to_string()); "change")]
-    #[test_case("s/.*/foo/", Sub(re(".*"), "foo".to_string()); "substitute")]
-    #[test_case("s/.*/foo/g", SubAll(re(".*"), "foo".to_string()); "substitute all")]
-    #[test_case("p/$0/", Print("$0".to_string()); "print")]
-    #[test_case("P", Print("$0".to_string()); "print full match")]
-    #[test_case("d", Delete; "delete")]
+    fn s(e: Expr) -> ParseOutput {
+        ParseOutput::Single(e)
+    }
+
+    fn p(e1: Expr, e2: Expr) -> ParseOutput {
+        ParseOutput::Pair(e1, e2)
+    }
+
+    #[test_case("x/.*/", s(LoopMatches(re(".*"))); "x loop")]
+    #[test_case("y/.*/", s(LoopBetweenMatches(re(".*"))); "y loop")]
+    #[test_case("g/.*/", s(IfContains(re(".*"))); "g filter")]
+    #[test_case("v/.*/", s(IfNotContains(re(".*"))); "v filter")]
+    #[test_case("i/foo/", s(Insert("foo".to_string())); "insert")]
+    #[test_case("a/foo/", s(Append("foo".to_string())); "append")]
+    #[test_case("c/foo/", s(Change("foo".to_string())); "change")]
+    #[test_case("s/.*/foo/", s(Sub(re(".*"), "foo".to_string())); "substitute")]
+    #[test_case("s/.*/foo/g", p(LoopMatches(re(".*")), Change("foo".to_string())); "substitute all")]
+    #[test_case("p/$0/", s(Print("$0".to_string())); "print")]
+    #[test_case("P", s(Print("$0".to_string())); "print full match")]
+    #[test_case("d", s(Delete); "delete")]
     #[test_case(
         "{P; g/bar/ a/foo/;}",
-        Group(vec![
+        s(Group(vec![
             vec![Print("$0".to_string())],
             vec![IfContains(re("bar")), Append("foo".to_string())]
-        ]);
+        ]));
         "group"
     )]
     #[test]
-    fn parse_expr_works(s: &str, expected: Expr) {
-        let a = Expr::try_parse(&mut s.chars().peekable()).expect("valid input");
+    fn parse_expr_works(input: &str, expected: ParseOutput) {
+        let a = Expr::try_parse(&mut input.chars().peekable()).expect("valid input");
         assert_eq!(a, expected);
     }
 }

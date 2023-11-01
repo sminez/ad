@@ -50,7 +50,6 @@ impl<'a> Iterator for StreamIter<'a> {
 
 impl IterableStream for Rope {
     fn iter_between(&self, from: usize, to: usize) -> StreamIter<'_> {
-        println!("iter_between from={from}");
         StreamIter::Rope(IdxRopeChars::new(self, from, to))
     }
 
@@ -109,7 +108,8 @@ impl IterableStream for Buffer {
                 Cur::from_char_idx(to, self),
                 true,
             ),
-        };
+        }
+        .collapse_null_range();
         self.handle_action(Action::Delete);
     }
 

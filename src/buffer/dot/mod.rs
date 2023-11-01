@@ -153,7 +153,7 @@ impl Dot {
     }
 
     /// If both ends of a Range match then replace with a single Cur
-    fn collapse_null_range(self) -> Self {
+    pub(crate) fn collapse_null_range(self) -> Self {
         match self {
             Dot::Range {
                 r: Range { start, end, .. },
