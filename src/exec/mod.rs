@@ -214,15 +214,11 @@ impl Program {
         S: IterableStream,
         W: Write,
     {
-        let (mut from, mut to) = m.loc();
+        let (mut from, to) = m.loc();
         let mut offset: isize = 0;
 
-        for m in initial_matches.into_iter() {
-            (from, to) = m.loc();
-            let m = Match::synthetic(
-                (from as isize + offset) as usize,
-                (to as isize + offset) as usize,
-            );
+        for mut m in initial_matches.into_iter() {
+            m.apply_offset(offset);
 
             let cur_len = stream.len_chars();
             (_, from) = self.step(stream, m, pc + 1, fname, out)?;
@@ -446,6 +442,18 @@ mod tests {
 
         assert_eq!(&r.to_string(), expected);
         assert_eq!(dot, expected_dot);
+    }
+
+    #[test_case(", x/(t.)/ c/$1X/", "thXis is a teXst XstrXing"; "x c")]
+    #[test_case(", x/(t.)/ i/$1/", "ththis is a tetest t strtring"; "x i")]
+    #[test_case(", x/(t.)/ a/$1/", "ththis is a tetest t strtring"; "x a")]
+    #[test]
+    fn substitution_of_submatches_works(s: &str, expected: &str) {
+        let mut prog = Program::try_parse(s).unwrap();
+
+        let mut r = Rope::from_str("this is a test string");
+        prog.execute(&mut r, "test", &mut vec![]).unwrap();
+        assert_eq!(&r.to_string(), expected);
     }
 
     #[test_case(", x/foo/ p/$0/", "foo│foo│foo"; "x print")]

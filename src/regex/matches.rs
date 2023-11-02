@@ -22,6 +22,15 @@ impl Match {
         Self { sub_matches }
     }
 
+    pub(crate) fn apply_offset(&mut self, offset: isize) {
+        for i in 0..20 {
+            if i > 0 && self.sub_matches[i] == 0 {
+                continue;
+            }
+            self.sub_matches[i] = (self.sub_matches[i] as isize + offset) as usize;
+        }
+    }
+
     pub fn str_match_text(&self, s: &str) -> String {
         let (a, b) = self.loc();
         s.chars().skip(a).take(b - a + 1).collect()
