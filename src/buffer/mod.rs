@@ -715,4 +715,24 @@ mod tests {
             ]
         );
     }
+
+    #[test]
+    fn delete_undo_works() {
+        let mut b = simple_initial_buffer();
+        let original_lines = b.string_lines();
+
+        b.handle_action(Action::DotExtendBackward(TextObject::Word, 1));
+        b.handle_action(Action::Delete);
+
+        b.set_dot(TextObject::BufferStart, 1);
+        b.handle_action(Action::DotExtendForward(TextObject::Word, 1));
+        b.handle_action(Action::Delete);
+
+        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo);
+
+        let lines = b.string_lines();
+
+        assert_eq!(lines, original_lines);
+    }
 }

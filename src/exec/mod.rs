@@ -463,6 +463,7 @@ mod tests {
     #[test_case(", s/oo/X/g", "fX│fX│fX"; "sub all")]
     #[test_case(", s/.*/X/g", "X"; "sub all dot star")]
     #[test_case(", x/oo/ s/.*/X/g", "fX│fX│fX"; "x sub all dot star")]
+    #[test_case(", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();

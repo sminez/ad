@@ -208,18 +208,17 @@ impl Regex {
         self.prev = None;
         self.next = None;
 
-        if !matched {
-            for t in self.clist.iter_mut().take(n) {
-                if self.prog[t.pc].op == Op::Match {
-                    t.sub_matches[1] = sp; // Save end of the match
-                    if t.sub_matches[1] >= t.sub_matches[0] {
-                        return Some(Match {
-                            sub_matches: t.sub_matches,
-                        });
-                    }
-                }
+        // Check to see if the final pass had a match which would be better than any
+        // that we have so far.
+        for t in self.clist.iter_mut().take(n) {
+            if self.prog[t.pc].op == Op::Match && t.sub_matches[1] >= sub_matches[1] {
+                matched = true;
+                sub_matches = t.sub_matches;
+                break;
             }
+        }
 
+        if !matched {
             return None;
         }
 
@@ -322,68 +321,70 @@ mod tests {
     use super::*;
     use simple_test_case::test_case;
 
-    #[test_case("ba*", "baaaaa", true; "zero or more present")]
-    #[test_case("ba*", "b", true; "zero or more not present")]
-    #[test_case("ba+", "baaaaa", true; "one or more present")]
-    #[test_case("ba+", "b", false; "one or more not present")]
-    #[test_case("b?a", "ba", true; "optional present")]
-    #[test_case("b?a", "a", true; "optional not present")]
-    #[test_case("a(bb)+a", "abbbba", true; "article example matching")]
-    #[test_case("a(bb)+a", "abbba", false; "article example non matching")]
-    #[test_case(".*b", "123b", true; "dot star prefix")]
-    #[test_case("1.*", "123b", true; "dot star suffix")]
-    #[test_case("1.*b", "123b", true; "dot star inner")]
-    #[test_case("(c|C)ase matters", "case matters", true; "alternation first")]
-    #[test_case("(c|C)ase matters", "Case matters", true; "alternation second")]
-    #[test_case("(a|b|c)", "c", true; "chained alternation")]
-    #[test_case("this@*works", "this contains\nbut still works", true; "true any")]
-    #[test_case(r"literal\?", "literal?", true; "escape special char")]
-    #[test_case(r"literal\t", "literal\t", true; "escape sequence")]
-    #[test_case("[abc] happy cow", "a happy cow", true; "character class")]
-    #[test_case("[^abc] happy cow", "a happy cow", false; "negated character class")]
-    #[test_case("[a-zA-Z]*", "camelCaseFtw", true; "char class ranges matching")]
-    #[test_case("[a-zA-Z]*1", "kebab-case-not-so-much", false; "char class ranges non matching")]
-    #[test_case("[a-zA-Z ]*", "this should work", true; "char class mixed")]
-    #[test_case("[\\]5]*", "5]]5555]]", true; "char class escaped bracket")]
-    #[test_case("[0-9]+", "0123", true; "digit range")]
-    #[test_case("[0-9]+", "0", true; "digit range range start only")]
-    #[test_case("25[0-5]", "255", true; "ipv4 element one")]
-    #[test_case("2[0-4][0-9]", "231", true; "ipv4 element two")]
-    #[test_case("1?[0-9]?[0-9]", "155", true; "ipv4 element three three digit")]
-    #[test_case("1?[0-9]?[0-9]", "72", true; "ipv4 element three two digit")]
-    #[test_case("1?[0-9]?[0-9]", "8", true; "ipv4 element three one digit")]
-    #[test_case("1?[0-9]?[0-9]", "0", true; "ipv4 element three zero")]
-    #[test_case("(25[0-5]|2[0-4][0-9])", "255", true; "ipv4 elements one and two matching one")]
-    #[test_case("(25[0-5]|2[0-4][0-9])", "219", true; "ipv4 elements one and two matching two")]
-    #[test_case("(25[0-5]|2[0-4][0-9])", "42", false; "ipv4 elements one and two not matching")]
-    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "251", true; "ipv4 all elements matching one")]
-    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "237", true; "ipv4 all elements matching two")]
-    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "142", true; "ipv4 all elements matching three")]
+    #[test_case("ba*", "baaaaa", Some("baaaaa"); "zero or more present")]
+    #[test_case("ba*", "b", Some("b"); "zero or more not present")]
+    #[test_case("ba+", "baaaaa", Some("baaaaa"); "one or more present")]
+    #[test_case("ba+", "b", None; "one or more not present")]
+    #[test_case("b?a", "ba", Some("ba"); "optional present")]
+    #[test_case("b?a", "a", Some("a"); "optional not present")]
+    #[test_case("a(bb)+a", "abbbba", Some("abbbba"); "article example matching")]
+    #[test_case("a(bb)+a", "abbba", None; "article example non matching")]
+    #[test_case(".*b", "123b", Some("123b"); "dot star prefix")]
+    #[test_case("1.*", "123b", Some("123b"); "dot star suffix")]
+    #[test_case("1.*b", "123b", Some("123b"); "dot star inner")]
+    #[test_case("(c|C)ase matters", "case matters", Some("case matters"); "alternation first")]
+    #[test_case("(c|C)ase matters", "Case matters", Some("Case matters"); "alternation second")]
+    #[test_case("(a|b|c)", "c", Some("c"); "chained alternation")]
+    #[test_case("this@*works", "this contains\nbut still works", Some("this contains\nbut still works"); "true any")]
+    #[test_case(r"literal\?", "literal?", Some("literal?"); "escape special char")]
+    #[test_case(r"literal\t", "literal\t", Some("literal\t"); "escape sequence")]
+    #[test_case("[abc] happy cow", "a happy cow", Some("a happy cow"); "character class")]
+    #[test_case("[^abc] happy cow", "a happy cow", None; "negated character class")]
+    #[test_case("[a-zA-Z]*", "camelCaseFtw", Some("camelCaseFtw"); "char class ranges matching")]
+    #[test_case("[a-zA-Z]*1", "kebab-case-not-so-much", None; "char class ranges non matching")]
+    #[test_case("[a-zA-Z ]*", "this should work", Some("this should work"); "char class mixed")]
+    #[test_case("[\\]5]*", "5]]5555]]", Some("5]]5555]]"); "char class escaped bracket")]
+    #[test_case("[0-9]+", "0123", Some("0123"); "digit range")]
+    #[test_case("[0-9]+", "0", Some("0"); "digit range range start only")]
+    #[test_case("25[0-5]", "255", Some("255"); "ipv4 element one")]
+    #[test_case("2[0-4][0-9]", "231", Some("231"); "ipv4 element two")]
+    #[test_case("1?[0-9]?[0-9]", "155", Some("155"); "ipv4 element three three digit")]
+    #[test_case("1?[0-9]?[0-9]", "72", Some("72"); "ipv4 element three two digit")]
+    #[test_case("1?[0-9]?[0-9]", "8", Some("8"); "ipv4 element three one digit")]
+    #[test_case("1?[0-9]?[0-9]", "0", Some("0"); "ipv4 element three zero")]
+    #[test_case("(25[0-5]|2[0-4][0-9])", "255", Some("255"); "ipv4 elements one and two matching one")]
+    #[test_case("(25[0-5]|2[0-4][0-9])", "219", Some("219"); "ipv4 elements one and two matching two")]
+    #[test_case("(25[0-5]|2[0-4][0-9])", "42", None; "ipv4 elements one and two not matching")]
+    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "251", Some("251"); "ipv4 all elements matching one")]
+    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "237", Some("237"); "ipv4 all elements matching two")]
+    #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "142", Some("142"); "ipv4 all elements matching three")]
     #[test_case(
         r"(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])",
         "127.0.0.1",
-        true;
+        Some("127.0.0.1");
         "ipv4 full"
     )]
-    #[test_case("^foo", "foo at the start", true; "SOL holding")]
-    #[test_case("^foo", "bar\nfoo at the start", true; "SOL holding after newline")]
-    #[test_case("^foo", "we have foo but not at the start", false; "SOL not holding")]
-    #[test_case("foo$", "a line that ends with foo", true; "BOL holding")]
-    #[test_case("foo$", "a line that ends with foo\nnow bar", true; "BOL holding before newline")]
-    #[test_case("foo$", "a line with foo in the middle", false; "BOL not holding")]
-    #[test_case("a{3}", "aaa", true; "counted repetition")]
-    #[test_case("a{3}", "aa", false; "counted repetition non matching")]
-    #[test_case("a{3,}", "aaaaaa", true; "counted repetition at least")]
-    #[test_case("a{3,}", "aa", false; "counted repetition at least non matching")]
-    #[test_case("a{3,5}", "aaa", true; "counted repetition between lower")]
-    #[test_case("a{3,5}", "aaaaa", true; "counted repetition between upper")]
-    #[test_case("a{3,5}", "aaaa", true; "counted repetition in range")]
-    #[test_case("a{3,5}", "aa", false; "counted repetition less")]
-    #[test_case("^a{3,5}$", "aaaaaa", false; "counted repetition more")]
+    #[test_case("^foo", "foo at the start", Some("foo"); "SOL holding")]
+    #[test_case("^foo", "bar\nfoo at the start", Some("foo"); "SOL holding after newline")]
+    #[test_case("^foo", "we have foo but not at the start", None; "SOL not holding")]
+    #[test_case("foo$", "a line that ends with foo", Some("foo"); "BOL holding")]
+    #[test_case("foo$", "a line that ends with foo\nnow bar", Some("foo"); "BOL holding before newline")]
+    #[test_case("foo$", "a line with foo in the middle", None; "BOL not holding")]
+    #[test_case("a{3}", "aaa", Some("aaa"); "counted repetition")]
+    #[test_case("a{3}", "aa", None; "counted repetition non matching")]
+    #[test_case("a{3,}", "aaaaaa", Some("aaaaaa"); "counted repetition at least")]
+    #[test_case("a{3,}", "aa", None; "counted repetition at least non matching")]
+    #[test_case("a{3,5}", "aaa", Some("aaa"); "counted repetition between lower")]
+    #[test_case("a{3,5}", "aaaaa", Some("aaaaa"); "counted repetition between upper")]
+    #[test_case("a{3,5}", "aaaa", Some("aaaa"); "counted repetition in range")]
+    #[test_case("a{3,5}", "aa", None; "counted repetition less")]
+    #[test_case("^a{3,5}$", "aaaaaa", None; "counted repetition more")]
+    #[test_case("\\b\\w+\\b", "foo", Some("foo"); "word boundary at end of input")]
     #[test]
-    fn match_works(re: &str, s: &str, matches: bool) {
+    fn match_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = Regex::compile(re).unwrap();
-        assert_eq!(r.match_str(s).is_some(), matches);
+        let m = r.match_str(s).map(|m| m.str_match_text(s));
+        assert_eq!(m.as_deref(), expected);
     }
 
     #[test_case("[0-9]+", " 42 3 127 9991 ", &["42", "3", "127", "9991"]; "integers")]
@@ -400,14 +401,15 @@ mod tests {
 
     #[test]
     fn match_extraction_works() {
-        let re = "([0-9]+)-([0-9]+)";
+        let re = "([0-9]+)-([0-9]+)-([0-9]+)";
         let mut r = Regex::compile(re).unwrap();
-        let s = "this should work 123-456 other stuff";
+        let s = "this should work 123-456-789 other stuff";
         let m = r.match_str(s).unwrap();
 
         assert_eq!(m.str_submatch_text(1, s).as_deref(), Some("123"));
         assert_eq!(m.str_submatch_text(2, s).as_deref(), Some("456"));
-        assert_eq!(m.str_match_text(s), "123-456");
+        assert_eq!(m.str_submatch_text(3, s).as_deref(), Some("789"));
+        assert_eq!(m.str_match_text(s), "123-456-789");
     }
 
     #[test]
