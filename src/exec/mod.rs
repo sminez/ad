@@ -482,10 +482,10 @@ mod tests {
     #[test_case(", x/ / d"; "delete spaces")]
     #[test_case(", s/ //g"; "sub remove spaces")]
     #[test_case(", x/\\b\\w+\\b/ d"; "delete each word")]
-    // #[test_case(", x/. / d"; "delete things before a space")]
-    // #[test_case(", x/\\b\\w+\\b/ c/buffalo/"; "change each word")]
-    // #[test_case(", x/\\b\\w+\\b/ a/buffalo/"; "append to each word")]
-    // #[test_case(", x/\\b\\w+\\b/ i/buffalo/"; "insert before each word")]
+    #[test_case(", x/. / d"; "delete things before a space")]
+    #[test_case(", x/\\b\\w+\\b/ c/buffalo/"; "change each word")]
+    #[test_case(", x/\\b\\w+\\b/ a/buffalo/"; "append to each word")]
+    #[test_case(", x/\\b\\w+\\b/ i/buffalo/"; "insert before each word")]
     #[test]
     fn buffer_execute_undo_all_is_a_noop(s: &str) {
         let mut prog = Program::try_parse(s).unwrap();

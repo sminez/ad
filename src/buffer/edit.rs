@@ -95,7 +95,7 @@ impl Edit {
         if e.cur == self.cur {
             self.txt.prepend(e.txt);
             None
-        } else {
+        } else if e.cur.y == self.cur.y {
             match &self.txt {
                 Txt::Char(_) if e.cur.x == self.cur.x + 1 => {
                     self.txt.append(e.txt);
@@ -107,6 +107,8 @@ impl Edit {
                 }
                 _ => Some(e),
             }
+        } else {
+            Some(e)
         }
     }
 
@@ -114,7 +116,7 @@ impl Edit {
         if e.cur == self.cur {
             self.txt.append(e.txt);
             None
-        } else {
+        } else if e.cur.y == self.cur.y {
             match &e.txt {
                 Txt::Char(_) if e.cur.x + 1 == self.cur.x => {
                     self.txt.prepend(e.txt);
@@ -128,6 +130,8 @@ impl Edit {
                 }
                 _ => Some(e),
             }
+        } else {
+            Some(e)
         }
     }
 }

@@ -480,10 +480,9 @@ impl Buffer {
             (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s).0,
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }).0,
             (Kind::Delete, Txt::String(s)) => {
-                let (dy, last_line) = s.lines().enumerate().last().unwrap_or((0, ""));
-                let mut end = cur;
-                end.x += last_line.len();
-                end.y += dy;
+                let start_idx = cur.as_char_idx(self);
+                let end_idx = start_idx + s.chars().count() - 1;
+                let end = Cur::from_char_idx(end_idx, self);
                 self.delete_dot(
                     Dot::Range {
                         r: Range::from_cursors(cur, end, true),
@@ -735,5 +734,49 @@ mod tests {
         let lines = b.string_lines();
 
         assert_eq!(lines, original_lines);
+    }
+
+    fn c(y: usize, x: usize) -> Cur {
+        Cur { y, x }
+    }
+
+    #[test]
+    fn undo_string_insert_works() {
+        let initial_content = "foo foo foo\n";
+        let mut b = Buffer::new_unnamed(0, initial_content);
+
+        b.insert_string(Dot::Cur { c: c(0, 0) }, "bar".to_string());
+        b.handle_action(Action::Undo);
+
+        assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
+    }
+
+    #[test]
+    fn undo_string_delete_works() {
+        let initial_content = "foo foo foo\n";
+        let mut b = Buffer::new_unnamed(0, initial_content);
+
+        let r = Range::from_cursors(c(0, 0), c(0, 2), true);
+        b.delete_dot(Dot::Range { r });
+        b.handle_action(Action::Undo);
+
+        assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
+    }
+
+    #[test]
+    fn undo_string_insert_and_delete_works() {
+        let initial_content = "foo foo foo\n";
+        let mut b = Buffer::new_unnamed(0, initial_content);
+
+        let r = Range::from_cursors(c(0, 0), c(0, 2), true);
+        b.delete_dot(Dot::Range { r });
+        b.insert_string(Dot::Cur { c: c(0, 0) }, "bar".to_string());
+
+        assert_eq!(b.string_lines(), vec!["bar foo foo", ""]);
+
+        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo);
+
+        assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
 }
