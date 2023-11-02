@@ -288,13 +288,14 @@ impl Buffer {
 
         // Apply highlight if included in current Dot
         if let Some(lr) = self.dot.line_range(y) {
+            let n_chars = rline.chars().count();
             let (start, end) = match lr {
                 // LineRange is an inclusive range so we need to insert after `end` if its
                 // not the end of the line
-                LineRange::Partial { start, end, .. } => (start, min(end + 1, rline.len())),
-                LineRange::FromStart { end, .. } => (0, min(end + 1, rline.len())),
-                LineRange::ToEnd { start, .. } => (start, rline.len()),
-                LineRange::Full { .. } => (0, rline.len()),
+                LineRange::Partial { start, end, .. } => (start, min(end + 1, n_chars)),
+                LineRange::FromStart { end, .. } => (0, min(end + 1, n_chars)),
+                LineRange::ToEnd { start, .. } => (start, n_chars),
+                LineRange::Full { .. } => (0, n_chars),
             };
             rline.insert_str(end, &Style::Reset.to_string());
             rline.insert_str(start, &Style::Bg(bg_dot).to_string());

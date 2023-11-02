@@ -467,10 +467,14 @@ mod tests {
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
+
         let mut r = Rope::from_str("foo│foo│foo");
         prog.execute(&mut r, "test", &mut vec![]).unwrap();
+        assert_eq!(&r.to_string(), expected, "rope");
 
-        assert_eq!(&r.to_string(), expected);
+        let mut b = Buffer::new_unnamed(0, "foo│foo│foo");
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        assert_eq!(&b.txt.to_string(), expected, "buffer");
     }
 
     #[test_case(", d"; "delete buffer")]
