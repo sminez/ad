@@ -277,8 +277,12 @@ impl Regex {
             match t.assertion {
                 Some(a) if !a.holds_for(self.prev, self.next) => (),
                 _ => {
-                    // Save start is for the NEXT char and Save end is for CURRENT char
-                    t.sub_matches[s] = if s % 2 == 0 && !initial { sp + 1 } else { sp };
+                    // We don't hard error on compiling a regex with more than 9 submatches
+                    // but we don't track anything past the 9th
+                    if s < 20 {
+                        // Save start is for the NEXT char and Save end is for CURRENT char
+                        t.sub_matches[s] = if s % 2 == 0 && !initial { sp + 1 } else { sp };
+                    }
                     self.add_thread(lst, thread(t.pc + 1, t.sub_matches), sp, initial);
                 }
             }

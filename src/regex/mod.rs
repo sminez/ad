@@ -13,7 +13,7 @@ mod vm;
 pub use matches::{Match, MatchIter};
 pub use vm::Regex;
 
-const POSTFIX_BUF_SIZE: usize = 2000;
+const POSTFIX_BUF_SIZE: usize = 8000;
 const POSTFIX_MAX_PARENS: usize = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

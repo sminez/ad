@@ -121,7 +121,7 @@ pub(super) fn compile(pfix: Vec<Pfix>) -> Vec<Op> {
 
     macro_rules! pop {
         () => {{
-            let ix = expr_offsets.pop().unwrap();
+            let ix = expr_offsets.pop().unwrap_or(0);
             prog.split_off(ix)
         }};
     }
