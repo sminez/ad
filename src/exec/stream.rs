@@ -94,20 +94,14 @@ impl IterableStream for Buffer {
         self.txt.clone()
     }
 
-    fn insert(&mut self, ix: usize, s: &str) {
-        self.dot = Dot::Cur {
-            c: Cur::from_char_idx(ix, self),
-        };
+    fn insert(&mut self, idx: usize, s: &str) {
+        self.dot = Dot::Cur { c: Cur { idx } };
         self.handle_action(Action::InsertString { s: s.to_string() });
     }
 
     fn remove(&mut self, from: usize, to: usize) {
         self.dot = Dot::Range {
-            r: Range::from_cursors(
-                Cur::from_char_idx(from, self),
-                Cur::from_char_idx(to, self),
-                true,
-            ),
+            r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, true),
         }
         .collapse_null_range();
         self.handle_action(Action::Delete);
@@ -130,7 +124,8 @@ impl IterableStream for Buffer {
     }
 
     fn current_dot(&self) -> (usize, usize) {
-        self.dot.as_range().as_char_indices(self)
+        let Range { start, end, .. } = self.dot.as_range();
+        (start.idx, end.idx)
     }
 
     fn len_chars(&self) -> usize {

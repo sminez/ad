@@ -13,10 +13,13 @@ pub(super) mod iter {
 
     impl<'b> IdxChars<'b> {
         pub fn new<'a: 'b>(cur: Cur, b: &'a Buffer) -> Peekable<Self> {
-            let idx = cur.as_char_idx(b);
-            let inner: Chars<'b> = b.txt.chars_at(idx);
+            let inner: Chars<'b> = b.txt.chars_at(cur.idx);
 
-            IdxChars { inner, idx }.peekable()
+            IdxChars {
+                inner,
+                idx: cur.idx,
+            }
+            .peekable()
         }
     }
 
@@ -40,8 +43,7 @@ pub(super) mod iter {
 
     impl<'b> RevIdxChars<'b> {
         pub fn new(cur: Cur, b: &'b Buffer) -> Peekable<Self> {
-            let idx = cur.as_char_idx(b);
-            let mut inner = b.txt.chars_at(idx);
+            let mut inner = b.txt.chars_at(cur.idx);
 
             // crank the iterator forward one character so that when we iterate backwards the first
             // character we yeild is at the cursor position
@@ -49,7 +51,7 @@ pub(super) mod iter {
 
             RevIdxChars {
                 inner,
-                idx: idx + 1,
+                idx: cur.idx + 1,
             }
             .peekable()
         }
@@ -86,9 +88,10 @@ pub(super) mod iter {
 
     impl<'b> IdxLines<'b> {
         pub fn new(cur: Cur, b: &'b Buffer) -> Peekable<Self> {
-            let inner = b.txt.lines_at(cur.y);
+            let y = b.txt.char_to_line(cur.idx);
+            let inner = b.txt.lines_at(y);
 
-            IdxLines { inner, idx: cur.y }.peekable()
+            IdxLines { inner, idx: y }.peekable()
         }
     }
 
@@ -110,12 +113,13 @@ pub(super) mod iter {
 
     impl<'b> RevIdxLines<'b> {
         pub fn new(cur: Cur, b: &'b Buffer) -> Peekable<Self> {
-            let mut inner = b.txt.lines_at(cur.y);
+            let y = b.txt.char_to_line(cur.idx);
+            let mut inner = b.txt.lines_at(y);
 
             // crank the iterator forward one character so that when we iterate backwards the first
             // line we yeild is at the cursor position
             inner.next();
-            let idx = cur.y + 1;
+            let idx = y + 1;
 
             RevIdxLines { inner, idx }.peekable()
         }

@@ -1,10 +1,7 @@
 //! A transient buffer for handling interactive input from the user without
 //! modifying the current buffer state.
 use crate::{
-    buffer::{
-        dot::{Cur, Dot},
-        Buffer, BufferKind, TextObject,
-    },
+    buffer::{Buffer, BufferKind, TextObject},
     editor::Editor,
     key::{Arrow, Key},
     MINI_BUFFER_HEIGHT,
@@ -73,18 +70,8 @@ impl MiniBuffer {
     fn handle_on_change<F: Fn(&str) -> Option<Vec<String>>>(&mut self, input: &str, on_change: F) {
         if let Some(lines) = (on_change)(input) {
             self.b.txt = Rope::from_str(&lines.join("\n"));
+            self.b.dot.clamp_idx(self.b.txt.len_chars());
         };
-
-        let c = Cur {
-            x: 0,
-            y: if self.b.is_empty() {
-                0
-            } else {
-                min(self.b.len_lines() - 1, self.b.dot.active_cur().y)
-            },
-        };
-
-        self.b.dot = Dot::Cur { c };
     }
 
     pub fn prompt_w_callback<F: Fn(&str) -> Option<Vec<String>>>(
@@ -117,7 +104,7 @@ impl MiniBuffer {
             mb.b.txt = Rope::from_str(&visible_lines.join("\n"));
 
             let n_visible_lines = min(visible_lines.len(), mb.max_height);
-            let Cur { y, .. } = mb.b.dot.active_cur();
+            let (y, _) = mb.b.dot.active_cur().as_yx(&mb.b);
 
             let (selected_line_idx, top, bottom, b) = if n_visible_lines == 0 {
                 (0, 0, 0, None)

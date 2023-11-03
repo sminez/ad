@@ -1,5 +1,4 @@
-use crate::buffer::Cur;
-use std::fmt;
+use crate::buffer::{Buffer, Cur};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -57,17 +56,6 @@ pub(crate) struct Edit {
     pub(super) txt: Txt,
 }
 
-impl fmt::Display for Edit {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let indicator = if self.kind == Kind::Insert { "I" } else { "D" };
-
-        match &self.txt {
-            Txt::Char(c) => write!(f, "{indicator} {} '{}'", self.cur, c),
-            Txt::String(s) => write!(f, "{indicator} {} '{}'", self.cur, s.replace('\n', "\\n")),
-        }
-    }
-}
-
 impl Edit {
     fn into_undo(mut self) -> Self {
         self.kind = match self.kind {
@@ -76,6 +64,16 @@ impl Edit {
         };
 
         self
+    }
+
+    pub fn string_repr(&self, b: &Buffer) -> String {
+        let indicator = if self.kind == Kind::Insert { "I" } else { "D" };
+        let addr = self.cur.as_string_addr(b);
+
+        match &self.txt {
+            Txt::Char(c) => format!("{indicator} {addr} '{}'", c),
+            Txt::String(s) => format!("{indicator} {addr} '{}'", s.replace('\n', "\\n")),
+        }
     }
 
     fn try_combine(&mut self, e: Edit) -> Option<Edit> {
@@ -95,20 +93,18 @@ impl Edit {
         if e.cur == self.cur {
             self.txt.prepend(e.txt);
             None
-        } else if e.cur.y == self.cur.y {
+        } else {
             match &self.txt {
-                Txt::Char(_) if e.cur.x == self.cur.x + 1 => {
+                Txt::Char(_) if e.cur.idx == self.cur.idx + 1 => {
                     self.txt.append(e.txt);
                     None
                 }
-                Txt::String(s) if e.cur.x == self.cur.x + s.len() => {
+                Txt::String(s) if e.cur.idx == self.cur.idx + s.len() => {
                     self.txt.append(e.txt);
                     None
                 }
                 _ => Some(e),
             }
-        } else {
-            Some(e)
         }
     }
 
@@ -116,22 +112,20 @@ impl Edit {
         if e.cur == self.cur {
             self.txt.append(e.txt);
             None
-        } else if e.cur.y == self.cur.y {
+        } else {
             match &e.txt {
-                Txt::Char(_) if e.cur.x + 1 == self.cur.x => {
+                Txt::Char(_) if e.cur.idx + 1 == self.cur.idx => {
                     self.txt.prepend(e.txt);
                     self.cur = e.cur;
                     None
                 }
-                Txt::String(s) if e.cur.x + s.len() == self.cur.x => {
+                Txt::String(s) if e.cur.idx + s.len() == self.cur.idx => {
                     self.txt.prepend(e.txt);
                     self.cur = e.cur;
                     None
                 }
                 _ => Some(e),
             }
-        } else {
-            Some(e)
         }
     }
 }
@@ -148,8 +142,8 @@ pub(crate) struct EditLog {
 }
 
 impl EditLog {
-    pub(crate) fn debug_edits(&self) -> Vec<String> {
-        self.edits.iter().map(|e| e.to_string()).collect()
+    pub(crate) fn debug_edits(&self, b: &Buffer) -> Vec<String> {
+        self.edits.iter().map(|e| e.string_repr(b)).collect()
     }
 
     pub(crate) fn undo(&mut self) -> Option<Edit> {
@@ -236,76 +230,76 @@ pub(crate) mod tests {
     use super::*;
     use simple_test_case::test_case;
 
-    pub(crate) fn in_c(y: usize, x: usize, c: char) -> Edit {
+    pub(crate) fn in_c(idx: usize, c: char) -> Edit {
         Edit {
             kind: Kind::Insert,
-            cur: Cur { y, x },
+            cur: Cur { idx },
             txt: Txt::Char(c),
         }
     }
 
-    pub(crate) fn in_s(y: usize, x: usize, s: &str) -> Edit {
+    pub(crate) fn in_s(idx: usize, s: &str) -> Edit {
         Edit {
             kind: Kind::Insert,
-            cur: Cur { y, x },
+            cur: Cur { idx },
             txt: Txt::String(s.to_string()),
         }
     }
 
-    pub(crate) fn del_c(y: usize, x: usize, c: char) -> Edit {
+    pub(crate) fn del_c(idx: usize, c: char) -> Edit {
         Edit {
             kind: Kind::Delete,
-            cur: Cur { y, x },
+            cur: Cur { idx },
             txt: Txt::Char(c),
         }
     }
 
-    pub(crate) fn del_s(y: usize, x: usize, s: &str) -> Edit {
+    pub(crate) fn del_s(idx: usize, s: &str) -> Edit {
         Edit {
             kind: Kind::Delete,
-            cur: Cur { y, x },
+            cur: Cur { idx },
             txt: Txt::String(s.to_string()),
         }
     }
 
     #[test_case(
-        vec![in_c(0, 0, 'a'), in_c(0, 1, 'b')],
-        &[in_s(0, 0, "ab")];
+        vec![in_c(0, 'a'), in_c(1, 'b')],
+        &[in_s(0, "ab")];
         "run of characters"
     )]
     #[test_case(
-        vec![in_c(0, 0, 'a'), in_c(0, 0, 'b')],
-        &[in_s(0, 0, "ba")];
+        vec![in_c(0, 'a'), in_c(0, 'b')],
+        &[in_s(0, "ba")];
         "run of characters at same cursor"
     )]
     #[test_case(
-        vec![in_c(0, 0, 'a'), in_s(0, 1, "bcd")],
-        &[in_s(0, 0, "abcd")];
+        vec![in_c(0, 'a'), in_s(1, "bcd")],
+        &[in_s(0, "abcd")];
         "char then string"
     )]
     #[test_case(
-        vec![in_c(0, 0, 'a'), in_s(0, 0, "bcd")],
-        &[in_s(0, 0, "bcda")];
+        vec![in_c(0, 'a'), in_s(0, "bcd")],
+        &[in_s(0, "bcda")];
         "char then string at same cursor"
     )]
     #[test_case(
-        vec![in_s(0, 0, "ab"), in_s(0, 2, "cd")],
-        &[in_s(0, 0, "abcd")];
+        vec![in_s(0, "ab"), in_s(2, "cd")],
+        &[in_s(0, "abcd")];
         "run of strings"
     )]
     #[test_case(
-        vec![in_s(0, 0, "ab"), in_s(0, 0, "cd")],
-        &[in_s(0, 0, "cdab")];
+        vec![in_s(0, "ab"), in_s(0, "cd")],
+        &[in_s(0, "cdab")];
         "run of strings at same cursor"
     )]
     #[test_case(
-        vec![in_s(0, 0, "abc"), in_c(0, 3, 'd')],
-        &[in_s(0, 0, "abcd")];
+        vec![in_s(0, "abc"), in_c(3, 'd')],
+        &[in_s(0, "abcd")];
         "string then char"
     )]
     #[test_case(
-        vec![in_s(0, 0, "abc"), in_c(0, 0, 'd')],
-        &[in_s(0, 0, "dabc")];
+        vec![in_s(0, "abc"), in_c(0, 'd')],
+        &[in_s(0, "dabc")];
         "string then char at same cursor"
     )]
     #[test]
@@ -319,43 +313,43 @@ pub(crate) mod tests {
     }
 
     #[test_case(
-        vec![del_c(0, 1, 'b'), del_c(0, 0, 'a')],
-        &[del_s(0, 0, "ab")];
+        vec![del_c(1, 'b'), del_c(0, 'a')],
+        &[del_s(0, "ab")];
         "run of chars"
     )]
     #[test_case(
-        vec![del_c(0, 0, 'a'), del_c(0, 0, 'b')],
-        &[del_s(0, 0, "ab")];
+        vec![del_c(0, 'a'), del_c(0, 'b')],
+        &[del_s(0, "ab")];
         "run of characters at same cursor"
     )]
     #[test_case(
-        vec![del_c(0, 3, 'd'), del_s(0, 0, "abc")],
-        &[del_s(0, 0, "abcd")];
+        vec![del_c(3, 'd'), del_s(0, "abc")],
+        &[del_s(0, "abcd")];
         "char then string"
     )]
     #[test_case(
-        vec![del_c(0, 0, 'a'), del_s(0, 0, "bcd")],
-        &[del_s(0, 0, "abcd")];
+        vec![del_c(0, 'a'), del_s(0, "bcd")],
+        &[del_s(0, "abcd")];
         "char then string at same cursor"
     )]
     #[test_case(
-        vec![del_s(0, 2, "cde"), del_s(0, 0, "ab")],
-        &[del_s(0, 0, "abcde")];
+        vec![del_s(2, "cde"), del_s(0, "ab")],
+        &[del_s(0, "abcde")];
         "run of strings"
     )]
     #[test_case(
-        vec![del_s(0, 0, "abc"), del_s(0, 0, "de")],
-        &[del_s(0, 0, "abcde")];
+        vec![del_s(0, "abc"), del_s(0, "de")],
+        &[del_s(0, "abcde")];
         "run of strings at same cursor"
     )]
     #[test_case(
-        vec![del_s(0, 0, "abc"), del_c(0, 0, 'd')],
-        &[del_s(0, 0, "abcd")];
+        vec![del_s(0, "abc"), del_c(0, 'd')],
+        &[del_s(0, "abcd")];
         "string then char"
     )]
     #[test_case(
-        vec![del_s(0, 0, "abc"), del_c(0, 0, 'd')],
-        &[del_s(0, 0, "abcd")];
+        vec![del_s(0, "abc"), del_c(0, 'd')],
+        &[del_s(0, "abcd")];
         "string then char at same cursor"
     )]
     #[test]

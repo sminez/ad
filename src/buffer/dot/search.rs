@@ -26,14 +26,10 @@ pub trait Matcher {
     fn match_forward_from(&self, cur: Cur, b: &Buffer) -> Option<Dot> {
         match self.try_match(IdxChars::new(cur, b)) {
             Some((start, end)) if start == end => Some(Dot::Cur {
-                c: Cur::from_char_idx(start, b),
+                c: Cur { idx: start },
             }),
             Some((start, end)) => Some(Dot::Range {
-                r: Range::from_cursors(
-                    Cur::from_char_idx(start, b),
-                    Cur::from_char_idx(end, b),
-                    false,
-                ),
+                r: Range::from_cursors(Cur { idx: start }, Cur { idx: end }, false),
             }),
             None => None,
         }
@@ -51,14 +47,10 @@ pub trait Matcher {
     fn match_backward_from(&self, cur: Cur, b: &Buffer) -> Option<Dot> {
         match self.reversed().try_match(RevIdxChars::new(cur, b)) {
             Some((start, end)) if start == end => Some(Dot::Cur {
-                c: Cur::from_char_idx(start, b),
+                c: Cur { idx: start },
             }),
             Some((start, end)) => Some(Dot::Range {
-                r: Range::from_cursors(
-                    Cur::from_char_idx(start, b),
-                    Cur::from_char_idx(end, b),
-                    true,
-                ),
+                r: Range::from_cursors(Cur { idx: start }, Cur { idx: end }, true),
             }),
             None => None,
         }

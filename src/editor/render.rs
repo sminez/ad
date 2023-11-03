@@ -1,6 +1,6 @@
 //! Rendering the user interface
 use crate::{
-    buffer::{Buffer, Cur, MiniBufferState},
+    buffer::{Buffer, MiniBufferState},
     die,
     editor::Editor,
     key::Key,
@@ -53,7 +53,7 @@ impl Editor {
         let (x, y) = if w_minibuffer {
             (cx, cy)
         } else {
-            let Cur { y, .. } = active.dot.active_cur();
+            let (y, _) = active.dot.active_cur().as_yx(active);
             (active.rx - active.col_off + w_sgncol, y - active.row_off)
         };
 
@@ -121,7 +121,7 @@ impl Editor {
             b.len_lines(),
             if b.dirty { "[+]" } else { "" }
         );
-        let rstatus = b.dot.addr();
+        let rstatus = b.dot.addr(b);
         let width = self.screen_cols - lstatus.len();
         buf.push_str(&format!(
             "{}{lstatus}{rstatus:>width$}{}\r\n",

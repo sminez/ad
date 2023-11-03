@@ -172,22 +172,20 @@ impl Buffer {
     }
 
     pub(crate) fn debug_edit_log(&self) -> Vec<String> {
-        self.edit_log.debug_edits().into_iter().collect()
+        self.edit_log.debug_edits(self).into_iter().collect()
     }
 
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
-        let Cur { x, y } = self.dot.active_cur();
+        let (y, x) = self.dot.active_cur().as_yx(self);
         self.rx = self.rx_from_x(y, x);
 
         if y < self.row_off {
-            self.dot.set_active_cur(Cur { y: self.row_off, x });
+            self.dot.set_active_cur(Cur::from_yx(self.row_off, x, self));
         }
 
         if y >= self.row_off + screen_rows {
-            self.dot.set_active_cur(Cur {
-                y: self.row_off + screen_rows - 1,
-                x,
-            });
+            self.dot
+                .set_active_cur(Cur::from_yx(self.row_off + screen_rows - 1, x, self));
         }
 
         if self.rx < self.col_off {
@@ -282,7 +280,7 @@ impl Buffer {
         let mut rline = self.raw_rline_unchecked(y, lpad, screen_cols);
 
         // Apply highlight if included in current Dot
-        if let Some(lr) = self.dot.line_range(y) {
+        if let Some(lr) = self.dot.line_range(y, self) {
             let n_chars = rline.chars().count();
             let (start, end) = match lr {
                 // LineRange is an inclusive range so we need to insert after `end` if its
@@ -314,12 +312,9 @@ impl Buffer {
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
 
         let mut dot = Dot::Cur {
-            c: Cur {
-                y,
-                x: self.x_from_rx(y),
-            },
+            c: Cur::from_yx(y, self.x_from_rx(y), self),
         };
-        dot.clamp_for(self);
+        dot.clamp_idx(self.txt.len_chars());
         self.dot = dot;
     }
 
@@ -329,14 +324,11 @@ impl Buffer {
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
 
         let mut r = self.dot.as_range();
-        let c = Cur {
-            y,
-            x: self.x_from_rx(y),
-        };
+        let c = Cur::from_yx(y, self.x_from_rx(y), self);
         r.set_active_cursor(c);
 
         let mut dot = Dot::Range { r };
-        dot.clamp_for(self);
+        dot.clamp_idx(self.txt.len_chars());
         self.dot = dot;
     }
 
@@ -422,21 +414,21 @@ impl Buffer {
     /// Set dot and clamp to ensure it is within bounds
     fn set_dot(&mut self, t: TextObject, n: usize) {
         let mut dot = t.set_dot_n(self.dot, n, self);
-        dot.clamp_for(self);
+        dot.clamp_idx(self.txt.len_chars());
         self.dot = dot;
     }
 
     /// Extend dot foward and clamp to ensure it is within bounds
     fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
         let mut dot = t.extend_dot_forward_n(self.dot, n, self);
-        dot.clamp_for(self);
+        dot.clamp_idx(self.txt.len_chars());
         self.dot = dot;
     }
 
     /// Extend dot backward and clamp to ensure it is within bounds
     fn extend_dot_backward(&mut self, t: TextObject, n: usize) {
         let mut dot = t.extend_dot_backward_n(self.dot, n, self);
-        dot.clamp_for(self);
+        dot.clamp_idx(self.txt.len_chars());
         self.dot = dot;
     }
 
@@ -475,9 +467,9 @@ impl Buffer {
             (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s).0,
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }).0,
             (Kind::Delete, Txt::String(s)) => {
-                let start_idx = cur.as_char_idx(self);
+                let start_idx = cur.idx;
                 let end_idx = start_idx + s.chars().count() - 1;
-                let end = Cur::from_char_idx(end_idx, self);
+                let end = Cur { idx: end_idx };
                 self.delete_dot(
                     Dot::Range {
                         r: Range::from_cursors(cur, end, true),
@@ -497,12 +489,12 @@ impl Buffer {
             Dot::Range { r } => self.delete_range(r),
         };
 
-        let idx = cur.as_char_idx(self);
+        let idx = cur.idx;
         self.txt.insert_char(idx, ch);
         self.edit_log.insert_char(cur, ch);
         self.dirty = true;
 
-        (Cur::from_char_idx(idx + 1, self), deleted)
+        (Cur { idx: idx + 1 }, deleted)
     }
 
     fn insert_string(&mut self, dot: Dot, s: String) -> (Cur, Option<String>) {
@@ -515,7 +507,7 @@ impl Buffer {
         // a no-op for the content of self.txt) but we support it as inserting
         // an empty string while dot is a range has the same effect as a delete.
         if !s.is_empty() {
-            let idx = cur.as_char_idx(self);
+            let idx = cur.idx;
             self.txt.insert(idx, &s);
             self.edit_log.insert_string(cur, s);
         }
@@ -533,7 +525,7 @@ impl Buffer {
     }
 
     fn delete_cur(&mut self, cur: Cur) -> Cur {
-        let idx = cur.as_char_idx(self);
+        let idx = cur.idx;
         if idx < self.txt.len_chars() {
             let ch = self.txt.char(idx);
             self.txt.remove(idx..(idx + 1));
@@ -545,9 +537,10 @@ impl Buffer {
     }
 
     fn delete_range(&mut self, r: Range) -> (Cur, Option<String>) {
-        let rng = match r.as_inclusive_char_range(self) {
-            Some(rng) => rng,
-            None => return (r.start, None),
+        let rng = if r.start.idx != r.end.idx {
+            r.start.idx..=min(r.end.idx, self.txt.len_chars() - 1)
+        } else {
+            return (r.start, None);
         };
 
         let s = self.txt.slice(rng.clone()).to_string();
@@ -624,10 +617,7 @@ mod tests {
     #[test]
     fn simple_insert_works() {
         let b = simple_initial_buffer();
-        let c = Cur {
-            y: 1,
-            x: LINE_2.len(),
-        };
+        let c = Cur::from_yx(1, LINE_2.len(), &b);
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
@@ -636,7 +626,7 @@ mod tests {
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
-            vec![in_s(0, 0, &format!("{LINE_1}\n")), in_s(1, 0, LINE_2)]
+            vec![in_s(0, &format!("{LINE_1}\n{LINE_2}"))]
         );
     }
 
@@ -645,7 +635,7 @@ mod tests {
         let mut b = simple_initial_buffer();
         b.handle_action(Action::DotSet(TextObject::Line, 1));
         b.handle_action(Action::InsertChar { c: 'x' });
-        let c = Cur { y: 1, x: 1 };
+        let c = Cur::from_yx(1, 1, &b);
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
@@ -655,10 +645,9 @@ mod tests {
         assert_eq!(
             b.edit_log.edits,
             vec![
-                in_s(0, 0, &format!("{LINE_1}\n")),
-                in_s(1, 0, LINE_2),
-                del_s(1, 0, LINE_2),
-                in_c(1, 0, 'x'),
+                in_s(0, &format!("{LINE_1}\n{LINE_2}")),
+                del_s(LINE_1.len() + 1, LINE_2),
+                in_c(LINE_1.len() + 1, 'x'),
             ]
         );
     }
@@ -668,7 +657,7 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, "");
         b.handle_raw_key(Key::Arrow(Arrow::Right));
 
-        let c = Cur { y: 0, x: 0 };
+        let c = Cur { idx: 0 };
         assert_eq!(b.dot, Dot::Cur { c });
     }
 
@@ -676,7 +665,7 @@ mod tests {
     fn delete_in_empty_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "");
         b.handle_action(Action::Delete);
-        let c = Cur { y: 0, x: 0 };
+        let c = Cur { idx: 0 };
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -691,10 +680,7 @@ mod tests {
         b.handle_action(Action::DotSet(TextObject::Arr(Arrow::Left), 1));
         b.handle_action(Action::Delete);
 
-        let c = Cur {
-            y: 1,
-            x: LINE_2.len() - 1,
-        };
+        let c = Cur::from_yx(1, LINE_2.len() - 1, &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -704,9 +690,8 @@ mod tests {
         assert_eq!(
             b.edit_log.edits,
             vec![
-                in_s(0, 0, "This is a test\n"),
-                in_s(1, 0, "involving multiple lines"),
-                del_c(1, 23, 's')
+                in_s(0, &format!("{LINE_1}\n{LINE_2}")),
+                del_c(LINE_1.len() + 24, 's')
             ]
         );
     }
@@ -731,8 +716,8 @@ mod tests {
         assert_eq!(lines, original_lines);
     }
 
-    fn c(y: usize, x: usize) -> Cur {
-        Cur { y, x }
+    fn c(idx: usize) -> Cur {
+        Cur { idx }
     }
 
     #[test]
@@ -740,7 +725,7 @@ mod tests {
         let initial_content = "foo foo foo\n";
         let mut b = Buffer::new_unnamed(0, initial_content);
 
-        b.insert_string(Dot::Cur { c: c(0, 0) }, "bar".to_string());
+        b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string());
         b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
@@ -751,7 +736,7 @@ mod tests {
         let initial_content = "foo foo foo\n";
         let mut b = Buffer::new_unnamed(0, initial_content);
 
-        let r = Range::from_cursors(c(0, 0), c(0, 2), true);
+        let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r });
         b.handle_action(Action::Undo);
 
@@ -763,9 +748,9 @@ mod tests {
         let initial_content = "foo foo foo\n";
         let mut b = Buffer::new_unnamed(0, initial_content);
 
-        let r = Range::from_cursors(c(0, 0), c(0, 2), true);
+        let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r });
-        b.insert_string(Dot::Cur { c: c(0, 0) }, "bar".to_string());
+        b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string());
 
         assert_eq!(b.string_lines(), vec!["bar foo foo", ""]);
 

@@ -1,36 +1,44 @@
 use crate::{buffer::Buffer, key::Arrow};
-use std::{cmp::Ordering, fmt};
+use std::cmp::min;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cur {
-    pub y: usize,
-    pub x: usize,
-}
-
-impl fmt::Display for Cur {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}:{}", self.y + 1, self.x + 1)
-    }
+    pub idx: usize,
 }
 
 impl Cur {
     pub fn buffer_start() -> Self {
-        Cur { y: 0, x: 0 }
+        Cur { idx: 0 }
     }
 
     pub fn buffer_end(b: &Buffer) -> Self {
-        Cur::from_char_idx(b.txt.len_chars(), b)
+        Cur {
+            idx: b.txt.len_chars(),
+        }
     }
 
-    pub(crate) fn as_char_idx(&self, b: &Buffer) -> usize {
-        b.txt.line_to_char(self.y) + self.x
+    pub fn as_string_addr(&self, b: &Buffer) -> String {
+        let (y, x) = self.as_yx(b);
+        format!("{}:{}", y + 1, x + 1)
     }
 
-    pub(crate) fn from_char_idx(idx: usize, b: &Buffer) -> Self {
-        let y = b.txt.char_to_line(idx);
-        let x = idx - b.txt.line_to_char(y);
+    pub(crate) fn as_yx(&self, b: &Buffer) -> (usize, usize) {
+        let y = b.txt.char_to_line(self.idx);
+        let x = self.idx - b.txt.line_to_char(y);
 
-        Self { y, x }
+        (y, x)
+    }
+
+    pub(crate) fn from_yx(y_idx: usize, x_idx: usize, b: &Buffer) -> Self {
+        let line_start = b.txt.line_to_char(y_idx);
+        let mut x_max = b.txt.line(y_idx).len_chars();
+        if y_idx < b.len_lines() - 1 {
+            x_max -= 1;
+        }
+
+        Self {
+            idx: line_start + min(x_idx, x_max),
+        }
     }
 
     pub(super) fn arr_w_count(&self, arr: Arrow, count: usize, b: &Buffer) -> Self {
@@ -40,7 +48,7 @@ impl Cur {
             cur = cur.arr(arr, b);
         }
 
-        cur.clamp_for(b);
+        cur.clamp_idx(b.txt.len_chars());
         cur
     }
 
@@ -49,78 +57,42 @@ impl Cur {
 
         match arr {
             Arrow::Up => {
-                if cur.y != 0 {
-                    cur.y -= 1;
-                    cur.set_x_from_buffer_rx(b);
+                let (mut y, _) = self.as_yx(b);
+                if y != 0 {
+                    y -= 1;
+                    cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
             }
             Arrow::Down => {
-                if !b.is_empty() && cur.y < b.len_lines() - 1 {
-                    cur.y += 1;
-                    cur.set_x_from_buffer_rx(b);
+                let (mut y, _) = self.as_yx(b);
+                if !b.is_empty() && y < b.len_lines() - 1 {
+                    y += 1;
+                    cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
             }
-            Arrow::Left => {
-                if cur.x != 0 {
-                    cur.x -= 1;
-                } else if cur.y > 0 {
-                    // Allow <- to move to the end of the previous line
-                    cur.y -= 1;
-                    cur.x = b.txt.line(cur.y).len_chars().saturating_sub(1);
-                }
-            }
-            Arrow::Right => {
-                if let Some(line) = b.line(cur.y) {
-                    match cur.x.cmp(&line.len_chars().saturating_sub(1)) {
-                        Ordering::Less => cur.x += 1,
-                        Ordering::Equal => {
-                            // Allow -> to move to the start of the next line
-                            cur.y += 1;
-                            cur.x = 0;
-                        }
-                        _ => (),
-                    }
-                }
-            }
+            Arrow::Left => cur.idx = cur.idx.saturating_sub(1),
+            Arrow::Right => cur.idx = min(cur.idx + 1, b.txt.len_chars()),
         }
 
         cur
     }
 
-    pub(super) fn clamp_for(&mut self, b: &Buffer) {
-        let y_max = b.len_lines() - 1;
-        if self.y > y_max {
-            self.y = y_max;
-            self.x = b.txt.line(y_max).len_chars();
-            return;
-        }
-
-        // On the last line we allow focusing the cursor at the index
-        // after the end of the buffer to allow for appending
-        let mut max_x = b.txt.line(self.y).len_chars();
-        if self.y < y_max {
-            max_x = max_x.saturating_sub(1);
-        }
-
-        if self.x > max_x {
-            self.x = max_x;
-        }
-    }
-
-    fn set_x_from_buffer_rx(&mut self, b: &Buffer) {
-        self.x = b.x_from_rx(self.y);
+    pub(super) fn clamp_idx(&mut self, max_idx: usize) {
+        self.idx = min(self.idx, max_idx);
     }
 
     #[must_use]
-    pub(super) fn move_to_line_start(mut self) -> Self {
-        self.x = 0;
+    pub(super) fn move_to_line_start(mut self, b: &Buffer) -> Self {
+        let y = b.txt.char_to_line(self.idx);
+        self.idx = b.txt.line_to_char(y);
         self
     }
 
     #[must_use]
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
-        self.x += b.txt.line(self.y).chars().skip(self.x).count();
-        self.clamp_for(b);
+        let y = b.txt.char_to_line(self.idx);
+
+        self.idx = b.txt.line_to_char(y) + b.txt.line(y).len_chars().saturating_sub(1);
         self
     }
 }
@@ -131,55 +103,42 @@ mod tests {
     use crate::buffer::tests::buffer_from_lines;
 
     #[test]
-    fn clamp_for_focuses_eol() {
+    fn from_yx_focuses_eol() {
         let lines = &["a", "ab", "abc", "abcd"];
         let b = buffer_from_lines(lines);
 
         for (n, s) in lines.iter().enumerate() {
-            let mut c = Cur { y: n, x: 100 };
-            c.clamp_for(&b);
+            let c = Cur::from_yx(n, 100, &b);
 
             // Should be focused on the newline character at the end of the line
             // In the case of the last line we should be focused on the index after
             // the end of the string so that we are appending to the buffer.
-            assert_eq!(c, Cur { y: n, x: s.len() }, "line='{s}'");
+            assert_eq!(c.as_yx(&b), (n, s.len()), "line='{s}'");
         }
-    }
-
-    #[test]
-    fn clamp_past_eof_focuses_eof() {
-        let lines = &["a", "ab", "abc", "abcd"];
-        let b = buffer_from_lines(lines);
-        let mut c = Cur { y: 100, x: 100 };
-
-        c.clamp_for(&b);
-        assert_eq!(c, Cur { y: 3, x: 4 });
     }
 
     #[test]
     fn arr_right_at_eof_focuses_eof() {
         let lines = &["a", "ab", "abc", "abcd"];
         let b = buffer_from_lines(lines);
-        let mut c = Cur { y: 100, x: 100 };
-
-        c.clamp_for(&b);
-        assert_eq!(c, Cur { y: 3, x: 4 });
+        let c = Cur::buffer_end(&b);
+        assert_eq!(c.as_yx(&b), (3, 4));
 
         let final_c = c.arr(Arrow::Right, &b);
-        assert_eq!(final_c, Cur { y: 3, x: 4 });
+        assert_eq!(final_c.as_yx(&b), (3, 4));
     }
 
     #[test]
     fn arr_right_at_last_char_focuses_eof() {
         let lines = &["a", "ab", "abc", "abcd"];
         let b = buffer_from_lines(lines);
-        let mut c = Cur { y: 3, x: 3 };
+        let mut c = Cur::buffer_end(&b);
+        c.idx -= 1;
 
-        c.clamp_for(&b);
-        assert_eq!(c, Cur { y: 3, x: 3 });
+        assert_eq!(c.as_yx(&b), (3, 3));
 
         let mut final_c = c.arr(Arrow::Right, &b);
-        final_c.clamp_for(&b);
-        assert_eq!(final_c, Cur { y: 3, x: 4 });
+        final_c.clamp_idx(b.txt.len_chars());
+        assert_eq!(final_c.as_yx(&b), (3, 4));
     }
 }

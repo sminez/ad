@@ -9,7 +9,7 @@
 //! rendering logic.
 use crate::{buffer::Buffer, key::Arrow};
 use ropey::RopeSlice;
-use std::{fmt, iter::Peekable};
+use std::iter::Peekable;
 
 mod cur;
 mod range;
@@ -43,35 +43,33 @@ impl Default for Dot {
     }
 }
 
-impl fmt::Display for Dot {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cur { c } => write!(f, "{c}"),
-            Self::Range { r } => write!(f, "{r}"),
-        }
-    }
-}
-
 impl Dot {
-    pub fn from_char_indices(from: usize, to: usize, b: &Buffer) -> Self {
+    pub fn from_char_indices(from: usize, to: usize) -> Self {
         Self::Range {
-            r: Range::from_cursors(Cur::from_char_idx(from, b), Cur::from_char_idx(to, b), true),
+            r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, true),
         }
     }
 
     /// The address representation of this dot in the form that is enterable by the user.
     /// Indices are 1-based rather than their internal 0-based representation.
-    pub fn addr(&self) -> String {
-        self.to_string()
+    pub fn addr(&self, b: &Buffer) -> String {
+        match self {
+            Self::Cur { c } => c.as_string_addr(b),
+            Self::Range { r } => r.as_string_addr(b),
+        }
     }
 
     pub fn content(&self, b: &Buffer) -> String {
         match self {
-            Self::Cur { c } => b.txt.line(c.y).slice(c.x..(c.x + 1)).to_string(),
-            Self::Range { r } => match r.as_inclusive_char_range(b) {
-                Some(rng) => b.txt.slice(rng).to_string(),
-                None => String::new(),
-            },
+            Self::Cur { c: Cur { idx } } => b.txt.slice(idx..=idx).to_string(),
+            Self::Range {
+                r:
+                    Range {
+                        start: Cur { idx: from },
+                        end: Cur { idx: to },
+                        ..
+                    },
+            } => b.txt.slice(from..=to).to_string(),
         }
     }
 
@@ -145,10 +143,10 @@ impl Dot {
         }
     }
 
-    pub(crate) fn line_range(&self, y: usize) -> Option<LineRange> {
+    pub(crate) fn line_range(&self, y: usize, b: &Buffer) -> Option<LineRange> {
         match self {
             Dot::Cur { .. } => None,
-            Dot::Range { r } => r.line_range(y),
+            Dot::Range { r } => r.line_range(y, b),
         }
     }
 
@@ -163,12 +161,12 @@ impl Dot {
     }
 
     /// Clamp this dot to be valid for the given Buffer
-    pub(crate) fn clamp_for(&mut self, b: &Buffer) {
+    pub(crate) fn clamp_idx(&mut self, max_idx: usize) {
         match self {
-            Dot::Cur { c } => c.clamp_for(b),
+            Dot::Cur { c } => c.clamp_idx(max_idx),
             Dot::Range { r } => {
-                r.start.clamp_for(b);
-                r.end.clamp_for(b);
+                r.start.clamp_idx(max_idx);
+                r.end.clamp_idx(max_idx);
             }
         }
     }
@@ -276,11 +274,7 @@ pub fn delimited(
     let end = consume_until(until, &mut IdxChars::new(cur, b)).unwrap_or_else(|| b.txt.len_chars());
 
     Dot::Range {
-        r: Range::from_cursors(
-            Cur::from_char_idx(start, b),
-            Cur::from_char_idx(end, b),
-            start_active,
-        ),
+        r: Range::from_cursors(Cur { idx: start }, Cur { idx: end }, start_active),
     }
     .collapse_null_range()
 }
@@ -319,11 +313,11 @@ impl UpdateDot for TextObject {
                 c: dot.active_cur().move_to_line_end(b),
             },
             TextObject::LineStart => Dot::Cur {
-                c: dot.active_cur().move_to_line_start(),
+                c: dot.active_cur().move_to_line_start(b),
             },
 
             TextObject::Line => Dot::Range {
-                r: dot.as_range().extend_to_line_start().extend_to_line_end(b),
+                r: dot.as_range().extend_to_line_start(b).extend_to_line_end(b),
             }
             .collapse_null_range(),
 
@@ -397,12 +391,12 @@ impl UpdateDot for TextObject {
                 (start, new_end)
             }
             (TextObject::LineStart, true) => (
-                start.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
+                start.arr_w_count(Arrow::Down, 1, b).move_to_line_start(b),
                 end,
             ),
             (TextObject::LineStart, false) => (
                 start,
-                end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(),
+                end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(b),
             ),
             (TextObject::Paragraph, true) => (start.to_next_paragraph_end(b), end),
             (TextObject::Paragraph, false) => (start, end.to_next_paragraph_end(b)),
@@ -439,15 +433,15 @@ impl UpdateDot for TextObject {
                 (start, end.arr_w_count(Arrow::Up, 1, b).move_to_line_end(b))
             }
             (TextObject::LineStart, true) => {
-                if start.x == 0 {
+                if start.idx == b.txt.char_to_line(start.idx) {
                     (start.arr_w_count(Arrow::Up, 1, b), end)
                 } else {
-                    start.x = 0;
+                    start.idx = b.txt.char_to_line(start.idx);
                     (start, end)
                 }
             }
             (TextObject::LineStart, false) => {
-                end.x = 0;
+                end.idx = b.txt.char_to_line(end.idx);
                 (start, end)
             }
             (TextObject::Paragraph, true) => (start.to_prev_paragraph_start(b), end),
@@ -482,7 +476,7 @@ impl From<char> for CharKind {
     }
 }
 
-fn next_word_boundary<I>(b: &Buffer, it: &mut Peekable<I>) -> Option<Cur>
+fn next_word_boundary<I>(it: &mut Peekable<I>) -> Option<Cur>
 where
     I: Iterator<Item = (usize, char)>,
 {
@@ -514,7 +508,7 @@ where
     for (j, c) in it {
         let k2 = CharKind::from(c);
         if k2 != k {
-            return Some(Cur::from_char_idx(idx, b));
+            return Some(Cur { idx });
         }
         idx = j;
     }
@@ -526,7 +520,7 @@ fn next_paragraph_boundary<'a, I>(
     cond1: Cond<RopeSlice<'a>>,
     cond2: Cond<RopeSlice<'a>>,
     it: &mut Peekable<I>,
-) -> Option<Cur>
+) -> Option<usize>
 where
     I: Iterator<Item = (usize, RopeSlice<'a>)>,
 {
@@ -537,17 +531,17 @@ where
                 it.next();
                 consume_while(cond2, it);
                 if let Some(y) = consume_while(cond1, it) {
-                    return Some(Cur { y, x: 0 });
+                    return Some(y);
                 }
             } else if let Some(y) = consume_while(cond1, it) {
-                return Some(Cur { y, x: 0 });
+                return Some(y);
             }
         }
 
         (Some(_), Some(_)) => {
             consume_while(cond2, it);
             if let Some(y) = consume_while(cond1, it) {
-                return Some(Cur { y, x: 0 });
+                return Some(y);
             }
         }
 
@@ -565,7 +559,7 @@ impl Cur {
     // "  fn foo(bar: usize) -> anyhow::Result<()>  "
     //     ^   ^^  ^^     ^^  ^      ^ ^     ^   ^ ^
     fn to_next_word_end(self, b: &Buffer) -> Cur {
-        next_word_boundary(b, &mut IdxChars::new(self, b)).unwrap_or_else(|| Cur::buffer_end(b))
+        next_word_boundary(&mut IdxChars::new(self, b)).unwrap_or_else(|| Cur::buffer_end(b))
     }
 
     // The following marks are where we should be moving to on successive
@@ -574,7 +568,7 @@ impl Cur {
     // "  fn foo(bar: usize) -> anyhow::Result<()>  "
     //  ^ ^  ^  ^^  ^ ^    ^ ^  ^     ^ ^     ^
     fn to_prev_word_start(self, b: &Buffer) -> Cur {
-        next_word_boundary(b, &mut RevIdxChars::new(self, b)).unwrap_or_else(Cur::buffer_start)
+        next_word_boundary(&mut RevIdxChars::new(self, b)).unwrap_or_else(Cur::buffer_start)
     }
 
     /// Advance the given cursor to the next "paragraph end".
@@ -583,6 +577,7 @@ impl Cur {
     /// next paragraph start.
     fn to_next_paragraph_end(self, b: &Buffer) -> Cur {
         next_paragraph_boundary(blank_line, non_blank_line, &mut IdxLines::new(self, b))
+            .map(|y| Cur::from_yx(y, 0, b))
             .unwrap_or_else(|| Cur::buffer_end(b))
     }
 
@@ -592,6 +587,7 @@ impl Cur {
     /// first non-blank line of the previous paragraph.
     fn to_prev_paragraph_start(self, b: &Buffer) -> Cur {
         next_paragraph_boundary(non_blank_line, blank_line, &mut RevIdxLines::new(self, b))
+            .map(|y| Cur::from_yx(y, 0, b))
             .unwrap_or_else(Cur::buffer_start)
     }
 }
@@ -613,15 +609,29 @@ is quite short when compared to the first.
 
 The third paragraph is even shorter.";
 
+    fn cur(y: usize, x: usize) -> Cur {
+        let y = if y == 0 {
+            0
+        } else {
+            EXAMPLE_TEXT
+                .lines()
+                .take(y)
+                .map(|line| line.len() + 1)
+                .sum()
+        };
+
+        Cur { idx: y + x }
+    }
+
     fn c(y: usize, x: usize) -> Dot {
-        Dot::Cur { c: Cur { y, x } }
+        Dot::Cur { c: cur(y, x) }
     }
 
     fn r(y: usize, x: usize, y2: usize, x2: usize) -> Dot {
         Dot::Range {
             r: Range {
-                start: Cur { y, x },
-                end: Cur { y: y2, x: x2 },
+                start: cur(y, x),
+                end: cur(y2, x2),
                 start_active: false,
             },
         }
@@ -648,11 +658,8 @@ The third paragraph is even shorter.";
         b.dot = c(5, 1); // Start of paragraph 2
         let dot = to.set_dot(b.dot, &b);
 
+        println!("expected='{}' actual='{}'", expected.addr(&b), dot.addr(&b));
         assert_eq!(dot, expected);
-    }
-
-    fn cur(y: usize, x: usize) -> Cur {
-        Cur { y, x }
     }
 
     #[test_case(cur(4, 0), cur(8, 0); "on paragraph start")]

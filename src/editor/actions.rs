@@ -185,7 +185,7 @@ impl Editor {
         let selection = MiniBuffer::select_from("> ", self.buffers.active().string_lines(), self);
         if let MiniBufferSelection::Line { cy, .. } = selection {
             self.buffers.active_mut().dot = Dot::Cur {
-                c: Cur { y: cy, x: 0 },
+                c: Cur::from_yx(cy, 0, self.buffers.active()),
             };
             self.handle_action(Action::DotSet(TextObject::Line, 1));
         }
@@ -253,10 +253,7 @@ impl Editor {
         let mut buf = Vec::new();
         let fname = self.buffers.active().full_name().to_string();
         match prog.execute(self.buffers.active_mut(), &fname, &mut buf) {
-            Ok((to, from)) => {
-                self.buffers.active_mut().dot =
-                    Dot::from_char_indices(from, to, self.buffers.active_mut())
-            }
+            Ok((to, from)) => self.buffers.active_mut().dot = Dot::from_char_indices(from, to),
             Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
         }
 

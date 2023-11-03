@@ -1,17 +1,10 @@
 use crate::buffer::{dot::Cur, Buffer};
-use std::{cmp::min, fmt, ops::RangeInclusive};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {
     pub start: Cur,
     pub end: Cur,
     pub(super) start_active: bool,
-}
-
-impl fmt::Display for Range {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{},{}", self.start, self.end)
-    }
 }
 
 impl Range {
@@ -31,30 +24,18 @@ impl Range {
         }
     }
 
-    pub(crate) fn as_char_indices(&self, b: &Buffer) -> (usize, usize) {
-        let start = self.start.as_char_idx(b);
-        let end = self.end.as_char_idx(b);
-
-        (start, end)
-    }
-
-    pub(crate) fn as_inclusive_char_range(&self, b: &Buffer) -> Option<RangeInclusive<usize>> {
-        let start = self.start.as_char_idx(b);
-        let end = self.end.as_char_idx(b);
-
-        assert!(start != end, "null range that should have been collapsed");
-
-        if b.is_empty() {
-            None
-        } else {
-            Some(start..=min(end, b.txt.len_chars().saturating_sub(1)))
-        }
+    pub fn as_string_addr(&self, b: &Buffer) -> String {
+        format!(
+            "{},{}",
+            self.start.as_string_addr(b),
+            self.end.as_string_addr(b)
+        )
     }
 
     /// Extends the STARTING cursor to its line start
     #[must_use]
-    pub(super) fn extend_to_line_start(mut self) -> Self {
-        self.start = self.start.move_to_line_start();
+    pub(super) fn extend_to_line_start(mut self, b: &Buffer) -> Self {
+        self.start = self.start.move_to_line_start(b);
         self
     }
 
@@ -92,26 +73,29 @@ impl Range {
         }
     }
 
-    pub(crate) fn line_range(&self, y: usize) -> Option<LineRange> {
-        if y == self.start.y {
-            if self.start.y == self.end.y {
+    pub(crate) fn line_range(&self, y: usize, b: &Buffer) -> Option<LineRange> {
+        let (y_start, x_start) = self.start.as_yx(b);
+        let (y_end, x_end) = self.end.as_yx(b);
+
+        if y == y_start {
+            if y_start == y_end {
                 Some(LineRange::Partial {
-                    y: self.start.y,
-                    start: self.start.x,
-                    end: self.end.x,
+                    y: y_start,
+                    start: x_start,
+                    end: x_end,
                 })
             } else {
                 Some(LineRange::ToEnd {
-                    y: self.start.y,
-                    start: self.start.x,
+                    y: y_start,
+                    start: x_start,
                 })
             }
-        } else if y > self.start.y && y < self.end.y {
+        } else if y > y_start && y < y_end {
             Some(LineRange::Full { y })
-        } else if y == self.end.y {
+        } else if y == y_end {
             Some(LineRange::FromStart {
-                y: self.end.y,
-                end: self.end.x,
+                y: y_end,
+                end: x_end,
             })
         } else {
             None
