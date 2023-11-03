@@ -1,8 +1,12 @@
 :: TODO
 
+- [ ] Refactor Dot logic to use char indices internally
+  - This repr should simplify a lot of the manipulation operations for buffers (the current
+    coordinate repr is only really useful for rendering and user specified buffer navigation)
 - [!] Fix keyboard driven scrolling
   - The decision to not drag the cursor while scrolling with the mouse seems to have
     completely broken auto-scrolling...
+- [!] Horizontal scroll doesn't appear to correctly account for the sign column?
   - The more I look at vim's behaviour around this the more it feels like there isn't
     a "nice" way to handle maintaining the current selection if it scrolls off screen.
 - [ ] implement remaining text objects
@@ -23,11 +27,9 @@
       yet.
 
 -- Structural regular expressions --
-- [ ] Fix Buffer Undo state following use of the new Edit mode
-   >> It looks like the changes are not being correctly stored in the edit log which
-      results in them being played back incorrectly when undoing?
-      Should hopefully be simple enough to get a test set up for reproducing the issue
-      and debugging what's up.
+- [ ] Use the refactored editor Dot type rather than tuples for positions
+- [ ] feature: Piping through a shell command
+- [ ] feature: Replace without output from a shell command
 - [ ] Storing the history of previous edit commands and allowing for cycling through
       them would be helpful (same for Command mode).
 - [ ] Update the current "Command Mode" dummy mode to just take a string for the mode

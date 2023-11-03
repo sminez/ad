@@ -94,12 +94,14 @@ impl Editor {
                     buf.push_str(&banner);
                 }
             } else {
+                // +2 for the leading space and vline chars
+                let padding = w_lnum + 2;
                 buf.push_str(&format!(
                     "{} {:>width$}{VLINE}{}{}",
                     Style::Fg(SGNCOL_FG.into()),
                     file_row + 1,
                     Style::Reset,
-                    b.styled_rline_unchecked(file_row, w_lnum, self.screen_cols, DOT_BG.into()),
+                    b.styled_rline_unchecked(file_row, padding, self.screen_cols, DOT_BG.into()),
                     width = w_lnum
                 ));
             }

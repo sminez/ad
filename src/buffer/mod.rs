@@ -251,26 +251,21 @@ impl Buffer {
     /// This includes tab expansion but not any styling that might be applied,
     /// trailing \r\n or screen clearing escape codes.
     pub(crate) fn raw_rline_unchecked(&self, y: usize, lpad: usize, screen_cols: usize) -> String {
-        // We need to know if there are any leading tab characters that are padding
-        // the screen so we read the full line up to its max end point for the current
-        // window size and then trim off the column offset once we have expanded tabs.
-        let chars_to_check = self.col_off + screen_cols - lpad;
-        let mut rline = String::with_capacity(chars_to_check);
-        let mut it = self.txt.line(y).chars();
+        let max_chars = screen_cols - lpad;
+        let mut rline = Vec::with_capacity(max_chars);
+        let mut it = self.txt.line(y).chars().skip(self.col_off);
 
-        while rline.len() <= chars_to_check {
+        // Iterating over characters not bytes as we need to account for multi-byte utf8
+        while rline.len() <= max_chars {
             match it.next() {
                 Some('\n') | None => break,
-                Some('\t') => rline.push_str(&" ".repeat(TAB_STOP)),
+                Some('\t') => rline.extend([' '; TAB_STOP].iter()),
                 Some(c) => rline.push(c),
             }
         }
 
-        if rline.len() > self.col_off {
-            rline = rline.split_off(self.col_off);
-        }
-
-        rline
+        rline.truncate(max_chars); // noop if max_chars > rline.len()
+        rline.into_iter().collect()
     }
 
     /// The render representation of a given line, truncated to fit within the
