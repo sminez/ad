@@ -108,20 +108,9 @@ impl Editor {
     }
 
     pub(super) fn save_current_buffer(&mut self, fname: Option<String>) {
-        use BufferKind as Bk;
-
-        let p = match (fname, &self.buffers.active().kind) {
-            (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
-            (_, Bk::File(ref p)) => p.clone(),
-            (_, Bk::Unnamed) => match MiniBuffer::prompt("Save As: ", self) {
-                Some(s) => {
-                    let p: PathBuf = s.into();
-                    self.buffers.active_mut().kind = BufferKind::File(p.clone());
-                    p
-                }
-                None => return,
-            },
-            (_, Bk::Virtual(_) | Bk::MiniBuffer) => return,
+        let p = match self.get_buffer_save_path(fname) {
+            Some(p) => p,
+            None => return,
         };
 
         let b = self.buffers.active_mut();
@@ -142,6 +131,43 @@ impl Editor {
         };
 
         self.set_status_message(&msg);
+    }
+
+    fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
+        use BufferKind as Bk;
+
+        let desired_path = match (fname, &self.buffers.active().kind) {
+            // File has a known name which is either where we loaded it from or a
+            // path that has been set and verified from the Some(s) case that follows
+            (None, Bk::File(ref p)) => return Some(p.clone()),
+            // Renaming an existing file or attempting to save a new file created in
+            // the editor: both need verifying
+            (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
+            // Attempting to save without a name so we prompt for one and verify it
+            (None, Bk::Unnamed) => match MiniBuffer::prompt("Save As: ", self) {
+                Some(s) => s.into(),
+                None => return None,
+            },
+            // virtual and minibuffer buffers don't support saving and have no save path
+            (_, Bk::Virtual(_) | Bk::MiniBuffer) => return None,
+        };
+
+        match desired_path.try_exists() {
+            Ok(false) => (),
+            Ok(true) => {
+                if !MiniBuffer::confirm("File already exists", self) {
+                    return None;
+                }
+            }
+            Err(e) => {
+                self.set_status_message(&format!("Unable to check path: {e}"));
+                return None;
+            }
+        }
+
+        self.buffers.active_mut().kind = BufferKind::File(desired_path.clone());
+
+        Some(desired_path)
     }
 
     pub(super) fn set_mode(&mut self, name: &str) {

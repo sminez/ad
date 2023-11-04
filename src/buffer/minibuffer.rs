@@ -175,6 +175,14 @@ impl MiniBuffer {
         }
     }
 
+    /// Append ", continue? [y/n]: " to the prompt and return true if the user enters one of
+    /// y, Y, yes, YES, Yes (otherwise return false)
+    pub fn confirm(prompt: &str, ed: &mut Editor) -> bool {
+        let resp = MiniBuffer::prompt(&format!("{prompt}, continue? [y/n]: "), ed);
+
+        matches!(resp.as_deref(), Some("y" | "Y" | "yes"))
+    }
+
     pub fn select_from(
         prompt: &str,
         initial_lines: Vec<String>,

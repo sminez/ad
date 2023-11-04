@@ -1,6 +1,5 @@
 :: TODO
 
-- [!] When saving a file with a new name we need to check if that file already exists
 - [!] ". x/.*/ ..." seems broken for some reason? Gets stuck in a loop
 - [ ] implement remaining text objects
    >> The implementation for these is yet another way of hunting through the buffer for
