@@ -15,7 +15,7 @@ use super::{
 };
 use crate::buffer::Buffer;
 use ropey::Rope;
-use std::mem::take;
+use std::mem::{swap, take};
 
 /// A regular expression engine designed for use within the ad text editor.
 ///
@@ -190,7 +190,7 @@ impl Regex {
                 }
             }
 
-            (clist, nlist) = (nlist, clist);
+            swap(&mut clist, &mut nlist);
             self.prev = Some(ch);
             self.gen += 1;
 

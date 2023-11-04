@@ -180,12 +180,11 @@ impl Buffer {
         self.rx = self.rx_from_x(y, x);
 
         if y < self.row_off {
-            self.dot.set_active_cur(Cur::from_yx(self.row_off, x, self));
+            self.row_off = y;
         }
 
         if y >= self.row_off + screen_rows {
-            self.dot
-                .set_active_cur(Cur::from_yx(self.row_off + screen_rows - 1, x, self));
+            self.row_off = y - screen_rows + 1;
         }
 
         if self.rx < self.col_off {
@@ -332,11 +331,26 @@ impl Buffer {
         self.dot = dot;
     }
 
-    pub(crate) fn scroll_up(&mut self) {
+    pub(crate) fn scroll_up(&mut self, screen_rows: usize) {
+        let c = self.dot.active_cur();
+        let (y, x) = c.as_yx(self);
+        if self.row_off > 0 && y == self.row_off + screen_rows - 1 {
+            self.dot.set_active_cur(Cur::from_yx(y - 1, x, self));
+        }
+
+        // clamp scroll is called when we render so no need to run it here as well
         self.row_off = self.row_off.saturating_sub(1);
     }
 
     pub(crate) fn scroll_down(&mut self) {
+        let c = self.dot.active_cur();
+        let (y, x) = c.as_yx(self);
+        if y == self.row_off && self.row_off < self.txt.len_lines() - 1 {
+            self.dot.set_active_cur(Cur::from_yx(y + 1, x, self));
+            self.dot.clamp_idx(self.txt.len_chars());
+        }
+
+        // clamp scroll is called when we render so no need to run it here as well
         self.row_off += 1;
     }
 

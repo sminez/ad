@@ -1,11 +1,7 @@
 :: TODO
 
-- [!] Fix keyboard driven scrolling
-  - The decision to not drag the cursor while scrolling with the mouse seems to have
-    completely broken auto-scrolling...
-- [!] Horizontal scroll doesn't appear to correctly account for the sign column?
-  - The more I look at vim's behaviour around this the more it feels like there isn't
-    a "nice" way to handle maintaining the current selection if it scrolls off screen.
+- [!] When saving a file with a new name we need to check if that file already exists
+- [!] ". x/.*/ ..." seems broken for some reason? Gets stuck in a loop
 - [ ] implement remaining text objects
    >> The implementation for these is yet another way of hunting through the buffer for
       a certain position. Now that the regex engine works it might actually be simpler
@@ -27,6 +23,9 @@
 - [ ] Use the refactored editor Dot type rather than tuples for positions
 - [ ] feature: Piping through a shell command
 - [ ] feature: Replace without output from a shell command
+- [ ] Look at running grouped expressions in parallel a-la Sam
+  - This should be doable by pre-computing the match positions and tracking any edit
+    offsets that have built up
 - [ ] Storing the history of previous edit commands and allowing for cycling through
       them would be helpful (same for Command mode).
 - [ ] Update the current "Command Mode" dummy mode to just take a string for the mode

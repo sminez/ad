@@ -208,7 +208,7 @@ impl Editor {
             }
 
             MouseEvent::Press { b: WheelUp, .. } => {
-                self.buffers.active_mut().scroll_up();
+                self.buffers.active_mut().scroll_up(self.screen_rows);
             }
             MouseEvent::Press { b: WheelDown, .. } => {
                 self.buffers.active_mut().scroll_down();
