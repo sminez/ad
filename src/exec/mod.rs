@@ -1,5 +1,6 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
+    buffer::Dot,
     regex::{self, Match},
     util::parse_num,
 };
@@ -47,33 +48,34 @@ pub struct Program {
 
 impl Program {
     /// Execute this program against a given IterableStream
-    pub fn execute<S, W>(
-        &mut self,
-        stream: &mut S,
-        fname: &str,
-        out: &mut W,
-    ) -> Result<(usize, usize), Error>
+    pub fn execute<S, W>(&mut self, stream: &mut S, fname: &str, out: &mut W) -> Result<Dot, Error>
     where
         S: IterableStream,
         W: Write,
     {
-        let (from, to) = match self.initial_dot {
+        let initial_dot = match self.initial_dot {
             InitialDot::Full => stream.map_initial_dot(0, None),
             InitialDot::Start(f) => stream.map_initial_dot(f, None),
             InitialDot::Range(f, t) => stream.map_initial_dot(f, Some(t)),
             InitialDot::Current => stream.current_dot(),
+            InitialDot::Explicit(d) => d,
         };
 
-        let (from, to) = if !self.exprs.is_empty() {
-            let initial = Match::synthetic(from, to);
-            self.step(stream, initial, 0, fname, out)?
-        } else {
-            (from, to)
-        };
+        if self.exprs.is_empty() {
+            return Ok(initial_dot);
+        }
 
+        let (from, to) = initial_dot.as_char_indices();
+        let initial = Match::synthetic(from, to);
+
+        // In the case of running against a lazy stream our initial `to` will be a sential value of
+        // usize::MAX which needs to be clamped to the size of the input. For Buffers and Ropes
+        // where we know that we should already be in bounds this is not required but the overhead
+        // of always doing it is fairly minimal.
+        let (from, to) = self.step(stream, initial, 0, fname, out)?.as_char_indices();
         let ix_max = stream.len_chars().saturating_sub(1);
 
-        Ok((min(from, ix_max), min(to, ix_max)))
+        Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
     }
 
     fn step<S, W>(
@@ -83,7 +85,7 @@ impl Program {
         pc: usize,
         fname: &str,
         out: &mut W,
-    ) -> Result<(usize, usize), Error>
+    ) -> Result<Dot, Error>
     where
         S: IterableStream,
         W: Write,
@@ -92,15 +94,16 @@ impl Program {
 
         match self.exprs[pc].clone() {
             Expr::Group(g) => {
-                let mut res = (from, to);
+                let mut dot = stream.map_initial_dot(from, Some(to));
                 for exprs in g {
                     let mut p = Program {
-                        initial_dot: InitialDot::Range(from, to),
+                        initial_dot: InitialDot::Explicit(dot),
                         exprs: exprs.clone(),
                     };
-                    res = p.step(stream, m, 0, fname, out)?;
+                    dot = p.step(stream, m, 0, fname, out)?;
                 }
-                Ok(res)
+
+                Ok(dot)
             }
 
             Expr::LoopMatches(mut re) => {
@@ -141,7 +144,7 @@ impl Program {
                 if re.matches_iter(&mut stream.iter_between(from, to), from) {
                     self.step(stream, m, pc + 1, fname, out)
                 } else {
-                    Ok((from, to))
+                    Ok(Dot::from_char_indices(from, to))
                 }
             }
 
@@ -149,38 +152,38 @@ impl Program {
                 if !re.matches_iter(&mut stream.iter_between(from, to), from) {
                     self.step(stream, m, pc + 1, fname, out)
                 } else {
-                    Ok((from, to))
+                    Ok(Dot::from_char_indices(from, to))
                 }
             }
 
             Expr::Print(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 writeln!(out, "{s}").expect("to be able to write");
-                Ok((from, to))
+                Ok(Dot::from_char_indices(from, to))
             }
 
             Expr::Insert(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 stream.insert(from, &s);
-                Ok((from, to + s.chars().count()))
+                Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
             Expr::Append(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 stream.insert(to + 1, &s);
-                Ok((from, to + s.chars().count()))
+                Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
             Expr::Change(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
                 stream.remove(from, to);
                 stream.insert(from, &s);
-                Ok((from, from + s.chars().count()))
+                Ok(Dot::from_char_indices(from, from + s.chars().count()))
             }
 
             Expr::Delete => {
                 stream.remove(from, to);
-                Ok((from, from))
+                Ok(Dot::from_char_indices(from, from))
             }
 
             Expr::Sub(mut re, pat) => {
@@ -190,9 +193,12 @@ impl Program {
                         let s = template_match(&pat, m, stream.contents(), fname)?;
                         stream.remove(mfrom, mto);
                         stream.insert(mfrom, &s);
-                        Ok((from, to - (mto - mfrom + 1) + s.chars().count()))
+                        Ok(Dot::from_char_indices(
+                            from,
+                            to - (mto - mfrom + 1) + s.chars().count(),
+                        ))
                     }
-                    None => Ok((from, to)),
+                    None => Ok(Dot::from_char_indices(from, to)),
                 }
             }
         }
@@ -209,7 +215,7 @@ impl Program {
         pc: usize,
         fname: &str,
         out: &mut W,
-    ) -> Result<(usize, usize), Error>
+    ) -> Result<Dot, Error>
     where
         S: IterableStream,
         W: Write,
@@ -221,13 +227,13 @@ impl Program {
             m.apply_offset(offset);
 
             let cur_len = stream.len_chars();
-            (_, from) = self.step(stream, m, pc + 1, fname, out)?;
+            from = self.step(stream, m, pc + 1, fname, out)?.last_cur().idx;
             let new_len = stream.len_chars();
 
             offset += new_len as isize - cur_len as isize;
         }
 
-        Ok((from, to))
+        Ok(Dot::from_char_indices(from, to))
     }
 
     /// Attempt to parse a given program input using a known max dot position
@@ -315,6 +321,7 @@ enum InitialDot {
     Current,
     Start(usize),
     Range(usize, usize),
+    Explicit(Dot),
 }
 
 fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<InitialDot, Error> {
@@ -441,7 +448,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(&r.to_string(), expected);
-        assert_eq!(dot, expected_dot);
+        assert_eq!(dot.as_char_indices(), expected_dot);
     }
 
     #[test_case(", x/(t.)/ c/$1X/", "thXis is a teXst XstrXing"; "x c")]

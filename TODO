@@ -19,7 +19,6 @@
       yet.
 
 -- Structural regular expressions --
-- [ ] Use the refactored editor Dot type rather than tuples for positions
 - [ ] feature: Piping through a shell command
 - [ ] feature: Replace without output from a shell command
 - [ ] Look at running grouped expressions in parallel a-la Sam

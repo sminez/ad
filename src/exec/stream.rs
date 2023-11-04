@@ -21,14 +21,14 @@ pub trait IterableStream {
     fn contents(&self) -> Rope;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize);
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot;
     fn len_chars(&self) -> usize;
 
     /// This only really makes sense for use with a buffer but is supported
     /// so that don't need to special case running programs against an in-editor
     /// buffer vs stdin or a file read from disk.
-    fn current_dot(&self) -> (usize, usize) {
-        (0, 0)
+    fn current_dot(&self) -> Dot {
+        Dot::default()
     }
 }
 
@@ -65,7 +65,7 @@ impl IterableStream for Rope {
         self.remove(from..=to)
     }
 
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot {
         let from = self
             .try_line_to_char(line_from)
             .unwrap_or_else(|_| self.len_chars().saturating_sub(1));
@@ -77,7 +77,7 @@ impl IterableStream for Rope {
             None => self.len_chars().saturating_sub(1),
         };
 
-        (from, to)
+        Dot::from_char_indices(from, to)
     }
 
     fn len_chars(&self) -> usize {
@@ -107,7 +107,7 @@ impl IterableStream for Buffer {
         self.handle_action(Action::Delete);
     }
 
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot {
         let from = self
             .txt
             .try_line_to_char(line_from)
@@ -120,12 +120,11 @@ impl IterableStream for Buffer {
             None => self.txt.len_chars().saturating_sub(1),
         };
 
-        (from, to)
+        Dot::from_char_indices(from, to)
     }
 
-    fn current_dot(&self) -> (usize, usize) {
-        let Range { start, end, .. } = self.dot.as_range();
-        (start.idx, end.idx)
+    fn current_dot(&self) -> Dot {
+        self.dot
     }
 
     fn len_chars(&self) -> usize {
@@ -241,7 +240,7 @@ impl IterableStream for CachedStdin {
         self.r.borrow_mut().remove(from..=to)
     }
 
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> (usize, usize) {
+    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot {
         let n = match line_to {
             Some(n) => n,
             None => line_from,
@@ -261,7 +260,7 @@ impl IterableStream for CachedStdin {
             None => usize::MAX,
         };
 
-        (from, to)
+        Dot::from_char_indices(from, to)
     }
 
     fn len_chars(&self) -> usize {

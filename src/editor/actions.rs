@@ -279,7 +279,7 @@ impl Editor {
         let mut buf = Vec::new();
         let fname = self.buffers.active().full_name().to_string();
         match prog.execute(self.buffers.active_mut(), &fname, &mut buf) {
-            Ok((to, from)) => self.buffers.active_mut().dot = Dot::from_char_indices(from, to),
+            Ok(new_dot) => self.buffers.active_mut().dot = new_dot,
             Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
         }
 

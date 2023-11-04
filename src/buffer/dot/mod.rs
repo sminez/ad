@@ -50,6 +50,20 @@ impl Dot {
         }
     }
 
+    pub fn as_char_indices(&self) -> (usize, usize) {
+        match *self {
+            Self::Cur { c: Cur { idx } } => (idx, idx),
+            Self::Range {
+                r:
+                    Range {
+                        start: Cur { idx: from },
+                        end: Cur { idx: to },
+                        ..
+                    },
+            } => (from, to),
+        }
+    }
+
     /// The address representation of this dot in the form that is enterable by the user.
     /// Indices are 1-based rather than their internal 0-based representation.
     pub fn addr(&self, b: &Buffer) -> String {
@@ -60,17 +74,8 @@ impl Dot {
     }
 
     pub fn content(&self, b: &Buffer) -> String {
-        match self {
-            Self::Cur { c: Cur { idx } } => b.txt.slice(idx..=idx).to_string(),
-            Self::Range {
-                r:
-                    Range {
-                        start: Cur { idx: from },
-                        end: Cur { idx: to },
-                        ..
-                    },
-            } => b.txt.slice(from..=to).to_string(),
-        }
+        let (from, to) = self.as_char_indices();
+        b.txt.slice(from..=to).to_string()
     }
 
     #[inline]
