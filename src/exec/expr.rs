@@ -28,35 +28,29 @@ pub(super) enum ParseOutput {
 
 impl Expr {
     pub(super) fn try_parse(it: &mut Peekable<Chars>) -> Result<ParseOutput, Error> {
+        use Expr::*;
+        use ParseOutput::*;
+
         match it.next() {
-            Some('x') => Ok(ParseOutput::Single(Expr::LoopMatches(
-                parse_delimited_regex(it, "x")?,
-            ))),
-            Some('y') => Ok(ParseOutput::Single(Expr::LoopBetweenMatches(
-                parse_delimited_regex(it, "y")?,
-            ))),
-            Some('g') => Ok(ParseOutput::Single(Expr::IfContains(
-                parse_delimited_regex(it, "g")?,
-            ))),
-            Some('v') => Ok(ParseOutput::Single(Expr::IfNotContains(
-                parse_delimited_regex(it, "v")?,
-            ))),
-            Some('i') => Ok(ParseOutput::Single(Expr::Insert(parse_delimited_str(
-                it, "i",
-            )?))),
-            Some('a') => Ok(ParseOutput::Single(Expr::Append(parse_delimited_str(
-                it, "a",
-            )?))),
-            Some('c') => Ok(ParseOutput::Single(Expr::Change(parse_delimited_str(
-                it, "c",
-            )?))),
+            Some('x') => Ok(Single(LoopMatches(parse_delimited_regex(it, "x")?))),
+            Some('X') => Ok(Single(LoopMatches(Regex::compile(".*")?))),
+
+            Some('y') => Ok(Single(LoopBetweenMatches(parse_delimited_regex(it, "y")?))),
+            Some('Y') => Ok(Single(LoopBetweenMatches(Regex::compile(".*")?))),
+
+            Some('g') => Ok(Single(IfContains(parse_delimited_regex(it, "g")?))),
+            Some('v') => Ok(Single(IfNotContains(parse_delimited_regex(it, "v")?))),
+
+            Some('i') => Ok(Single(Insert(parse_delimited_str(it, "i")?))),
+            Some('a') => Ok(Single(Append(parse_delimited_str(it, "a")?))),
+            Some('c') => Ok(Single(Change(parse_delimited_str(it, "c")?))),
             Some('s') => parse_sub(it),
-            Some('p') => Ok(ParseOutput::Single(Expr::Print(parse_delimited_str(
-                it, "p",
-            )?))),
-            Some('P') => Ok(ParseOutput::Single(Expr::Print("$0".to_string()))),
-            Some('d') => Ok(ParseOutput::Single(Expr::Delete)),
-            Some('{') => Ok(ParseOutput::Single(Expr::Group(parse_group(it)?))),
+            Some('d') => Ok(Single(Delete)),
+
+            Some('p') => Ok(Single(Print(parse_delimited_str(it, "p")?))),
+            Some('P') => Ok(Single(Print("$0".to_string()))),
+
+            Some('{') => Ok(Single(Group(parse_group(it)?))),
 
             // Comments run until the end of the current line
             Some('#') => loop {

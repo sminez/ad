@@ -21,7 +21,7 @@ mod minibuffer;
 use edit::{Edit, EditLog, Kind, Txt};
 
 pub(crate) use buffers::Buffers;
-pub(crate) use dot::{Cur, Dot, LineRange, Matcher, Range, TextObject, UpdateDot};
+pub(crate) use dot::{parse_dot, Cur, Dot, LineRange, Matcher, Range, TextObject, UpdateDot};
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
@@ -482,7 +482,7 @@ impl Buffer {
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }).0,
             (Kind::Delete, Txt::String(s)) => {
                 let start_idx = cur.idx;
-                let end_idx = start_idx + s.chars().count() - 1;
+                let end_idx = start_idx + s.chars().count();
                 let end = Cur { idx: end_idx };
                 self.delete_dot(
                     Dot::Range {
@@ -552,7 +552,7 @@ impl Buffer {
 
     fn delete_range(&mut self, r: Range) -> (Cur, Option<String>) {
         let rng = if r.start.idx != r.end.idx {
-            r.start.idx..=min(r.end.idx, self.txt.len_chars() - 1)
+            r.start.idx..min(r.end.idx, self.txt.len_chars())
         } else {
             return (r.start, None);
         };
@@ -762,7 +762,7 @@ mod tests {
         let initial_content = "foo foo foo\n";
         let mut b = Buffer::new_unnamed(0, initial_content);
 
-        let r = Range::from_cursors(c(0), c(2), true);
+        let r = Range::from_cursors(c(0), c(3), true);
         b.delete_dot(Dot::Range { r });
         b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string());
 

@@ -12,11 +12,13 @@ use ropey::RopeSlice;
 use std::iter::Peekable;
 
 mod cur;
+pub(crate) mod parse;
 mod range;
 mod search;
 mod util;
 
 pub(crate) use cur::Cur;
+pub(crate) use parse as parse_dot;
 pub(crate) use range::{LineRange, Range};
 pub(crate) use search::Matcher;
 
@@ -46,13 +48,13 @@ impl Default for Dot {
 impl Dot {
     pub fn from_char_indices(from: usize, to: usize) -> Self {
         Self::Range {
-            r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, true),
+            r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, false),
         }
     }
 
     pub fn as_char_indices(&self) -> (usize, usize) {
         match *self {
-            Self::Cur { c: Cur { idx } } => (idx, idx),
+            Self::Cur { c: Cur { idx } } => (idx, idx + 1),
             Self::Range {
                 r:
                     Range {
@@ -75,7 +77,7 @@ impl Dot {
 
     pub fn content(&self, b: &Buffer) -> String {
         let (from, to) = self.as_char_indices();
-        b.txt.slice(from..=to).to_string()
+        b.txt.slice(from..to).to_string()
     }
 
     #[inline]
@@ -654,8 +656,8 @@ The third paragraph is even shorter.";
     #[test_case(BufferStart, c(0, 0); "buffer start")]
     #[test_case(BufferEnd, c(9, 36); "buffer end")]
     #[test_case(Character, c(5, 2); "character")]
-    #[test_case(Line, r(5, 0, 5, 43); "line")]
-    #[test_case(LineEnd, c(5, 43); "line end")]
+    #[test_case(Line, r(5, 0, 5, 44); "line")]
+    #[test_case(LineEnd, c(5, 44); "line end")]
     #[test_case(LineStart, c(5, 0); "line start")]
     #[test]
     fn set_dot_works(to: TextObject, expected: Dot) {
@@ -663,7 +665,6 @@ The third paragraph is even shorter.";
         b.dot = c(5, 1); // Start of paragraph 2
         let dot = to.set_dot(b.dot, &b);
 
-        println!("expected='{}' actual='{}'", expected.addr(&b), dot.addr(&b));
         assert_eq!(dot, expected);
     }
 

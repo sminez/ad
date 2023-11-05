@@ -33,26 +33,29 @@ impl Match {
 
     pub fn str_match_text(&self, s: &str) -> String {
         let (a, b) = self.loc();
-        s.chars().skip(a).take(b - a + 1).collect()
+        s.chars().skip(a).take(b - a).collect()
     }
 
     pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
         let (a, b) = self.sub_loc(n)?;
-        Some(s.chars().skip(a).take(b - a + 1).collect())
+        Some(s.chars().skip(a).take(b - a).collect())
     }
 
     pub fn rope_match_text<'a>(&self, r: &'a Rope) -> RopeSlice<'a> {
         let (a, b) = self.loc();
-        r.slice(a..=b)
+        r.slice(a..b)
     }
 
     pub fn rope_submatch_text<'a>(&self, n: usize, r: &'a Rope) -> Option<RopeSlice<'a>> {
         let (a, b) = self.sub_loc(n)?;
-        Some(r.slice(a..=b))
+        Some(r.slice(a..b))
     }
 
     pub fn loc(&self) -> (usize, usize) {
-        (self.sub_matches[0], self.sub_matches[1])
+        let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
+
+        assert!(start <= end, "invalid match: {start} > {end}");
+        (start, end)
     }
 
     pub fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
@@ -64,6 +67,7 @@ impl Match {
             return None;
         }
 
+        assert!(start <= end, "invalid match: {start} > {end}");
         Some((start, end))
     }
 }
@@ -77,7 +81,10 @@ impl<'a> IndexedChars for &'a str {
     type I = Skip<Enumerate<Chars<'a>>>;
 
     fn iter_from(&self, from: usize) -> Option<Self::I> {
-        if from >= self.len() {
+        // This is not at all efficient but we only really make use of strings in test cases where
+        // the length of the string is small. For the "real" impls using Ropes, checking the number
+        // of chars in the rope is O(1).
+        if from >= self.chars().count() {
             None
         } else {
             Some(self.chars().enumerate().skip(from))

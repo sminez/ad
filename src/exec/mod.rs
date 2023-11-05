@@ -1,8 +1,10 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
-    buffer::Dot,
+    buffer::{
+        parse_dot::{DotExpression, ParseError},
+        Dot,
+    },
     regex::{self, Match},
-    util::parse_num,
 };
 use ropey::Rope;
 use std::{cmp::min, io::Write, iter::Peekable, str::Chars};
@@ -42,7 +44,7 @@ impl From<regex::Error> for Error {
 /// A parsed and compiled program that can be executed against an input
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    initial_dot: InitialDot,
+    initial_dot: DotExpression,
     exprs: Vec<Expr>,
 }
 
@@ -53,13 +55,7 @@ impl Program {
         S: IterableStream,
         W: Write,
     {
-        let initial_dot = match self.initial_dot {
-            InitialDot::Full => stream.map_initial_dot(0, None),
-            InitialDot::Start(f) => stream.map_initial_dot(f, None),
-            InitialDot::Range(f, t) => stream.map_initial_dot(f, Some(t)),
-            InitialDot::Current => stream.current_dot(),
-            InitialDot::Explicit(d) => d,
-        };
+        let initial_dot = stream.map_dot_expr(&mut self.initial_dot);
 
         if self.exprs.is_empty() {
             return Ok(initial_dot);
@@ -73,7 +69,7 @@ impl Program {
         // where we know that we should already be in bounds this is not required but the overhead
         // of always doing it is fairly minimal.
         let (from, to) = self.step(stream, initial, 0, fname, out)?.as_char_indices();
-        let ix_max = stream.len_chars().saturating_sub(1);
+        let ix_max = stream.len_chars();
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
     }
@@ -94,10 +90,10 @@ impl Program {
 
         match self.exprs[pc].clone() {
             Expr::Group(g) => {
-                let mut dot = stream.map_initial_dot(from, Some(to));
+                let mut dot = Dot::from_char_indices(from, to);
                 for exprs in g {
                     let mut p = Program {
-                        initial_dot: InitialDot::Explicit(dot),
+                        initial_dot: DotExpression::Explicit(dot),
                         exprs: exprs.clone(),
                     };
                     dot = p.step(stream, m, 0, fname, out)?;
@@ -108,12 +104,31 @@ impl Program {
 
             Expr::LoopMatches(mut re) => {
                 let mut initial_matches = Vec::new();
+                println!("initial matches for pc={pc} (from={from} to={to}):");
                 while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
+                    println!("from={from} to={to} loc={:?}", m.loc());
                     initial_matches.push(m);
-                    from = m.loc().1 + 1;
-                    if from > to {
+
+                    // It's possible for the Regex we're using to match a 0-length string which
+                    // would cause us to get stuck trying to advance to the next match position.
+                    // If this happens we advance from by a character to ensure that we search
+                    // further in the input.
+                    let mut new_from = m.loc().1;
+                    if new_from == from {
+                        new_from += 1;
+                    }
+                    from = new_from;
+
+                    if from >= to {
                         break;
                     }
+                    println!("new_from={from} to={to}");
+                }
+
+                let r = stream.contents();
+                println!("n_matches={}", initial_matches.len());
+                for m in initial_matches.iter() {
+                    println!("{:?} -> '{}'", m.loc(), m.rope_match_text(&r));
                 }
 
                 self.apply_matches(initial_matches, stream, m, pc, fname, out)
@@ -125,9 +140,9 @@ impl Program {
                 while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
                     let (new_from, new_to) = m.loc();
                     if from < new_from {
-                        initial_matches.push(Match::synthetic(from, new_from - 1));
+                        initial_matches.push(Match::synthetic(from, new_from));
                     }
-                    from = new_to + 1;
+                    from = new_to;
                     if from > to {
                         break;
                     }
@@ -170,7 +185,7 @@ impl Program {
 
             Expr::Append(pat) => {
                 let s = template_match(&pat, m, stream.contents(), fname)?;
-                stream.insert(to + 1, &s);
+                stream.insert(to, &s);
                 Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
@@ -195,7 +210,7 @@ impl Program {
                         stream.insert(mfrom, &s);
                         Ok(Dot::from_char_indices(
                             from,
-                            to - (mto - mfrom + 1) + s.chars().count(),
+                            to - (mto - mfrom) + s.chars().count(),
                         ))
                     }
                     None => Ok(Dot::from_char_indices(from, to)),
@@ -233,7 +248,10 @@ impl Program {
             offset += new_len as isize - cur_len as isize;
         }
 
-        Ok(Dot::from_char_indices(from, to))
+        Ok(Dot::from_char_indices(
+            from,
+            (to as isize + offset) as usize,
+        ))
     }
 
     /// Attempt to parse a given program input using a known max dot position
@@ -245,7 +263,19 @@ impl Program {
             return Err(Error::EmptyProgram);
         }
 
-        let initial_dot = parse_initial_dot(&mut it)?;
+        let initial_dot = match DotExpression::parse(&mut it) {
+            Ok(dot_expr) => dot_expr,
+            // If the start of input is not a dot expression we default to Full and
+            // attempt to parse the rest of the program
+            Err(ParseError::NotADotExpression) => DotExpression::full(),
+            // All other errors are parse errors for us
+            Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
+            Err(ParseError::UnclosedDelimiter) => {
+                return Err(Error::UnclosedDelimiter("dot expr regex", '/'))
+            }
+            Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
+        };
+
         consume_whitespace(&mut it);
 
         loop {
@@ -315,50 +345,6 @@ fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
     Ok(())
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum InitialDot {
-    Full,
-    Current,
-    Start(usize),
-    Range(usize, usize),
-    Explicit(Dot),
-}
-
-fn parse_initial_dot(it: &mut Peekable<Chars>) -> Result<InitialDot, Error> {
-    match it.peek() {
-        Some(',') => {
-            it.next();
-            Ok(InitialDot::Full)
-        }
-
-        Some('.') => {
-            it.next();
-            Ok(InitialDot::Current)
-        }
-
-        // n,m | n,
-        Some(&c) if c.is_ascii_digit() => {
-            it.next();
-            let n = parse_num(c, it);
-            match it.next() {
-                Some(',') => match it.next() {
-                    Some(c) if c.is_ascii_digit() => {
-                        let m = parse_num(c, it);
-                        Ok(InitialDot::Range(n, m))
-                    }
-                    Some(' ') | None => Ok(InitialDot::Start(n)),
-                    Some(ch) => Err(Error::UnexpectedCharacter(ch)),
-                },
-                Some(ch) => Err(Error::UnexpectedCharacter(ch)),
-                None => Err(Error::Eof),
-            }
-        }
-
-        // Allow omitting the initial dot
-        _ => Ok(InitialDot::Full),
-    }
-}
-
 // FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
 // then we end up attempting to template THAT in a later iteration of the loop.
 fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Error> {
@@ -397,17 +383,6 @@ mod tests {
         Regex::compile(s).unwrap()
     }
 
-    #[test_case(",", InitialDot::Full; "full")]
-    #[test_case("5,", InitialDot::Start(5); "from n")]
-    #[test_case("50,", InitialDot::Start(50); "from n multi digit")]
-    #[test_case("5,9", InitialDot::Range(5, 9); "from n to m")]
-    #[test_case("25,90", InitialDot::Range(25, 90); "from n to m multi digit")]
-    #[test]
-    fn parse_initial_dot_works(s: &str, expected: InitialDot) {
-        let dot = parse_initial_dot(&mut s.chars().peekable()).expect("valid input");
-        assert_eq!(dot, expected);
-    }
-
     #[test_case(", p/$0/", vec![Print("$0".to_string())]; "print all")]
     #[test_case(", x/^.*$/ s/foo/bar/", vec![LoopMatches(re("^.*$")), Sub(re("foo"), "bar".to_string())]; "simple loop")]
     #[test_case(", x/^.*$/ g/emacs/ d", vec![LoopMatches(re("^.*$")), IfContains(re("emacs")), Delete]; "loop filter")]
@@ -417,7 +392,7 @@ mod tests {
         assert_eq!(
             p,
             Program {
-                initial_dot: InitialDot::Full,
+                initial_dot: DotExpression::full(),
                 exprs: expected
             }
         );
@@ -431,20 +406,22 @@ mod tests {
         assert_eq!(res, Err(expected));
     }
 
-    #[test_case(Insert("X".to_string()), "Xfoo foo foo", (0, 11); "insert")]
-    #[test_case(Append("X".to_string()), "foo foo fooX", (0, 11); "append")]
+    #[test_case(Insert("X".to_string()), "Xfoo foo foo", (0, 12); "insert")]
+    #[test_case(Append("X".to_string()), "foo foo fooX", (0, 12); "append")]
     #[test_case(Change("X".to_string()), "X", (0, 1); "change")]
     #[test_case(Delete, "", (0, 0); "delete")]
-    #[test_case(Sub(re("oo"), "X".to_string()), "fX foo foo", (0, 9); "sub single")]
+    #[test_case(Sub(re("oo"), "X".to_string()), "fX foo foo", (0, 10); "sub single")]
+    #[test_case(LoopMatches(re("foo")), "  ", (2, 2); "loop delete")]
+    #[test_case(LoopBetweenMatches(re("foo")), "foofoofoo", (6, 9); "loop between delete")]
     #[test]
     fn step_works(expr: Expr, expected: &str, expected_dot: (usize, usize)) {
         let mut prog = Program {
-            initial_dot: InitialDot::Full,
-            exprs: vec![expr],
+            initial_dot: DotExpression::full(),
+            exprs: vec![expr, Delete],
         };
         let mut r = Rope::from_str("foo foo foo");
         let dot = prog
-            .step(&mut r, Match::synthetic(0, 10), 0, "test", &mut vec![])
+            .step(&mut r, Match::synthetic(0, 11), 0, "test", &mut vec![])
             .unwrap();
 
         assert_eq!(&r.to_string(), expected);
@@ -463,12 +440,13 @@ mod tests {
         assert_eq!(&r.to_string(), expected);
     }
 
+    #[test_case("/oo.fo/ d", "fo│foo"; "regex dot delete")]
+    #[test_case("/oo/,/oo/ d", "f│foo"; "regex dot range delete")]
     #[test_case(", x/foo/ p/$0/", "foo│foo│foo"; "x print")]
     #[test_case(", x/foo/ i/X/", "Xfoo│Xfoo│Xfoo"; "x insert")]
     #[test_case(", x/foo/ a/X/", "fooX│fooX│fooX"; "x append")]
     #[test_case(", x/foo/ c/X/", "X│X│X"; "x change")]
     #[test_case(", x/foo/ s/o/X/", "fXo│fXo│fXo"; "x substitute")]
-    #[test_case(", x/foo/ s/o/X/g", "fXX│fXX│fXX"; "x substitute all")]
     #[test_case(", y/foo/ p/>$0</", "foo│foo│foo"; "y print")]
     #[test_case(", y/foo/ i/X/", "fooX│fooX│foo"; "y insert")]
     #[test_case(", y/foo/ a/X/", "foo│Xfoo│Xfoo"; "y append")]
@@ -477,8 +455,9 @@ mod tests {
     #[test_case(", s/\\w+/X/", "X│foo│foo"; "sub word single")]
     #[test_case(", s/oo/X/g", "fX│fX│fX"; "sub all")]
     #[test_case(", s/.*/X/g", "X"; "sub all dot star")]
-    #[test_case(", x/oo/ s/.*/X/g", "fX│fX│fX"; "x sub all dot star")]
     #[test_case(", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
+    #[test_case(", x/foo/ s/o/X/g", "fXX│fXX│fXX"; "nested loop x substitute all")]
+    #[test_case(", x/oo/ s/.*/X/g", "fX│fX│fX"; "nested loop x sub all dot star")]
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
@@ -490,6 +469,26 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, "foo│foo│foo");
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         assert_eq!(&b.txt.to_string(), expected, "buffer");
+    }
+
+    #[test]
+    fn multiline_file_dot_star_works() {
+        let mut prog = Program::try_parse(", x/.*/ c/foo/").unwrap();
+
+        let mut r = Rope::from_str("this is\na multiline\nfile");
+        prog.execute(&mut r, "test", &mut vec![]).unwrap();
+
+        // '.*' will match the null string at the end of lines containing a newline as well
+        assert_eq!(&r.to_string(), "foofoo\nfoofoo\nfoo");
+    }
+
+    #[test]
+    fn multiline_file_dot_plus_works() {
+        let mut prog = Program::try_parse(", x/.+/ c/foo/").unwrap();
+
+        let mut r = Rope::from_str("this is\na multiline\nfile");
+        prog.execute(&mut r, "test", &mut vec![]).unwrap();
+        assert_eq!(&r.to_string(), "foo\nfoo\nfoo");
     }
 
     #[test_case(", d"; "delete buffer")]

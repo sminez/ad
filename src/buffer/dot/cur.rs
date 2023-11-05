@@ -92,7 +92,7 @@ impl Cur {
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         let y = b.txt.char_to_line(self.idx);
 
-        self.idx = b.txt.line_to_char(y) + b.txt.line(y).len_chars().saturating_sub(1);
+        self.idx = b.txt.line_to_char(y) + b.txt.line(y).len_chars();
         self
     }
 }

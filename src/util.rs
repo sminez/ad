@@ -130,9 +130,9 @@ impl<'a> Iterator for IdxRopeChars<'a> {
     type Item = (usize, char);
 
     fn next(&mut self) -> Option<Self::Item> {
-        // self.from == self.to is the last character so
+        // self.from == self.to - 1 is the last character so
         // we catch end of iteration on the subsequent call
-        if self.from > self.to {
+        if self.from >= self.to {
             None
         } else {
             self.inner.next().map(|c| {

@@ -1,7 +1,10 @@
 //! An abstraction over a rope so that we can cache streaming input and apply edits
 //! on the fly as needed.
 use crate::{
-    buffer::{Buffer, Cur, Dot, Range},
+    buffer::{
+        parse_dot::{CompoundAddr, DotExpression, SimpleAddr},
+        Buffer, Cur, Dot, Range,
+    },
     editor::Action,
     util::IdxRopeChars,
 };
@@ -21,7 +24,6 @@ pub trait IterableStream {
     fn contents(&self) -> Rope;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot;
     fn len_chars(&self) -> usize;
 
     /// This only really makes sense for use with a buffer but is supported
@@ -29,6 +31,64 @@ pub trait IterableStream {
     /// buffer vs stdin or a file read from disk.
     fn current_dot(&self) -> Dot {
         Dot::default()
+    }
+
+    fn map_from_to(&self, line_from: usize, line_to: Option<usize>) -> Dot;
+    fn line_to_char(&self, line_idx: usize) -> Option<usize>;
+
+    fn map_simple_addr(&self, addr: &mut SimpleAddr, cur_dot: Dot) -> Dot {
+        use SimpleAddr::*;
+
+        match addr {
+            Current => cur_dot,
+            Bof => Dot::Cur { c: Cur { idx: 0 } },
+            Eof => Dot::Cur {
+                c: Cur {
+                    idx: self.len_chars(),
+                },
+            },
+            Line(line) => self.map_from_to(*line, Some(*line)),
+
+            LineAndColumn(line, col) => match self.line_to_char(*line) {
+                Some(idx) => Dot::Cur {
+                    c: Cur { idx: idx + *col },
+                },
+                None => Dot::from_char_indices(0, 0),
+            },
+
+            Regex(re) => {
+                let from = cur_dot.last_cur().idx;
+                let to = self.len_chars();
+
+                match re.match_iter(&mut self.iter_between(from, to), from) {
+                    Some(m) => {
+                        let (from, to) = m.loc();
+                        Dot::from_char_indices(from, to)
+                    }
+                    None => Dot::from_char_indices(0, 0),
+                }
+            }
+        }
+    }
+
+    fn map_inclusive_range(&self, from: &mut SimpleAddr, to: &mut SimpleAddr) -> Dot {
+        let d = self.map_simple_addr(from, self.current_dot());
+        let c1 = d.first_cur();
+        let c2 = self.map_simple_addr(to, d).last_cur();
+
+        Dot::Range {
+            r: Range::from_cursors(c1, c2, false),
+        }
+    }
+
+    fn map_dot_expr(&self, d: &mut DotExpression) -> Dot {
+        match d {
+            DotExpression::Explicit(d) => *d,
+            DotExpression::Simple(addr) => self.map_simple_addr(addr, self.current_dot()),
+            DotExpression::Compound(CompoundAddr::InclusiveRange(from, to)) => {
+                self.map_inclusive_range(from, to)
+            }
+        }
     }
 }
 
@@ -62,22 +122,26 @@ impl IterableStream for Rope {
     }
 
     fn remove(&mut self, from: usize, to: usize) {
-        self.remove(from..=to)
+        self.remove(from..to)
     }
 
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot {
+    fn map_from_to(&self, line_from: usize, line_to: Option<usize>) -> Dot {
         let from = self
             .try_line_to_char(line_from)
-            .unwrap_or_else(|_| self.len_chars().saturating_sub(1));
+            .unwrap_or_else(|_| self.len_chars());
         let to = match line_to {
             Some(n) => match self.try_line_to_char(n) {
-                Ok(ix) => ix + self.line(n).len_chars().saturating_sub(1),
-                Err(_) => self.len_chars().saturating_sub(1),
+                Ok(ix) => ix + self.line(n).len_chars(),
+                Err(_) => self.len_chars(),
             },
-            None => self.len_chars().saturating_sub(1),
+            None => self.len_chars(),
         };
 
         Dot::from_char_indices(from, to)
+    }
+
+    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+        self.try_line_to_char(line_idx).ok()
     }
 
     fn len_chars(&self) -> usize {
@@ -107,20 +171,24 @@ impl IterableStream for Buffer {
         self.handle_action(Action::Delete);
     }
 
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot {
+    fn map_from_to(&self, line_from: usize, line_to: Option<usize>) -> Dot {
         let from = self
             .txt
             .try_line_to_char(line_from)
-            .unwrap_or_else(|_| self.txt.len_chars().saturating_sub(1));
+            .unwrap_or_else(|_| self.txt.len_chars());
         let to = match line_to {
             Some(n) => match self.txt.try_line_to_char(n) {
-                Ok(ix) => ix + self.txt.line(n).len_chars().saturating_sub(1),
-                Err(_) => self.txt.len_chars().saturating_sub(1),
+                Ok(ix) => ix + self.txt.line(n).len_chars(),
+                Err(_) => self.txt.len_chars(),
             },
-            None => self.txt.len_chars().saturating_sub(1),
+            None => self.txt.len_chars(),
         };
 
         Dot::from_char_indices(from, to)
+    }
+
+    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+        self.txt.try_line_to_char(line_idx).ok()
     }
 
     fn current_dot(&self) -> Dot {
@@ -195,9 +263,9 @@ impl<'a> Iterator for CachedStdinIter<'a> {
     type Item = (usize, char);
 
     fn next(&mut self) -> Option<Self::Item> {
-        // self.from == self.to is the last character so
+        // self.from == self.to - 1 is the last character so
         // we catch end of iteration on the subsequent call
-        if self.from > self.to {
+        if self.from >= self.to {
             return None;
         }
 
@@ -237,19 +305,22 @@ impl IterableStream for CachedStdin {
     }
 
     fn remove(&mut self, from: usize, to: usize) {
-        self.r.borrow_mut().remove(from..=to)
+        self.r.borrow_mut().remove(from..to)
     }
 
-    fn map_initial_dot(&self, line_from: usize, line_to: Option<usize>) -> Dot {
+    fn map_from_to(&self, line_from: usize, line_to: Option<usize>) -> Dot {
         let n = match line_to {
             Some(n) => n,
             None => line_from,
         };
 
-        for _ in 0..=n {
-            self.try_read_next_line();
-            if self.is_closed() {
-                break;
+        let cur_len = self.contents().len_lines();
+        if n > cur_len {
+            for _ in cur_len..=n {
+                self.try_read_next_line();
+                if self.is_closed() {
+                    break;
+                }
             }
         }
 
@@ -261,6 +332,20 @@ impl IterableStream for CachedStdin {
         };
 
         Dot::from_char_indices(from, to)
+    }
+
+    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+        let cur_len = self.contents().len_lines();
+        if line_idx > cur_len {
+            for _ in cur_len..=line_idx {
+                self.try_read_next_line();
+                if self.is_closed() {
+                    break;
+                }
+            }
+        }
+
+        self.contents().try_line_to_char(line_idx).ok()
     }
 
     fn len_chars(&self) -> usize {

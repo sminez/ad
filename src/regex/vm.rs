@@ -167,11 +167,11 @@ impl Regex {
         let mut n = self.p;
         self.p = 0;
         let mut matched = false;
-        let mut did_break = false;
 
         let mut it = input.peekable();
         self.prev = None;
         self.next = None;
+        let initial_sp = sp;
 
         while let Some((i, ch)) = it.next() {
             sp = i;
@@ -195,7 +195,6 @@ impl Regex {
             self.gen += 1;
 
             if self.p == 0 {
-                did_break = true;
                 break;
             }
 
@@ -211,7 +210,10 @@ impl Regex {
         // Check to see if the final pass had a match which would be better than any
         // that we have so far.
         for t in self.clist.iter_mut().take(n) {
-            if self.prog[t.pc].op == Op::Match && t.sub_matches[1] >= sub_matches[1] {
+            if self.prog[t.pc].op == Op::Match
+                && t.sub_matches[0] >= initial_sp
+                && t.sub_matches[1] >= sub_matches[1]
+            {
                 matched = true;
                 sub_matches = t.sub_matches;
                 break;
@@ -220,12 +222,6 @@ impl Regex {
 
         if !matched {
             return None;
-        }
-
-        // If we broke before the end of input when matching then the index we have for
-        // the end of the match is one character too far so we need to back it up.
-        if did_break {
-            sub_matches[1] -= 1;
         }
 
         Some(Match { sub_matches })
@@ -280,8 +276,10 @@ impl Regex {
                     // We don't hard error on compiling a regex with more than 9 submatches
                     // but we don't track anything past the 9th
                     if s < 20 {
-                        // Save start is for the NEXT char and Save end is for CURRENT char
-                        t.sub_matches[s] = if s % 2 == 0 && !initial { sp + 1 } else { sp };
+                        // If we are saving our initial position then we are looking at the correct
+                        // character, otherwise the Save op is being processed at the character
+                        // before the one we need to save.
+                        t.sub_matches[s] = if !initial { sp + 1 } else { sp };
                     }
                     self.add_thread(lst, thread(t.pc + 1, t.sub_matches), sp, initial);
                 }
@@ -325,6 +323,7 @@ mod tests {
     use super::*;
     use simple_test_case::test_case;
 
+    #[test_case("foo", "foo", Some("foo"); "literal full string")]
     #[test_case("ba*", "baaaaa", Some("baaaaa"); "zero or more present")]
     #[test_case("ba*", "b", Some("b"); "zero or more not present")]
     #[test_case("ba+", "baaaaa", Some("baaaaa"); "one or more present")]
@@ -404,6 +403,18 @@ mod tests {
     }
 
     #[test]
+    fn dot_star_works() {
+        let mut r = Regex::compile(".*").unwrap();
+        let s = "\nthis is\na multiline\nfile";
+        let m1 = r.match_str(s).unwrap();
+        assert_eq!(m1.str_match_text(s), "");
+
+        // Skipping the leading newline should cause us to match all of the following line
+        let m2 = r.match_str(&s[1..]).unwrap();
+        assert_eq!(m2.str_match_text(&s[1..]), "this is");
+    }
+
+    #[test]
     fn match_extraction_works() {
         let re = "([0-9]+)-([0-9]+)-([0-9]+)";
         let mut r = Regex::compile(re).unwrap();
@@ -414,6 +425,50 @@ mod tests {
         assert_eq!(m.str_submatch_text(2, s).as_deref(), Some("456"));
         assert_eq!(m.str_submatch_text(3, s).as_deref(), Some("789"));
         assert_eq!(m.str_match_text(s), "123-456-789");
+    }
+
+    #[test]
+    fn multiline_input_match_dot_star_works() {
+        let mut r = Regex::compile(".*").unwrap();
+        let s = "this is\na multiline\nfile";
+
+        let m = r.match_str(s).unwrap();
+        assert_eq!(m.str_match_text(s), "this is");
+    }
+
+    #[test]
+    fn multiline_input_match_dot_star_works_with_non_zero_initial_sp() {
+        let mut r = Regex::compile(".*").unwrap();
+        let s = "this is\na multiline\nfile";
+
+        // Just to convince me that the offsets here are exactly as I am expecting
+        assert_eq!(s.chars().skip(7).collect::<String>(), "\na multiline\nfile");
+
+        let m1 = r.match_iter(&mut s.chars().enumerate().skip(7), 7).unwrap();
+        assert_eq!(m1.str_match_text(s), "");
+
+        let m2 = r.match_iter(&mut s.chars().enumerate().skip(8), 8).unwrap();
+        assert_eq!(m2.str_match_text(s), "a multiline");
+    }
+
+    #[test]
+    fn multiline_input_match_all_dot_star_works() {
+        let mut r = Regex::compile(".*").unwrap();
+        let s = "this is\na multiline\nfile";
+
+        let mut it = r.match_str_all(s);
+
+        // written this way rather than using collect as if we introduce a bug in the MatchIter
+        // impl we can end up with an iterator that gets stuck and never terminates.
+        let m1 = it.next().unwrap();
+        assert_eq!(m1.str_match_text(s), "this is");
+
+        let m2 = it.next().unwrap();
+        assert_eq!(m2.str_match_text(s), "a multiline");
+
+        let m3 = it.next().unwrap();
+        assert_eq!(m3.str_match_text(s), "file");
+        assert_eq!(it.next(), None);
     }
 
     #[test]
