@@ -154,6 +154,19 @@ impl Regex {
     {
         let mut clist = take(&mut self.clist);
         let mut nlist = take(&mut self.nlist);
+
+        // FIXME: we need to clear the old submatches as we can't guarantee that the elements of
+        // clist and nlist will be used in the same order as a previous iteration which will result
+        // in them containing garbarge information for save points _before_ the one that they
+        // initially track themselves.
+        // It would be more efficient to instead track submatches using an index and ref counting as
+        // with the original thread impl from rsc's code I suspect?
+        for lst in [&mut clist, &mut nlist].iter_mut() {
+            for t in lst.iter_mut() {
+                t.sub_matches = [0; 20];
+            }
+        }
+
         let mut sub_matches = [0; 20];
 
         // We bump the generation to ensure we don't collide with anything from
@@ -171,7 +184,6 @@ impl Regex {
         let mut it = input.peekable();
         self.prev = None;
         self.next = None;
-        let initial_sp = sp;
 
         while let Some((i, ch)) = it.next() {
             sp = i;
@@ -210,10 +222,7 @@ impl Regex {
         // Check to see if the final pass had a match which would be better than any
         // that we have so far.
         for t in self.clist.iter_mut().take(n) {
-            if self.prog[t.pc].op == Op::Match
-                && t.sub_matches[0] >= initial_sp
-                && t.sub_matches[1] >= sub_matches[1]
-            {
+            if self.prog[t.pc].op == Op::Match && t.sub_matches[1] >= sub_matches[1] {
                 matched = true;
                 sub_matches = t.sub_matches;
                 break;

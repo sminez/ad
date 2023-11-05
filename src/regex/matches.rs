@@ -54,7 +54,12 @@ impl Match {
     pub fn loc(&self) -> (usize, usize) {
         let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
 
-        assert!(start <= end, "invalid match: {start} > {end}");
+        assert!(
+            start <= end,
+            "invalid match: {start} > {end}: {:?}",
+            self.sub_matches
+        );
+
         (start, end)
     }
 
@@ -67,7 +72,12 @@ impl Match {
             return None;
         }
 
-        assert!(start <= end, "invalid match: {start} > {end}");
+        assert!(
+            start <= end,
+            "invalid match: {start} > {end}: {:?}",
+            self.sub_matches
+        );
+
         Some((start, end))
     }
 }

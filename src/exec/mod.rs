@@ -104,9 +104,7 @@ impl Program {
 
             Expr::LoopMatches(mut re) => {
                 let mut initial_matches = Vec::new();
-                println!("initial matches for pc={pc} (from={from} to={to}):");
                 while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
-                    println!("from={from} to={to} loc={:?}", m.loc());
                     initial_matches.push(m);
 
                     // It's possible for the Regex we're using to match a 0-length string which
@@ -122,13 +120,6 @@ impl Program {
                     if from >= to {
                         break;
                     }
-                    println!("new_from={from} to={to}");
-                }
-
-                let r = stream.contents();
-                println!("n_matches={}", initial_matches.len());
-                for m in initial_matches.iter() {
-                    println!("{:?} -> '{}'", m.loc(), m.rope_match_text(&r));
                 }
 
                 self.apply_matches(initial_matches, stream, m, pc, fname, out)
