@@ -154,19 +154,6 @@ impl Regex {
     {
         let mut clist = take(&mut self.clist);
         let mut nlist = take(&mut self.nlist);
-
-        // FIXME: we need to clear the old submatches as we can't guarantee that the elements of
-        // clist and nlist will be used in the same order as a previous iteration which will result
-        // in them containing garbarge information for save points _before_ the one that they
-        // initially track themselves.
-        // It would be more efficient to instead track submatches using an index and ref counting as
-        // with the original thread impl from rsc's code I suspect?
-        for lst in [&mut clist, &mut nlist].iter_mut() {
-            for t in lst.iter_mut() {
-                t.sub_matches = [0; 20];
-            }
-        }
-
         let mut sub_matches = [0; 20];
 
         // We bump the generation to ensure we don't collide with anything from
@@ -205,12 +192,12 @@ impl Regex {
             swap(&mut clist, &mut nlist);
             self.prev = Some(ch);
             self.gen += 1;
+            n = self.p;
 
             if self.p == 0 {
                 break;
             }
 
-            n = self.p;
             self.p = 0;
         }
 
