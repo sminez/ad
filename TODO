@@ -1,6 +1,6 @@
 :: TODO
 
-- [!] ". x/.*/ ..." seems broken for some reason? Gets stuck in a loop
+- [ ] Edit log transactions
 - [ ] implement remaining text objects
    >> The implementation for these is yet another way of hunting through the buffer for
       a certain position. Now that the regex engine works it might actually be simpler

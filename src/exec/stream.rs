@@ -131,7 +131,7 @@ impl IterableStream for Rope {
             .unwrap_or_else(|_| self.len_chars());
         let to = match line_to {
             Some(n) => match self.try_line_to_char(n) {
-                Ok(ix) => ix + self.line(n).len_chars(),
+                Ok(ix) => ix + self.line(n).len_chars().saturating_sub(1),
                 Err(_) => self.len_chars(),
             },
             None => self.len_chars(),
@@ -178,7 +178,7 @@ impl IterableStream for Buffer {
             .unwrap_or_else(|_| self.txt.len_chars());
         let to = match line_to {
             Some(n) => match self.txt.try_line_to_char(n) {
-                Ok(ix) => ix + self.txt.line(n).len_chars(),
+                Ok(ix) => ix + self.txt.line(n).len_chars().saturating_sub(1),
                 Err(_) => self.txt.len_chars(),
             },
             None => self.txt.len_chars(),
@@ -325,10 +325,15 @@ impl IterableStream for CachedStdin {
         }
 
         let r = self.contents();
-        let from = r.try_line_to_char(line_from).unwrap_or(usize::MAX);
+        let from = r
+            .try_line_to_char(line_from)
+            .unwrap_or_else(|_| r.len_chars());
         let to = match line_to {
-            Some(n) => r.try_line_to_char(n).unwrap_or(usize::MAX),
-            None => usize::MAX,
+            Some(n) => match r.try_line_to_char(n) {
+                Ok(ix) => ix + r.line(n).len_chars().saturating_sub(1),
+                Err(_) => r.len_chars(),
+            },
+            None => r.len_chars(),
         };
 
         Dot::from_char_indices(from, to)
