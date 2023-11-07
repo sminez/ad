@@ -4,8 +4,9 @@ use crate::{
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
     term::{
-        clear_screen, disable_mouse_support, enable_mouse_support, enable_raw_mode, get_termios,
-        get_termsize, register_signal_handler, set_termios, win_size_changed,
+        clear_screen, disable_alternate_screen, disable_mouse_support, enable_alternate_screen,
+        enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
+        set_termios, win_size_changed,
     },
 };
 use libc::termios as Termios;
@@ -40,6 +41,7 @@ pub struct Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
+        disable_alternate_screen(&mut self.stdout);
         disable_mouse_support(&mut self.stdout);
         set_termios(self.original_termios)
     }
@@ -58,6 +60,7 @@ impl Editor {
 
         let mut stdout = io::stdout();
         enable_mouse_support(&mut stdout);
+        enable_alternate_screen(&mut stdout);
 
         Self {
             screen_rows: 0,

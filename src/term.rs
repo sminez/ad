@@ -16,6 +16,8 @@ use std::{
 const CLEAR_SCREEN: &str = "\x1b[2J";
 const ENABLE_MOUSE_SUPPORT: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h";
 const DISABLE_MOUSE_SUPPORT: &str = "\x1b[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l";
+const ENABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
+const DISABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
 
 /// Used for storing and checking whether or not we've received a signal that our window
 /// size has changed.
@@ -201,6 +203,24 @@ pub(crate) fn disable_mouse_support(stdout: &mut Stdout) {
     }
     if let Err(e) = stdout.flush() {
         panic!("unable to disable mouse support: {e}");
+    }
+}
+
+pub(crate) fn enable_alternate_screen(stdout: &mut Stdout) {
+    if let Err(e) = stdout.write_all(ENABLE_ALTERNATE_SCREEN.as_bytes()) {
+        panic!("unable to enable alternate screen: {e}");
+    }
+    if let Err(e) = stdout.flush() {
+        panic!("unable to enable alternate screen: {e}");
+    }
+}
+
+pub(crate) fn disable_alternate_screen(stdout: &mut Stdout) {
+    if let Err(e) = stdout.write_all(DISABLE_ALTERNATE_SCREEN.as_bytes()) {
+        panic!("unable to disable alternate screen: {e}");
+    }
+    if let Err(e) = stdout.flush() {
+        panic!("unable to disable alternate screen: {e}");
     }
 }
 
