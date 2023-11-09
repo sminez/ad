@@ -1,18 +1,23 @@
 :: TODO
 
-- [ ] Edit log transactions
+- [!] Tabs are breaking highlighting of dot
+- [!] Dot range is a character short following the refactor to use non-inclusive ranges
+- [ ] feature: Edit log transactions
+- [ ] feature: center screen on current line
+- [ ] feature: expand tab
 - [ ] implement remaining text objects
    >> The implementation for these is yet another way of hunting through the buffer for
       a certain position. Now that the regex engine works it might actually be simpler
      (though probably not faster) to just use that for all text object style Dot changes?
   - Target character
   - Delimited between a given character pair
-- [ ] store "desired x" or an "x is at EOL" flag?
-- [ ] FUSE filesystem fun...!
+- [ ] feature: match indent
+- [ ] feature: store "desired x" or an "x is at EOL" flag?
+- [ ] feature: FUSE filesystem fun...!
   - Whether or not this uses FUSE in the end or not, the Acme style interface for
     supporting extension of the editor is still the plan for how to handle things.
-- [ ] mini-buffer tab complete
-- [ ] completion of command mode commands
+- [ ] feature: mini-buffer tab complete
+- [ ] feature: completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
