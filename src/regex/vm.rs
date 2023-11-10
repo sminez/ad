@@ -31,6 +31,10 @@ pub struct Regex {
     clist: Box<[Thread]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
     nlist: Box<[Thread]>,
+    /// Pre-allocated SubMatch positions referenced by threads
+    sms: Box<[SubMatches]>,
+    /// Available indicies into self.sms for storing SubMatch positions for new threads
+    free_sms: Vec<usize>,
     /// Monotonically increasing index used to dedup Threads
     /// Will overflow at some point if a given regex is used a VERY large number of times
     gen: usize,
@@ -40,8 +44,6 @@ pub struct Regex {
     prev: Option<char>,
     /// Next character in the input after the one currently being processed
     next: Option<char>,
-
-    sms: Vec<SubMatches>,
 }
 
 impl Regex {
@@ -56,8 +58,8 @@ impl Regex {
 
         let clist = vec![Thread::default(); prog.len()].into_boxed_slice();
         let nlist = vec![Thread::default(); prog.len()].into_boxed_slice();
-        let mut sms = Vec::with_capacity(prog.len());
-        sms.push(SubMatches::default());
+        let sms = vec![SubMatches::default(); prog.len()].into_boxed_slice();
+        let free_sms = (1..prog.len()).collect();
 
         Ok(Self {
             prog,
@@ -69,6 +71,7 @@ impl Regex {
             next: None,
 
             sms,
+            free_sms,
         })
     }
 
@@ -159,6 +162,11 @@ impl Regex {
         I: Iterator<Item = (usize, char)>,
     {
         let mut sub_matches = [0; 20];
+        self.free_sms = (1..self.prog.len()).collect();
+        self.sms[0] = SubMatches {
+            refs: 1,
+            inner: [0; 20],
+        };
 
         // We bump the generation to ensure we don't collide with anything from
         // a previous run while initialising the VM.
@@ -183,14 +191,21 @@ impl Regex {
 
             for i in 0..n {
                 let t = self.clist[i];
-                if let Some(sms) = self.step_thread(t, sp, ch) {
+                if let Some(sm) = self.step_thread(t, sp, ch) {
                     if return_on_first_match {
                         return Some(Match::synthetic(0, 0));
                     }
 
                     matched = true;
-                    sub_matches = self.sms[sms].inner;
+                    sub_matches = self.sms[sm].inner;
                     sub_matches[1] = sp; // Save end of the match
+
+                    // We're ending this thread and all others that have lower priority
+                    // so decrement the references they have to their submatches
+                    for j in i..n {
+                        self.sm_dec_ref(self.clist[j].sm);
+                    }
+
                     break;
                 }
             }
@@ -213,9 +228,9 @@ impl Regex {
         // Check to see if the final pass had a match which would be better than any
         // that we have so far.
         for t in self.clist.iter_mut().take(n) {
-            if self.prog[t.pc].op == Op::Match && self.sms[t.sms].inner[1] >= sub_matches[1] {
+            if self.prog[t.pc].op == Op::Match && self.sms[t.sm].inner[1] >= sub_matches[1] {
                 matched = true;
-                sub_matches = self.sms[t.sms].inner;
+                sub_matches = self.sms[t.sm].inner;
                 break;
             }
         }
@@ -233,19 +248,19 @@ impl Regex {
             // If comparisons and their assertions hold then queue the resulting threads
             op @ (Op::Char(_) | Op::Class(_) | Op::Any | Op::TrueAny) if op.matches(ch) => {
                 match t.assertion {
-                    Some(a) if !a.holds_for(self.prev, self.next) => return None,
-                    _ => self.add_thread(thread(t.pc + 1, t.sms), sp, false),
+                    Some(a) if !a.holds_for(self.prev, self.next) => {
+                        self.sm_dec_ref(t.sm);
+                        return None;
+                    }
+                    _ => self.add_thread(thread(t.pc + 1, t.sm), sp, false),
                 }
             }
 
-            Op::Match => return Some(t.sms),
+            Op::Match => return Some(t.sm),
 
             // Save, Jump & Split are handled in add_thread.
             // Non-matching comparison ops result in that thread dying.
-            // _ => (),
-            _ => {
-                self.sms[t.sms].refs -= 1;
-            }
+            _ => self.sm_dec_ref(t.sm),
         }
 
         None
@@ -254,6 +269,7 @@ impl Regex {
     #[inline]
     fn add_thread(&mut self, t: Thread, sp: usize, initial: bool) {
         if self.prog[t.pc].gen == self.gen {
+            self.sm_dec_ref(t.sm);
             return; // already on the list we are currently building
         }
         self.prog[t.pc].gen = self.gen;
@@ -262,46 +278,60 @@ impl Regex {
         // from self.prog but add_thread required &mut self, so matching would mean we had
         // to Clone as Op::Class does not implement Copy
         if let Op::Jump(l1) = self.prog[t.pc].op {
-            self.add_thread(thread(l1, t.sms), sp, initial);
+            self.add_thread(thread(l1, t.sm), sp, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
-            self.sms[t.sms].refs += 1;
-            self.add_thread(thread(l1, t.sms), sp, initial);
-            self.add_thread(thread(l2, t.sms), sp, initial);
+            self.sms[t.sm].refs += 1;
+            self.add_thread(thread(l1, t.sm), sp, initial);
+            self.add_thread(thread(l2, t.sm), sp, initial);
         } else if let Op::Assertion(a) = self.prog[t.pc].op {
-            self.add_thread(assert_thread(t.pc + 1, t.sms, a), sp, initial);
+            self.add_thread(assert_thread(t.pc + 1, t.sm, a), sp, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
             match t.assertion {
-                Some(a) if !a.holds_for(self.prev, self.next) => (),
+                Some(a) if !a.holds_for(self.prev, self.next) => self.sm_dec_ref(t.sm),
                 _ => {
-                    // We don't hard error on compiling a regex with more than 9 submatches
-                    // but we don't track anything past the 9th
-                    let sms = if s < 20 {
-                        // If we are saving our initial position then we are looking at the correct
-                        // character, otherwise the Save op is being processed at the character
-                        // before the one we need to save.
-                        let val = if !initial { sp + 1 } else { sp };
-                        let sms = if self.sms[t.sms].refs == 1 {
-                            t.sms
-                        } else {
-                            let sms = self.sms.len();
-                            self.sms.push(self.sms[t.sms]);
-                            self.sms[sms].refs = 1;
-                            sms
-                        };
-
-                        self.sms[sms].inner[s] = val;
-                        sms
-                    } else {
-                        t.sms
-                    };
-
-                    self.add_thread(thread(t.pc + 1, sms), sp, initial);
+                    let sm = self.sm_update(t.sm, s, sp, initial);
+                    self.add_thread(thread(t.pc + 1, sm), sp, initial);
                 }
             }
         } else {
             self.nlist[self.p] = t;
             self.p += 1;
         }
+    }
+
+    #[inline]
+    fn sm_dec_ref(&mut self, i: usize) {
+        self.sms[i].refs -= 1;
+        if self.sms[i].refs == 0 {
+            self.free_sms.push(i);
+        }
+    }
+
+    #[inline]
+    fn sm_update(&mut self, i: usize, s: usize, sp: usize, initial: bool) -> usize {
+        // We don't hard error on compiling a regex with more than 9 submatches
+        // but we don't track anything past the 9th
+        if s >= 20 {
+            return i;
+        }
+
+        let i = if self.sms[i].refs == 1 {
+            i
+        } else {
+            self.sm_dec_ref(i);
+            let j = self.free_sms.pop().unwrap();
+            self.sms[j].inner = self.sms[i].inner;
+            self.sms[j].refs = 1;
+            j
+        };
+
+        // If we are saving our initial position then we are looking at the correct
+        // character, otherwise the Save op is being processed at the character
+        // before the one we need to save.
+        let val = if !initial { sp + 1 } else { sp };
+        self.sms[i].inner[s] = val;
+
+        i
     }
 }
 
@@ -321,23 +351,23 @@ struct Thread {
     /// An assertion that must hold for this instruction to be runnable
     assertion: Option<Assertion>,
     /// Index into the Regex sms field
-    sms: usize,
+    sm: usize,
 }
 
 #[inline]
-fn thread(pc: usize, sms: usize) -> Thread {
+fn thread(pc: usize, sm: usize) -> Thread {
     Thread {
         pc,
-        sms,
+        sm,
         assertion: None,
     }
 }
 
 #[inline]
-fn assert_thread(pc: usize, sms: usize, a: Assertion) -> Thread {
+fn assert_thread(pc: usize, sm: usize, a: Assertion) -> Thread {
     Thread {
         pc,
-        sms,
+        sm,
         assertion: Some(a),
     }
 }
