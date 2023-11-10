@@ -28,9 +28,9 @@ pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
-    clist: Vec<Thread>,
+    clist: Box<[Thread]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
-    nlist: Vec<Thread>,
+    nlist: Box<[Thread]>,
     /// Monotonically increasing index used to dedup Threads
     /// Will overflow at some point if a given regex is used a VERY large number of times
     gen: usize,
@@ -52,8 +52,8 @@ impl Regex {
         let ops = optimise(compile(pfix));
         let prog: Prog = ops.into_iter().map(|op| Inst { op, gen: 0 }).collect();
 
-        let clist = vec![Thread::default(); prog.len()];
-        let nlist = vec![Thread::default(); prog.len()];
+        let clist = vec![Thread::default(); prog.len()].into_boxed_slice();
+        let nlist = vec![Thread::default(); prog.len()].into_boxed_slice();
 
         Ok(Self {
             prog,
