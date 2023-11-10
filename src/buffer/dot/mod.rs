@@ -656,8 +656,8 @@ The third paragraph is even shorter.";
     #[test_case(BufferStart, c(0, 0); "buffer start")]
     #[test_case(BufferEnd, c(9, 36); "buffer end")]
     #[test_case(Character, c(5, 2); "character")]
-    #[test_case(Line, r(5, 0, 5, 44); "line")]
-    #[test_case(LineEnd, c(5, 44); "line end")]
+    #[test_case(Line, r(5, 0, 5, 43); "line")]
+    #[test_case(LineEnd, c(5, 43); "line end")]
     #[test_case(LineStart, c(5, 0); "line start")]
     #[test]
     fn set_dot_works(to: TextObject, expected: Dot) {

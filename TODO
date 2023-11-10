@@ -1,6 +1,5 @@
 :: TODO
 
-- [!] Dot range is a character short following the refactor to use non-inclusive ranges
 - [ ] feature: Edit log transactions
 - [ ] feature: center screen on current line
 - [ ] feature: expand tab

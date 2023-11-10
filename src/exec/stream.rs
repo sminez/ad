@@ -165,7 +165,13 @@ impl IterableStream for Buffer {
 
     fn remove(&mut self, from: usize, to: usize) {
         self.dot = Dot::Range {
-            r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, true),
+            r: Range::from_cursors(
+                Cur { idx: from },
+                Cur {
+                    idx: to.saturating_sub(1),
+                },
+                true,
+            ),
         }
         .collapse_null_range();
         self.handle_action(Action::Delete);
