@@ -19,6 +19,7 @@ pub(super) enum Assertion {
 }
 
 impl Assertion {
+    #[inline]
     pub(super) fn holds_for(&self, prev: Option<char>, next: Option<char>) -> bool {
         match self {
             Assertion::LineStart => matches!(prev, Some('\n') | None),
@@ -54,6 +55,7 @@ pub(super) enum Op {
 impl Op {
     /// Whether or not this Op matches the current VM state.
     /// This will panic if not called on a comparison or assertion Op.
+    #[inline]
     pub(super) fn matches(&self, ch: char) -> bool {
         match self {
             Op::Char(c) => *c == ch,
@@ -65,11 +67,13 @@ impl Op {
         }
     }
 
+    #[inline]
     fn is_comp(&self) -> bool {
         !matches!(self, Op::Split(_, _) | Op::Jump(_) | Op::Match)
     }
 
     // Increment jumps and splits past the given index
+    #[inline]
     fn inc(&mut self, i: usize) {
         match self {
             Op::Jump(j) if *j >= i => *j += 1,

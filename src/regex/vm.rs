@@ -35,6 +35,7 @@ pub struct Regex {
     sms: Box<[SubMatches]>,
     /// Available indicies into self.sms for storing SubMatch positions for new threads
     free_sms: Vec<usize>,
+    track_submatches: bool,
     /// Monotonically increasing index used to dedup Threads
     /// Will overflow at some point if a given regex is used a VERY large number of times
     gen: usize,
@@ -72,17 +73,20 @@ impl Regex {
 
             sms,
             free_sms,
+            track_submatches: true,
         })
     }
 
     /// Attempt to match this Regex against a given `&str` input, returning the position
     /// of the match and all submatches if successful.
     pub fn match_str(&mut self, input: &str) -> Option<Match> {
+        self.track_submatches = true;
         self.match_iter(&mut input.chars().enumerate(), 0)
     }
 
     /// Iterate over all non-overlapping matches of this Regex for a given `&str` input.
     pub fn match_str_all<'a, 'b>(&'a mut self, input: &'b str) -> MatchIter<'a, &'b str> {
+        self.track_submatches = true;
         MatchIter {
             it: input,
             r: self,
@@ -93,11 +97,13 @@ impl Regex {
     /// Attempt to match this Regex against a given `Rope` input, returning the position
     /// of the match and all submatches if successful.
     pub fn match_rope(&mut self, r: &Rope) -> Option<Match> {
+        self.track_submatches = true;
         self.match_iter(&mut r.chars().enumerate(), 0)
     }
 
     /// Iterate over all non-overlapping matches of this Regex for a given `Rope` input.
     pub fn match_rope_all<'a, 'b>(&'a mut self, r: &'b Rope) -> MatchIter<'a, &'b Rope> {
+        self.track_submatches = true;
         MatchIter {
             it: r,
             r: self,
@@ -107,6 +113,7 @@ impl Regex {
 
     /// Iterate over all non-overlapping matches of this Regex for a given `Buffer` input.
     pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b Rope> {
+        self.track_submatches = true;
         MatchIter {
             it: &b.txt,
             r: self,
@@ -120,18 +127,21 @@ impl Regex {
     where
         I: Iterator<Item = (usize, char)>,
     {
-        self._match_iter(input, sp, false)
+        self.track_submatches = true;
+        self._match_iter(input, sp)
     }
 
     /// Determine whether or not this Regex matches the input `&str` without searching for
     /// the leftmost-longest match and associated submatch boundaries.
     pub fn matches_str(&mut self, input: &str) -> bool {
+        self.track_submatches = false;
         self.matches_iter(&mut input.chars().enumerate(), 0)
     }
 
     /// Determine whether or not this Regex matches the input `Rope` without searching for
     /// the leftmost-longest match and associated submatch boundaries.
     pub fn matches_rope(&mut self, r: &Rope) -> bool {
+        self.track_submatches = false;
         self.matches_iter(&mut r.chars().enumerate(), 0)
     }
 
@@ -141,7 +151,8 @@ impl Regex {
     where
         I: Iterator<Item = (usize, char)>,
     {
-        self._match_iter(input, sp, true).is_some()
+        self.track_submatches = false;
+        self._match_iter(input, sp).is_some()
     }
 
     /// This is the main VM implementation that is used by all other matching methods on Regex.
@@ -152,12 +163,7 @@ impl Regex {
     /// >> The Match returned in this case will always point to the null string at the start
     ///    of the string and should only be used for conversion to a bool in `matches_*`
     ///    methods.
-    fn _match_iter<I>(
-        &mut self,
-        input: &mut I,
-        mut sp: usize,
-        return_on_first_match: bool,
-    ) -> Option<Match>
+    fn _match_iter<I>(&mut self, input: &mut I, mut sp: usize) -> Option<Match>
     where
         I: Iterator<Item = (usize, char)>,
     {
@@ -190,9 +196,8 @@ impl Regex {
             self.next = it.peek().map(|(_, c)| *c);
 
             for i in 0..n {
-                let t = self.clist[i];
-                if let Some(sm) = self.step_thread(t, sp, ch) {
-                    if return_on_first_match {
+                if let Some(sm) = self.step_thread(i, sp, ch) {
+                    if !self.track_submatches {
                         return Some(Match::synthetic(0, 0));
                     }
 
@@ -243,7 +248,8 @@ impl Regex {
     }
 
     #[inline]
-    fn step_thread(&mut self, t: Thread, sp: usize, ch: char) -> Option<usize> {
+    fn step_thread(&mut self, i: usize, sp: usize, ch: char) -> Option<usize> {
+        let t = &self.clist[i];
         match &self.prog[t.pc].op {
             // If comparisons and their assertions hold then queue the resulting threads
             op @ (Op::Char(_) | Op::Class(_) | Op::Any | Op::TrueAny) if op.matches(ch) => {
@@ -276,7 +282,8 @@ impl Regex {
 
         // We do this as chained if-let as we need to recursively call add_thread with data
         // from self.prog but add_thread required &mut self, so matching would mean we had
-        // to Clone as Op::Class does not implement Copy
+        // to Clone as Op::Class does not implement Copy.
+        // > This is faster than cloning the op and matching
         if let Op::Jump(l1) = self.prog[t.pc].op {
             self.add_thread(thread(l1, t.sm), sp, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
@@ -301,6 +308,10 @@ impl Regex {
 
     #[inline]
     fn sm_dec_ref(&mut self, i: usize) {
+        if !self.track_submatches {
+            return;
+        }
+
         self.sms[i].refs -= 1;
         if self.sms[i].refs == 0 {
             self.free_sms.push(i);
@@ -311,7 +322,7 @@ impl Regex {
     fn sm_update(&mut self, i: usize, s: usize, sp: usize, initial: bool) -> usize {
         // We don't hard error on compiling a regex with more than 9 submatches
         // but we don't track anything past the 9th
-        if s >= 20 {
+        if !self.track_submatches || s >= 20 {
             return i;
         }
 
@@ -319,7 +330,7 @@ impl Regex {
             i
         } else {
             self.sm_dec_ref(i);
-            let j = self.free_sms.pop().unwrap();
+            let j = self.free_sms.swap_remove(0);
             self.sms[j].inner = self.sms[i].inner;
             self.sms[j].refs = 1;
             j

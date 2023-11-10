@@ -182,6 +182,7 @@ impl CharClass {
     }
 
     // Negated classes still don't match a newline
+    #[inline]
     fn matches(&self, ch: char) -> bool {
         if self.negated && ch == '\n' {
             return false;
