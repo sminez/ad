@@ -30,8 +30,8 @@ fn burntsushi_pathological_case(n_alts: usize, n_reps: usize) {
 
 fn criterion_benchmark(c: &mut Criterion) {
     // > The full torture test Burntsushi used would be 475, 43000
-    let n_alts = 100;
-    let n_reps = 5000;
+    let n_alts = 50;
+    let n_reps = 1000;
     let mut group = c.benchmark_group(format!("burntsushi {n_alts} alts, {n_reps} reps"));
 
     group.bench_function("with compile", |b| {

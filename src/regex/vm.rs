@@ -15,7 +15,7 @@ use super::{
 };
 use crate::buffer::Buffer;
 use ropey::Rope;
-use std::mem::{swap, take};
+use std::mem::swap;
 
 /// A regular expression engine designed for use within the ad text editor.
 ///
@@ -40,6 +40,8 @@ pub struct Regex {
     prev: Option<char>,
     /// Next character in the input after the one currently being processed
     next: Option<char>,
+
+    sms: Vec<SubMatches>,
 }
 
 impl Regex {
@@ -54,6 +56,8 @@ impl Regex {
 
         let clist = vec![Thread::default(); prog.len()].into_boxed_slice();
         let nlist = vec![Thread::default(); prog.len()].into_boxed_slice();
+        let mut sms = Vec::with_capacity(prog.len());
+        sms.push(SubMatches::default());
 
         Ok(Self {
             prog,
@@ -63,6 +67,8 @@ impl Regex {
             p: 0,
             prev: None,
             next: None,
+
+            sms,
         })
     }
 
@@ -152,14 +158,13 @@ impl Regex {
     where
         I: Iterator<Item = (usize, char)>,
     {
-        let mut clist = take(&mut self.clist);
-        let mut nlist = take(&mut self.nlist);
         let mut sub_matches = [0; 20];
 
         // We bump the generation to ensure we don't collide with anything from
         // a previous run while initialising the VM.
         self.gen += 1;
-        self.add_thread(&mut clist, Thread::default(), sp, true);
+        self.add_thread(Thread::default(), sp, true);
+        swap(&mut self.clist, &mut self.nlist);
         self.gen += 1;
 
         // Same as at the end of the outer for-loop, we need to reset self.p to 0
@@ -176,20 +181,21 @@ impl Regex {
             sp = i;
             self.next = it.peek().map(|(_, c)| *c);
 
-            for t in clist.iter().take(n) {
-                if let Some(sms) = self.step_thread(t, &mut nlist, sp, ch) {
+            for i in 0..n {
+                let t = self.clist[i];
+                if let Some(sms) = self.step_thread(t, sp, ch) {
                     if return_on_first_match {
                         return Some(Match::synthetic(0, 0));
                     }
 
                     matched = true;
-                    sub_matches = sms;
+                    sub_matches = self.sms[sms].inner;
                     sub_matches[1] = sp; // Save end of the match
                     break;
                 }
             }
 
-            swap(&mut clist, &mut nlist);
+            swap(&mut self.clist, &mut self.nlist);
             self.prev = Some(ch);
             self.gen += 1;
             n = self.p;
@@ -201,17 +207,15 @@ impl Regex {
             self.p = 0;
         }
 
-        self.clist = clist;
-        self.nlist = nlist;
         self.prev = None;
         self.next = None;
 
         // Check to see if the final pass had a match which would be better than any
         // that we have so far.
         for t in self.clist.iter_mut().take(n) {
-            if self.prog[t.pc].op == Op::Match && t.sub_matches[1] >= sub_matches[1] {
+            if self.prog[t.pc].op == Op::Match && self.sms[t.sms].inner[1] >= sub_matches[1] {
                 matched = true;
-                sub_matches = t.sub_matches;
+                sub_matches = self.sms[t.sms].inner;
                 break;
             }
         }
@@ -223,33 +227,32 @@ impl Regex {
         Some(Match { sub_matches })
     }
 
-    fn step_thread(
-        &mut self,
-        t: &Thread,
-        nlist: &mut [Thread],
-        sp: usize,
-        ch: char,
-    ) -> Option<[usize; 20]> {
+    #[inline]
+    fn step_thread(&mut self, t: Thread, sp: usize, ch: char) -> Option<usize> {
         match &self.prog[t.pc].op {
             // If comparisons and their assertions hold then queue the resulting threads
             op @ (Op::Char(_) | Op::Class(_) | Op::Any | Op::TrueAny) if op.matches(ch) => {
                 match t.assertion {
                     Some(a) if !a.holds_for(self.prev, self.next) => return None,
-                    _ => self.add_thread(nlist, thread(t.pc + 1, t.sub_matches), sp, false),
+                    _ => self.add_thread(thread(t.pc + 1, t.sms), sp, false),
                 }
             }
 
-            Op::Match => return Some(t.sub_matches),
+            Op::Match => return Some(t.sms),
 
             // Save, Jump & Split are handled in add_thread.
             // Non-matching comparison ops result in that thread dying.
-            _ => (),
+            // _ => (),
+            _ => {
+                self.sms[t.sms].refs -= 1;
+            }
         }
 
         None
     }
 
-    fn add_thread(&mut self, lst: &mut [Thread], mut t: Thread, sp: usize, initial: bool) {
+    #[inline]
+    fn add_thread(&mut self, t: Thread, sp: usize, initial: bool) {
         if self.prog[t.pc].gen == self.gen {
             return; // already on the list we are currently building
         }
@@ -259,32 +262,56 @@ impl Regex {
         // from self.prog but add_thread required &mut self, so matching would mean we had
         // to Clone as Op::Class does not implement Copy
         if let Op::Jump(l1) = self.prog[t.pc].op {
-            self.add_thread(lst, thread(l1, t.sub_matches), sp, initial);
+            self.add_thread(thread(l1, t.sms), sp, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
-            self.add_thread(lst, thread(l1, t.sub_matches), sp, initial);
-            self.add_thread(lst, thread(l2, t.sub_matches), sp, initial);
+            self.sms[t.sms].refs += 1;
+            self.add_thread(thread(l1, t.sms), sp, initial);
+            self.add_thread(thread(l2, t.sms), sp, initial);
         } else if let Op::Assertion(a) = self.prog[t.pc].op {
-            self.add_thread(lst, assert_thread(t.pc + 1, t.sub_matches, a), sp, initial);
+            self.add_thread(assert_thread(t.pc + 1, t.sms, a), sp, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
             match t.assertion {
                 Some(a) if !a.holds_for(self.prev, self.next) => (),
                 _ => {
                     // We don't hard error on compiling a regex with more than 9 submatches
                     // but we don't track anything past the 9th
-                    if s < 20 {
+                    let sms = if s < 20 {
                         // If we are saving our initial position then we are looking at the correct
                         // character, otherwise the Save op is being processed at the character
                         // before the one we need to save.
-                        t.sub_matches[s] = if !initial { sp + 1 } else { sp };
-                    }
-                    self.add_thread(lst, thread(t.pc + 1, t.sub_matches), sp, initial);
+                        let val = if !initial { sp + 1 } else { sp };
+                        let sms = if self.sms[t.sms].refs == 1 {
+                            t.sms
+                        } else {
+                            let sms = self.sms.len();
+                            self.sms.push(self.sms[t.sms]);
+                            self.sms[sms].refs = 1;
+                            sms
+                        };
+
+                        self.sms[sms].inner[s] = val;
+                        sms
+                    } else {
+                        t.sms
+                    };
+
+                    self.add_thread(thread(t.pc + 1, sms), sp, initial);
                 }
             }
         } else {
-            lst[self.p] = t;
+            self.nlist[self.p] = t;
             self.p += 1;
         }
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct SubMatches {
+    /// How many threads are currently pointing at this SubMatches
+    refs: usize,
+    /// $0 -> $9 submatches with $0 being the full match
+    /// for submatch $k the start index is 2$k and the end is 2$k+1
+    inner: [usize; 20],
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -293,23 +320,24 @@ struct Thread {
     pc: usize,
     /// An assertion that must hold for this instruction to be runnable
     assertion: Option<Assertion>,
-    /// $0 -> $9 submatches with $0 being the full match
-    /// for submatch $k the start index is 2$k and the end is 2$k+1
-    sub_matches: [usize; 20],
+    /// Index into the Regex sms field
+    sms: usize,
 }
 
-fn thread(pc: usize, sub_matches: [usize; 20]) -> Thread {
+#[inline]
+fn thread(pc: usize, sms: usize) -> Thread {
     Thread {
         pc,
-        sub_matches,
+        sms,
         assertion: None,
     }
 }
 
-fn assert_thread(pc: usize, sub_matches: [usize; 20], a: Assertion) -> Thread {
+#[inline]
+fn assert_thread(pc: usize, sms: usize, a: Assertion) -> Thread {
     Thread {
         pc,
-        sub_matches,
+        sms,
         assertion: Some(a),
     }
 }
