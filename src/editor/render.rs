@@ -161,7 +161,7 @@ impl Editor {
         if let Some(b) = b {
             let width = self.screen_cols;
             for i in top..=bottom {
-                let rline = b.raw_rline_unchecked(i, 0, self.screen_cols);
+                let (rline, _) = b.raw_rline_unchecked(i, 0, self.screen_cols, None);
                 let len = min(self.screen_cols, rline.len());
                 if i == selected_line_idx {
                     buf.push_str(&format!(

@@ -247,22 +247,58 @@ impl Buffer {
     /// available screen space.
     /// This includes tab expansion but not any styling that might be applied,
     /// trailing \r\n or screen clearing escape codes.
-    pub(crate) fn raw_rline_unchecked(&self, y: usize, lpad: usize, screen_cols: usize) -> String {
+    /// If a dot range is provided then the character offsets used will be adjusted
+    /// to account for expanded tab characters, returning None if self.col_off would
+    /// mean that the requested range is not currently visible.
+    pub(crate) fn raw_rline_unchecked(
+        &self,
+        y: usize,
+        lpad: usize,
+        screen_cols: usize,
+        dot_range: Option<(usize, usize)>,
+    ) -> (String, Option<(usize, usize)>) {
         let max_chars = screen_cols - lpad;
         let mut rline = Vec::with_capacity(max_chars);
+        // Iterating over characters not bytes as we need to account for multi-byte utf8
         let mut it = self.txt.line(y).chars().skip(self.col_off);
 
-        // Iterating over characters not bytes as we need to account for multi-byte utf8
+        let mut update_dot = dot_range.is_some();
+        let (mut start, mut end) = dot_range.unwrap_or_default();
+
+        if update_dot && self.col_off > end {
+            update_dot = false; // we're past the requested range
+        } else {
+            start = start.saturating_sub(self.col_off);
+            end = end.saturating_sub(self.col_off);
+        }
+
         while rline.len() <= max_chars {
             match it.next() {
                 Some('\n') | None => break,
-                Some('\t') => rline.extend([' '; TAB_STOP].iter()),
+                Some('\t') => {
+                    if rline.len() < start {
+                        start += TAB_STOP;
+                    }
+                    if rline.len() < end {
+                        end = end.saturating_add(TAB_STOP);
+                    }
+                    rline.extend([' '; TAB_STOP].iter());
+                }
                 Some(c) => rline.push(c),
             }
         }
 
         rline.truncate(max_chars); // noop if max_chars > rline.len()
-        rline.into_iter().collect()
+        let n_chars = rline.len();
+        let s = rline.into_iter().collect();
+
+        if update_dot {
+            start = min(start, n_chars);
+            end = min(end, n_chars);
+            (s, Some((start, end)))
+        } else {
+            (s, None)
+        }
     }
 
     /// The render representation of a given line, truncated to fit within the
@@ -276,19 +312,19 @@ impl Buffer {
         screen_cols: usize,
         bg_dot: Color,
     ) -> String {
-        let mut rline = self.raw_rline_unchecked(y, lpad, screen_cols);
+        let dot_range = self.dot.line_range(y, self).map(|lr| match lr {
+            // LineRange is an inclusive range so we need to insert after `end` if its
+            // not the end of the line
+            LineRange::Partial { start, end, .. } => (start, end + 1),
+            LineRange::FromStart { end, .. } => (0, end + 1),
+            LineRange::ToEnd { start, .. } => (start, usize::MAX),
+            LineRange::Full { .. } => (0, usize::MAX),
+        });
+
+        let (mut rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
 
         // Apply highlight if included in current Dot
-        if let Some(lr) = self.dot.line_range(y, self) {
-            let n_chars = rline.chars().count();
-            let (start, end) = match lr {
-                // LineRange is an inclusive range so we need to insert after `end` if its
-                // not the end of the line
-                LineRange::Partial { start, end, .. } => (start, min(end + 1, n_chars)),
-                LineRange::FromStart { end, .. } => (0, min(end + 1, n_chars)),
-                LineRange::ToEnd { start, .. } => (start, n_chars),
-                LineRange::Full { .. } => (0, n_chars),
-            };
+        if let Some((start, end)) = dot_range {
             rline.insert_str(end, &Style::Reset.to_string());
             rline.insert_str(start, &Style::Bg(bg_dot).to_string());
         }
@@ -772,5 +808,29 @@ mod tests {
         b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
+    }
+
+    #[test_case("simple line", None, 0, "simple line", None; "simple line no dot")]
+    #[test_case("simple line", Some((1, 5)), 0, "simple line", Some((1, 5)); "simple line partial")]
+    #[test_case("simple line", Some((0, usize::MAX)), 0, "simple line", Some((0, 11)); "simple line full")]
+    #[test_case("simple line", Some((0, 2)), 4, "le line", None; "scrolled past dot")]
+    #[test_case("simple line", Some((0, 9)), 4, "le line", Some((0, 5)); "scrolled updating dot")]
+    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs", Some((7, 13)); "with tabs")]
+    #[test_case("\twith tabs", Some((0, usize::MAX)), 0, "    with tabs", Some((0, 13)); "with tabs full")]
+    #[test]
+    fn raw_line_unchecked_updates_dot_correctly(
+        line: &str,
+        dot_range: Option<(usize, usize)>,
+        col_off: usize,
+        expected_line: &str,
+        expected_dot_range: Option<(usize, usize)>,
+    ) {
+        let mut b = Buffer::new_unnamed(0, line);
+        b.col_off = col_off;
+
+        let (line, dot_range) = b.raw_rline_unchecked(0, 0, 200, dot_range);
+
+        assert_eq!(line, expected_line);
+        assert_eq!(dot_range, expected_dot_range);
     }
 }
