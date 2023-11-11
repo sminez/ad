@@ -229,6 +229,10 @@ impl Buffer {
         let mut cx = 0;
 
         for c in self.txt.line(y).chars() {
+            if c == '\n' {
+                break;
+            }
+
             if c == '\t' {
                 rx += (TAB_STOP - 1) - (rx % TAB_STOP);
             }
