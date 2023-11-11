@@ -2,6 +2,7 @@
 pub mod buffer;
 pub mod editor;
 pub mod exec;
+pub mod fsys;
 pub mod key;
 pub mod mode;
 pub mod regex;
