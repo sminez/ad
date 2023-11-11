@@ -27,6 +27,9 @@ pub enum Req {
     ReadBufferDot { id: usize },
     ReadBufferAddr { id: usize },
     ReadBufferBody { id: usize },
-    // SetBufferAddr { id: usize, addr: String },
-    // SetBufferContent { id: usize, s: String },
+
+    SetBufferDot { id: usize, s: String },
+    SetBufferAddr { id: usize, s: String },
+    ClearBufferBody { id: usize },
+    InsertBufferBody { id: usize, s: String, offset: usize },
 }

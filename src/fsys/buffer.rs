@@ -7,6 +7,7 @@ use fuser::FileAttr;
 use std::{
     collections::BTreeMap,
     sync::mpsc::{Receiver, Sender},
+    time::SystemTime,
 };
 
 pub(super) const BUFFER_FILES: [(Ino, &str); INO_OFFSET as usize - 1] = [
@@ -103,6 +104,36 @@ impl BufferNodes {
         self.known
             .get(&parent)?
             .current_file_content(fname, &self.tx)
+    }
+
+    pub(super) fn truncate(&mut self, ino: Ino) {
+        let (parent, fname) = parent_and_fname(ino);
+        let b = match self.known.get_mut(&parent) {
+            Some(b) => b,
+            None => return,
+        };
+        b.attrs.mtime = SystemTime::now();
+        b.attrs.size = 0;
+        let id = b.id;
+
+        if fname == "body" {
+            _ = Message::send(Req::ClearBufferBody { id }, &self.tx);
+        }
+    }
+
+    pub(super) fn req_for_write(&mut self, ino: Ino, s: String, offset: usize) -> Option<Req> {
+        let (parent, fname) = parent_and_fname(ino);
+        let b = self.known.get_mut(&parent)?;
+        b.attrs.mtime = SystemTime::now();
+        let id = b.id;
+
+        match fname {
+            "dot" => Some(Req::SetBufferDot { id, s }),
+            "addr" => Some(Req::SetBufferAddr { id, s }),
+            "body" => Some(Req::InsertBufferBody { id, s, offset }),
+            "filename" | "event" => None,
+            _ => None,
+        }
     }
 
     /// Process any pending updates from the main thread for changes to the buffer set

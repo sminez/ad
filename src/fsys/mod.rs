@@ -28,15 +28,20 @@
 //! ```
 use crate::editor::InputEvent;
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
-    Request,
+    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
+    ReplyEntry, ReplyOpen, Request,
 };
-use libc::ENOENT;
+// See the following for an overview of libc error codes:
+//   https://www.gnu.org/software/libc/manual/html_node/Error-Codes.html
+use libc::{EINVAL, EIO, ENOENT};
 use std::{
     env,
     ffi::OsStr,
     fs::create_dir_all,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        mpsc::{Receiver, Sender},
+    },
     thread::{spawn, JoinHandle},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -80,6 +85,7 @@ const INO_OFFSET: Ino = 6;
 
 pub struct AdFs {
     mount_path: String,
+    next_fh: AtomicU64,
     tx: Sender<InputEvent>,
     buffer_nodes: BufferNodes,
     // Root level files and directories
@@ -97,6 +103,7 @@ impl AdFs {
 
         Self {
             mount_path,
+            next_fh: AtomicU64::new(1),
             tx,
             buffer_nodes,
             mount_dir_attrs: empty_dir_attrs(MOUNT_ROOT_INO),
@@ -106,6 +113,10 @@ impl AdFs {
 
     pub fn mount_path(&self) -> &str {
         &self.mount_path
+    }
+
+    pub fn next_fh(&mut self) -> u64 {
+        self.next_fh.fetch_add(1, Ordering::SeqCst)
     }
 
     /// Spawn a thread for running this filesystem and return a handle to it
@@ -249,23 +260,102 @@ impl Filesystem for AdFs {
         reply.ok();
     }
 
-    // TODO: implement the following methods
+    // TODO: restrict by filehandle for the events file
+    fn write(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        data: &[u8],
+        _write_flags: u32,
+        _flags: i32,
+        _lock_owner: Option<u64>,
+        reply: fuser::ReplyWrite,
+    ) {
+        assert!(offset >= 0, "negative read offset");
+        self.buffer_nodes.update();
 
-    // fn write(
-    //     &mut self,
-    //     _req: &Request<'_>,
-    //     ino: u64,
-    //     fh: u64,
-    //     offset: i64,
-    //     data: &[u8],
-    //     write_flags: u32,
-    //     flags: i32,
-    //     lock_owner: Option<u64>,
-    //     reply: fuser::ReplyWrite,
-    // ) {
-    // }
+        let n_bytes = data.len() as u32;
+        let msg = match String::from_utf8(data.to_vec()) {
+            Ok(s) => s,
+            Err(_) => {
+                reply.error(EINVAL);
+                return;
+            }
+        };
 
-    // fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: fuser::ReplyOpen) {}
+        match ino {
+            CONTROL_FILE_INO => {
+                self.control_file_attrs.mtime = SystemTime::now();
+                match Message::send(Req::ControlMessage { msg }, &self.tx) {
+                    Ok(_) => reply.written(n_bytes),
+                    Err(_) => reply.error(EIO),
+                }
+            }
+
+            ino => match self.buffer_nodes.req_for_write(ino, msg, offset as usize) {
+                Some(req) => match Message::send(req, &self.tx) {
+                    Ok(_) => reply.written(n_bytes),
+                    Err(_) => reply.error(EIO),
+                },
+                None => reply.error(ENOENT),
+            },
+        }
+    }
+
+    fn access(&mut self, _req: &Request<'_>, _ino: u64, _mask: i32, reply: ReplyEmpty) {
+        reply.ok()
+    }
+
+    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
+        let flags = 0;
+        let fh = self.next_fh();
+
+        reply.opened(fh, flags)
+    }
+
+    fn setattr(
+        &mut self,
+        _req: &Request<'_>,
+        ino: u64,
+        _mode: Option<u32>,
+        _uid: Option<u32>,
+        _gid: Option<u32>,
+        size: Option<u64>,
+        _atime: Option<fuser::TimeOrNow>,
+        _mtime: Option<fuser::TimeOrNow>,
+        _ctime: Option<SystemTime>,
+        _fh: Option<u64>,
+        _crtime: Option<SystemTime>,
+        _chgtime: Option<SystemTime>,
+        _bkuptime: Option<SystemTime>,
+        _flags: Option<u32>,
+        reply: ReplyAttr,
+    ) {
+        // Truncation of a file
+        if let Some(0) = size {
+            match ino {
+                MOUNT_ROOT_INO => self.mount_dir_attrs.size = 0,
+                CONTROL_FILE_INO => self.control_file_attrs.size = 0,
+                ino => self.buffer_nodes.truncate(ino),
+            }
+        }
+
+        let attrs = match ino {
+            MOUNT_ROOT_INO => self.mount_dir_attrs,
+            CONTROL_FILE_INO => self.control_file_attrs,
+            ino => match self.buffer_nodes.get_attr_for_inode(ino) {
+                Some(attrs) => attrs,
+                None => {
+                    reply.error(ENOENT);
+                    return;
+                }
+            },
+        };
+
+        reply.attr(&TTL, &attrs);
+    }
 }
 
 fn empty_dir_attrs(ino: Ino) -> FileAttr {

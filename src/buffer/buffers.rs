@@ -83,9 +83,9 @@ impl Buffers {
         self.inner.iter().find(|b| b.id == id)
     }
 
-    // pub(crate) fn with_id_mut(&mut self, id: usize) -> Option<&mut Buffer> {
-    //     self.inner.iter_mut().find(|b| b.id == id)
-    // }
+    pub(crate) fn with_id_mut(&mut self, id: usize) -> Option<&mut Buffer> {
+        self.inner.iter_mut().find(|b| b.id == id)
+    }
 
     pub fn dirty_buffers(&self) -> Vec<&str> {
         self.inner

@@ -1,6 +1,7 @@
 use crate::{
-    buffer::{ActionOutcome, Buffer, Buffers, TextObject},
+    buffer::{parse_dot::DotExpression, ActionOutcome, Buffer, Buffers, Cur, Dot, TextObject},
     die,
+    exec::IterableStream,
     fsys::{AdFs, BufId, Message, Req},
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
@@ -141,11 +142,36 @@ impl Editor {
     fn send_buffer_resp(
         &self,
         id: usize,
-        f: fn(&Buffer) -> String,
         tx: Sender<Result<String, String>>,
+        f: fn(&Buffer) -> String,
     ) {
         match self.buffers.with_id(id) {
             Some(b) => tx.send(Ok((f)(b))).unwrap(),
+            None => {
+                tx.send(Err("unknown buffer".to_string())).unwrap();
+                self.btx.send(BufId::Remove(id)).unwrap();
+            }
+        }
+    }
+    fn handle_buffer_mutation<F: FnOnce(&mut Buffer, String) -> Option<ActionOutcome>>(
+        &mut self,
+        id: usize,
+        tx: Sender<Result<String, String>>,
+        s: String,
+        f: F,
+    ) {
+        match self.buffers.with_id_mut(id) {
+            Some(b) => {
+                if let Some(o) = (f)(b, s) {
+                    match o {
+                        ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
+                        ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
+                    }
+                };
+
+                tx.send(Ok("handled".to_string())).unwrap()
+            }
+
             None => {
                 tx.send(Err("unknown buffer".to_string())).unwrap();
                 self.btx.send(BufId::Remove(id)).unwrap();
@@ -164,10 +190,34 @@ impl Editor {
                 tx.send(Ok("handled".to_string())).unwrap();
             }
 
-            ReadBufferName { id } => self.send_buffer_resp(id, |b| b.full_name().to_string(), tx),
-            ReadBufferDot { id } => self.send_buffer_resp(id, |b| b.dot_contents(), tx),
-            ReadBufferAddr { id } => self.send_buffer_resp(id, |b| b.addr(), tx),
-            ReadBufferBody { id } => self.send_buffer_resp(id, |b| b.str_contents(), tx),
+            ReadBufferName { id } => self.send_buffer_resp(id, tx, |b| b.full_name().to_string()),
+            ReadBufferDot { id } => self.send_buffer_resp(id, tx, |b| b.dot_contents()),
+            ReadBufferAddr { id } => self.send_buffer_resp(id, tx, |b| b.addr()),
+            ReadBufferBody { id } => self.send_buffer_resp(id, tx, |b| b.str_contents()),
+
+            SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                b.handle_action(Action::InsertString { s })
+            }),
+
+            SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                if let Ok(mut expr) = DotExpression::parse(&mut s.chars().peekable()) {
+                    b.dot = b.map_dot_expr(&mut expr);
+                };
+
+                None
+            }),
+
+            ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
+                b.handle_action(Action::DotSet(TextObject::BufferStart, 1));
+                b.handle_action(Action::DotExtendForward(TextObject::BufferEnd, 1));
+                b.handle_action(Action::Delete)
+            }),
+
+            InsertBufferBody { id, s, offset } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                let idx = b.txt.byte_to_char(offset);
+                b.dot = Dot::Cur { c: Cur { idx } };
+                b.handle_action(Action::InsertString { s })
+            }),
         }
     }
 
