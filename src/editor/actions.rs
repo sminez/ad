@@ -31,6 +31,7 @@ pub enum Action {
     DotExtendForward(TextObject, usize),
     DotFlip,
     DotSet(TextObject, usize),
+    EditCommand { cmd: String },
     ExecuteDot,
     Exit { force: bool },
     InsertChar { c: char },
@@ -250,30 +251,14 @@ impl Editor {
         MiniBuffer::select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log(), self);
     }
 
-    pub(super) fn command_mode(&mut self) {
-        self.modes.insert(0, Mode::ephemeral_mode("COMMAND"));
-
-        if let Some(input) = MiniBuffer::prompt(":", self) {
-            if let Some(actions) = self.parse_command(&input) {
-                self.handle_actions(actions);
-            }
+    pub(super) fn execute_command(&mut self, cmd: &str) {
+        if let Some(actions) = self.parse_command(cmd.trim_end()) {
+            self.handle_actions(actions);
         }
-
-        self.modes.remove(0);
     }
 
-    pub(super) fn sam_mode(&mut self) {
-        self.modes.insert(0, Mode::ephemeral_mode("EDIT"));
-
-        let input = match MiniBuffer::prompt("Edit> ", self) {
-            Some(input) => input,
-            None => {
-                self.modes.remove(0);
-                return;
-            }
-        };
-
-        let mut prog = match Program::try_parse(&input) {
+    pub(super) fn execute_edit_command(&mut self, cmd: &str) {
+        let mut prog = match Program::try_parse(cmd) {
             Ok(prog) => prog,
             Err(e) => {
                 self.set_status_message(&format!("Invalid edit command: {e:?}"));
@@ -303,6 +288,24 @@ impl Editor {
                 self,
             );
         }
+    }
+
+    pub(super) fn command_mode(&mut self) {
+        self.modes.insert(0, Mode::ephemeral_mode("COMMAND"));
+
+        if let Some(input) = MiniBuffer::prompt(":", self) {
+            self.execute_command(&input);
+        }
+
+        self.modes.remove(0);
+    }
+
+    pub(super) fn sam_mode(&mut self) {
+        self.modes.insert(0, Mode::ephemeral_mode("EDIT"));
+
+        if let Some(input) = MiniBuffer::prompt("Edit> ", self) {
+            self.execute_edit_command(&input);
+        };
 
         self.modes.remove(0);
     }

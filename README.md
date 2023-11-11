@@ -1,5 +1,15 @@
 # ad :: an adaptable text editor
 
+`ad` (pronounced A.D.) is an attempt at combining a modal editing interface of likes of `vi`
+and `kakoune` with the approach to extensibility of Plan9's `Acme`. It is primarily intended
+as playground for experimenting with implementing various text editor features and currently
+is not at all optimised or feature complete enough for use as your main text editor.
+
+That said, if this sounds like something you might find interesting then please to take a
+look and see what you think! For now there isn't a whole lot of user facing documentation so
+you will need to read through the source code to learn about what is and is not implemented.
+
+
 ## Project Status
 
 This is not even remotely usable or stable enough for real world day-to-day use yet. All aspects of
@@ -32,7 +42,7 @@ I'm just going to hard code stuff. I'll try to do it in a way that makes it easy
 but the whole thing will be a lot easier to write if there isn't really any config parsing.
 
 ## Goals
-- Simple modal editing to the extent that I use VIM (maybe including counts, maybe not)
+- Simple modal editing to the extent that I use VIM
 - Sed/Sam style edit commands
 - Acme style use of external commands rather than an embedded language:
   - Exposing current buffer / window state to external programs

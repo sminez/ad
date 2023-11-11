@@ -1,21 +1,18 @@
 :: TODO
 
-- [ ] feature: Edit log transactions
-- [ ] feature: center screen on current line
-- [ ] feature: expand tab
+- [ ] FEATURE: Edit log transactions
+- [ ] FEATURE: center screen on current line
+- [ ] FEATURE: expand tab
 - [ ] implement remaining text objects
    >> The implementation for these is yet another way of hunting through the buffer for
       a certain position. Now that the regex engine works it might actually be simpler
      (though probably not faster) to just use that for all text object style Dot changes?
   - Target character
   - Delimited between a given character pair
-- [ ] feature: match indent
-- [ ] feature: store "desired x" or an "x is at EOL" flag?
-- [ ] feature: FUSE filesystem fun...!
-  - Whether or not this uses FUSE in the end or not, the Acme style interface for
-    supporting extension of the editor is still the plan for how to handle things.
-- [ ] feature: mini-buffer tab complete
-- [ ] feature: completion of command mode commands
+- [ ] FEATURE: match indent
+- [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
+- [ ] FEATURE: mini-buffer tab complete
+- [ ] FEATURE: completion of command mode commands
   - To start with this should be simple enough for handling just what is built in
     but supporting listing external scripts and tools would be nice as well
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
@@ -30,12 +27,11 @@
       files right next to the file that is being edited.
       - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
         the file but this is normal behaviour for sed so not an issue with ad
-- [ ] need to sketch out and implement the control files
 - [ ] need to detect an existing Fuse mount and handle the conflict gracefully
 
 -- Structural regular expressions --
-- [ ] feature: Piping through a shell command
-- [ ] feature: Replace without output from a shell command
+- [ ] FEATURE: Piping through a shell command
+- [ ] FEATURE: Replace without output from a shell command
 - [ ] Look at running grouped expressions in parallel a-la Sam
   - This should be doable by pre-computing the match positions and tracking any edit
     offsets that have built up

@@ -184,9 +184,7 @@ impl Editor {
 
         match req {
             ControlMessage { msg } => {
-                if let Some(actions) = self.parse_command(&msg) {
-                    self.handle_actions(actions);
-                }
+                self.execute_command(&msg);
                 tx.send(Ok("handled".to_string())).unwrap();
             }
 
@@ -200,7 +198,7 @@ impl Editor {
             }),
 
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(mut expr) = DotExpression::parse(&mut s.chars().peekable()) {
+                if let Ok(mut expr) = DotExpression::parse(&mut s.trim_end().chars().peekable()) {
                     b.dot = b.map_dot_expr(&mut expr);
                 };
 
@@ -248,6 +246,7 @@ impl Editor {
             Action::ChangeDirectory { path } => self.change_directory(path),
             Action::CommandMode => self.command_mode(),
             Action::DeleteBuffer { force } => self.delete_current_buffer(force),
+            Action::EditCommand { cmd } => self.execute_edit_command(&cmd),
             Action::Exit { force } => self.exit(force),
             Action::NextBuffer => self.buffers.next(),
             Action::OpenFile { path } => self.open_file(&path),

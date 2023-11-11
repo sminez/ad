@@ -11,6 +11,7 @@ impl Editor {
             return Some(actions);
         }
 
+        let input = input.trim_end();
         let (command, args) = if input.contains(' ') {
             input.split_once(' ')?
         } else {
@@ -35,7 +36,18 @@ impl Editor {
             "db" | "delete-buffer" => Some(Single(DeleteBuffer { force: false })),
             "db!" | "delete-buffer!" => Some(Single(DeleteBuffer { force: true })),
 
-            "e" | "edit" => {
+            "E" | "Edit" => {
+                if args.is_empty() {
+                    self.set_status_message("No edit script provided");
+                    None
+                } else {
+                    Some(Single(EditCommand {
+                        cmd: args.to_string(),
+                    }))
+                }
+            }
+
+            "o" | "open" => {
                 if args.is_empty() {
                     self.set_status_message("No filename provided");
                     None
