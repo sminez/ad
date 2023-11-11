@@ -27,7 +27,8 @@ impl Buffers {
         }
     }
 
-    pub fn open_or_focus<P: AsRef<Path>>(&mut self, path: P) -> io::Result<()> {
+    /// Returns the id of a newly created buffer, None if the buffer already existed
+    pub fn open_or_focus<P: AsRef<Path>>(&mut self, path: P) -> io::Result<Option<usize>> {
         let path = match path.as_ref().canonicalize() {
             Ok(p) => p,
             Err(e) if e.kind() == ErrorKind::NotFound => path.as_ref().to_path_buf(),
@@ -40,7 +41,7 @@ impl Buffers {
 
         if let Some(idx) = idx {
             self.inner.swap(0, idx);
-            return Ok(());
+            return Ok(None);
         }
 
         // Remove an empty scratch buffer if the user has now opened a file
@@ -48,11 +49,12 @@ impl Buffers {
             self.inner.remove(0);
         }
 
-        let b = Buffer::new_from_canonical_file_path(self.next_id, path)?;
-        self.inner.insert(0, b);
+        let id = self.next_id;
         self.next_id += 1;
+        let b = Buffer::new_from_canonical_file_path(id, path)?;
+        self.inner.insert(0, b);
 
-        Ok(())
+        Ok(Some(id))
     }
 
     /// Used to seed the buffer selection mini-buffer
@@ -76,6 +78,14 @@ impl Buffers {
             self.inner.swap(0, idx);
         }
     }
+
+    pub(crate) fn with_id(&self, id: usize) -> Option<&Buffer> {
+        self.inner.iter().find(|b| b.id == id)
+    }
+
+    // pub(crate) fn with_id_mut(&mut self, id: usize) -> Option<&mut Buffer> {
+    //     self.inner.iter_mut().find(|b| b.id == id)
+    // }
 
     pub fn dirty_buffers(&self) -> Vec<&str> {
         self.inner

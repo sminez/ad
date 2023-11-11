@@ -1,26 +1,39 @@
 //! Fetching and parsing input from the user
 use crate::{
-    editor::Editor,
+    fsys::Message,
     key::{Key, MouseEvent},
     term::win_size_changed,
 };
-use std::io::Read;
+use std::{
+    io::{stdin, Read, Stdin},
+    sync::mpsc::Sender,
+    thread::{spawn, JoinHandle},
+};
 
-impl Editor {
-    #[inline]
-    pub fn block_for_key(&mut self) -> Key {
-        loop {
-            // We need to check for size updates inside of this loop so that we don't have
-            // to wait for user input to respond to a resize event
-            if win_size_changed() {
-                self.update_window_size();
-                self.refresh_screen();
-            }
+pub enum InputEvent {
+    Message(Message),
+    KeyPress(Key),
+    WinsizeChanged,
+}
 
+pub(super) struct Input {
+    stdin: Stdin,
+    tx: Sender<InputEvent>,
+}
+
+impl Input {
+    pub(super) fn new(tx: Sender<InputEvent>) -> Self {
+        Self { stdin: stdin(), tx }
+    }
+
+    pub fn run_threaded(mut self) -> JoinHandle<()> {
+        spawn(move || loop {
             if let Some(key) = self.try_read_key() {
-                return key;
+                self.tx.send(InputEvent::KeyPress(key)).unwrap();
+            } else if win_size_changed() {
+                self.tx.send(InputEvent::WinsizeChanged).unwrap();
             }
-        }
+        })
     }
 
     #[inline]

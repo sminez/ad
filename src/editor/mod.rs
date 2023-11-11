@@ -1,19 +1,21 @@
 use crate::{
-    buffer::{ActionOutcome, Buffers, TextObject},
+    buffer::{ActionOutcome, Buffer, Buffers, TextObject},
     die,
+    fsys::{AdFs, BufId, Message, Req},
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
     term::{
         clear_screen, disable_alternate_screen, disable_mouse_support, enable_alternate_screen,
         enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
-        set_termios, win_size_changed,
+        set_termios,
     },
 };
 use libc::termios as Termios;
 use std::{
     env,
-    io::{self, Stdin, Stdout},
+    io::{self, Stdout},
     path::PathBuf,
+    sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
 };
 
@@ -23,12 +25,13 @@ mod input;
 mod render;
 
 pub use actions::{Action, Actions};
+use input::Input;
+pub use input::InputEvent;
 
 pub struct Editor {
     screen_rows: usize,
     screen_cols: usize,
     stdout: Stdout,
-    stdin: Stdin,
     original_termios: Termios,
     cwd: PathBuf,
     running: bool,
@@ -37,6 +40,9 @@ pub struct Editor {
     modes: Vec<Mode>,
     pending_keys: Vec<Key>,
     buffers: Buffers,
+    rx: Receiver<InputEvent>,
+    btx: Sender<BufId>,
+    fs_chans: Option<(Sender<InputEvent>, Receiver<BufId>)>,
 }
 
 impl Drop for Editor {
@@ -62,11 +68,13 @@ impl Editor {
         enable_mouse_support(&mut stdout);
         enable_alternate_screen(&mut stdout);
 
+        let (tx, rx) = channel();
+        let (btx, brx) = channel();
+
         Self {
             screen_rows: 0,
             screen_cols: 0,
             stdout,
-            stdin: io::stdin(),
             original_termios,
             cwd,
             running: true,
@@ -75,6 +83,9 @@ impl Editor {
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
+            rx,
+            btx,
+            fs_chans: Some((tx, brx)),
         }
     }
 
@@ -86,18 +97,21 @@ impl Editor {
         self.screen_cols = screen_cols;
     }
 
-    pub fn run(&mut self) {
+    pub fn run(mut self) {
         register_signal_handler();
         self.update_window_size();
 
+        let (tx, brx) = self.fs_chans.take().expect("to have fsys channels");
+        Input::new(tx.clone()).run_threaded();
+        AdFs::new(tx, brx).run_threaded();
+
         while self.running {
             self.refresh_screen();
-            if let Some(k) = self.try_read_key() {
-                self.handle_keypress(k);
-            }
 
-            if win_size_changed() {
-                self.update_window_size();
+            match self.rx.recv().unwrap() {
+                InputEvent::KeyPress(k) => self.handle_keypress(k),
+                InputEvent::Message(msg) => self.handle_message(msg),
+                InputEvent::WinsizeChanged => self.update_window_size(),
             }
         }
 
@@ -114,7 +128,50 @@ impl Editor {
         self.status_time = Instant::now();
     }
 
-    pub fn handle_keypress(&mut self, k: Key) {
+    pub(crate) fn block_for_key(&mut self) -> Key {
+        loop {
+            match self.rx.recv().unwrap() {
+                InputEvent::KeyPress(k) => return k,
+                InputEvent::Message(msg) => self.handle_message(msg),
+                InputEvent::WinsizeChanged => self.update_window_size(),
+            }
+        }
+    }
+
+    fn send_buffer_resp(
+        &self,
+        id: usize,
+        f: fn(&Buffer) -> String,
+        tx: Sender<Result<String, String>>,
+    ) {
+        match self.buffers.with_id(id) {
+            Some(b) => tx.send(Ok((f)(b))).unwrap(),
+            None => {
+                tx.send(Err("unknown buffer".to_string())).unwrap();
+                self.btx.send(BufId::Remove(id)).unwrap();
+            }
+        }
+    }
+
+    fn handle_message(&mut self, Message { req, tx }: Message) {
+        use Req::*;
+
+        match req {
+            ControlMessage { msg } => {
+                if let Some(actions) = self.parse_command(&msg) {
+                    self.handle_actions(actions);
+                }
+                tx.send(Ok("handled".to_string())).unwrap();
+            }
+
+            ReadBufferName { id } => self.send_buffer_resp(id, |b| b.full_name().to_string(), tx),
+            ReadBufferDot { id } => self.send_buffer_resp(id, |b| b.dot_contents(), tx),
+            ReadBufferAddr { id } => self.send_buffer_resp(id, |b| b.addr(), tx),
+            ReadBufferBody { id } => self.send_buffer_resp(id, |b| b.str_contents(), tx),
+        }
+    }
+
+    fn handle_keypress(&mut self, k: Key) {
         self.pending_keys.push(k);
 
         if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {

@@ -59,7 +59,7 @@ impl BufferKind {
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Buffer {
-    id: usize,
+    pub(crate) id: usize,
     pub(crate) kind: BufferKind,
     pub(crate) dot: Dot,
     pub(crate) txt: Rope,
@@ -150,6 +150,10 @@ impl Buffer {
         self.txt.bytes().collect()
     }
 
+    pub fn str_contents(&self) -> String {
+        self.txt.to_string()
+    }
+
     pub(crate) fn string_lines(&self) -> Vec<String> {
         self.txt
             .lines()
@@ -159,6 +163,10 @@ impl Buffer {
 
     pub fn dot_contents(&self) -> String {
         self.dot.content(self)
+    }
+
+    pub fn addr(&self) -> String {
+        self.dot.addr(self)
     }
 
     #[inline]

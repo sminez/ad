@@ -4,6 +4,7 @@ use crate::{
     die,
     editor::Editor,
     exec::Program,
+    fsys::BufId,
     key::Key,
     mode::Mode,
     util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
@@ -89,8 +90,10 @@ impl Editor {
     }
 
     pub fn open_file(&mut self, path: &str) {
-        if let Err(e) = self.buffers.open_or_focus(self.cwd.join(path)) {
-            self.set_status_message(&format!("Error opening file: {e}"));
+        match self.buffers.open_or_focus(self.cwd.join(path)) {
+            Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
+            Ok(Some(new_id)) => self.btx.send(BufId::Add(new_id)).unwrap(),
+            Ok(None) => (),
         };
     }
 
@@ -100,6 +103,9 @@ impl Editor {
         if self.buffers.active().dirty && !force {
             self.set_status_message("No write since last change");
         } else {
+            let id = self.buffers.active().id;
+            self.btx.send(BufId::Remove(id)).unwrap();
+
             self.buffers.close_active();
             if is_last_buffer {
                 self.running = false;

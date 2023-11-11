@@ -1,5 +1,8 @@
 //! A simple demo of the filesystem interface
-use ad::fsys::{AdFs, BufId, Message, Req};
+use ad::{
+    editor::InputEvent,
+    fsys::{AdFs, BufId, Message, Req},
+};
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
     thread::{spawn, JoinHandle},
@@ -19,7 +22,7 @@ fn main() {
     ed_thread.join().unwrap()
 }
 
-fn mock_editor_thread(mrx: Receiver<Message>, btx: Sender<BufId>) -> JoinHandle<()> {
+fn mock_editor_thread(rx: Receiver<InputEvent>, btx: Sender<BufId>) -> JoinHandle<()> {
     use Req::*;
 
     spawn(move || {
@@ -27,7 +30,10 @@ fn mock_editor_thread(mrx: Receiver<Message>, btx: Sender<BufId>) -> JoinHandle<
         btx.send(BufId::Add(2)).unwrap();
 
         loop {
-            let Message { req, tx } = mrx.recv().unwrap();
+            let (req, tx) = match rx.recv().unwrap() {
+                InputEvent::Message(Message { req, tx }) => (req, tx),
+                _ => continue,
+            };
 
             let s = match req {
                 ReadBufferName { id: 1 } => "my-first-buffer.txt",
@@ -45,7 +51,7 @@ fn mock_editor_thread(mrx: Receiver<Message>, btx: Sender<BufId>) -> JoinHandle<
                 _ => continue,
             };
 
-            tx.send(s.to_string()).unwrap()
+            tx.send(Ok(s.to_string())).unwrap()
         }
     })
 }

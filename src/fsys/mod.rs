@@ -26,6 +26,7 @@
 //!       body
 //!       event
 //! ```
+use crate::editor::InputEvent;
 use fuser::{
     FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry,
     Request,
@@ -79,7 +80,7 @@ const INO_OFFSET: Ino = 6;
 
 pub struct AdFs {
     mount_path: String,
-    mtx: Sender<Message>,
+    tx: Sender<InputEvent>,
     buffer_nodes: BufferNodes,
     // Root level files and directories
     mount_dir_attrs: FileAttr,
@@ -87,16 +88,16 @@ pub struct AdFs {
 }
 
 impl AdFs {
-    pub fn new(mtx: Sender<Message>, brx: Receiver<BufId>) -> Self {
+    pub fn new(tx: Sender<InputEvent>, brx: Receiver<BufId>) -> Self {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
 
         create_dir_all(&mount_path).expect("to be able to create our mount point");
-        let buffer_nodes = BufferNodes::new(mtx.clone(), brx);
+        let buffer_nodes = BufferNodes::new(tx.clone(), brx);
 
         Self {
             mount_path,
-            mtx,
+            tx,
             buffer_nodes,
             mount_dir_attrs: empty_dir_attrs(MOUNT_ROOT_INO),
             control_file_attrs: empty_file_attrs(CONTROL_FILE_INO),

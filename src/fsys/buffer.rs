@@ -2,6 +2,7 @@
 use super::{
     empty_dir_attrs, empty_file_attrs, Ino, Message, Req, BLOCK_SIZE, BUFFERS_INO, INO_OFFSET,
 };
+use crate::editor::InputEvent;
 use fuser::FileAttr;
 use std::{
     collections::BTreeMap,
@@ -37,17 +38,17 @@ pub(super) struct BufferNodes {
     known: BTreeMap<Ino, BufferNode>,
     next_ino: Ino,
     attrs: FileAttr,
-    mtx: Sender<Message>,
+    tx: Sender<InputEvent>,
     brx: Receiver<BufId>,
 }
 
 impl BufferNodes {
-    pub(super) fn new(mtx: Sender<Message>, brx: Receiver<BufId>) -> Self {
+    pub(super) fn new(tx: Sender<InputEvent>, brx: Receiver<BufId>) -> Self {
         Self {
             known: BTreeMap::default(),
             next_ino: BUFFERS_INO + 1,
             attrs: empty_dir_attrs(BUFFERS_INO),
-            mtx,
+            tx,
             brx,
         }
     }
@@ -78,7 +79,7 @@ impl BufferNodes {
         } else {
             self.known
                 .get_mut(&parent)?
-                .refreshed_file_attrs(name, &self.mtx)
+                .refreshed_file_attrs(name, &self.tx)
         }
     }
 
@@ -94,14 +95,14 @@ impl BufferNodes {
         let (parent, fname) = parent_and_fname(ino);
         self.known
             .get_mut(&parent)?
-            .refreshed_file_attrs(fname, &self.mtx)
+            .refreshed_file_attrs(fname, &self.tx)
     }
 
     pub(super) fn get_file_content(&mut self, ino: Ino) -> Option<String> {
         let (parent, fname) = parent_and_fname(ino);
         self.known
             .get(&parent)?
-            .current_file_content(fname, &self.mtx)
+            .current_file_content(fname, &self.tx)
     }
 
     /// Process any pending updates from the main thread for changes to the buffer set
@@ -151,8 +152,8 @@ impl BufferNode {
         self.attrs
     }
 
-    fn refreshed_file_attrs(&mut self, fname: &str, mtx: &Sender<Message>) -> Option<FileAttr> {
-        let content = self.current_file_content(fname, mtx)?;
+    fn refreshed_file_attrs(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<FileAttr> {
+        let content = self.current_file_content(fname, tx)?;
         let attrs = self.file_attrs.get_mut(fname)?;
         attrs.size = content.as_bytes().len() as u64;
         attrs.blocks = (attrs.size + BLOCK_SIZE - 1) / BLOCK_SIZE;
@@ -160,12 +161,12 @@ impl BufferNode {
         Some(*attrs)
     }
 
-    fn current_file_content(&self, fname: &str, mtx: &Sender<Message>) -> Option<String> {
+    fn current_file_content(&self, fname: &str, tx: &Sender<InputEvent>) -> Option<String> {
         match fname {
-            "filename" => Some(Message::send(Req::ReadBufferName { id: self.id }, mtx)),
-            "dot" => Some(Message::send(Req::ReadBufferDot { id: self.id }, mtx)),
-            "addr" => Some(Message::send(Req::ReadBufferAddr { id: self.id }, mtx)),
-            "body" => Some(Message::send(Req::ReadBufferBody { id: self.id }, mtx)),
+            "filename" => Message::send(Req::ReadBufferName { id: self.id }, tx).ok(),
+            "dot" => Message::send(Req::ReadBufferDot { id: self.id }, tx).ok(),
+            "addr" => Message::send(Req::ReadBufferAddr { id: self.id }, tx).ok(),
+            "body" => Message::send(Req::ReadBufferBody { id: self.id }, tx).ok(),
             "event" => Some("".to_string()), // TODO: sort out the event file
             _ => None,
         }
