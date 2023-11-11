@@ -21,6 +21,18 @@
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
 
+-- Fsys --
+- [!] buffer details for the initial scratch file seem to cause errors when requesting
+      the control file details through fsys?
+      - Also seems to happen with a new file that is being created
+      - It _might_ be something to do with special handling around naming new files?
+- [ ] sed edit in place doesn't seem to work because it needs to be able to create temp
+      files right next to the file that is being edited.
+      - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
+        the file but this is normal behaviour for sed so not an issue with ad
+- [ ] need to sketch out and implement the control files
+- [ ] need to detect an existing Fuse mount and handle the conflict gracefully
+
 -- Structural regular expressions --
 - [ ] feature: Piping through a shell command
 - [ ] feature: Replace without output from a shell command
