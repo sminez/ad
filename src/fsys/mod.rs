@@ -59,14 +59,11 @@ type Ino = u64;
 // Fixed inodes inside of '$HOME/.ad/mnt/buffers':
 ///   1. $HOME/.ad/mnt  -> The directory we mount to
 const MOUNT_ROOT_INO: Ino = 1;
-///   2.   log          -> log file for the editor as a whole
-const LOG_FILE_INO: Ino = 2;
-const LOG_FILE: &str = "log";
-///   3.   ctrl         -> control file for issuing commands
-const CONTROL_FILE_INO: Ino = 3;
+///   2.   ctrl         -> control file for issuing commands
+const CONTROL_FILE_INO: Ino = 2;
 const CONTROL_FILE: &str = "ctrl";
-///   4    buffers/     -> parent directory for buffers
-const BUFFERS_INO: Ino = 4;
+///   3    buffers/     -> parent directory for buffers
+const BUFFERS_INO: Ino = 3;
 const BUFFERS_DIR: &str = "buffers";
 
 /// The number of inodes required to serve both the directory and contents
@@ -86,7 +83,6 @@ pub struct AdFs {
     buffer_nodes: BufferNodes,
     // Root level files and directories
     mount_dir_attrs: FileAttr,
-    log_file_attrs: FileAttr,
     control_file_attrs: FileAttr,
 }
 
@@ -103,7 +99,6 @@ impl AdFs {
             mtx,
             buffer_nodes,
             mount_dir_attrs: empty_dir_attrs(MOUNT_ROOT_INO),
-            log_file_attrs: empty_file_attrs(LOG_FILE_INO),
             control_file_attrs: empty_file_attrs(CONTROL_FILE_INO),
         }
     }
@@ -124,6 +119,152 @@ impl AdFs {
 
         spawn(move || fuser::mount2(self, path, &options).unwrap())
     }
+}
+
+impl Filesystem for AdFs {
+    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+        self.buffer_nodes.update();
+
+        let str_name = match name.to_str() {
+            Some(s) => s,
+            None => {
+                reply.error(ENOENT);
+                return;
+            }
+        };
+
+        match parent {
+            MOUNT_ROOT_INO => match str_name {
+                CONTROL_FILE => reply.entry(&TTL, &self.control_file_attrs, 0),
+                BUFFERS_DIR => reply.entry(&TTL, &self.buffer_nodes.attrs(), 0),
+                _ => match self.buffer_nodes.lookup_file_attrs(parent, str_name) {
+                    Some(attrs) => reply.entry(&TTL, &attrs, 0),
+                    None => reply.error(ENOENT),
+                },
+            },
+
+            ino if ino == BUFFERS_INO || self.buffer_nodes.is_known_buffer_ino(ino) => {
+                match self.buffer_nodes.lookup_file_attrs(ino, str_name) {
+                    Some(attrs) => reply.entry(&TTL, &attrs, 0),
+                    None => reply.error(ENOENT),
+                }
+            }
+
+            _ => reply.error(ENOENT),
+        }
+    }
+
+    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+        self.buffer_nodes.update();
+
+        match ino {
+            MOUNT_ROOT_INO => reply.attr(&TTL, &self.mount_dir_attrs),
+            CONTROL_FILE_INO => reply.attr(&TTL, &self.control_file_attrs),
+
+            ino => match self.buffer_nodes.get_attr_for_inode(ino) {
+                Some(attrs) => reply.attr(&TTL, &attrs),
+                None => reply.error(ENOENT),
+            },
+        }
+    }
+
+    fn read(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        _size: u32,
+        _flags: i32,
+        _lock: Option<u64>,
+        reply: ReplyData,
+    ) {
+        self.buffer_nodes.update();
+
+        match ino {
+            CONTROL_FILE_INO => reply.data(&[]),
+
+            ino => match self.buffer_nodes.get_file_content(ino) {
+                Some(content) => reply.data(&content.as_bytes()[offset as usize..]),
+                None => reply.error(ENOENT),
+            },
+        }
+    }
+
+    fn readdir(
+        &mut self,
+        _req: &Request,
+        ino: u64,
+        _fh: u64,
+        offset: i64,
+        mut reply: ReplyDirectory,
+    ) {
+        self.buffer_nodes.update();
+
+        let entries = match ino {
+            MOUNT_ROOT_INO => vec![
+                (1, FileType::Directory, "."),
+                (1, FileType::Directory, ".."),
+                (CONTROL_FILE_INO, FileType::RegularFile, CONTROL_FILE),
+                (BUFFERS_INO, FileType::Directory, BUFFERS_DIR),
+            ],
+
+            BUFFERS_INO => {
+                let mut entries = vec![
+                    (BUFFERS_INO, FileType::Directory, "."),
+                    (BUFFERS_INO, FileType::Directory, ".."),
+                ];
+
+                for (ino, id) in self.buffer_nodes.known_buffer_ids() {
+                    entries.push((ino, FileType::Directory, id));
+                }
+
+                entries
+            }
+
+            ino if self.buffer_nodes.is_known_buffer_ino(ino) => {
+                let mut entries = vec![
+                    (ino, FileType::Directory, "."),
+                    (ino, FileType::Directory, ".."),
+                ];
+
+                for (offset, fname) in BUFFER_FILES.into_iter() {
+                    entries.push((ino + offset, FileType::RegularFile, fname));
+                }
+
+                entries
+            }
+
+            _ => return reply.error(ENOENT),
+        };
+
+        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
+            // i + 1 means the index of the next entry
+            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
+                break;
+            }
+        }
+
+        reply.ok();
+    }
+
+    // TODO: implement the following methods
+
+    // fn write(
+    //     &mut self,
+    //     _req: &Request<'_>,
+    //     ino: u64,
+    //     fh: u64,
+    //     offset: i64,
+    //     data: &[u8],
+    //     write_flags: u32,
+    //     flags: i32,
+    //     lock_owner: Option<u64>,
+    //     reply: fuser::ReplyWrite,
+    // ) {
+    // }
+
+    // fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: fuser::ReplyOpen) {}
 }
 
 fn empty_dir_attrs(ino: Ino) -> FileAttr {
@@ -163,151 +304,5 @@ fn empty_file_attrs(ino: Ino) -> FileAttr {
         rdev: 0,
         flags: 0,
         blksize: BLOCK_SIZE as u32,
-    }
-}
-
-impl Filesystem for AdFs {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
-        self.buffer_nodes.update();
-
-        let str_name = match name.to_str() {
-            Some(s) => s,
-            None => {
-                reply.error(ENOENT);
-                return;
-            }
-        };
-
-        println!("LOOKUP: parent={parent} name={str_name}");
-
-        if parent == MOUNT_ROOT_INO {
-            match str_name {
-                LOG_FILE => reply.entry(&TTL, &self.log_file_attrs, 0),
-                CONTROL_FILE => reply.entry(&TTL, &self.control_file_attrs, 0),
-                _ => match self.buffer_nodes.lookup_file_attrs(parent, str_name) {
-                    Some(attrs) => reply.entry(&TTL, &attrs, 0),
-                    None => reply.error(ENOENT),
-                },
-            }
-        }
-    }
-
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
-        self.buffer_nodes.update();
-
-        println!("GETATTR: ino={ino}");
-        match ino {
-            MOUNT_ROOT_INO => reply.attr(&TTL, &self.mount_dir_attrs),
-            LOG_FILE_INO => reply.attr(&TTL, &self.log_file_attrs),
-            CONTROL_FILE_INO => reply.attr(&TTL, &self.control_file_attrs),
-
-            ino => match self.buffer_nodes.get_attr_for_inode(ino) {
-                Some(attrs) => reply.attr(&TTL, &attrs),
-                None => reply.error(ENOENT),
-            },
-        }
-    }
-
-    fn read(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        _size: u32,
-        _flags: i32,
-        _lock: Option<u64>,
-        reply: ReplyData,
-    ) {
-        self.buffer_nodes.update();
-
-        println!("READ: ino={ino} offset={offset}");
-        match ino {
-            // FIXME: logfile and control file are left empty for now
-            LOG_FILE_INO => reply.data(&[]),
-            CONTROL_FILE_INO => reply.data(&[]),
-
-            ino => match self.buffer_nodes.get_file_content(ino) {
-                Some(content) => reply.data(&content.as_bytes()[offset as usize..]),
-                None => reply.error(ENOENT),
-            },
-        }
-    }
-
-    // fn write(
-    //     &mut self,
-    //     _req: &Request<'_>,
-    //     ino: u64,
-    //     fh: u64,
-    //     offset: i64,
-    //     data: &[u8],
-    //     write_flags: u32,
-    //     flags: i32,
-    //     lock_owner: Option<u64>,
-    //     reply: fuser::ReplyWrite,
-    // ) {
-    // }
-
-    fn readdir(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
-        self.buffer_nodes.update();
-        println!("READDIR: ino={ino} offset={offset}");
-
-        let entries = match ino {
-            MOUNT_ROOT_INO => vec![
-                (1, FileType::Directory, "."),
-                (1, FileType::Directory, ".."),
-                (LOG_FILE_INO, FileType::RegularFile, LOG_FILE),
-                (CONTROL_FILE_INO, FileType::RegularFile, CONTROL_FILE),
-                (BUFFERS_INO, FileType::Directory, BUFFERS_DIR),
-            ],
-
-            BUFFERS_INO => {
-                let mut entries = vec![
-                    (BUFFERS_INO, FileType::Directory, "."),
-                    (BUFFERS_INO, FileType::Directory, ".."),
-                ];
-
-                for (ino, id) in self.buffer_nodes.known_buffer_ids() {
-                    entries.push((ino, FileType::Directory, id));
-                }
-
-                entries
-            }
-
-            ino if self.buffer_nodes.is_known_buffer_ino(ino) => {
-                let mut entries = vec![
-                    (ino, FileType::Directory, "."),
-                    (ino, FileType::Directory, ".."),
-                ];
-
-                for (offset, fname) in BUFFER_FILES.into_iter() {
-                    entries.push((ino + offset, FileType::RegularFile, fname));
-                }
-
-                entries
-            }
-
-            _ => {
-                println!("READDIR: NOT FOUND");
-                reply.error(ENOENT);
-                return;
-            }
-        };
-
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                break;
-            }
-        }
-
-        reply.ok();
     }
 }

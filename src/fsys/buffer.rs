@@ -16,10 +16,11 @@ pub(super) const BUFFER_FILES: [(Ino, &str); INO_OFFSET as usize - 1] = [
     (5, "event"),
 ];
 
-/// Not guaranteed to be a valid parent node
 fn parent_and_fname(ino: Ino) -> (Ino, &'static str) {
-    let parent = (ino - BUFFERS_INO) / INO_OFFSET;
-    let fname = BUFFER_FILES[((ino - BUFFERS_INO) % INO_OFFSET) as usize].1;
+    assert!(ino > BUFFERS_INO, "invalid buffer file Ino");
+
+    let parent = BUFFERS_INO + (ino - BUFFERS_INO) / INO_OFFSET + 1;
+    let fname = BUFFER_FILES[((ino - BUFFERS_INO - 2) % INO_OFFSET) as usize].1;
 
     (parent, fname)
 }
@@ -69,7 +70,16 @@ impl BufferNodes {
     }
 
     pub(super) fn lookup_file_attrs(&mut self, parent: Ino, name: &str) -> Option<FileAttr> {
-        self.known.get(&parent)?.file_attrs.get(&name).copied()
+        if parent == BUFFERS_INO {
+            self.known
+                .values()
+                .find(|b| b.str_id == name)
+                .map(|b| b.attrs())
+        } else {
+            self.known
+                .get_mut(&parent)?
+                .refreshed_file_attrs(name, &self.mtx)
+        }
     }
 
     pub(super) fn get_attr_for_inode(&mut self, ino: Ino) -> Option<FileAttr> {
@@ -156,7 +166,7 @@ impl BufferNode {
             "dot" => Some(Message::send(Req::ReadBufferDot { id: self.id }, mtx)),
             "addr" => Some(Message::send(Req::ReadBufferAddr { id: self.id }, mtx)),
             "body" => Some(Message::send(Req::ReadBufferBody { id: self.id }, mtx)),
-            "event" => None, // TODO: sort out the event file
+            "event" => Some("".to_string()), // TODO: sort out the event file
             _ => None,
         }
     }
@@ -170,4 +180,21 @@ fn stub_file_attrs(ino: Ino) -> BTreeMap<&'static str, FileAttr> {
     }
 
     m
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    #[test_case(1, 0, "filename"; "filename first buffer")]
+    #[test_case(INO_OFFSET+2, 1, "dot"; "dot second buffer")]
+    #[test_case(INO_OFFSET+4, 1, "body"; "body second buffer")]
+    #[test]
+    fn parent_and_fname_works(ino: Ino, parent: Ino, fname: &str) {
+        let (p, f) = parent_and_fname(ino + BUFFERS_INO + 1);
+
+        assert_eq!(p, parent + BUFFERS_INO + 1);
+        assert_eq!(f, fname);
+    }
 }

@@ -7,14 +7,16 @@ use std::{
 
 fn main() {
     // In the real code the other halves of these channels are handed off to the editor
-    let (mtx, _) = channel();
-    let (_, brx) = channel();
+    let (mtx, mrx) = channel();
+    let (btx, brx) = channel();
     let fs = AdFs::new(mtx, brx);
 
     println!("mounting at {}", fs.mount_path());
     let fs_handle = fs.run_threaded();
+    let ed_thread = mock_editor_thread(mrx, btx);
 
-    fs_handle.join().unwrap()
+    fs_handle.join().unwrap();
+    ed_thread.join().unwrap()
 }
 
 fn mock_editor_thread(mrx: Receiver<Message>, btx: Sender<BufId>) -> JoinHandle<()> {
@@ -32,13 +34,13 @@ fn mock_editor_thread(mrx: Receiver<Message>, btx: Sender<BufId>) -> JoinHandle<
                 ReadBufferDot { id: 1 } => "contents of dot",
                 ReadBufferAddr { id: 1 } => "3:5,3:16",
                 ReadBufferBody { id: 1 } => {
-                    "this is the full file\nwith lines\nand the contents of dot"
+                    "this is the full file\nwith lines\nand the contents of dot\n"
                 }
 
                 ReadBufferName { id: 2 } => "demo-buffer.rs",
                 ReadBufferDot { id: 2 } => "some other dot contents",
                 ReadBufferAddr { id: 2 } => "5:12,5:29",
-                ReadBufferBody { id: 2 } => "clearly this is just test data",
+                ReadBufferBody { id: 2 } => "clearly this is just test data\n",
 
                 _ => continue,
             };
