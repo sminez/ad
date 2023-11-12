@@ -1,28 +1,41 @@
 :: TODO
 
-- [ ] FEATURE: Edit log transactions
-- [ ] FEATURE: center screen on current line
-- [ ] FEATURE: expand tab
-- [ ] implement remaining text objects
-   >> The implementation for these is yet another way of hunting through the buffer for
-      a certain position. Now that the regex engine works it might actually be simpler
-     (though probably not faster) to just use that for all text object style Dot changes?
-  - Target character
-  - Delimited between a given character pair
-- [ ] FEATURE: match indent
-- [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
-- [ ] FEATURE: mini-buffer tab complete
-- [ ] FEATURE: completion of command mode commands
-  - To start with this should be simple enough for handling just what is built in
-    but supporting listing external scripts and tools would be nice as well
+-- BUGS --
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
-
--- Fsys --
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
       the control file details through fsys?
       - Also seems to happen with a new file that is being created
       - It _might_ be something to do with special handling around naming new files?
+
+-- Misc / Editor features --
+- [ ] FEATURE: Edit log transactions
+	  - paste should always be a new transaction
+- [ ] FEATURE: center screen on current line
+- [ ] FEATURE: expand tab
+- [ ] implement remaining text objects
+      >> The implementation for these is yet another way of hunting through the buffer for
+         a certain position. Now that the regex engine works it might actually be simpler
+         (though probably not faster) to just use that for all text object style Dot changes?
+      - Target character
+      - Delimited between a given character pair
+- [ ] FEATURE: match indent
+- [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
+- [ ] FEATURE: mini-buffer tab complete
+- [ ] FEATURE: completion of command mode commands
+      - To start with this should be simple enough for handling just what is built in
+        but supporting listing external scripts and tools would be nice as well
+- [ ] FEATURE: auto-reload files when they are modified on disk
+      - This is a feature that has saved me countless times when pulling changes from git
+        so it really does need to be there, but having this implemented cross platform
+        is likely going to bring in a bunch of dependencies.
+      - The notify crate (https://crates.io/crates/notify) seems to be what a lot of things
+        use but it brings in mio it seems so the other inter-thread communication pieces
+        _really_ should all make use of the same sort of event loop rather than having
+        multiple, but that'll likely make things a lot more fiddly compared to using mpsc
+        channels.
+
+-- Fsys --
 - [ ] sed edit in place doesn't seem to work because it needs to be able to create temp
       files right next to the file that is being edited.
       - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
@@ -33,8 +46,8 @@
 - [ ] FEATURE: Piping through a shell command
 - [ ] FEATURE: Replace without output from a shell command
 - [ ] Look at running grouped expressions in parallel a-la Sam
-  - This should be doable by pre-computing the match positions and tracking any edit
-    offsets that have built up
+      - This should be doable by pre-computing the match positions and tracking any edit
+        offsets that have built up
 - [ ] Storing the history of previous edit commands and allowing for cycling through
       them would be helpful (same for Command mode).
 - [ ] Update the current "Command Mode" dummy mode to just take a string for the mode

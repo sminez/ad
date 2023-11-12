@@ -28,8 +28,8 @@
 //! ```
 use crate::editor::InputEvent;
 use fuser::{
-    FileAttr, FileType, Filesystem, MountOption, ReplyAttr, ReplyData, ReplyDirectory, ReplyEmpty,
-    ReplyEntry, ReplyOpen, Request,
+    spawn_mount2, BackgroundSession, FileAttr, FileType, Filesystem, MountOption, ReplyAttr,
+    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
 };
 // See the following for an overview of libc error codes:
 //   https://www.gnu.org/software/libc/manual/html_node/Error-Codes.html
@@ -42,7 +42,6 @@ use std::{
         atomic::{AtomicU64, Ordering},
         mpsc::{Receiver, Sender},
     },
-    thread::{spawn, JoinHandle},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
@@ -83,6 +82,7 @@ const BUFFERS_DIR: &str = "buffers";
 ///   6.   event        -> Contol file for intercepting input events for the buffer
 const INO_OFFSET: Ino = 6;
 
+#[derive(Debug)]
 pub struct AdFs {
     mount_path: String,
     next_fh: AtomicU64,
@@ -91,6 +91,15 @@ pub struct AdFs {
     // Root level files and directories
     mount_dir_attrs: FileAttr,
     control_file_attrs: FileAttr,
+}
+
+#[derive(Debug)]
+pub struct FsHandle(BackgroundSession);
+
+impl FsHandle {
+    pub fn join(self) {
+        self.0.join()
+    }
 }
 
 impl AdFs {
@@ -115,12 +124,12 @@ impl AdFs {
         &self.mount_path
     }
 
-    pub fn next_fh(&mut self) -> u64 {
+    fn next_fh(&mut self) -> u64 {
         self.next_fh.fetch_add(1, Ordering::SeqCst)
     }
 
     /// Spawn a thread for running this filesystem and return a handle to it
-    pub fn run_threaded(self) -> JoinHandle<()> {
+    pub fn run_threaded(self) -> FsHandle {
         let options = [
             MountOption::FSName(FS_NAME.to_string()),
             MountOption::AutoUnmount,
@@ -129,7 +138,7 @@ impl AdFs {
         ];
         let path = self.mount_path.clone();
 
-        spawn(move || fuser::mount2(self, path, &options).unwrap())
+        FsHandle(spawn_mount2(self, path, &options).expect("to be able to start fsys thread"))
     }
 }
 

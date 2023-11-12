@@ -104,7 +104,7 @@ impl Editor {
 
         let (tx, brx) = self.fs_chans.take().expect("to have fsys channels");
         Input::new(tx.clone()).run_threaded();
-        AdFs::new(tx, brx).run_threaded();
+        let fs_handle = AdFs::new(tx, brx).run_threaded();
 
         while self.running {
             self.refresh_screen();
@@ -117,6 +117,7 @@ impl Editor {
         }
 
         clear_screen(&mut self.stdout);
+        fs_handle.join()
     }
 
     pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
