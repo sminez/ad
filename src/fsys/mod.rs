@@ -379,8 +379,8 @@ fn empty_dir_attrs(ino: Ino) -> FileAttr {
         kind: FileType::Directory,
         perm: 0o755,
         nlink: 2,
-        uid: 501,
-        gid: 20,
+        uid: get_uid(),
+        gid: get_gid(),
         rdev: 0,
         flags: 0,
         blksize: BLOCK_SIZE as u32,
@@ -399,10 +399,20 @@ fn empty_file_attrs(ino: Ino) -> FileAttr {
         kind: FileType::RegularFile,
         perm: 0o644,
         nlink: 1,
-        uid: 501,
-        gid: 20,
+        uid: get_uid(),
+        gid: get_gid(),
+        // uid: 501,
+        // gid: 20,
         rdev: 0,
         flags: 0,
         blksize: BLOCK_SIZE as u32,
     }
+}
+
+fn get_uid() -> u32 {
+    unsafe { libc::getuid() }
+}
+
+fn get_gid() -> u32 {
+    unsafe { libc::getgid() }
 }
