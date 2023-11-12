@@ -384,31 +384,10 @@ impl UpdateDot for TextObject {
             (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Right, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Down, 1, b), end),
             (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Down, 1, b)),
-            (TextObject::LineEnd, true) => {
-                // start can only be EOL if start==end
-                if start != end {
-                    (start.move_to_line_end(b), end)
-                } else {
-                    let new_end = start.arr_w_count(Arrow::Down, 1, b).move_to_line_end(b);
-                    (end, new_end)
-                }
-            }
-            (TextObject::LineEnd, false) => {
-                let mut new_end = end.move_to_line_end(b);
-                if new_end == end {
-                    // already EOL so move to the next
-                    new_end = new_end.arr_w_count(Arrow::Down, 1, b).move_to_line_end(b);
-                }
-                (start, new_end)
-            }
-            (TextObject::LineStart, true) => (
-                start.arr_w_count(Arrow::Down, 1, b).move_to_line_start(b),
-                end,
-            ),
-            (TextObject::LineStart, false) => (
-                start,
-                end.arr_w_count(Arrow::Down, 1, b).move_to_line_start(b),
-            ),
+            (TextObject::LineEnd, true) => (start.move_to_line_end(b), end),
+            (TextObject::LineEnd, false) => (start, end.move_to_line_end(b)),
+            (TextObject::LineStart, true) => (start.move_to_line_start(b), end),
+            (TextObject::LineStart, false) => (start, end.move_to_line_start(b)),
             (TextObject::Paragraph, true) => (start.to_next_paragraph_end(b), end),
             (TextObject::Paragraph, false) => (start, end.to_next_paragraph_end(b)),
             (TextObject::Word, true) => (start.to_next_word_end(b), end),
@@ -437,24 +416,10 @@ impl UpdateDot for TextObject {
             (TextObject::Character, false) => (start, end.arr_w_count(Arrow::Left, 1, b)),
             (TextObject::Line, true) => (start.arr_w_count(Arrow::Up, 1, b), end),
             (TextObject::Line, false) => (start, end.arr_w_count(Arrow::Up, 1, b)),
-            (TextObject::LineEnd, true) => {
-                (start.arr_w_count(Arrow::Up, 1, b).move_to_line_end(b), end)
-            }
-            (TextObject::LineEnd, false) => {
-                (start, end.arr_w_count(Arrow::Up, 1, b).move_to_line_end(b))
-            }
-            (TextObject::LineStart, true) => {
-                if start.idx == b.txt.char_to_line(start.idx) {
-                    (start.arr_w_count(Arrow::Up, 1, b), end)
-                } else {
-                    start.idx = b.txt.char_to_line(start.idx);
-                    (start, end)
-                }
-            }
-            (TextObject::LineStart, false) => {
-                end.idx = b.txt.char_to_line(end.idx);
-                (start, end)
-            }
+            (TextObject::LineEnd, true) => (start.move_to_line_end(b), end),
+            (TextObject::LineEnd, false) => (start, end.move_to_line_end(b)),
+            (TextObject::LineStart, true) => (start.move_to_line_start(b), end),
+            (TextObject::LineStart, false) => (start, end.move_to_line_start(b)),
             (TextObject::Paragraph, true) => (start.to_prev_paragraph_start(b), end),
             (TextObject::Paragraph, false) => (start, end.to_prev_paragraph_start(b)),
             (TextObject::Word, true) => (start.to_prev_word_start(b), end),
