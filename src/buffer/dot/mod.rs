@@ -76,6 +76,10 @@ impl Dot {
     }
 
     pub fn content(&self, b: &Buffer) -> String {
+        if b.txt.len_chars() == 0 {
+            return String::new();
+        }
+
         let (from, to) = self.as_char_indices();
         b.txt.slice(from..to).to_string()
     }
