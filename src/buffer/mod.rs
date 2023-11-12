@@ -1,5 +1,5 @@
 use crate::{
-    cfg,
+    config,
     editor::Action,
     key::Key,
     term::{Color, Style},
@@ -210,7 +210,7 @@ impl Buffer {
             return 0;
         }
 
-        let tabstop = cfg!().tabstop;
+        let tabstop = config!().tabstop;
 
         let mut rx = 0;
         for c in self.txt.line(y).chars().take(x) {
@@ -230,7 +230,7 @@ impl Buffer {
 
         let mut rx = 0;
         let mut cx = 0;
-        let tabstop = cfg!().tabstop;
+        let tabstop = config!().tabstop;
 
         for c in self.txt.line(y).chars() {
             if c == '\n' {
@@ -274,7 +274,7 @@ impl Buffer {
         dot_range: Option<(usize, usize)>,
     ) -> (String, Option<(usize, usize)>) {
         let max_chars = screen_cols - lpad;
-        let tabstop = cfg!().tabstop;
+        let tabstop = config!().tabstop;
         let mut rline = Vec::with_capacity(max_chars);
         // Iterating over characters not bytes as we need to account for multi-byte utf8
         let mut it = self.txt.line(y).chars().skip(self.col_off);
@@ -453,11 +453,14 @@ impl Buffer {
     }
 
     fn handle_raw_key(&mut self, k: Key) -> Option<ActionOutcome> {
-        let cfg = cfg!();
+        let (match_indent, expand_tab, tabstop) = {
+            let conf = config!();
+            (conf.match_indent, conf.expand_tab, conf.tabstop)
+        };
 
         match k {
             Key::Return => {
-                let prefix = if cfg.match_indent {
+                let prefix = if match_indent {
                     let cur = self.dot.first_cur();
                     let y = self.txt.char_to_line(cur.idx);
                     let line = self.txt.line(y).to_string();
@@ -478,8 +481,8 @@ impl Buffer {
             }
 
             Key::Tab => {
-                let (c, deleted) = if cfg.expand_tab {
-                    self.insert_string(self.dot, " ".repeat(cfg.tabstop))
+                let (c, deleted) = if expand_tab {
+                    self.insert_string(self.dot, " ".repeat(tabstop))
                 } else {
                     self.insert_char(self.dot, '\t')
                 };

@@ -2,9 +2,9 @@
 //! modifying the current buffer state.
 use crate::{
     buffer::{Buffer, BufferKind, TextObject},
+    config,
     editor::Editor,
     key::{Arrow, Key},
-    MINI_BUFFER_HEIGHT,
 };
 use ropey::Rope;
 use std::cmp::min;
@@ -82,7 +82,11 @@ impl MiniBuffer {
     ) -> MiniBufferSelection {
         let offset = prompt.len();
         let (screen_rows, _) = ed.screen_rowcol();
-        let mut mb = MiniBuffer::new(prompt.to_string(), initial_lines, MINI_BUFFER_HEIGHT);
+        let mut mb = MiniBuffer::new(
+            prompt.to_string(),
+            initial_lines,
+            config!().minibuffer_lines,
+        );
         let mut input = String::new();
         let mut x = 0;
         let mut line_indices: Vec<usize> = Vec::with_capacity(mb.initial_lines.len());

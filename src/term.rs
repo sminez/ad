@@ -62,14 +62,16 @@ pub struct Color {
     g: u8,
 }
 
-impl From<&str> for Color {
-    fn from(s: &str) -> Self {
+impl TryFrom<&str> for Color {
+    type Error = String;
+
+    fn try_from(s: &str) -> Result<Self, String> {
         let [_, r, g, b] = match u32::from_str_radix(s.strip_prefix('#').unwrap_or(s), 16) {
             Ok(hex) => hex.to_be_bytes(),
-            Err(e) => die!("invalid color ('{s}'): {e}"),
+            Err(e) => return Err(format!("invalid color ('{s}'): {e}")),
         };
 
-        Self { r, g, b }
+        Ok(Self { r, g, b })
     }
 }
 

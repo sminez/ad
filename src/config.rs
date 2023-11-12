@@ -1,10 +1,14 @@
 //! A minimal config file format for ad
+use crate::term::Color;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub(crate) tabstop: usize,
     pub(crate) expand_tab: bool,
     pub(crate) match_indent: bool,
+    pub(crate) status_timeout: u64,
+    pub(crate) minibuffer_lines: usize,
+    pub(crate) colorscheme: ColorScheme,
 }
 
 impl Default for Config {
@@ -13,6 +17,32 @@ impl Default for Config {
             tabstop: 4,
             expand_tab: true,
             match_indent: true,
+            status_timeout: 5,
+            minibuffer_lines: 10,
+            colorscheme: ColorScheme::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ColorScheme {
+    pub(crate) bg: Color,
+    pub(crate) fg: Color,
+    pub(crate) dot_bg: Color,
+    pub(crate) bar_bg: Color,
+    pub(crate) signcol_fg: Color,
+    pub(crate) minibuffer_hl: Color,
+}
+
+impl Default for ColorScheme {
+    fn default() -> Self {
+        Self {
+            bg: "#1B1720".try_into().unwrap(),
+            fg: "#EBDBB2".try_into().unwrap(),
+            dot_bg: "#336677".try_into().unwrap(),
+            bar_bg: "#4E415C".try_into().unwrap(),
+            signcol_fg: "#544863".try_into().unwrap(),
+            minibuffer_hl: "#3E3549".try_into().unwrap(),
         }
     }
 }
@@ -46,30 +76,50 @@ impl Config {
         };
 
         match prop {
-            "tabstop" => {
-                self.tabstop = match val.parse() {
-                    Ok(num) => num,
-                    Err(_) => return Err(format!("'{val}' is not valid tabstop")),
-                };
-            }
+            // Numbers
+            "tabstop" => self.tabstop = parse_usize(prop, val)?,
+            "minibuffer-lines" => self.minibuffer_lines = parse_usize(prop, val)?,
+            "status-timeout" => self.status_timeout = parse_usize(prop, val)? as u64,
 
-            "expand-tab" => match val {
-                "true" => self.expand_tab = true,
-                "false" => self.expand_tab = false,
-                _ => return Err(format!("expand-tab: expected true/false, got '{val}'")),
-            },
+            // Flags
+            "expand-tab" => self.expand_tab = parse_bool(prop, val)?,
+            "match-indent" => self.match_indent = parse_bool(prop, val)?,
 
-            "match-indent" => match val {
-                "true" => self.match_indent = true,
-                "false" => self.match_indent = false,
-                _ => return Err(format!("match-indent: expected true/false, got '{val}'")),
-            },
+            // Colors
+            "bg-color" => self.colorscheme.bg = parse_color(prop, val)?,
+            "fg-color" => self.colorscheme.fg = parse_color(prop, val)?,
+            "dot-bg-color" => self.colorscheme.dot_bg = parse_color(prop, val)?,
+            "bar-bg-color" => self.colorscheme.bar_bg = parse_color(prop, val)?,
+            "signcol-fg-color" => self.colorscheme.signcol_fg = parse_color(prop, val)?,
+            "minibuffer-hl-color" => self.colorscheme.minibuffer_hl = parse_color(prop, val)?,
 
             _ => return Err(format!("'{prop}' is not a known config property")),
         }
 
         Ok(())
     }
+}
+
+fn parse_usize(prop: &str, val: &str) -> Result<usize, String> {
+    match val.parse() {
+        Ok(num) => Ok(num),
+        Err(_) => Err(format!("expected number for '{prop}' but found '{val}'")),
+    }
+}
+
+fn parse_bool(prop: &str, val: &str) -> Result<bool, String> {
+    match val {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(format!(
+            "expected true/false for '{prop}' but found '{val}'"
+        )),
+    }
+}
+
+fn parse_color(prop: &str, val: &str) -> Result<Color, String> {
+    Color::try_from(val)
+        .map_err(|_| format!("expected #RRGGBB string for '{prop}' but found '{val}'"))
 }
 
 #[cfg(test)]
@@ -98,19 +148,21 @@ set match-indent=false
             tabstop: 4,
             expand_tab: true,
             match_indent: true,
+            ..Default::default()
         };
 
         assert_eq!(cfg, expected);
     }
 
     #[test]
-    fn custom_vals_for_all_props_works() {
+    fn custom_vals_work() {
         let cfg = Config::parse(CUSTOM_CONFIG).unwrap();
 
         let expected = Config {
             tabstop: 7,
             expand_tab: false,
             match_indent: false,
+            ..Default::default()
         };
 
         assert_eq!(cfg, expected);

@@ -1,19 +1,16 @@
 //! Rendering the user interface
 use crate::{
     buffer::{Buffer, MiniBufferState},
+    config,
+    config::ColorScheme,
     die,
     editor::Editor,
     key::Key,
     term::{Cursor, Style},
-    STATUS_TIMEOUT, VERSION,
+    VERSION,
 };
 use std::{cmp::min, io::Write, time::Instant};
 
-// UI colors (should be pulled from config eventually)
-const DOT_BG: &str = "#336677";
-const BAR_BG: &str = "#4E415C";
-const SGNCOL_FG: &str = "#544863";
-const MB_HIGHLIGHT: &str = "#3E3549";
 const VLINE: char = '│';
 
 impl Editor {
@@ -39,14 +36,27 @@ impl Editor {
             .active_mut()
             .clamp_scroll(self.screen_rows, self.screen_cols);
 
+        let (cs, status_timeout) = {
+            let conf = config!();
+            (conf.colorscheme, conf.status_timeout)
+        };
+
         let mut buf = format!("{}{}", Cursor::Hide, Cursor::ToStart);
-        let w_sgncol = self.render_rows(&mut buf, effective_screen_rows);
-        self.render_status_bar(&mut buf);
+        let w_sgncol = self.render_rows(&mut buf, effective_screen_rows, &cs);
+        self.render_status_bar(&mut buf, &cs);
 
         if w_minibuffer {
-            self.render_minibuffer_state(&mut buf, prompt_line, b, selected_line_idx, top, bottom);
+            self.render_minibuffer_state(
+                &mut buf,
+                prompt_line,
+                b,
+                selected_line_idx,
+                top,
+                bottom,
+                &cs,
+            );
         } else {
-            self.render_message_bar(&mut buf);
+            self.render_message_bar(&mut buf, &cs, status_timeout);
         }
 
         let active = self.buffers.active();
@@ -69,7 +79,7 @@ impl Editor {
     }
 
     /// Returns the width of the sign column
-    fn render_rows(&self, buf: &mut String, screen_rows: usize) -> usize {
+    fn render_rows(&self, buf: &mut String, screen_rows: usize, cs: &ColorScheme) -> usize {
         let b = self.buffers.active();
 
         // Sort out dimensions of the sign/number column
@@ -80,9 +90,10 @@ impl Editor {
 
             if file_row >= b.len_lines() {
                 buf.push_str(&format!(
-                    "{}~ {VLINE:>width$}{}",
-                    Style::Fg(SGNCOL_FG.into()),
-                    Style::Reset,
+                    "{}{}~ {VLINE:>width$}{}",
+                    Style::Fg(cs.signcol_fg),
+                    Style::Bg(cs.bg),
+                    Style::Fg(cs.fg),
                     width = w_lnum
                 ));
 
@@ -97,11 +108,12 @@ impl Editor {
                 // +2 for the leading space and vline chars
                 let padding = w_lnum + 2;
                 buf.push_str(&format!(
-                    "{} {:>width$}{VLINE}{}{}",
-                    Style::Fg(SGNCOL_FG.into()),
+                    "{}{} {:>width$}{VLINE}{}{}",
+                    Style::Fg(cs.signcol_fg),
+                    Style::Bg(cs.bg),
                     file_row + 1,
-                    Style::Reset,
-                    b.styled_rline_unchecked(file_row, padding, self.screen_cols, DOT_BG.into()),
+                    Style::Fg(cs.fg),
+                    b.styled_rline_unchecked(file_row, padding, self.screen_cols, cs.dot_bg),
                     width = w_lnum
                 ));
             }
@@ -112,7 +124,7 @@ impl Editor {
         w_sgncol
     }
 
-    fn render_status_bar(&self, buf: &mut String) {
+    fn render_status_bar(&self, buf: &mut String, cs: &ColorScheme) {
         let b = self.buffers.active();
         let lstatus = format!(
             "{} {} - {} lines {}",
@@ -123,15 +135,17 @@ impl Editor {
         );
         let rstatus = b.dot.addr(b);
         let width = self.screen_cols - lstatus.len();
+
         buf.push_str(&format!(
-            "{}{lstatus}{rstatus:>width$}{}\r\n",
-            Style::Bg(BAR_BG.into()),
+            "{}{}{lstatus}{rstatus:>width$}{}\r\n",
+            Style::Bg(cs.bar_bg),
+            Style::Fg(cs.fg),
             Style::Reset
         ));
     }
 
     // current prompt and pending chars
-    fn render_message_bar(&self, buf: &mut String) {
+    fn render_message_bar(&self, buf: &mut String, cs: &ColorScheme, status_timeout: u64) {
         buf.push_str(&Cursor::ClearRight.to_string());
 
         let mut msg = self.status_message.clone();
@@ -140,15 +154,24 @@ impl Editor {
         let pending = render_pending(&self.pending_keys);
         let delta = (Instant::now() - self.status_time).as_secs();
 
-        if !msg.is_empty() && delta < STATUS_TIMEOUT {
+        if !msg.is_empty() && delta < status_timeout {
             let width = self.screen_cols - msg.len() - 10;
-            buf.push_str(&format!("{msg}{pending:>width$}"));
+            buf.push_str(&format!(
+                "{}{}{msg}{pending:>width$}",
+                Style::Fg(cs.fg),
+                Style::Bg(cs.bg)
+            ));
         } else {
             let width = self.screen_cols - 10;
-            buf.push_str(&format!("{pending:>width$}"));
+            buf.push_str(&format!(
+                "{}{}{pending:>width$}",
+                Style::Fg(cs.fg),
+                Style::Bg(cs.bg)
+            ));
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_minibuffer_state(
         &self,
         buf: &mut String,
@@ -157,26 +180,40 @@ impl Editor {
         selected_line_idx: usize,
         top: usize,
         bottom: usize,
+        cs: &ColorScheme,
     ) {
         if let Some(b) = b {
             let width = self.screen_cols;
+
             for i in top..=bottom {
                 let (rline, _) = b.raw_rline_unchecked(i, 0, self.screen_cols, None);
                 let len = min(self.screen_cols, rline.len());
                 if i == selected_line_idx {
                     buf.push_str(&format!(
-                        "{}{:<width$}{}\r\n",
-                        Style::Bg(MB_HIGHLIGHT.into()),
+                        "{}{}{:<width$}{}\r\n",
+                        Style::Fg(cs.fg),
+                        Style::Bg(cs.minibuffer_hl),
                         &rline[0..len],
                         Style::Reset,
                     ));
                 } else {
-                    buf.push_str(&format!("{}{}\r\n", &rline[0..len], Cursor::ClearRight));
+                    buf.push_str(&format!(
+                        "{}{}{}{}\r\n",
+                        Style::Fg(cs.fg),
+                        Style::Bg(cs.bg),
+                        &rline[0..len],
+                        Cursor::ClearRight
+                    ));
                 }
             }
         }
 
-        buf.push_str(&format!("{prompt_line}{}", Cursor::ClearRight));
+        buf.push_str(&format!(
+            "{}{}{prompt_line}{}",
+            Style::Fg(cs.fg),
+            Style::Bg(cs.bg),
+            Cursor::ClearRight
+        ));
     }
 }
 
