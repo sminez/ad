@@ -365,7 +365,7 @@ fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Err
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{buffer::Buffer, editor::Action, regex::Regex};
+    use crate::{buffer::Buffer, editor::Action, regex::Regex, Config};
     use ropey::Rope;
     use simple_test_case::test_case;
     use Expr::*;
@@ -498,7 +498,7 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content);
 
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
-        while b.handle_action(Action::Undo).is_none() {}
+        while b.handle_action(Action::Undo, &Config::default()).is_none() {}
         let final_content = String::from_utf8(b.contents()).unwrap();
 
         assert_eq!(&final_content, initial_content);

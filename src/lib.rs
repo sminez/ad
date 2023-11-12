@@ -1,5 +1,6 @@
 //! ad :: the adaptable editor
 pub mod buffer;
+pub mod config;
 pub mod editor;
 pub mod exec;
 pub mod fsys;
@@ -10,6 +11,7 @@ pub mod term;
 pub mod trie;
 pub mod util;
 
+pub use config::Config;
 pub use editor::Editor;
 pub use exec::{CachedStdin, IterableStream, Program};
 
