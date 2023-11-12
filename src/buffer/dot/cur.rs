@@ -91,8 +91,14 @@ impl Cur {
     #[must_use]
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         let y = b.txt.char_to_line(self.idx);
+        self.idx = b.txt.line_to_char(y) + b.txt.line(y).len_chars();
 
-        self.idx = b.txt.line_to_char(y) + b.txt.line(y).len_chars().saturating_sub(1);
+        // On the last line of the file we don't have a trailing newline
+        // so we really do want the final character
+        if y < b.len_lines().saturating_sub(1) {
+            self.idx = self.idx.saturating_sub(1);
+        }
+
         self
     }
 }
