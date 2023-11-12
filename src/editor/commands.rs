@@ -61,6 +61,10 @@ impl Editor {
             "q" | "quit" => Some(Single(Exit { force: false })),
             "q!" | "quit!" => Some(Single(Exit { force: true })),
 
+            "set" => Some(Single(SetConfigProp {
+                input: args.to_string(),
+            })),
+
             "w" | "write" => {
                 if args.is_empty() {
                     Some(Single(SaveBuffer))

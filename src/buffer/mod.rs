@@ -1,10 +1,10 @@
 use crate::{
-    config::Config,
+    cfg,
     editor::Action,
     key::Key,
     term::{Color, Style},
     util::relative_path_from,
-    MAX_NAME_LEN, TAB_STOP, UNNAMED_BUFFER,
+    MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ropey::{Rope, RopeSlice};
 use std::{
@@ -210,10 +210,12 @@ impl Buffer {
             return 0;
         }
 
+        let tabstop = cfg!().tabstop;
+
         let mut rx = 0;
         for c in self.txt.line(y).chars().take(x) {
             if c == '\t' {
-                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+                rx += (tabstop - 1) - (rx % tabstop);
             }
             rx += 1;
         }
@@ -228,6 +230,7 @@ impl Buffer {
 
         let mut rx = 0;
         let mut cx = 0;
+        let tabstop = cfg!().tabstop;
 
         for c in self.txt.line(y).chars() {
             if c == '\n' {
@@ -235,7 +238,7 @@ impl Buffer {
             }
 
             if c == '\t' {
-                rx += (TAB_STOP - 1) - (rx % TAB_STOP);
+                rx += (tabstop - 1) - (rx % tabstop);
             }
             rx += 1;
 
@@ -271,6 +274,7 @@ impl Buffer {
         dot_range: Option<(usize, usize)>,
     ) -> (String, Option<(usize, usize)>) {
         let max_chars = screen_cols - lpad;
+        let tabstop = cfg!().tabstop;
         let mut rline = Vec::with_capacity(max_chars);
         // Iterating over characters not bytes as we need to account for multi-byte utf8
         let mut it = self.txt.line(y).chars().skip(self.col_off);
@@ -290,12 +294,12 @@ impl Buffer {
                 Some('\n') | None => break,
                 Some('\t') => {
                     if rline.len() < start {
-                        start += TAB_STOP;
+                        start += tabstop;
                     }
                     if rline.len() < end {
-                        end = end.saturating_add(TAB_STOP);
+                        end = end.saturating_add(tabstop);
                     }
-                    rline.extend([' '; TAB_STOP].iter());
+                    rline.append(&mut [' '].repeat(tabstop));
                 }
                 Some(c) => rline.push(c),
             }
@@ -404,7 +408,7 @@ impl Buffer {
     }
 
     /// The error result of this function is an error string that should be displayed to the user
-    pub(crate) fn handle_action(&mut self, a: Action, cfg: &Config) -> Option<ActionOutcome> {
+    pub(crate) fn handle_action(&mut self, a: Action) -> Option<ActionOutcome> {
         match a {
             Action::Delete => {
                 let (c, deleted) = self.delete_dot(self.dot);
@@ -440,7 +444,7 @@ impl Buffer {
                 self.find_forward(s);
             }
 
-            Action::RawKey { k } => return self.handle_raw_key(k, cfg),
+            Action::RawKey { k } => return self.handle_raw_key(k),
 
             _ => (),
         }
@@ -448,7 +452,9 @@ impl Buffer {
         None
     }
 
-    fn handle_raw_key(&mut self, k: Key, cfg: &Config) -> Option<ActionOutcome> {
+    fn handle_raw_key(&mut self, k: Key) -> Option<ActionOutcome> {
+        let cfg = cfg!();
+
         match k {
             Key::Return => {
                 let prefix = if cfg.match_indent {
@@ -691,7 +697,7 @@ mod tests {
         let s = lines.join("\n");
 
         for c in s.chars() {
-            b.handle_action(Action::InsertChar { c }, &Config::default());
+            b.handle_action(Action::InsertChar { c });
         }
 
         b
@@ -720,8 +726,8 @@ mod tests {
     #[test]
     fn insert_char_w_range_dot_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line, 1), &Config::default());
-        b.handle_action(Action::InsertChar { c: 'x' }, &Config::default());
+        b.handle_action(Action::DotSet(TextObject::Line, 1));
+        b.handle_action(Action::InsertChar { c: 'x' });
         let c = Cur::from_yx(1, 1, &b);
         let lines = b.string_lines();
 
@@ -742,7 +748,7 @@ mod tests {
     #[test]
     fn move_forward_at_end_of_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "");
-        b.handle_raw_key(Key::Arrow(Arrow::Right), &Config::default());
+        b.handle_raw_key(Key::Arrow(Arrow::Right));
 
         let c = Cur { idx: 0 };
         assert_eq!(b.dot, Dot::Cur { c });
@@ -751,7 +757,7 @@ mod tests {
     #[test]
     fn delete_in_empty_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "");
-        b.handle_action(Action::Delete, &Config::default());
+        b.handle_action(Action::Delete);
         let c = Cur { idx: 0 };
         let lines = b.string_lines();
 
@@ -764,11 +770,8 @@ mod tests {
     #[test]
     fn simple_delete_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(
-            Action::DotSet(TextObject::Arr(Arrow::Left), 1),
-            &Config::default(),
-        );
-        b.handle_action(Action::Delete, &Config::default());
+        b.handle_action(Action::DotSet(TextObject::Arr(Arrow::Left), 1));
+        b.handle_action(Action::Delete);
 
         let c = Cur::from_yx(1, LINE_2.len() - 1, &b);
         let lines = b.string_lines();
@@ -791,21 +794,15 @@ mod tests {
         let mut b = simple_initial_buffer();
         let original_lines = b.string_lines();
 
-        b.handle_action(
-            Action::DotExtendBackward(TextObject::Word, 1),
-            &Config::default(),
-        );
-        b.handle_action(Action::Delete, &Config::default());
+        b.handle_action(Action::DotExtendBackward(TextObject::Word, 1));
+        b.handle_action(Action::Delete);
 
         b.set_dot(TextObject::BufferStart, 1);
-        b.handle_action(
-            Action::DotExtendForward(TextObject::Word, 1),
-            &Config::default(),
-        );
-        b.handle_action(Action::Delete, &Config::default());
+        b.handle_action(Action::DotExtendForward(TextObject::Word, 1));
+        b.handle_action(Action::Delete);
 
-        b.handle_action(Action::Undo, &Config::default());
-        b.handle_action(Action::Undo, &Config::default());
+        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo);
 
         let lines = b.string_lines();
 
@@ -822,7 +819,7 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content);
 
         b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string());
-        b.handle_action(Action::Undo, &Config::default());
+        b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -834,7 +831,7 @@ mod tests {
 
         let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r });
-        b.handle_action(Action::Undo, &Config::default());
+        b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -850,8 +847,8 @@ mod tests {
 
         assert_eq!(b.string_lines(), vec!["bar foo foo", ""]);
 
-        b.handle_action(Action::Undo, &Config::default());
-        b.handle_action(Action::Undo, &Config::default());
+        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }

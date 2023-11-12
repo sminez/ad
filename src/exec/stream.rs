@@ -7,7 +7,6 @@ use crate::{
     },
     editor::Action,
     util::IdxRopeChars,
-    Config,
 };
 use ropey::Rope;
 use std::{
@@ -161,10 +160,7 @@ impl IterableStream for Buffer {
 
     fn insert(&mut self, idx: usize, s: &str) {
         self.dot = Dot::Cur { c: Cur { idx } };
-        self.handle_action(
-            Action::InsertString { s: s.to_string() },
-            &Config::default(),
-        );
+        self.handle_action(Action::InsertString { s: s.to_string() });
     }
 
     fn remove(&mut self, from: usize, to: usize) {
@@ -178,7 +174,7 @@ impl IterableStream for Buffer {
             ),
         }
         .collapse_null_range();
-        self.handle_action(Action::Delete, &Config::default());
+        self.handle_action(Action::Delete);
     }
 
     fn map_from_to(&self, line_from: usize, line_to: Option<usize>) -> Dot {

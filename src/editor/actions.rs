@@ -7,6 +7,7 @@ use crate::{
     fsys::BufId,
     key::Key,
     mode::Mode,
+    update_config,
     util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
 };
 use std::{env, fs, io::Write, path::PathBuf};
@@ -48,6 +49,7 @@ pub enum Action {
     SaveBufferAs { path: String },
     SearchInCurrentBuffer,
     SelectBuffer,
+    SetConfigProp { input: String },
     SetMode { m: &'static str },
     ShellPipe { cmd: String },
     ShellReplace { cmd: String },
@@ -175,6 +177,12 @@ impl Editor {
         self.buffers.active_mut().kind = BufferKind::File(desired_path.clone());
 
         Some(desired_path)
+    }
+
+    pub(super) fn set_config_prop(&mut self, input: &str) {
+        if let Err(msg) = update_config(input) {
+            self.set_status_message(&msg);
+        }
     }
 
     pub(super) fn set_mode(&mut self, name: &str) {

@@ -4,6 +4,7 @@ use crate::{
     die,
     exec::IterableStream,
     fsys::{AdFs, BufId, Message, Req},
+    init_config,
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
     term::{
@@ -31,7 +32,6 @@ use input::Input;
 pub use input::InputEvent;
 
 pub struct Editor {
-    cfg: Config,
     screen_rows: usize,
     screen_cols: usize,
     stdout: Stdout,
@@ -74,8 +74,9 @@ impl Editor {
         let (tx, rx) = channel();
         let (btx, brx) = channel();
 
+        init_config(cfg);
+
         Self {
-            cfg,
             screen_rows: 0,
             screen_cols: 0,
             stdout,
@@ -157,7 +158,7 @@ impl Editor {
             }
         }
     }
-    fn handle_buffer_mutation<F: FnOnce(&mut Buffer, &Config, String) -> Option<ActionOutcome>>(
+    fn handle_buffer_mutation<F: FnOnce(&mut Buffer, String) -> Option<ActionOutcome>>(
         &mut self,
         id: usize,
         tx: Sender<Result<String, String>>,
@@ -166,7 +167,7 @@ impl Editor {
     ) {
         match self.buffers.with_id_mut(id) {
             Some(b) => {
-                if let Some(o) = (f)(b, &self.cfg, s) {
+                if let Some(o) = (f)(b, s) {
                     match o {
                         ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
                         ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
@@ -197,11 +198,11 @@ impl Editor {
             ReadBufferAddr { id } => self.send_buffer_resp(id, tx, |b| b.addr()),
             ReadBufferBody { id } => self.send_buffer_resp(id, tx, |b| b.str_contents()),
 
-            SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, cfg, s| {
-                b.handle_action(Action::InsertString { s }, cfg)
+            SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                b.handle_action(Action::InsertString { s })
             }),
 
-            SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, _, s| {
+            SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 if let Ok(mut expr) = DotExpression::parse(&mut s.trim_end().chars().peekable()) {
                     b.dot = b.map_dot_expr(&mut expr);
                 };
@@ -209,21 +210,17 @@ impl Editor {
                 None
             }),
 
-            ClearBufferBody { id } => {
-                self.handle_buffer_mutation(id, tx, String::new(), |b, cfg, _| {
-                    b.handle_action(Action::DotSet(TextObject::BufferStart, 1), cfg);
-                    b.handle_action(Action::DotExtendForward(TextObject::BufferEnd, 1), cfg);
-                    b.handle_action(Action::Delete, cfg)
-                })
-            }
+            ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
+                b.handle_action(Action::DotSet(TextObject::BufferStart, 1));
+                b.handle_action(Action::DotExtendForward(TextObject::BufferEnd, 1));
+                b.handle_action(Action::Delete)
+            }),
 
-            InsertBufferBody { id, s, offset } => {
-                self.handle_buffer_mutation(id, tx, s, |b, cfg, s| {
-                    let idx = b.txt.byte_to_char(offset);
-                    b.dot = Dot::Cur { c: Cur { idx } };
-                    b.handle_action(Action::InsertString { s }, cfg)
-                })
-            }
+            InsertBufferBody { id, s, offset } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                let idx = b.txt.byte_to_char(offset);
+                b.dot = Dot::Cur { c: Cur { idx } };
+                b.handle_action(Action::InsertString { s })
+            }),
         }
     }
 
@@ -265,6 +262,7 @@ impl Editor {
             Action::SaveBuffer => self.save_current_buffer(None),
             Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
             Action::SelectBuffer => self.select_buffer(),
+            Action::SetConfigProp { input } => self.set_config_prop(&input),
             Action::SetMode { m } => self.set_mode(m),
             Action::ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             Action::ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
@@ -293,7 +291,7 @@ impl Editor {
     }
 
     fn forward_action_to_active_buffer(&mut self, a: Action) {
-        if let Some(o) = self.buffers.active_mut().handle_action(a, &self.cfg) {
+        if let Some(o) = self.buffers.active_mut().handle_action(a) {
             match o {
                 ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
@@ -315,9 +313,7 @@ impl Editor {
                 self.buffers
                     .active_mut()
                     .set_dot_from_screen_coords(x, y, self.screen_rows);
-                self.buffers
-                    .active_mut()
-                    .handle_action(Action::LoadDot, &self.cfg);
+                self.buffers.active_mut().handle_action(Action::LoadDot);
             }
 
             MouseEvent::Hold { x, y } => {
