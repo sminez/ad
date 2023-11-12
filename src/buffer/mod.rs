@@ -1,9 +1,5 @@
 use crate::{
-    config,
-    editor::Action,
-    key::Key,
-    term::{Color, Style},
-    util::relative_path_from,
+    config, config::ColorScheme, editor::Action, key::Key, term::Style, util::relative_path_from,
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ropey::{Rope, RopeSlice};
@@ -327,7 +323,7 @@ impl Buffer {
         y: usize,
         lpad: usize,
         screen_cols: usize,
-        bg_dot: Color,
+        cs: &ColorScheme,
     ) -> String {
         let dot_range = self.dot.line_range(y, self).map(|lr| match lr {
             // LineRange is an inclusive range so we need to insert after `end` if its
@@ -342,8 +338,9 @@ impl Buffer {
 
         // Apply highlight if included in current Dot
         if let Some((start, end)) = dot_range {
-            rline.insert_str(end, &Style::Reset.to_string());
-            rline.insert_str(start, &Style::Bg(bg_dot).to_string());
+            // rline.insert_str(end, &Style::Reset.to_string());
+            rline.insert_str(end, &format!("{}{}", Style::Bg(cs.bg), Style::Fg(cs.fg)));
+            rline.insert_str(start, &Style::Bg(cs.dot_bg).to_string());
         }
 
         rline

@@ -113,7 +113,7 @@ impl Editor {
                     Style::Bg(cs.bg),
                     file_row + 1,
                     Style::Fg(cs.fg),
-                    b.styled_rline_unchecked(file_row, padding, self.screen_cols, cs.dot_bg),
+                    b.styled_rline_unchecked(file_row, padding, self.screen_cols, cs),
                     width = w_lnum
                 ));
             }

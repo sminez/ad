@@ -110,6 +110,12 @@ impl Editor {
         Input::new(tx.clone()).run_threaded();
         let fs_handle = AdFs::new(tx, brx).run_threaded();
 
+        self.run_event_loop();
+        clear_screen(&mut self.stdout);
+        fs_handle.join()
+    }
+
+    fn run_event_loop(&mut self) {
         while self.running {
             self.refresh_screen();
 
@@ -119,9 +125,6 @@ impl Editor {
                 InputEvent::WinsizeChanged => self.update_window_size(),
             }
         }
-
-        clear_screen(&mut self.stdout);
-        fs_handle.join()
     }
 
     pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
