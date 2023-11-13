@@ -1,13 +1,14 @@
 //! Editor actions in response to user input
 use crate::{
     buffer::{BufferKind, Cur, Dot, MiniBuffer, MiniBufferSelection, TextObject},
+    config::Config,
     die,
     editor::Editor,
     exec::Program,
     fsys::BufId,
     key::Key,
     mode::Mode,
-    update_config,
+    replace_config, update_config,
     util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
 };
 use std::{env, fs, io::Write, path::PathBuf};
@@ -44,6 +45,9 @@ pub enum Action {
     PreviousBuffer,
     RawKey { k: Key },
     Redo,
+    ReloadActiveBuffer,
+    ReloadBuffer { id: usize },
+    ReloadConfig,
     SamMode,
     SaveBuffer,
     SaveBufferAs { path: String },
@@ -177,6 +181,33 @@ impl Editor {
         self.buffers.active_mut().kind = BufferKind::File(desired_path.clone());
 
         Some(desired_path)
+    }
+
+    pub(super) fn reload_buffer(&mut self, id: usize) {
+        let msg = match self.buffers.with_id_mut(id) {
+            Some(b) => b.reload_from_disk(),
+            // Silently ignoring attempts to reload unknown buffers
+            None => return,
+        };
+
+        self.set_status_message(&msg);
+    }
+
+    pub(super) fn reload_config(&mut self) {
+        let msg = match Config::try_load() {
+            Ok(config) => {
+                replace_config(config);
+                "config reloaded".to_string()
+            }
+            Err(s) => s,
+        };
+
+        self.set_status_message(&msg);
+    }
+
+    pub(super) fn reload_active_buffer(&mut self) {
+        let msg = self.buffers.active_mut().reload_from_disk();
+        self.set_status_message(&msg);
     }
 
     pub(super) fn set_config_prop(&mut self, input: &str) {

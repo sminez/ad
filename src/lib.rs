@@ -35,8 +35,15 @@ pub(crate) static ORIGINAL_TERMIOS: OnceLock<Termios> = OnceLock::new();
 /// through to everywhere that it is needed outside of the main Editor methods.
 pub(crate) static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
-pub(crate) fn init_config(cfg: Config) {
+pub(crate) fn set_config(cfg: Config) {
     _ = CONFIG.set(RwLock::new(cfg));
+}
+
+pub(crate) fn replace_config(cfg: Config) {
+    *CONFIG
+        .get_or_init(|| RwLock::new(Config::default()))
+        .write()
+        .unwrap() = cfg;
 }
 
 pub(crate) fn update_config(input: &str) -> Result<(), String> {

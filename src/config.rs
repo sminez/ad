@@ -1,5 +1,6 @@
 //! A minimal config file format for ad
 use crate::term::Color;
+use std::{env, fs, io};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -48,6 +49,21 @@ impl Default for ColorScheme {
 }
 
 impl Config {
+    pub fn try_load() -> Result<Self, String> {
+        let home = env::var("HOME").unwrap();
+
+        let s = match fs::read_to_string(format!("{home}/.ad/init.conf")) {
+            Ok(s) => s,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Config::default()),
+            Err(e) => return Err(format!("Unable to load config file: {e}")),
+        };
+
+        match Config::parse(&s) {
+            Ok(cfg) => Ok(cfg),
+            Err(e) => Err(format!("Invalid config file: {e}")),
+        }
+    }
+
     /// Attempt to parse the given file content as a Config file. If the file is invalid then an
     /// error message for the user is returned for displaying in the status bar.
     pub fn parse(contents: &str) -> Result<Self, String> {

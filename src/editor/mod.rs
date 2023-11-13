@@ -4,10 +4,9 @@ use crate::{
     die,
     exec::IterableStream,
     fsys::{AdFs, BufId, Message, Req},
-    init_config,
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
-    restore_terminal_state,
+    restore_terminal_state, set_config,
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler,
@@ -72,7 +71,7 @@ impl Editor {
         let (tx, rx) = channel();
         let (btx, brx) = channel();
 
-        init_config(cfg);
+        set_config(cfg);
 
         Self {
             screen_rows: 0,
@@ -257,6 +256,9 @@ impl Editor {
             Action::OpenFile { path } => self.open_file(&path),
             Action::Paste => self.paste_from_clipboard(),
             Action::PreviousBuffer => self.buffers.previous(),
+            Action::ReloadActiveBuffer => self.reload_active_buffer(),
+            Action::ReloadBuffer { id } => self.reload_buffer(id),
+            Action::ReloadConfig => self.reload_config(),
             Action::SamMode => self.sam_mode(),
             Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
             Action::SaveBuffer => self.save_current_buffer(None),

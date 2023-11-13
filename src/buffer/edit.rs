@@ -142,6 +142,12 @@ pub(crate) struct EditLog {
 }
 
 impl EditLog {
+    pub(crate) fn clear(&mut self) {
+        self.edits.clear();
+        self.undone_edits.clear();
+        self.paused = false;
+    }
+
     pub(crate) fn debug_edits(&self, b: &Buffer) -> Vec<String> {
         self.edits.iter().map(|e| e.string_repr(b)).collect()
     }

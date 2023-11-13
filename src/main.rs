@@ -23,7 +23,12 @@ fn main() {
         return run_script(&script, files);
     }
 
-    let mut e = Editor::new(load_config());
+    let config = match Config::try_load() {
+        Ok(config) => config,
+        Err(s) => fatal(&s),
+    };
+
+    let mut e = Editor::new(config);
     for fname in files.iter() {
         e.open_file(fname);
     }
@@ -39,21 +44,6 @@ struct Args {
 fn fatal(msg: &str) -> ! {
     eprintln!("{msg}");
     exit(1);
-}
-
-fn load_config() -> Config {
-    let home = env::var("HOME").unwrap();
-
-    let s = match fs::read_to_string(format!("{home}/.ad/init.conf")) {
-        Ok(s) => s,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => return Config::default(),
-        Err(e) => fatal(&e.to_string()),
-    };
-
-    match Config::parse(&s) {
-        Ok(cfg) => cfg,
-        Err(e) => fatal(&format!("INVALID CONFIG FILE: {e}")),
-    }
 }
 
 fn parse_args() -> Args {

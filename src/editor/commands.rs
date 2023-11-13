@@ -61,6 +61,9 @@ impl Editor {
             "q" | "quit" => Some(Single(Exit { force: false })),
             "q!" | "quit!" => Some(Single(Exit { force: true })),
 
+            "r" | "reload" => Some(Single(ReloadActiveBuffer)),
+            "R" | "reload-config" => Some(Single(ReloadConfig)),
+
             "set" => Some(Single(SetConfigProp {
                 input: args.to_string(),
             })),

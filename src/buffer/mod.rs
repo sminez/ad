@@ -89,6 +89,31 @@ impl Buffer {
         })
     }
 
+    pub(super) fn reload_from_disk(&mut self) -> String {
+        let path = match &self.kind {
+            BufferKind::File(p) => p,
+            _ => return "Buffer is not backed by a file on disk".to_string(),
+        };
+
+        let raw = match fs::read_to_string(path) {
+            Ok(contents) => contents,
+            Err(e) => return format!("Error reloading file: {e}"),
+        };
+
+        self.txt = Rope::from_str(&raw);
+        self.edit_log.clear();
+        self.dirty = false;
+
+        let n_bytes = raw.len();
+        let n_lines = self.txt.len_lines();
+        let display_path = match path.canonicalize() {
+            Ok(cp) => cp.display().to_string(),
+            Err(_) => path.display().to_string(),
+        };
+
+        format!("\"{display_path}\" {n_lines}L {n_bytes}B loaded")
+    }
+
     pub fn new_unnamed(id: usize, content: &str) -> Self {
         Self {
             id,
