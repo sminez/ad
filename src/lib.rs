@@ -12,6 +12,7 @@ pub mod exec;
 pub mod fsys;
 pub mod key;
 pub mod mode;
+pub mod ninep;
 pub mod regex;
 pub mod term;
 pub mod trie;
