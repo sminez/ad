@@ -73,3 +73,17 @@ macro_rules! keymap {
     (@action $v:expr) => { $crate::editor::Actions::Single($v) };
     (@action $($v:expr),+) => { $crate::editor::Actions::Multi(vec![$($v),+]) };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // This test will panic if any of the default keymaps end up with mappings that
+    // collide internally. The Trie struct rejects overlapping or duplicate keys on
+    // creation which will just panic the editor if this happens so it's worthwhile
+    // making sure we've not messed anything up.
+    #[test]
+    fn mode_keymaps_have_no_collisions() {
+        _ = modes();
+    }
+}

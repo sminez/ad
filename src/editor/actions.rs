@@ -198,10 +198,10 @@ impl Editor {
     }
 
     pub(super) fn exit(&mut self, force: bool) {
-        if self.buffers.active().dirty && !force {
-            let dirty_buffers = self.buffers.dirty_buffers().join(" ");
-            // TODO: probably want this to be a "cancel only" mini-buffer w multiple lines?
-            self.set_status_message(&format!("No write since last change: {dirty_buffers}"));
+        let dirty_buffers = self.buffers.dirty_buffers();
+        if !dirty_buffers.is_empty() && !force {
+            self.set_status_message("No write since last change. Use ':q!' to force exit");
+            MiniBuffer::select_from("No write since last change> ", dirty_buffers, self);
             return;
         }
 

@@ -7,13 +7,13 @@ use crate::{
     init_config,
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
+    restore_terminal_state,
     term::{
-        clear_screen, disable_alternate_screen, disable_mouse_support, enable_alternate_screen,
-        enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
-        set_termios,
+        clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
+        get_termsize, register_signal_handler,
     },
+    ORIGINAL_TERMIOS,
 };
-use libc::termios as Termios;
 use std::{
     env,
     io::{self, Stdout},
@@ -35,7 +35,6 @@ pub struct Editor {
     screen_rows: usize,
     screen_cols: usize,
     stdout: Stdout,
-    original_termios: Termios,
     cwd: PathBuf,
     running: bool,
     status_message: String,
@@ -50,9 +49,7 @@ pub struct Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
-        disable_alternate_screen(&mut self.stdout);
-        disable_mouse_support(&mut self.stdout);
-        set_termios(self.original_termios)
+        restore_terminal_state(&mut self.stdout);
     }
 }
 
@@ -66,6 +63,7 @@ impl Editor {
         };
 
         enable_raw_mode(original_termios);
+        _ = ORIGINAL_TERMIOS.set(original_termios);
 
         let mut stdout = io::stdout();
         enable_mouse_support(&mut stdout);
@@ -80,7 +78,6 @@ impl Editor {
             screen_rows: 0,
             screen_cols: 0,
             stdout,
-            original_termios,
             cwd,
             running: true,
             status_message: String::new(),

@@ -1,5 +1,9 @@
 //! ad :: the adaptable editor
-use std::sync::{OnceLock, RwLock};
+use libc::termios as Termios;
+use std::{
+    io::Stdout,
+    sync::{OnceLock, RwLock},
+};
 
 pub mod buffer;
 pub mod config;
@@ -17,9 +21,13 @@ pub use config::Config;
 pub use editor::Editor;
 pub use exec::{CachedStdin, IterableStream, Program};
 
+use term::{disable_alternate_screen, disable_mouse_support, set_termios};
+
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UNNAMED_BUFFER: &str = "[No Name]";
 pub const MAX_NAME_LEN: usize = 20;
+
+pub(crate) static ORIGINAL_TERMIOS: OnceLock<Termios> = OnceLock::new();
 
 /// Global config values which are only ever updated from the main editor thread.
 /// This is handled as a static OnceLock rather than being a property on the
@@ -51,12 +59,23 @@ macro_rules! config {
     }};
 }
 
-/// Helper for panicing the program but first ensuring that the screen is cleared
+/// Helper for panicing the program but first ensuring that we have restored the
+/// terminal state in the same way that we do when the Editor is dropped cleanly
 #[macro_export]
 macro_rules! die {
     ($template:expr $(, $arg:expr)*) => {{
-        $crate::term::clear_screen(&mut ::std::io::stdout());
+        $crate::restore_terminal_state(&mut ::std::io::stdout());
         panic!($template $(, $arg)*)
     }};
 
+}
+
+/// Restore the terminal state to what we had originally before starting our UI.
+///
+/// # Panics
+/// This will panic if ORIGINAL_TERMIOS has not been set.
+pub(crate) fn restore_terminal_state(so: &mut Stdout) {
+    disable_alternate_screen(so);
+    disable_mouse_support(so);
+    set_termios(*ORIGINAL_TERMIOS.get().unwrap());
 }

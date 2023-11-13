@@ -87,11 +87,11 @@ impl Buffers {
         self.inner.iter_mut().find(|b| b.id == id)
     }
 
-    pub fn dirty_buffers(&self) -> Vec<&str> {
+    pub fn dirty_buffers(&self) -> Vec<String> {
         self.inner
             .iter()
             .filter(|b| b.dirty)
-            .map(|b| b.full_name())
+            .map(|b| b.full_name().to_string())
             .collect()
     }
 

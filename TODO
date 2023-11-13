@@ -1,6 +1,7 @@
 :: TODO
 
 -- BUGS --
+- [!] Need to check if ANY file is dirty before exiting
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
@@ -23,6 +24,7 @@
 - [ ] FEATURE: completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
+- [ ] FEATURE: reload file from disk
 - [ ] FEATURE: auto-reload files when they are modified on disk
       - This is a feature that has saved me countless times when pulling changes from git
         so it really does need to be there, but having this implemented cross platform
