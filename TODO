@@ -36,6 +36,7 @@
 - [ ] FEATURE: support a $HOME/.ad/bin directory of commands that will be treated as builtins
       - $AD_BUFFER_ID should be set to the current buffer ID so that commands are able to
         target the buffer they are in
+- [ ] FEATURE: support opening and navigating directories
 
 -- Fsys --
 - [ ] sed edit in place doesn't seem to work because it needs to be able to create temp

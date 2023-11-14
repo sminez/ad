@@ -30,7 +30,8 @@ impl Editor {
             bottom,
         } = mb.unwrap_or_default();
 
-        let effective_screen_rows = self.screen_rows - (bottom - top);
+        let mb_offset = if w_minibuffer { 1 } else { 0 };
+        let effective_screen_rows = self.screen_rows - (bottom - top) - mb_offset;
 
         self.buffers
             .active_mut()
