@@ -164,7 +164,7 @@ impl Editor {
         } else {
             let width = self.screen_cols - 10;
             buf.push_str(&format!(
-                "{}{}{pending:>width$}",
+                "{}{}{pending:>width$}          ",
                 Style::Fg(cs.fg),
                 Style::Bg(cs.bg)
             ));
