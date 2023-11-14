@@ -145,7 +145,7 @@ impl<T: Format9p> Format9p for Vec<T> {
 }
 
 /// A wrapper around a Vec<u8> for handling data fields in read/write messages
-///
+/// ```text
 /// READ(5)
 ///  NAME
 ///       read, write - transfer data from and to a file
@@ -156,6 +156,7 @@ impl<T: Format9p> Format9p for Vec<T> {
 ///
 ///       size[4] Twrite tag[2] fid[4] offset[8] count[4] data[count]
 ///       size[4] Rwrite tag[2] count[4]
+/// ```
 #[derive(Clone, PartialEq, Eq)]
 pub struct Data(Vec<u8>);
 
