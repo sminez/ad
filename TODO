@@ -1,7 +1,6 @@
 :: TODO
 
 -- BUGS --
-- [!] Need to check if ANY file is dirty before exiting
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
@@ -12,7 +11,6 @@
 -- Misc / Editor features --
 - [ ] FEATURE: Edit log transactions
 	  - paste should always be a new transaction
-- [ ] FEATURE: center screen on current line
 - [ ] implement remaining text objects
       >> The implementation for these is yet another way of hunting through the buffer for
          a certain position. Now that the regex engine works it might actually be simpler
@@ -24,7 +22,6 @@
 - [ ] FEATURE: completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
-- [ ] FEATURE: reload file from disk
 - [ ] FEATURE: auto-reload files when they are modified on disk
       - This is a feature that has saved me countless times when pulling changes from git
         so it really does need to be there, but having this implemented cross platform

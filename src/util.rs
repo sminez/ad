@@ -80,7 +80,7 @@ pub(crate) fn relative_path_from(base: &Path, p: &Path) -> PathBuf {
             }
             (_, None) => comps.push(Component::ParentDir),
             (Some(a), Some(b)) if comps.is_empty() && a == b => (),
-            (Some(a), Some(b)) if a == Component::CurDir => comps.push(b),
+            (Some(Component::CurDir), Some(b)) => comps.push(b),
             (Some(_), Some(b)) => {
                 comps.push(Component::ParentDir);
                 for _ in base_comps {

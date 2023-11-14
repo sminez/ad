@@ -26,7 +26,7 @@ mod commands;
 mod input;
 mod render;
 
-pub use actions::{Action, Actions};
+pub use actions::{Action, Actions, ViewPort};
 use input::Input;
 pub use input::InputEvent;
 
@@ -247,6 +247,11 @@ impl Editor {
 
     fn handle_action(&mut self, action: Action) {
         match action {
+            Action::SetViewPort(vp) => {
+                self.buffers
+                    .active_mut()
+                    .view_port(vp, self.screen_rows, self.screen_cols)
+            }
             Action::ChangeDirectory { path } => self.change_directory(path),
             Action::CommandMode => self.command_mode(),
             Action::DeleteBuffer { force } => self.delete_current_buffer(force),

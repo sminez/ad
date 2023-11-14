@@ -1,5 +1,10 @@
 use crate::{
-    config, config::ColorScheme, editor::Action, key::Key, term::Style, util::relative_path_from,
+    config,
+    config::ColorScheme,
+    editor::{Action, ViewPort},
+    key::Key,
+    term::Style,
+    util::relative_path_from,
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ropey::{Rope, RopeSlice};
@@ -224,6 +229,18 @@ impl Buffer {
         if self.rx >= self.col_off + screen_cols {
             self.col_off = self.rx - screen_cols + 1;
         }
+    }
+
+    pub fn view_port(&mut self, vp: ViewPort, screen_rows: usize, screen_cols: usize) {
+        let (y, _) = self.dot.active_cur().as_yx(self);
+
+        self.row_off = match vp {
+            ViewPort::Top => y,
+            ViewPort::Center => y.saturating_sub(screen_rows / 2),
+            ViewPort::Bottom => y.saturating_sub(screen_rows),
+        };
+
+        self.clamp_scroll(screen_rows, screen_cols);
     }
 
     pub(crate) fn rx_from_x(&self, y: usize, x: usize) -> usize {

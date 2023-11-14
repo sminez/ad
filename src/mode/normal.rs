@@ -1,7 +1,7 @@
 //! vim style normal mode
 use crate::{
     buffer::TextObject::*,
-    editor::{Action::*, Actions},
+    editor::{Action::*, Actions, ViewPort},
     key::{Arrow::*, Key::*},
     keymap,
     mode::Mode,
@@ -71,6 +71,11 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char(';') ] => [ DotFlip ],
         [ Char(',') ] => [ DotCollapseFirst ],
         [ Alt(',') ] => [ DotCollapseLast ],
+
+        // Manipulating viewport
+        [ Char('z'), Char('t') ] => [ SetViewPort(ViewPort::Top) ],
+        [ Char('z'), Char('z') ] => [ SetViewPort(ViewPort::Center) ],
+        [ Char('z'), Char('b') ] => [ SetViewPort(ViewPort::Bottom) ],
 
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],

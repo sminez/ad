@@ -19,6 +19,13 @@ pub enum Actions {
     Multi(Vec<Action>),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewPort {
+    Bottom,
+    Center,
+    Top,
+}
+
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -54,6 +61,7 @@ pub enum Action {
     SearchInCurrentBuffer,
     SelectBuffer,
     SetConfigProp { input: String },
+    SetViewPort(ViewPort),
     SetMode { m: &'static str },
     ShellPipe { cmd: String },
     ShellReplace { cmd: String },
