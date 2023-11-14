@@ -21,6 +21,7 @@ pub mod util;
 pub use config::Config;
 pub use editor::Editor;
 pub use exec::{CachedStdin, IterableStream, Program};
+pub use ninep::server::{Serve9p, Server};
 
 use term::{disable_alternate_screen, disable_mouse_support, set_termios};
 

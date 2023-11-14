@@ -476,6 +476,7 @@ impl_message_datatype!(
 impl_message_datatype!(
     /// A qid represents the server's unique identification for the file being accessed: two files
     /// on the same server hierarchy are the same if and only if their qids are the same.
+    #[derive(Copy)]
     struct Qid {
         ty: u8,
         version: u32,
@@ -657,7 +658,7 @@ impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/walk
     /// size[4] Rwalk tag[2] | nwqid[2] nwqid*(wqid[13])
     Walk => Rwalk {
-        wquid: Vec<Qid>,
+        wqids: Vec<Qid>,
     }
 
     /// http://man.cat-v.org/plan_9/5/open
@@ -763,6 +764,7 @@ mod tests {
         S(&'static str),
         V(Vec<u32>),
         D(Vec<u8>),
+        Clunk,
     }
 
     // simple_test_case doesn't handle generic args for parameterised
@@ -789,6 +791,7 @@ mod tests {
     #[test_case(F9::S("Hello, 世界"); "multi-byte char string")]
     #[test_case(F9::V(vec![0, 1, 2, 3, u32::MAX]); "vec u32")]
     #[test_case(F9::D(vec![5, 6, 7, 8, u8::MAX]); "data")]
+    #[test_case(F9::Clunk; "clunk")]
     #[test]
     fn round_trip_is_fine(data: F9) {
         match data {
@@ -799,6 +802,7 @@ mod tests {
             F9::S(t) => round_trip_inner(t.to_string()),
             F9::V(t) => round_trip_inner(t),
             F9::D(t) => round_trip_inner(Data(t)),
+            F9::Clunk => round_trip_inner(Rclunk {}),
         }
     }
 }

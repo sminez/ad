@@ -2,3 +2,5 @@
 
 pub mod protocol;
 pub mod server;
+
+pub use server::{FileMeta, FileType, Serve9p, Server};
