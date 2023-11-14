@@ -215,56 +215,63 @@ impl Format9p for Data {
 
 /// Taken from the enum in fcall.h in the plan9 source.
 ///   https://github.com/9fans/plan9port/blob/master/include/fcall.h#L80
+///
+/// This is just used internally to help with defining the encode / decode behaviour
+/// of the various message types.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum MessageType {
-    Tversion = 100,
-    Rversion = 101,
+struct MessageType(u8);
 
-    Tauth = 102,
-    Rauth = 103,
+#[allow(non_upper_case_globals)]
+impl MessageType {
+    const Tversion: Self = Self(100);
+    const Rversion: Self = Self(101);
 
-    Tattach = 104,
-    Rattach = 105,
+    const Tauth: Self = Self(102);
+    const Rauth: Self = Self(103);
+
+    const Tattach: Self = Self(104);
+    const Rattach: Self = Self(105);
 
     // Terror = 106,
-    Rerror = 107,
+    const Rerror: Self = Self(107);
 
-    Tflush = 108,
-    Rflush = 109,
+    const Tflush: Self = Self(108);
+    const Rflush: Self = Self(109);
 
-    Twalk = 110,
-    Rwalk = 111,
+    const Twalk: Self = Self(110);
+    const Rwalk: Self = Self(111);
 
-    Topen = 112,
-    Ropen = 113,
+    const Topen: Self = Self(112);
+    const Ropen: Self = Self(113);
 
-    Tcreate = 114,
-    Rcreate = 115,
+    const Tcreate: Self = Self(114);
+    const Rcreate: Self = Self(115);
 
-    Tread = 116,
-    Rread = 117,
+    const Tread: Self = Self(116);
+    const Rread: Self = Self(117);
 
-    Twrite = 118,
-    Rwrite = 119,
+    const Twrite: Self = Self(118);
+    const Rwrite: Self = Self(119);
 
-    Tclunk = 120,
-    Rclunk = 121,
+    const Tclunk: Self = Self(120);
+    const Rclunk: Self = Self(121);
 
-    Tremove = 122,
-    Rremove = 123,
+    const Tremove: Self = Self(122);
+    const Rremove: Self = Self(123);
 
-    Tstat = 124,
-    Rstat = 125,
+    const Tstat: Self = Self(124);
+    const Rstat: Self = Self(125);
 
-    Twstat = 126,
-    Rwstat = 127,
+    const Twstat: Self = Self(126);
+    const Rwstat: Self = Self(127);
     // Tmax = 128,
     // Topenfd = 98,
     // Ropenfd = 99,
 }
 
-/// Helper for defining a struct that implements Format9p
-macro_rules! impl_message_type {
+/// Helper for defining a struct that implements Format9p by just serialising their
+/// fields directly without a size field.
+macro_rules! impl_message_datatype {
     (
         $(#[$docs:meta])+
         struct $struct:ident {
@@ -304,6 +311,62 @@ macro_rules! impl_message_type {
     };
 }
 
+macro_rules! impl_message_format {
+    (
+        $message_ty:ident, $enum_ty:ident, $err:expr;
+        $($enum_variant:ident => $struct:ident {
+            $($field:ident: $ty:ty,)*
+        })+
+    ) => {
+        impl Format9p for $message_ty {
+            fn n_bytes(&self) -> usize {
+                let content_size = match &self.content {
+                    $($enum_ty::$enum_variant(content) => content.n_bytes(),)+
+                };
+
+                // size[4] type[1] tag[2] | content[...]
+                4 + 1 + 2 + content_size
+            }
+
+            fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
+                let ty = match self.content {
+                    $($enum_ty::$enum_variant(_) => MessageType::$struct.0,)+
+                };
+
+                (self.n_bytes() as u32).write_to(w)?;
+                ty.write_to(w)?;
+                self.tag.write_to(w)?;
+
+                match &self.content {
+                    $($enum_ty::$enum_variant(content) => content.write_to(w),)+
+                }
+            }
+
+            fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
+                // the size field includes the number of bytes for the field itself so we
+                // trim that off before decoding the rest of the message
+                let size = u32::read_from(r)?;
+                let r = &mut r.take((size - 4) as u64);
+
+                let mut ty_buf = [0u8];
+                r.read_exact(&mut ty_buf)?;
+
+                let tag = u16::read_from(r)?;
+                let content = match MessageType(ty_buf[0]) {
+                    $(MessageType::$struct => $enum_ty::$enum_variant(Format9p::read_from(r)?),)+
+                    MessageType(ty) => return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!($err, ty),
+                    )),
+                };
+
+                Ok(Self { tag, content })
+            }
+        }
+
+    };
+}
+
 /// Generate the Tmessage enum along with the wrapped T-message types
 /// and their implementations of Format9p
 macro_rules! impl_tmessages {
@@ -313,20 +376,28 @@ macro_rules! impl_tmessages {
             $($field:ident: $ty:ty,)*
         }
     )+) => {
-        /// T-message variants
+        /// T-message data variants
         ///
+        /// The [Tmessage] struct is used to decode T-messages from clients.
         /// See the individual message structs for docs on the format and semantics of each variant.
         #[derive(Debug, Clone, PartialEq, Eq)]
-        pub enum Tmessage {
+        pub enum Tdata {
             $( $(#[$docs])+ $enum_variant($struct), )+
         }
 
-        $(impl_message_type!(
+        $(impl_message_datatype!(
             $(#[$docs])+
             struct $struct {
                 $($field: $ty,)*
             }
         );)+
+
+        impl_message_format!(
+            Tmessage, Tdata, "invalid message type for t-message: {}";
+            $($enum_variant => $struct {
+                $($field: $ty,)*
+            })+
+        );
     };
 }
 
@@ -339,24 +410,32 @@ macro_rules! impl_rmessages {
             $($field:ident: $ty:ty,)*
         }
     )+) => {
-        /// R-message variants
+        /// R-message data variants
         ///
+        /// The [Rmessage] struct is used to encode and send R-messages to clients.
         /// See the individual message structs for docs on the format and semantics of each variant.
         #[derive(Debug, Clone, PartialEq, Eq)]
-        pub enum Rmessage {
+        pub enum Rdata {
             $( $(#[$docs])+ $enum_variant($struct), )+
         }
 
-        $(impl_message_type!(
+        $(impl_message_datatype!(
             $(#[$docs])+
             struct $struct {
                 $($field: $ty,)*
             }
         );)+
+
+        impl_message_format!(
+            Rmessage, Rdata, "invalid message type for r-message: {}";
+            $($enum_variant => $struct {
+                $($field: $ty,)*
+            })+
+        );
     };
 }
 
-impl_message_type!(
+impl_message_datatype!(
     /// A machine-independent directory entry
     /// http://man.cat-v.org/plan_9/5/stat
     struct Stat {
@@ -393,7 +472,7 @@ impl_message_type!(
     }
 );
 
-impl_message_type!(
+impl_message_datatype!(
     /// A qid represents the server's unique identification for the file being accessed: two files
     /// on the same server hierarchy are the same if and only if their qids are the same.
     struct Qid {
@@ -402,6 +481,28 @@ impl_message_type!(
         path: u64,
     }
 );
+
+/// The Plan 9 File Protocol, 9P, is used for messages between clients and servers. A client
+/// transmits requests (T- messages) to a server, which subsequently returns replies (R-messages)
+/// to the client. The combined acts of transmitting (receiving) a request of a particular type,
+/// and receiving (transmitting) its reply is called a transaction of that type.
+///
+/// The data we decode into this struct is of the following form:
+/// ```txt
+///   size[4] type[1] tag[2] | content[...]
+/// ```
+/// where the [MessageType] is a T variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tmessage {
+    /// Each T-message has a tag field, chosen and used by the client to identify the message. The
+    /// reply to the message will have the same tag. Clients must arrange that no two outstanding
+    /// messages on the same connection have the same tag. An exception is the tag NOTAG, defined
+    /// as (ushort)~0 in <fcall.h>: the client can use it, when establishing a connection, to
+    /// override tag matching in version messages.
+    pub tag: u16,
+    /// The t-message variant specific data sent by the client
+    pub content: Tdata,
+}
 
 impl_tmessages! {
     /// http://man.cat-v.org/plan_9/5/version
@@ -500,6 +601,28 @@ impl_tmessages! {
     }
 }
 
+/// The Plan 9 File Protocol, 9P, is used for messages between clients and servers. A client
+/// transmits requests (T- messages) to a server, which subsequently returns replies (R-messages)
+/// to the client. The combined acts of transmitting (receiving) a request of a particular type,
+/// and receiving (transmitting) its reply is called a transaction of that type.
+///
+/// The data we decode into this struct is of the following form:
+/// ```txt
+///   size[4] type[1] tag[2] | content[...]
+/// ```
+/// where the [MessageType] is a R variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rmessage {
+    /// Each T-message has a tag field, chosen and used by the client to identify the message. The
+    /// reply to the message will have the same tag. Clients must arrange that no two outstanding
+    /// messages on the same connection have the same tag. An exception is the tag NOTAG, defined
+    /// as (ushort)~0 in <fcall.h>: the client can use it, when establishing a connection, to
+    /// override tag matching in version messages.
+    pub tag: u16,
+    /// The r-message variant specific data sent by the client
+    pub content: Rdata,
+}
+
 impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/version
     /// size[4] Rversion tag[2] | msize[4] version[s]
@@ -512,6 +635,12 @@ impl_rmessages! {
     /// size[4] Rauth tag[2] | aqid[13]
     Auth => Rauth {
         aqid: Qid,
+    }
+
+    /// http://man.cat-v.org/plan_9/5/error
+    /// size[4] Rerror tag[2] | ename[s]
+    Error => Rerror {
+        ename: String,
     }
 
     /// http://man.cat-v.org/plan_9/5/attach
