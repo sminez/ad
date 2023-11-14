@@ -9,7 +9,7 @@
 //! rendering logic.
 use crate::{buffer::Buffer, key::Arrow};
 use ropey::RopeSlice;
-use std::iter::Peekable;
+use std::{cmp::min, iter::Peekable};
 
 mod cur;
 pub(crate) mod parse;
@@ -76,12 +76,14 @@ impl Dot {
     }
 
     pub fn content(&self, b: &Buffer) -> String {
-        if b.txt.len_chars() == 0 {
+        let len_chars = b.txt.len_chars();
+
+        if len_chars == 0 {
             return String::new();
         }
 
         let (from, to) = self.as_char_indices();
-        b.txt.slice(from..to).to_string()
+        b.txt.slice(from..min(to, len_chars)).to_string()
     }
 
     #[inline]
