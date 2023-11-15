@@ -1,5 +1,5 @@
 //! https://groups.google.com/g/plan9port-dev/c/Zef5lM0HgnM
-use ad::ninep::protocol::{Format9p, Rmessage, Tattach, Tdata, Tmessage, Tstat, Tversion, Twalk};
+use ad::ninep::protocol::{Format9p, Rmessage, Tdata, Tmessage};
 use std::os::unix::net::UnixStream;
 
 // Binding to 127.0.0.1:2781
@@ -30,35 +30,35 @@ fn main() {
 
     send(
         u16::MAX,
-        Tdata::Version(Tversion {
+        Tdata::Version {
             msize: u16::MAX as u32,
             version: "9P2000".to_string(),
-        }),
+        },
         &mut socket,
     );
 
     send(
         0,
-        Tdata::Attach(Tattach {
+        Tdata::Attach {
             fid: 0,
             afid: 4294967295,
             uname: "innes.andersonmorrison".to_string(),
             aname: "".to_string(),
-        }),
+        },
         &mut socket,
     );
 
     send(
         0,
-        Tdata::Walk(Twalk {
+        Tdata::Walk {
             fid: 0,
             new_fid: 1,
             wnames: vec![],
-        }),
+        },
         &mut socket,
     );
 
-    send(1, Tdata::Stat(Tstat { fid: 1 }), &mut socket);
+    send(1, Tdata::Stat { fid: 1 }, &mut socket);
 }
 
 fn send(tag: u16, content: Tdata, socket: &mut UnixStream) {

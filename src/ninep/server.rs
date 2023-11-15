@@ -1,7 +1,6 @@
 //! Traits for implementing a 9p fileserver
 use crate::ninep::protocol::{
-    Format9p, Qid, Rattach, Rauth, RawStat, Rclunk, Rdata, Rerror, Rmessage, Rstat, Rversion,
-    Rwalk, Tattach, Tauth, Tclunk, Tdata, Tmessage, Tstat, Tversion, Twalk, MAX_DATA_LEN,
+    Format9p, Qid, RawStat, Rdata, Rmessage, Tdata, Tmessage, MAX_DATA_LEN,
 };
 use std::{
     cmp::min,
@@ -47,19 +46,15 @@ const E_WALK_NON_DIR: &str = "walk in non-directory";
 
 pub type Result<T> = std::result::Result<T, String>;
 
-// TODO: the types here need to be converted to something that is more friendly to work with
-// rather than using the types from the protocol layer directly
-
 pub trait Serve9p {
     #[allow(unused_variables)]
-    // fn auth(&mut self, afid: &Fid, uname: &str, aname: &str) -> Result<Qid> {
     fn auth(&mut self, afid: u32, uname: &str, aname: &str) -> Result<Qid> {
         Err("authentication not required".to_string())
     }
 
     fn walk(&mut self, path: &Path) -> Result<Vec<(FileType, PathBuf)>>;
 
-    // fn open(&mut self, fid: &Fid, mode: u8) -> Result<(Qid, u32)>;
+    // fn open(&mut self, path: &Path, mode: u8) -> Result<(u64, u32)>;
     // fn create(&mut self, fid: &Fid, name: &str, perm: u32, mode: u8) -> Result<(Qid, u32)>;
 
     // fn read(&mut self, fid: &Fid, offset: usize, count: usize) -> Result<Vec<u8>>;
@@ -208,12 +203,16 @@ impl<S: Serve9p> Server<S> {
                 let Tmessage { tag, content } = t;
 
                 let resp = match content {
-                    Version(tversion) => self.handle_version(tversion),
-                    Auth(tauth) => self.handle_auth(tauth),
-                    Attach(tattach) => self.handle_attach(tattach),
-                    Walk(twalk) => self.handle_walk(twalk),
-                    Clunk(tclunk) => self.handle_clunk(tclunk),
-                    Stat(tstat) => self.handle_stat(tstat),
+                    Version { msize, version } => self.handle_version(msize, version),
+                    Auth { afid, uname, aname } => self.handle_auth(afid, uname, aname),
+                    Attach { fid, .. } => self.handle_attach(fid),
+                    Walk {
+                        fid,
+                        new_fid,
+                        wnames,
+                    } => self.handle_walk(fid, new_fid, wnames),
+                    Clunk { fid } => self.handle_clunk(fid),
+                    Stat { fid } => self.handle_stat(fid),
 
                     _ => {
                         eprintln!("tag={tag} content={content:?}");
@@ -223,7 +222,7 @@ impl<S: Serve9p> Server<S> {
 
                 let r = Rmessage {
                     tag,
-                    content: resp.unwrap_or_else(|ename| Rdata::Error(Rerror { ename })),
+                    content: resp.unwrap_or_else(|ename| Rdata::Error { ename }),
                 };
 
                 eprintln!("r-message: {r:?}\n");
@@ -261,17 +260,17 @@ impl<S: Serve9p> Server<S> {
     /// A successful version request initializes the connection. All outstanding I/O on the
     /// connection is aborted; all active fids are freed (‘clunked’) automatically. The set of
     /// messages between version requests is called a session.
-    fn handle_version(&mut self, Tversion { msize, version }: Tversion) -> Result<Rdata> {
+    fn handle_version(&mut self, msize: u32, version: String) -> Result<Rdata> {
         let server_version = if version != "9P2000" {
             "unknown"
         } else {
             "9P2000"
         };
 
-        Ok(Rdata::Version(Rversion {
+        Ok(Rdata::Version {
             msize: min(self.msize, msize),
             version: server_version.to_string(),
-        }))
+        })
     }
 
     /// If the client does wish to authenticate, it must acquire and validate an afid using an auth
@@ -286,9 +285,9 @@ impl<S: Serve9p> Server<S> {
     /// Once the protocol is complete, the same afid is presented in the attach message for the
     /// user, granting entry. The same validated afid may be used for multiple attach messages with
     /// the same uname and aname.
-    fn handle_auth(&mut self, Tauth { afid, uname, aname }: Tauth) -> Result<Rdata> {
+    fn handle_auth(&mut self, afid: u32, uname: String, aname: String) -> Result<Rdata> {
         let aqid = self.s.auth(afid, &uname, &aname)?;
-        Ok(Rdata::Auth(Rauth { aqid }))
+        Ok(Rdata::Auth { aqid })
     }
 
     /// The attach message serves as a fresh introduction from a user on the client machine to the
@@ -302,7 +301,7 @@ impl<S: Serve9p> Server<S> {
     /// If the client does not wish to authenticate the connection, or knows that authentication is
     /// not required, the afid field in the attach message should be set to NOFID, defined as
     /// (u32int)~0 in <fcall.h>.
-    fn handle_attach(&mut self, Tattach { fid, .. }: Tattach) -> Result<Rdata> {
+    fn handle_attach(&mut self, fid: u32) -> Result<Rdata> {
         if self.fids.contains_key(&fid) {
             return Err(E_DUPLICATE_FID.to_string());
         }
@@ -316,9 +315,9 @@ impl<S: Serve9p> Server<S> {
             },
         );
 
-        Ok(Rdata::Attach(Rattach {
+        Ok(Rdata::Attach {
             aqid: *self.qids.get(&PathBuf::from("/")).unwrap(),
-        }))
+        })
     }
 
     /// The walk request carries as arguments an existing fid and a proposed newfid (which must not
@@ -365,14 +364,7 @@ impl<S: Serve9p> Server<S> {
     /// may be packed in a single message. This constant is called MAXWELEM in fcall(3). Despite
     /// this restriction, the system imposes no limit on the number of elements in a file name,
     /// only the number that may be transmitted in a single message.
-    fn handle_walk(
-        &mut self,
-        Twalk {
-            fid,
-            new_fid,
-            wnames,
-        }: Twalk,
-    ) -> Result<Rdata> {
+    fn handle_walk(&mut self, fid: u32, new_fid: u32, wnames: Vec<String>) -> Result<Rdata> {
         if new_fid != fid && self.fids.contains_key(&new_fid) {
             return Err(E_DUPLICATE_FID.to_string());
         }
@@ -384,7 +376,7 @@ impl<S: Serve9p> Server<S> {
 
         if wnames.is_empty() {
             self.fids.insert(new_fid, fm.clone());
-            return Ok(Rdata::Walk(Rwalk { wqids: vec![] }));
+            return Ok(Rdata::Walk { wqids: vec![] });
         } else if matches!(fm.ty, FileType::Regular) {
             return Err(E_WALK_NON_DIR.to_string());
         }
@@ -419,15 +411,15 @@ impl<S: Serve9p> Server<S> {
             self.fids.insert(new_fid, fm);
         }
 
-        Ok(Rdata::Walk(Rwalk { wqids }))
+        Ok(Rdata::Walk { wqids })
     }
 
-    fn handle_clunk(&mut self, Tclunk { fid }: Tclunk) -> Result<Rdata> {
+    fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
         self.fids.remove(&fid);
-        Ok(Rdata::Clunk(Rclunk {}))
+        Ok(Rdata::Clunk {})
     }
 
-    fn handle_stat(&mut self, Tstat { fid }: Tstat) -> Result<Rdata> {
+    fn handle_stat(&mut self, fid: u32) -> Result<Rdata> {
         let FileMeta { path, .. } = match self.fids.get(&fid) {
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
@@ -437,7 +429,7 @@ impl<S: Serve9p> Server<S> {
         let q = self.qids.get(path).unwrap();
         let stat: RawStat = (*q, s).into();
 
-        Ok(Rdata::Stat(Rstat { stat }))
+        Ok(Rdata::Stat { stat })
     }
 }
 

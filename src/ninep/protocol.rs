@@ -315,14 +315,21 @@ macro_rules! impl_message_datatype {
 macro_rules! impl_message_format {
     (
         $message_ty:ident, $enum_ty:ident, $err:expr;
-        $($enum_variant:ident => $struct:ident {
+        $($enum_variant:ident => $message_variant:ident {
             $($field:ident: $ty:ty,)*
         })+
     ) => {
         impl Format9p for $message_ty {
             fn n_bytes(&self) -> usize {
                 let content_size = match &self.content {
-                    $($enum_ty::$enum_variant(content) => content.n_bytes(),)+
+                    $(
+                        $enum_ty::$enum_variant { $($field,)* } => {
+                            #[allow(unused_mut)]
+                            let mut n = 0;
+                            $(n += $field.n_bytes();)*
+                            n
+                        }
+                    )+
                 };
 
                 // size[4] type[1] tag[2] | content[...]
@@ -331,7 +338,7 @@ macro_rules! impl_message_format {
 
             fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
                 let ty = match self.content {
-                    $($enum_ty::$enum_variant(_) => MessageType::$struct.0,)+
+                    $($enum_ty::$enum_variant { .. } => MessageType::$message_variant.0,)+
                 };
 
                 (self.n_bytes() as u32).write_to(w)?;
@@ -339,8 +346,14 @@ macro_rules! impl_message_format {
                 self.tag.write_to(w)?;
 
                 match &self.content {
-                    $($enum_ty::$enum_variant(content) => content.write_to(w),)+
+                    $(
+                        $enum_ty::$enum_variant { $($field,)* } => {
+                            $($field.write_to(w)?;)*
+                        },
+                    )+
                 }
+
+                Ok(())
             }
 
             fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
@@ -354,7 +367,12 @@ macro_rules! impl_message_format {
 
                 let tag = u16::read_from(r)?;
                 let content = match MessageType(ty_buf[0]) {
-                    $(MessageType::$struct => $enum_ty::$enum_variant(Format9p::read_from(r)?),)+
+                    $(
+                        MessageType::$message_variant => $enum_ty::$enum_variant {
+                            $($field: Format9p::read_from(r)?,)*
+                        },
+                    )+
+
                     MessageType(ty) => return Err(io::Error::new(
                         ErrorKind::InvalidData,
                         format!($err, ty),
@@ -373,7 +391,7 @@ macro_rules! impl_message_format {
 macro_rules! impl_tmessages {
     ($(
         $(#[$docs:meta])+
-        $enum_variant:ident => $struct:ident {
+        $enum_variant:ident => $message_variant:ident {
             $($field:ident: $ty:ty,)*
         }
     )+) => {
@@ -383,19 +401,12 @@ macro_rules! impl_tmessages {
         /// See the individual message structs for docs on the format and semantics of each variant.
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum Tdata {
-            $( $(#[$docs])+ $enum_variant($struct), )+
+            $( $(#[$docs])+ $enum_variant { $($field: $ty,)* }, )+
         }
-
-        $(impl_message_datatype!(
-            $(#[$docs])+
-            struct $struct {
-                $($field: $ty,)*
-            }
-        );)+
 
         impl_message_format!(
             Tmessage, Tdata, "invalid message type for t-message: {}";
-            $($enum_variant => $struct {
+            $($enum_variant => $message_variant {
                 $($field: $ty,)*
             })+
         );
@@ -407,7 +418,7 @@ macro_rules! impl_tmessages {
 macro_rules! impl_rmessages {
     ($(
         $(#[$docs:meta])+
-        $enum_variant:ident => $struct:ident {
+        $enum_variant:ident => $message_variant:ident {
             $($field:ident: $ty:ty,)*
         }
     )+) => {
@@ -417,19 +428,12 @@ macro_rules! impl_rmessages {
         /// See the individual message structs for docs on the format and semantics of each variant.
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum Rdata {
-            $( $(#[$docs])+ $enum_variant($struct), )+
+            $( $(#[$docs])+ $enum_variant { $($field: $ty,)* }, )+
         }
-
-        $(impl_message_datatype!(
-            $(#[$docs])+
-            struct $struct {
-                $($field: $ty,)*
-            }
-        );)+
 
         impl_message_format!(
             Rmessage, Rdata, "invalid message type for r-message: {}";
-            $($enum_variant => $struct {
+            $($enum_variant => $message_variant {
                 $($field: $ty,)*
             })+
         );
@@ -802,7 +806,10 @@ mod tests {
             F9::S(t) => round_trip_inner(t.to_string()),
             F9::V(t) => round_trip_inner(t),
             F9::D(t) => round_trip_inner(Data(t)),
-            F9::Clunk => round_trip_inner(Rclunk {}),
+            F9::Clunk => round_trip_inner(Rmessage {
+                tag: 0,
+                content: Rdata::Clunk {},
+            }),
         }
     }
 }
