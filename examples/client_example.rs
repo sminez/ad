@@ -1,31 +1,10 @@
 //! https://groups.google.com/g/plan9port-dev/c/Zef5lM0HgnM
 use ad::ninep::protocol::{Format9p, Rmessage, Tdata, Tmessage};
-use std::os::unix::net::UnixStream;
-
-// Binding to 127.0.0.1:2781
-// t-message: Tmessage { tag: 65535, content: Version(Tversion { msize: 8192, version: "9P2000" }) }
-// r-message: Rmessage { tag: 65535, content: Version(Rversion { msize: 8192, version: "9P2000" }) }
-
-// t-message: Tmessage { tag: 0, content: Auth(Tauth { afid: 0, uname: "innes.andersonmorrison", aname: "" }) }
-// r-message: Rmessage { tag: 0, content: Error(Rerror { ename: "authentication not required" }) }
-
-// t-message: Tmessage { tag: 0, content: Attach(Tattach { fid: 0, afid: 4294967295, uname: "innes.andersonmorrison", aname: "" }) }
-// r-message: Rmessage { tag: 0, content: Attach(Rattach { aqid: Qid { ty: 128, version: 0, path: 0 } }) }
-
-// t-message: Tmessage { tag: 0, content: Walk(Twalk { fid: 0, new_fid: 1, wnames: [] }) }
-// r-message: Rmessage { tag: 0, content: Walk(Rwalk { wqids: [] }) }
-
-// t-message: Tmessage { tag: 0, content: Stat(Tstat { fid: 1 }) }
-// r-message: Rmessage { tag: 0, content: Stat(Rstat { stat: RawStat { size: 54, ty: 0, dev: 0, qid: Qid { ty: 128, version: 0, path: 0 }, mode: 2147483968, atime: 1700041099, mtime: 1700041099, length: 0, name: "/", uid: "ad", gid: "ad", muid: "ad" } }) }
-
-// t-message: Tmessage { tag: 0, content: Clunk(Tclunk { fid: 1 }) }
-// r-message: Rmessage { tag: 0, content: Clunk(Rclunk) }
-
-// t-message: Tmessage { tag: 0, content: Clunk(Tclunk { fid: 0 }) }
-// r-message: Rmessage { tag: 0, content: Clunk(Rclunk) }
+use std::{env, os::unix::net::UnixStream};
 
 fn main() {
-    let mntp = "/tmp/ns.innes.andersonmorrison.:0/acme";
+    let uname = env::var("USER").unwrap();
+    let mntp = format!("/tmp/ns.{uname}.:0/acme");
     let mut socket = UnixStream::connect(mntp).unwrap();
 
     send(
@@ -42,7 +21,7 @@ fn main() {
         Tdata::Attach {
             fid: 0,
             afid: 4294967295,
-            uname: "innes.andersonmorrison".to_string(),
+            uname,
             aname: "".to_string(),
         },
         &mut socket,
@@ -58,7 +37,20 @@ fn main() {
         &mut socket,
     );
 
-    send(1, Tdata::Stat { fid: 1 }, &mut socket);
+    send(0, Tdata::Stat { fid: 1 }, &mut socket);
+    send(0, Tdata::Clunk { fid: 1 }, &mut socket);
+
+    send(
+        0,
+        Tdata::Walk {
+            fid: 0,
+            new_fid: 1,
+            wnames: vec![],
+        },
+        &mut socket,
+    );
+
+    send(0, Tdata::Open { fid: 1, mode: 0 }, &mut socket);
 }
 
 fn send(tag: u16, content: Tdata, socket: &mut UnixStream) {

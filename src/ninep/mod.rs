@@ -3,4 +3,4 @@
 pub mod protocol;
 pub mod server;
 
-pub use server::{FileMeta, FileType, Result, Serve9p, Server, Stat};
+pub use server::{FileMeta, FileType, IoUnit, Mode, Result, Serve9p, Server, Stat};

@@ -158,7 +158,7 @@ impl<T: Format9p> Format9p for Vec<T> {
 ///       size[4] Rwrite tag[2] count[4]
 /// ```
 #[derive(Clone, PartialEq, Eq)]
-pub struct Data(Vec<u8>);
+pub struct Data(pub(super) Vec<u8>);
 
 impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -444,7 +444,6 @@ impl_message_datatype!(
     /// A machine-independent directory entry
     /// http://man.cat-v.org/plan_9/5/stat
     struct RawStat {
-        size_header: u16,
         /// size[2]      total byte count of the following data
         size: u16,
         /// type[2]      for kernel use
@@ -603,6 +602,7 @@ impl_tmessages! {
     /// size[4] Twstat tag[2] | fid[4] stat[n]
     Wstat => Twstat {
         fid: u32,
+        size: u16,
         stat: RawStat,
     }
 }
@@ -702,6 +702,7 @@ impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/stat
     /// size[4] Rstat tag[2] | stat[n]
     Stat => Rstat {
+        size: u16,
         stat: RawStat,
     }
 
