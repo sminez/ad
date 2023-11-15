@@ -1,30 +1,44 @@
 //! Traits for implementing a 9p fileserver
 use crate::ninep::protocol::{
-    Format9p, Qid, Rauth, Rclunk, Rdata, Rerror, Rmessage, Rversion, Rwalk, Tattach, Tauth, Tdata,
-    Tmessage, Tversion, MAX_DATA_LEN,
+    Format9p, Qid, Rattach, Rauth, RawStat, Rclunk, Rdata, Rerror, Rmessage, Rstat, Rversion,
+    Rwalk, Tattach, Tauth, Tclunk, Tdata, Tmessage, Tstat, Tversion, Twalk, MAX_DATA_LEN,
 };
 use std::{
     cmp::min,
     collections::BTreeMap,
+    mem::size_of,
     net::TcpListener,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use super::protocol::{Rattach, Tclunk, Twalk};
+const TCP_PORT: u16 = 0xADD;
 
-const NO_FID: u32 = u32::MAX;
+// const NO_FID: u32 = u32::MAX;
 const QID_ROOT: u64 = 0;
 
 // File "mode" values for use in Qids
 const QTDIR: u8 = 0x80;
+const QTFILE: u8 = 0x00;
 // const QTAPPEND: u8 = 0x40;
 // const QTEXCL: u8 = 0x20;
 // const QTMOUNT: u8 = 0x10;
 // const QTAUTH: u8 = 0x08;
 // const QTTMP: u8 = 0x04;
 // const QTSYMLINK: u8 = 0x02;
-const QTFILE: u8 = 0x00;
+
+const DMDIR: u32 = 0x80000000;
+// const DMAPPEND: u32 = 0x40000000;
+// const DMEXCL: u32 = 0x20000000;
+// const DMMOUNT: u32 = 0x10000000;
+// const DMAUTH: u32 = 0x08000000;
+// const DMTMP: u32 = 0x04000000;
+// const DMSYMLINK: u32 = 0x02000000;
+// const DMDEVICE: u32 = 0x00800000;
+// const DMNAMEDPIPE: u32 = 0x00200000;
+// const DMSOCKET: u32 = 0x00100000;
+// const DMSETUID: u32 = 0x00080000;
+// const DMSETGID: u32 = 0x00040000;
 
 // Error messages
 const E_DUPLICATE_FID: &str = "duplicate fid";
@@ -56,8 +70,50 @@ pub trait Serve9p {
     // fn clunk(&mut self, fid: &Fid) -> Result<()>;
     // fn remove(&mut self, fid: &Fid) -> Result<()>;
 
-    // fn stat(&mut self, fid: &Fid) -> Result<Stat>;
+    fn stat(&mut self, path: &Path) -> Result<Stat>;
+
     // fn write_stat(&mut self, fid: &Fid, stat: Stat) -> Result<()>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Stat {
+    pub name: String,
+    pub ty: FileType,
+    pub perms: u32,
+    pub n_bytes: u64,
+    pub last_accesses: SystemTime,
+    pub last_modified: SystemTime,
+    pub owner: String,
+    pub group: String,
+    pub last_modified_by: String,
+}
+
+impl From<(Qid, Stat)> for RawStat {
+    fn from((qid, s): (Qid, Stat)) -> Self {
+        let size = (size_of::<u16>()
+            + size_of::<u32>() * 4
+            + qid.n_bytes()
+            + size_of::<u64>()
+            + s.name.n_bytes()
+            + s.owner.n_bytes()
+            + s.group.n_bytes()
+            + s.last_modified_by.n_bytes()) as u16;
+
+        RawStat {
+            size,
+            ty: 0,
+            dev: 0,
+            qid,
+            mode: u32::from(s.ty) | s.perms,
+            atime: systime_as_u32(s.last_accesses),
+            mtime: systime_as_u32(s.last_modified),
+            length: s.n_bytes,
+            name: s.name,
+            uid: s.owner,
+            gid: s.group,
+            muid: s.last_modified_by,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -71,6 +127,15 @@ impl From<FileType> for u8 {
         match value {
             FileType::Directory => QTDIR,
             FileType::Regular => QTFILE,
+        }
+    }
+}
+
+impl From<FileType> for u32 {
+    fn from(value: FileType) -> Self {
+        match value {
+            FileType::Directory => DMDIR,
+            FileType::Regular => 0,
         }
     }
 }
@@ -123,14 +188,23 @@ impl<S: Serve9p> Server<S> {
     pub fn serve(mut self) {
         use Tdata::*;
 
-        let listener = TcpListener::bind("127.0.0.1:9000").unwrap();
+        let addr = format!("127.0.0.1:{TCP_PORT}");
+        println!("Binding to {addr}");
+        let listener = TcpListener::bind(&addr).unwrap();
 
         // FIXME: this will need to handle multiple connections eventually
         for stream in listener.incoming() {
             let mut stream = stream.unwrap();
 
             loop {
-                let t = Tmessage::read_from(&mut stream).unwrap();
+                let t = match Tmessage::read_from(&mut stream) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        eprintln!("error reading message: {e}");
+                        break;
+                    }
+                };
+
                 eprintln!("t-message: {t:?}");
                 let Tmessage { tag, content } = t;
 
@@ -140,6 +214,7 @@ impl<S: Serve9p> Server<S> {
                     Attach(tattach) => self.handle_attach(tattach),
                     Walk(twalk) => self.handle_walk(twalk),
                     Clunk(tclunk) => self.handle_clunk(tclunk),
+                    Stat(tstat) => self.handle_stat(tstat),
 
                     _ => {
                         eprintln!("tag={tag} content={content:?}");
@@ -247,6 +322,50 @@ impl<S: Serve9p> Server<S> {
         }))
     }
 
+    /// The walk request carries as arguments an existing fid and a proposed newfid (which must not
+    /// be in use unless it is the same as fid) that the client wishes to associate with the result
+    /// of traversing the directory hierarchy by ‘walking’ the hierarchy using the successive path
+    /// name elements wname.
+    ///
+    /// The fid must represent a directory unless zero path name elements are specified.
+    ///
+    /// The fid must be valid in the current session and must not have been opened for I/O by an
+    /// open or create message. If the full sequence of nwname elements is walked successfully,
+    /// newfid will represent the file that results. If not, newfid (and fid) will be unaffected.
+    /// However, if newfid is in use or otherwise illegal, an Rerror is returned.
+    ///
+    /// The name “..” (dot-dot) represents the parent directory. The name “.” (dot), meaning the
+    /// current directory, is not used in the protocol.
+    ///
+    /// It is legal for nwname to be zero, in which case newfid will represent the same file as fid
+    /// and the walk will usually succeed; this is equivalent to walking to dot. The rest of this
+    /// discussion assumes nwname is greater than zero.
+    ///
+    /// The nwname path name elements wname are walked in order, “elementwise”. For the first
+    /// elementwise walk to succeed, the file identified by fid must be a directory, and the
+    /// implied user of the request must have permission to search the directory (see intro(9P)).
+    /// Subsequent elementwise walks have equivalent restrictions applied to the implicit fid that
+    /// results from the preceding elementwise walk.
+    ///
+    /// If the first element cannot be walked for any reason, Rerror is returned. Otherwise, the
+    /// walk will return an Rwalk message containing nwqid qids corresponding, in order, to the
+    /// files that are visited by the nwqid successful elementwise walks; nwqid is therefore either
+    /// nwname or the index of the first elementwise walk that failed. The value of nwqid cannot be
+    /// zero unless nwname is zero. Also, nwqid will always be less than or equal to nwname. Only
+    /// if it is equal, however, will newfid be affected, in which case newfid will represent the
+    /// file reached by the final elementwise walk requested in the message.
+    ///
+    /// A walk of the name “..” in the root directory of a server is equivalent to a walk with no
+    /// name elements.
+    ///
+    /// If newfid is the same as fid, the above discussion applies, with the obvious difference
+    /// that if the walk changes the state of newfid, it also changes the state of fid; and if
+    /// newfid is unaffected, then fid is also unaffected.
+    ///
+    /// To simplify the implementation of the servers, a maximum of sixteen name elements or qids
+    /// may be packed in a single message. This constant is called MAXWELEM in fcall(3). Despite
+    /// this restriction, the system imposes no limit on the number of elements in a file name,
+    /// only the number that may be transmitted in a single message.
     fn handle_walk(
         &mut self,
         Twalk {
@@ -264,11 +383,11 @@ impl<S: Serve9p> Server<S> {
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
 
-        if matches!(fm.ty, FileType::Regular) {
-            return Err(E_WALK_NON_DIR.to_string());
-        } else if wnames.is_empty() {
+        if wnames.is_empty() {
             self.fids.insert(new_fid, fm.clone());
             return Ok(Rdata::Walk(Rwalk { wqids: vec![] }));
+        } else if matches!(fm.ty, FileType::Regular) {
+            return Err(E_WALK_NON_DIR.to_string());
         }
 
         let suffix = PathBuf::from_iter(wnames);
@@ -285,10 +404,7 @@ impl<S: Serve9p> Server<S> {
             let path = self.next_qid();
             let qid = Qid {
                 ty: ty.into(),
-                version: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as u32,
+                version: 0,
                 path,
             };
             last = Some(FileMeta {
@@ -310,5 +426,25 @@ impl<S: Serve9p> Server<S> {
     fn handle_clunk(&mut self, Tclunk { fid }: Tclunk) -> Result<Rdata> {
         self.fids.remove(&fid);
         Ok(Rdata::Clunk(Rclunk {}))
+    }
+
+    fn handle_stat(&mut self, Tstat { fid }: Tstat) -> Result<Rdata> {
+        let FileMeta { path, .. } = match self.fids.get(&fid) {
+            Some(fm) => fm,
+            None => return Err(E_UNKNOWN_FID.to_string()),
+        };
+
+        let s = self.s.stat(path)?;
+        let q = self.qids.get(path).unwrap();
+        let stat: RawStat = (*q, s).into();
+
+        Ok(Rdata::Stat(Rstat { stat }))
+    }
+}
+
+fn systime_as_u32(t: SystemTime) -> u32 {
+    match t.duration_since(UNIX_EPOCH) {
+        Ok(d) => d.as_secs() as u32,
+        Err(_) => 0,
     }
 }

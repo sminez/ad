@@ -439,21 +439,15 @@ macro_rules! impl_rmessages {
 impl_message_datatype!(
     /// A machine-independent directory entry
     /// http://man.cat-v.org/plan_9/5/stat
-    struct Stat {
+    struct RawStat {
         /// size[2]      total byte count of the following data
         size: u16,
         /// type[2]      for kernel use
         ty: u16,
         /// dev[4]       for kernel use
         dev: u32,
-        /// qid.type[1]
-        /// the type of the file (directory, etc.), repre- sented as a bit vector corresponding to the
-        /// high 8 bits of the file's mode word.
-        quid_ty: u8,
-        /// qid.vers[4]  version number for given path
-        quid_vers: u32,
-        /// qid.path[8]  the file server's unique identification for the file
-        quid_path: u64,
+        /// Qid type, version and path
+        qid: Qid,
         /// mode[4]      permissions and flags
         mode: u32,
         /// atime[4]     last access time
@@ -478,8 +472,13 @@ impl_message_datatype!(
     /// on the same server hierarchy are the same if and only if their qids are the same.
     #[derive(Copy)]
     struct Qid {
+        /// qid.type[1]
+        /// the type of the file (directory, etc.), repre- sented as a bit vector corresponding to the
+        /// high 8 bits of the file's mode word.
         ty: u8,
+        /// qid.vers[4]  version number for given path
         version: u32,
+        /// qid.path[8]  the file server's unique identification for the file
         path: u64,
     }
 );
@@ -599,7 +598,7 @@ impl_tmessages! {
     /// size[4] Twstat tag[2] | fid[4] stat[n]
     Wstat => Twstat {
         fid: u32,
-        stat: Stat,
+        stat: RawStat,
     }
 }
 
@@ -698,7 +697,7 @@ impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/stat
     /// size[4] Rstat tag[2] | stat[n]
     Stat => Rstat {
-        stat: Stat,
+        stat: RawStat,
     }
 
     /// http://man.cat-v.org/plan_9/5/stat
