@@ -57,8 +57,6 @@ pub trait Serve9p {
         Err("authentication not required".to_string())
     }
 
-    // fn flush(&mut self, old_tag: u16) -> Result<()>;
-
     fn walk(&mut self, path: &Path) -> Result<Vec<(FileType, PathBuf)>>;
 
     // fn open(&mut self, fid: &Fid, mode: u8) -> Result<(Qid, u32)>;
@@ -67,7 +65,6 @@ pub trait Serve9p {
     // fn read(&mut self, fid: &Fid, offset: usize, count: usize) -> Result<Vec<u8>>;
     // fn write(&mut self, fid: &Fid, offset: usize, data: Vec<u8>) -> Result<usize>;
 
-    // fn clunk(&mut self, fid: &Fid) -> Result<()>;
     // fn remove(&mut self, fid: &Fid) -> Result<()>;
 
     fn stat(&mut self, path: &Path) -> Result<Stat>;
@@ -90,19 +87,20 @@ pub struct Stat {
 
 impl From<(Qid, Stat)> for RawStat {
     fn from((qid, s): (Qid, Stat)) -> Self {
-        let size = (size_of::<u16>()
+        let size_header = (size_of::<u16>() * 2
             + size_of::<u32>() * 4
             + qid.n_bytes()
-            + size_of::<u64>()
+            + s.n_bytes.n_bytes()
             + s.name.n_bytes()
             + s.owner.n_bytes()
             + s.group.n_bytes()
             + s.last_modified_by.n_bytes()) as u16;
 
         RawStat {
-            size,
-            ty: 0,
-            dev: 0,
+            size_header,
+            size: size_header - size_of::<u16>() as u16,
+            ty: 114,
+            dev: 1,
             qid,
             mode: u32::from(s.ty) | s.perms,
             atime: systime_as_u32(s.last_accesses),
@@ -201,6 +199,7 @@ impl<S: Serve9p> Server<S> {
                     Ok(t) => t,
                     Err(e) => {
                         eprintln!("error reading message: {e}");
+                        self.fids.clear();
                         break;
                     }
                 };

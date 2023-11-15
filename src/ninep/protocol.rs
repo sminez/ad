@@ -440,6 +440,7 @@ impl_message_datatype!(
     /// A machine-independent directory entry
     /// http://man.cat-v.org/plan_9/5/stat
     struct RawStat {
+        size_header: u16,
         /// size[2]      total byte count of the following data
         size: u16,
         /// type[2]      for kernel use
