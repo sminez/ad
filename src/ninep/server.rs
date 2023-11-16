@@ -5,13 +5,33 @@ use crate::ninep::protocol::{
 use std::{
     cmp::min,
     collections::BTreeMap,
+    env,
+    io::{Read, Write},
     mem::size_of,
     net::TcpListener,
+    os::unix::net::UnixListener,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+    thread::spawn,
     time::{SystemTime, UNIX_EPOCH},
 };
 
 const TCP_PORT: u16 = 0xADD;
+
+fn unix_socket() -> UnixListener {
+    let uname = env::var("USER").unwrap();
+    let mntp = format!("/tmp/ns.{uname}.:0/ad");
+    println!("Binding to {mntp}");
+
+    UnixListener::bind(mntp).unwrap()
+}
+
+fn tcp_socket() -> TcpListener {
+    let addr = format!("127.0.0.1:{TCP_PORT}");
+    println!("Binding to {addr}");
+
+    TcpListener::bind(&addr).unwrap()
+}
 
 // const NO_FID: u32 = u32::MAX;
 const QID_ROOT: u64 = 0;
@@ -159,7 +179,10 @@ pub struct FileMeta {
 // TODO: need to track which users have each fid?
 
 #[derive(Debug)]
-pub struct Server<S: Serve9p> {
+pub struct Server<S>
+where
+    S: Serve9p + Sync + Send + 'static,
+{
     s: S,
     msize: u32,
     next_qid: u64,
@@ -167,7 +190,62 @@ pub struct Server<S: Serve9p> {
     qids: BTreeMap<PathBuf, Qid>,
 }
 
-impl<S: Serve9p> Server<S> {
+fn handle_connection<S, RW>(srv: Arc<Mutex<Server<S>>>, mut stream: RW)
+where
+    S: Serve9p + Sync + Send + 'static,
+    RW: Read + Write,
+{
+    use Tdata::*;
+
+    loop {
+        let t = match Tmessage::read_from(&mut stream) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("error reading message: {e}\ndropping connection");
+                srv.lock().unwrap().fids.clear();
+                return;
+            }
+        };
+
+        eprintln!("t-message: {t:?}");
+        let Tmessage { tag, content } = t;
+        let mut s = srv.lock().unwrap();
+
+        let resp = match content {
+            Version { msize, version } => s.handle_version(msize, version),
+            Auth { afid, uname, aname } => s.handle_auth(afid, uname, aname),
+            Attach { fid, .. } => s.handle_attach(fid),
+            Walk {
+                fid,
+                new_fid,
+                wnames,
+            } => s.handle_walk(fid, new_fid, wnames),
+            Clunk { fid } => s.handle_clunk(fid),
+            Stat { fid } => s.handle_stat(fid),
+            Open { fid, mode } => s.handle_open(fid, mode),
+            Read { fid, offset, count } => s.handle_read(fid, offset, count),
+
+            _ => {
+                eprintln!("tag={tag} content={content:?}");
+                continue;
+            }
+        };
+
+        let r: Rmessage = (tag, resp).into();
+        eprintln!("r-message: {r:?}\n");
+
+        if let Err(e) = r.write_to(&mut stream) {
+            eprintln!("ERROR sending response: {e}");
+        }
+
+        drop(s);
+    }
+}
+
+impl<S> Server<S>
+where
+    S: Serve9p + Sync + Send + 'static,
+{
     pub fn new(s: S) -> Self {
         let mut qids = BTreeMap::default();
         qids.insert(
@@ -194,57 +272,27 @@ impl<S: Serve9p> Server<S> {
         qid
     }
 
-    pub fn serve(mut self) {
-        use Tdata::*;
+    pub fn serve_tcp(self) {
+        let listener = tcp_socket();
+        let srv = Arc::new(Mutex::new(self));
 
-        let addr = format!("127.0.0.1:{TCP_PORT}");
-        println!("Binding to {addr}");
-        let listener = TcpListener::bind(&addr).unwrap();
-
-        // FIXME: this will need to handle multiple connections eventually
         for stream in listener.incoming() {
-            let mut stream = stream.unwrap();
+            let stream = stream.unwrap();
+            println!("new connection");
+            let thread_srv = Arc::clone(&srv);
+            spawn(move || handle_connection(thread_srv, stream));
+        }
+    }
 
-            loop {
-                let t = match Tmessage::read_from(&mut stream) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        eprintln!("error reading message: {e}");
-                        self.fids.clear();
-                        break;
-                    }
-                };
+    pub fn serve_socket(self) {
+        let listener = unix_socket();
+        let srv = Arc::new(Mutex::new(self));
 
-                eprintln!("t-message: {t:?}");
-                let Tmessage { tag, content } = t;
-
-                let resp = match content {
-                    Version { msize, version } => self.handle_version(msize, version),
-                    Auth { afid, uname, aname } => self.handle_auth(afid, uname, aname),
-                    Attach { fid, .. } => self.handle_attach(fid),
-                    Walk {
-                        fid,
-                        new_fid,
-                        wnames,
-                    } => self.handle_walk(fid, new_fid, wnames),
-                    Clunk { fid } => self.handle_clunk(fid),
-                    Stat { fid } => self.handle_stat(fid),
-                    Open { fid, mode } => self.handle_open(fid, mode),
-                    Read { fid, offset, count } => self.handle_read(fid, offset, count),
-
-                    _ => {
-                        eprintln!("tag={tag} content={content:?}");
-                        continue;
-                    }
-                };
-
-                let r: Rmessage = (tag, resp).into();
-                eprintln!("r-message: {r:?}\n");
-
-                if let Err(e) = r.write_to(&mut stream) {
-                    eprintln!("ERROR sending response: {e}");
-                }
-            }
+        for stream in listener.incoming() {
+            let stream = stream.unwrap();
+            println!("new connection");
+            let thread_srv = Arc::clone(&srv);
+            spawn(move || handle_connection(thread_srv, stream));
         }
     }
 

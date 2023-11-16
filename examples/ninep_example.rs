@@ -7,7 +7,7 @@ use std::{
 
 fn main() {
     let s = Server::new(EchoServer);
-    s.serve()
+    s.serve_socket()
 }
 
 struct EchoServer;
