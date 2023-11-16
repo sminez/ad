@@ -1,5 +1,8 @@
 //! A simple demo of the filesystem interface
-use ad::ninep::{FileType, IoUnit, Mode, Result, Serve9p, Server, Stat};
+use ad::ninep::{
+    fs::{FileType, IoUnit, Mode, Stat},
+    server::{Result, Serve9p, Server, DEFAULT_SOCKET_NAME},
+};
 use std::{
     path::{Path, PathBuf},
     time::SystemTime,
@@ -7,7 +10,7 @@ use std::{
 
 fn main() {
     let s = Server::new(EchoServer);
-    s.serve_socket()
+    s.serve_socket(DEFAULT_SOCKET_NAME)
 }
 
 struct EchoServer;
@@ -16,8 +19,8 @@ impl Serve9p for EchoServer {
     fn walk(&mut self, path: &Path) -> Result<Vec<(FileType, PathBuf)>> {
         if path.as_os_str() == "/" {
             Ok(vec![
-                (FileType::Regular, "/foo".into()),
-                (FileType::Directory, "/bar".into()),
+                (FileType::Regular, "foo".into()),
+                (FileType::Directory, "bar".into()),
             ])
         } else {
             Err("unknown directory".to_string())
@@ -39,8 +42,8 @@ impl Serve9p for EchoServer {
                 last_modified_by: "ad".into(),
             }),
 
-            "/foo" => Err("stat for /foo".into()),
-            "/bar" => Err("stat for /bar".into()),
+            "foo" => Err("stat for /foo".into()),
+            "bar" => Err("stat for /bar".into()),
             s => Err(format!("stat for {s}")),
         }
     }
@@ -62,7 +65,7 @@ impl Serve9p for EchoServer {
             "/" => Ok(vec![
                 Stat {
                     qid: 1,
-                    name: "/bar".into(),
+                    name: "bar".into(),
                     ty: FileType::Directory,
                     perms: 0o500,
                     n_bytes: 0,
@@ -74,7 +77,7 @@ impl Serve9p for EchoServer {
                 },
                 Stat {
                     qid: 2,
-                    name: "/foo".into(),
+                    name: "foo".into(),
                     ty: FileType::Regular,
                     perms: 0o600,
                     n_bytes: 42,

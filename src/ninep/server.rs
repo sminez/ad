@@ -1,11 +1,12 @@
 //! Traits for implementing a 9p fileserver
-use crate::ninep::protocol::{
-    Data, Format9p, Qid, RawStat, Rdata, Rmessage, Tdata, Tmessage, MAX_DATA_LEN,
+use crate::ninep::{
+    fs::{FileMeta, FileType, IoUnit, Mode, Stat, QID_ROOT, QTDIR},
+    protocol::{Data, Format9p, Qid, RawStat, Rdata, Rmessage, Tdata, Tmessage, MAX_DATA_LEN},
 };
 use std::{
     cmp::min,
     collections::BTreeMap,
-    env,
+    env, fs,
     io::{Read, Write},
     mem::size_of,
     net::TcpListener,
@@ -13,66 +14,36 @@ use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     thread::spawn,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
-const TCP_PORT: u16 = 0xADD;
+pub const DEFAULT_TCP_PORT: u16 = 0xADD;
+pub const DEFAULT_SOCKET_NAME: &str = "ad";
 
-fn unix_socket() -> UnixListener {
+fn unix_socket(name: &str) -> UnixListener {
     let uname = env::var("USER").unwrap();
-    let mntp = format!("/tmp/ns.{uname}.:0/ad");
+    let mntp = format!("/tmp/ns.{uname}.:0/{name}");
+
+    // FIXME: really we should be handling this on exit but we'll need to catch
+    // ctrl-c to do that properly. For now this works but it means that if you
+    // start a second file server with the same name then it'll remove the socket
+    // for the first.
+    let _ = fs::remove_file(&mntp);
     println!("Binding to {mntp}");
 
     UnixListener::bind(mntp).unwrap()
 }
 
-fn tcp_socket() -> TcpListener {
-    let addr = format!("127.0.0.1:{TCP_PORT}");
+fn tcp_socket(port: u16) -> TcpListener {
+    let addr = format!("127.0.0.1:{port}");
     println!("Binding to {addr}");
 
     TcpListener::bind(&addr).unwrap()
 }
 
-// const NO_FID: u32 = u32::MAX;
-const QID_ROOT: u64 = 0;
-
-// File "mode" values for use in Qids
-const QTDIR: u8 = 0x80;
-const QTFILE: u8 = 0x00;
-// const QTAPPEND: u8 = 0x40;
-// const QTEXCL: u8 = 0x20;
-// const QTMOUNT: u8 = 0x10;
-// const QTAUTH: u8 = 0x08;
-// const QTTMP: u8 = 0x04;
-// const QTSYMLINK: u8 = 0x02;
-
-const DMDIR: u32 = 0x80000000;
-// const DMAPPEND: u32 = 0x40000000;
-// const DMEXCL: u32 = 0x20000000;
-// const DMMOUNT: u32 = 0x10000000;
-// const DMAUTH: u32 = 0x08000000;
-// const DMTMP: u32 = 0x04000000;
-// const DMSYMLINK: u32 = 0x02000000;
-// const DMDEVICE: u32 = 0x00800000;
-// const DMNAMEDPIPE: u32 = 0x00200000;
-// const DMSOCKET: u32 = 0x00100000;
-// const DMSETUID: u32 = 0x00080000;
-// const DMSETGID: u32 = 0x00040000;
-
 // Error messages
 const E_DUPLICATE_FID: &str = "duplicate fid";
 const E_UNKNOWN_FID: &str = "unknown fid";
 const E_WALK_NON_DIR: &str = "walk in non-directory";
-
-pub type Mode = u8;
-
-/// http://p9f.org/magic/man2html/2/iounit
-///
-/// Reads and writes of files are transmitted using the 9P protocol (see intro(5)) and in general,
-/// operations involving large amounts of data must be broken into smaller pieces by the operating
-/// system. The `I/O unit' associated with each file descriptor records the maximum size, in bytes,
-/// that may be read or written without breaking up the transfer.
-pub type IoUnit = u32;
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -101,79 +72,6 @@ pub trait Serve9p {
     // fn write(&mut self, fid: &Fid, offset: usize, data: Vec<u8>) -> Result<usize>;
     // fn remove(&mut self, fid: &Fid) -> Result<()>;
     // fn write_stat(&mut self, fid: &Fid, stat: Stat) -> Result<()>;
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Stat {
-    pub qid: u64,
-    pub name: String,
-    pub ty: FileType,
-    pub perms: u32,
-    pub n_bytes: u64,
-    pub last_accesses: SystemTime,
-    pub last_modified: SystemTime,
-    pub owner: String,
-    pub group: String,
-    pub last_modified_by: String,
-}
-
-impl From<(Qid, Stat)> for RawStat {
-    fn from((qid, s): (Qid, Stat)) -> Self {
-        let size = (size_of::<u16>()
-            + size_of::<u32>() * 4
-            + qid.n_bytes()
-            + s.n_bytes.n_bytes()
-            + s.name.n_bytes()
-            + s.owner.n_bytes()
-            + s.group.n_bytes()
-            + s.last_modified_by.n_bytes()) as u16;
-
-        RawStat {
-            size,
-            ty: 0,
-            dev: 0,
-            qid,
-            mode: u32::from(s.ty) | s.perms,
-            atime: systime_as_u32(s.last_accesses),
-            mtime: systime_as_u32(s.last_modified),
-            length: s.n_bytes,
-            name: s.name,
-            uid: s.owner,
-            gid: s.group,
-            muid: s.last_modified_by,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileType {
-    Regular,
-    Directory,
-}
-
-impl From<FileType> for u8 {
-    fn from(value: FileType) -> Self {
-        match value {
-            FileType::Directory => QTDIR,
-            FileType::Regular => QTFILE,
-        }
-    }
-}
-
-impl From<FileType> for u32 {
-    fn from(value: FileType) -> Self {
-        match value {
-            FileType::Directory => DMDIR,
-            FileType::Regular => 0,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileMeta {
-    path: PathBuf,
-    ty: FileType,
-    qid: u64,
 }
 
 // TODO: need to track which users have each fid?
@@ -272,8 +170,8 @@ where
         qid
     }
 
-    pub fn serve_tcp(self) {
-        let listener = tcp_socket();
+    pub fn serve_tcp(self, port: u16) {
+        let listener = tcp_socket(port);
         let srv = Arc::new(Mutex::new(self));
 
         for stream in listener.incoming() {
@@ -284,8 +182,8 @@ where
         }
     }
 
-    pub fn serve_socket(self) {
-        let listener = unix_socket();
+    pub fn serve_socket(self, socket_name: &str) {
+        let listener = unix_socket(socket_name);
         let srv = Arc::new(Mutex::new(self));
 
         for stream in listener.incoming() {
@@ -553,12 +451,5 @@ where
                 Ok(Rdata::Read { data: Data(buf) })
             }
         }
-    }
-}
-
-fn systime_as_u32(t: SystemTime) -> u32 {
-    match t.duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_secs() as u32,
-        Err(_) => 0,
     }
 }

@@ -1,6 +1,5 @@
 //! 9p Protocol implementation for serving our filesystem interface
 
+pub mod fs;
 pub mod protocol;
 pub mod server;
-
-pub use server::{FileMeta, FileType, IoUnit, Mode, Result, Serve9p, Server, Stat};
