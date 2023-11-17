@@ -1,12 +1,9 @@
 //! A simple demo of the filesystem interface
 use ad::ninep::{
-    fs::{FileType, IoUnit, Mode, Stat},
+    fs::{FileMeta, FileType, IoUnit, Mode, Stat},
     server::{Result, Serve9p, Server, DEFAULT_SOCKET_NAME},
 };
-use std::{
-    path::{Path, PathBuf},
-    time::SystemTime,
-};
+use std::{path::Path, time::SystemTime};
 
 fn main() {
     let s = Server::new(EchoServer);
@@ -16,12 +13,9 @@ fn main() {
 struct EchoServer;
 
 impl Serve9p for EchoServer {
-    fn walk(&mut self, path: &Path) -> Result<Vec<(FileType, PathBuf)>> {
-        if path.as_os_str() == "/" {
-            Ok(vec![
-                (FileType::Regular, "foo".into()),
-                (FileType::Directory, "bar".into()),
-            ])
+    fn walk(&mut self, path: &Path, elems: &[String]) -> Result<Vec<FileMeta>> {
+        if path.as_os_str() == "/" && elems.is_empty() {
+            Ok(vec![])
         } else {
             Err("unknown directory".to_string())
         }
@@ -29,7 +23,7 @@ impl Serve9p for EchoServer {
 
     fn stat(&mut self, path: &Path) -> Result<Stat> {
         match path.as_os_str().to_str().unwrap() {
-            "/" => Ok(Stat {
+            "" => Ok(Stat {
                 qid: 0,
                 name: "/".into(),
                 ty: FileType::Directory,
@@ -48,21 +42,27 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn open(&mut self, path: &Path, mode: Mode) -> Result<IoUnit> {
-        if path.as_os_str() == "/" && mode == 0 {
+    fn open(&mut self, path: &Path, mode: Mode, _uname: &str) -> Result<IoUnit> {
+        if path.as_os_str() == "" && mode == 0 {
             Ok(8168)
         } else {
             Err(format!("{path:?} is not a known path"))
         }
     }
 
-    fn read(&mut self, _path: &Path, _offset: usize, _count: usize) -> Result<Vec<u8>> {
+    fn read(
+        &mut self,
+        _path: &Path,
+        _offset: usize,
+        _count: usize,
+        _uname: &str,
+    ) -> Result<Vec<u8>> {
         Ok(vec![])
     }
 
-    fn read_dir(&mut self, path: &Path) -> Result<Vec<Stat>> {
+    fn read_dir(&mut self, path: &Path, _uname: &str) -> Result<Vec<Stat>> {
         match path.as_os_str().to_str().unwrap() {
-            "/" => Ok(vec![
+            "" => Ok(vec![
                 Stat {
                     qid: 1,
                     name: "bar".into(),

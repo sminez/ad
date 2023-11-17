@@ -6,7 +6,6 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-// const NO_FID: u32 = u32::MAX;
 pub const QID_ROOT: u64 = 0;
 
 // File "mode" values for use in Qids
@@ -109,10 +108,20 @@ impl From<FileType> for u32 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FileMeta {
-    pub(super) path: PathBuf,
-    pub(super) ty: FileType,
-    pub(super) qid: u64,
+pub struct FileMeta {
+    pub path: PathBuf,
+    pub ty: FileType,
+    pub qid: u64,
+}
+
+impl FileMeta {
+    pub(super) fn as_qid(&self) -> Qid {
+        Qid {
+            ty: self.ty.into(),
+            version: 0,
+            path: self.qid,
+        }
+    }
 }
 
 fn systime_as_u32(t: SystemTime) -> u32 {

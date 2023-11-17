@@ -1,6 +1,6 @@
 //! Traits for implementing a 9p fileserver
 use crate::ninep::{
-    fs::{FileMeta, FileType, IoUnit, Mode, Stat, QID_ROOT, QTDIR},
+    fs::{FileMeta, FileType, IoUnit, Mode, Stat, QID_ROOT},
     protocol::{Data, Format9p, Qid, RawStat, Rdata, Rmessage, Tdata, Tmessage, MAX_DATA_LEN},
 };
 use std::{
@@ -11,26 +11,41 @@ use std::{
     mem::size_of,
     net::TcpListener,
     os::unix::net::UnixListener,
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    path::Path,
+    sync::{Arc, Mutex, RwLock},
     thread::spawn,
 };
 
 pub const DEFAULT_TCP_PORT: u16 = 0xADD;
 pub const DEFAULT_SOCKET_NAME: &str = "ad";
+// const AFID_NO_AUTH: u32 = u32::MAX;
 
-fn unix_socket(name: &str) -> UnixListener {
+#[derive(Debug)]
+struct Socket {
+    path: String,
+    listener: UnixListener,
+}
+
+impl Drop for Socket {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn unix_socket(name: &str) -> Socket {
     let uname = env::var("USER").unwrap();
-    let mntp = format!("/tmp/ns.{uname}.:0/{name}");
+    let path = format!("/tmp/ns.{uname}.:0/{name}");
 
     // FIXME: really we should be handling this on exit but we'll need to catch
     // ctrl-c to do that properly. For now this works but it means that if you
     // start a second file server with the same name then it'll remove the socket
     // for the first.
-    let _ = fs::remove_file(&mntp);
-    println!("Binding to {mntp}");
+    let _ = fs::remove_file(&path);
+    println!("Binding to {path}");
 
-    UnixListener::bind(mntp).unwrap()
+    let listener = UnixListener::bind(&path).unwrap();
+
+    Socket { path, listener }
 }
 
 fn tcp_socket(port: u16) -> TcpListener {
@@ -43,7 +58,11 @@ fn tcp_socket(port: u16) -> TcpListener {
 // Error messages
 const E_DUPLICATE_FID: &str = "duplicate fid";
 const E_UNKNOWN_FID: &str = "unknown fid";
+const E_UNKNOWN_ROOT: &str = "unknown root directory";
 const E_WALK_NON_DIR: &str = "walk in non-directory";
+
+const UNKNOWN_VERSION: &str = "unknown";
+const SUPPORTED_VERSION: &str = "9P2000";
 
 pub type Result<T> = std::result::Result<T, String>;
 
@@ -62,82 +81,34 @@ pub trait Serve9p {
         Err("authentication not required".to_string())
     }
 
-    fn stat(&mut self, path: &Path) -> Result<Stat>;
-    fn walk(&mut self, path: &Path) -> Result<Vec<(FileType, PathBuf)>>;
-    fn open(&mut self, path: &Path, mode: Mode) -> Result<IoUnit>;
-    fn read(&mut self, path: &Path, offset: usize, count: usize) -> Result<Vec<u8>>;
-    fn read_dir(&mut self, path: &Path) -> Result<Vec<Stat>>;
+    fn walk(&mut self, path: &Path, elems: &[String]) -> Result<Vec<FileMeta>>;
+
+    fn open(&mut self, path: &Path, mode: Mode, uname: &str) -> Result<IoUnit>;
 
     // fn create(&mut self, fid: &Fid, name: &str, perm: u32, mode: Mode) -> Result<u32>;
+
+    fn read(&mut self, path: &Path, offset: usize, count: usize, uname: &str) -> Result<Vec<u8>>;
+
+    fn read_dir(&mut self, path: &Path, uname: &str) -> Result<Vec<Stat>>;
+
     // fn write(&mut self, fid: &Fid, offset: usize, data: Vec<u8>) -> Result<usize>;
+
     // fn remove(&mut self, fid: &Fid) -> Result<()>;
+
+    fn stat(&mut self, path: &Path) -> Result<Stat>;
+
     // fn write_stat(&mut self, fid: &Fid, stat: Stat) -> Result<()>;
 }
-
-// TODO: need to track which users have each fid?
 
 #[derive(Debug)]
 pub struct Server<S>
 where
     S: Serve9p + Sync + Send + 'static,
 {
-    s: S,
+    s: Arc<Mutex<S>>,
     msize: u32,
-    next_qid: u64,
-    fids: BTreeMap<u32, FileMeta>,
-    qids: BTreeMap<PathBuf, Qid>,
-}
-
-fn handle_connection<S, RW>(srv: Arc<Mutex<Server<S>>>, mut stream: RW)
-where
-    S: Serve9p + Sync + Send + 'static,
-    RW: Read + Write,
-{
-    use Tdata::*;
-
-    loop {
-        let t = match Tmessage::read_from(&mut stream) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("error reading message: {e}\ndropping connection");
-                srv.lock().unwrap().fids.clear();
-                return;
-            }
-        };
-
-        eprintln!("t-message: {t:?}");
-        let Tmessage { tag, content } = t;
-        let mut s = srv.lock().unwrap();
-
-        let resp = match content {
-            Version { msize, version } => s.handle_version(msize, version),
-            Auth { afid, uname, aname } => s.handle_auth(afid, uname, aname),
-            Attach { fid, .. } => s.handle_attach(fid),
-            Walk {
-                fid,
-                new_fid,
-                wnames,
-            } => s.handle_walk(fid, new_fid, wnames),
-            Clunk { fid } => s.handle_clunk(fid),
-            Stat { fid } => s.handle_stat(fid),
-            Open { fid, mode } => s.handle_open(fid, mode),
-            Read { fid, offset, count } => s.handle_read(fid, offset, count),
-
-            _ => {
-                eprintln!("tag={tag} content={content:?}");
-                continue;
-            }
-        };
-
-        let r: Rmessage = (tag, resp).into();
-        eprintln!("r-message: {r:?}\n");
-
-        if let Err(e) = r.write_to(&mut stream) {
-            eprintln!("ERROR sending response: {e}");
-        }
-
-        drop(s);
-    }
+    roots: BTreeMap<String, u64>,
+    qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
 }
 
 impl<S> Server<S>
@@ -145,52 +116,126 @@ where
     S: Serve9p + Sync + Send + 'static,
 {
     pub fn new(s: S) -> Self {
-        let mut qids = BTreeMap::default();
-        qids.insert(
-            "/".into(),
-            Qid {
-                ty: QTDIR,
-                version: 0,
-                path: QID_ROOT,
-            },
-        );
-
-        Self {
-            s,
-            msize: MAX_DATA_LEN as u32,
-            next_qid: 1,
-            fids: BTreeMap::default(),
-            qids,
-        }
+        Self::new_with_roots(s, [("".to_string(), QID_ROOT)].into_iter().collect())
     }
 
-    fn next_qid(&mut self) -> u64 {
-        let qid = self.next_qid;
-        self.next_qid += 1;
-        qid
+    pub fn new_with_roots(s: S, roots: BTreeMap<String, u64>) -> Self {
+        let qids = roots
+            .iter()
+            .map(|(p, &qid)| {
+                (
+                    qid,
+                    FileMeta {
+                        path: p.into(),
+                        ty: FileType::Directory,
+                        qid,
+                    },
+                )
+            })
+            .collect();
+
+        Self {
+            s: Arc::new(Mutex::new(s)),
+            msize: MAX_DATA_LEN as u32,
+            roots,
+            qids: Arc::new(RwLock::new(qids)),
+        }
     }
 
     pub fn serve_tcp(self, port: u16) {
         let listener = tcp_socket(port);
-        let srv = Arc::new(Mutex::new(self));
 
         for stream in listener.incoming() {
             let stream = stream.unwrap();
             println!("new connection");
-            let thread_srv = Arc::clone(&srv);
-            spawn(move || handle_connection(thread_srv, stream));
+            let session = Session::new_unattached(
+                self.msize,
+                self.roots.clone(),
+                self.s.clone(),
+                self.qids.clone(),
+                stream,
+            );
+
+            spawn(move || session.handle_connection());
         }
     }
 
     pub fn serve_socket(self, socket_name: &str) {
-        let listener = unix_socket(socket_name);
-        let srv = Arc::new(Mutex::new(self));
+        let sock = unix_socket(socket_name);
 
-        for stream in listener.incoming() {
+        for stream in sock.listener.incoming() {
             let stream = stream.unwrap();
             println!("new connection");
-            let thread_srv = Arc::clone(&srv);
-            spawn(move || handle_connection(thread_srv, stream));
+            let session = Session::new_unattached(
+                self.msize,
+                self.roots.clone(),
+                self.s.clone(),
+                self.qids.clone(),
+                stream,
+            );
+
+            spawn(move || session.handle_connection());
+        }
+    }
+}
+
+/// Marker trait for implementing a type state for Session
+trait SessionType {}
+
+#[derive(Debug)]
+struct Unattached;
+
+impl SessionType for Unattached {}
+
+#[derive(Debug)]
+struct Attached {
+    uname: String,
+    aname: String,
+    fids: BTreeMap<u32, u64>,
+}
+impl SessionType for Attached {}
+
+impl Attached {
+    fn new(uname: String, aname: String, root_fid: u32, root_qid: u64) -> Self {
+        Self {
+            uname,
+            aname,
+            fids: [(root_fid, root_qid)].into_iter().collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Session<T, S, RW>
+where
+    T: SessionType,
+    S: Serve9p + Sync + Send + 'static,
+    RW: Read + Write,
+{
+    state: T,
+    msize: u32,
+    roots: BTreeMap<String, u64>,
+    s: Arc<Mutex<S>>,
+    qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+    stream: RW,
+}
+
+impl<T, S, RW> Session<T, S, RW>
+where
+    T: SessionType,
+    S: Serve9p + Sync + Send + 'static,
+    RW: Read + Write,
+{
+    fn qid(&self, qid: u64) -> Option<Qid> {
+        self.qids.read().unwrap().get(&qid).map(|fm| fm.as_qid())
+    }
+
+    fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
+        let r: Rmessage = (tag, resp).into();
+        eprintln!("r-message: {r:?}\n");
+
+        if let Err(e) = r.write_to(&mut self.stream) {
+            eprintln!("ERROR sending response: {e}");
         }
     }
 
@@ -222,10 +267,10 @@ where
     /// connection is aborted; all active fids are freed (‘clunked’) automatically. The set of
     /// messages between version requests is called a session.
     fn handle_version(&mut self, msize: u32, version: String) -> Result<Rdata> {
-        let server_version = if version != "9P2000" {
-            "unknown"
+        let server_version = if version != SUPPORTED_VERSION {
+            UNKNOWN_VERSION
         } else {
-            "9P2000"
+            SUPPORTED_VERSION
         };
 
         Ok(Rdata::Version {
@@ -247,8 +292,90 @@ where
     /// user, granting entry. The same validated afid may be used for multiple attach messages with
     /// the same uname and aname.
     fn handle_auth(&mut self, afid: u32, uname: String, aname: String) -> Result<Rdata> {
-        let aqid = self.s.auth(afid, &uname, &aname)?;
+        let aqid = self.s.lock().unwrap().auth(afid, &uname, &aname)?;
+
         Ok(Rdata::Auth { aqid })
+    }
+}
+
+impl<S, RW> Session<Unattached, S, RW>
+where
+    S: Serve9p + Sync + Send + 'static,
+    RW: Read + Write,
+{
+    fn new_unattached(
+        msize: u32,
+        roots: BTreeMap<String, u64>,
+        s: Arc<Mutex<S>>,
+        qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+        stream: RW,
+    ) -> Self {
+        Self {
+            state: Unattached,
+            msize,
+            roots,
+            s,
+            qids,
+            stream,
+        }
+    }
+
+    fn into_attached(self, ty: Attached) -> Session<Attached, S, RW> {
+        let Self {
+            msize,
+            roots,
+            s,
+            qids,
+            stream,
+            ..
+        } = self;
+
+        Session::new_attached(ty, msize, roots, s, qids, stream)
+    }
+
+    fn handle_connection(mut self) {
+        use Tdata::*;
+
+        loop {
+            let t = match Tmessage::read_from(&mut self.stream) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("error reading message: {e}\ndropping connection");
+                    return;
+                }
+            };
+
+            eprintln!("t-message: {t:?}");
+            let Tmessage { tag, content } = t;
+
+            let resp = match content {
+                Version { msize, version } => self.handle_version(msize, version),
+                Auth { afid, uname, aname } => self.handle_auth(afid, uname, aname),
+
+                Attach {
+                    fid,
+                    afid,
+                    uname,
+                    aname,
+                } => {
+                    let (st, aqid) = match self.handle_attach(fid, afid, uname, aname) {
+                        Err(e) => {
+                            self.reply(tag, Err(e));
+                            continue;
+                        }
+
+                        Ok((st, aqid)) => (st, aqid),
+                    };
+
+                    self.reply(tag, Ok(Rdata::Attach { aqid }));
+                    return self.into_attached(st).handle_connection();
+                }
+
+                _ => Err("session is unattached".into()),
+            };
+
+            self.reply(tag, resp);
+        }
     }
 
     /// The attach message serves as a fresh introduction from a user on the client machine to the
@@ -262,23 +389,96 @@ where
     /// If the client does not wish to authenticate the connection, or knows that authentication is
     /// not required, the afid field in the attach message should be set to NOFID, defined as
     /// (u32int)~0 in <fcall.h>.
-    fn handle_attach(&mut self, fid: u32) -> Result<Rdata> {
-        if self.fids.contains_key(&fid) {
-            return Err(E_DUPLICATE_FID.to_string());
+    fn handle_attach(
+        &mut self,
+        root_fid: u32,
+        _afid: u32,
+        uname: String,
+        aname: String,
+    ) -> Result<(Attached, Qid)> {
+        let root_qid = match self.roots.get(&aname) {
+            Some(qid) => *qid,
+            None => return Err(E_UNKNOWN_ROOT.to_string()),
+        };
+
+        // TODO: handle checking afids (AFID_NO_AUTH should be accepted if there is no auth)
+
+        let st = Attached::new(uname, aname, root_fid, root_qid);
+        let aqid = self.qid(root_qid).expect("to have root qid");
+
+        Ok((st, aqid))
+    }
+}
+
+macro_rules! file_meta {
+    ($self:expr, $fid:expr) => {
+        match $self.state.fids.get(&$fid) {
+            Some(&qid) => $self.qids.read().unwrap().get(&qid).cloned(),
+            None => None,
         }
+    };
+}
 
-        self.fids.insert(
-            fid,
-            FileMeta {
-                path: "/".into(),
-                ty: FileType::Directory,
-                qid: 0,
-            },
-        );
+impl<S, RW> Session<Attached, S, RW>
+where
+    S: Serve9p + Sync + Send + 'static,
+    RW: Read + Write,
+{
+    fn new_attached(
+        state: Attached,
+        msize: u32,
+        roots: BTreeMap<String, u64>,
+        s: Arc<Mutex<S>>,
+        qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+        stream: RW,
+    ) -> Self {
+        Self {
+            state,
+            msize,
+            roots,
+            s,
+            qids,
+            stream,
+        }
+    }
 
-        Ok(Rdata::Attach {
-            aqid: *self.qids.get(&PathBuf::from("/")).unwrap(),
-        })
+    fn handle_connection(mut self) {
+        use Tdata::*;
+
+        loop {
+            let t = match Tmessage::read_from(&mut self.stream) {
+                Ok(t) => t,
+                Err(e) => {
+                    eprintln!("error reading message: {e}\ndropping connection");
+                    return;
+                }
+            };
+
+            eprintln!("t-message: {t:?}");
+            let Tmessage { tag, content } = t;
+
+            let resp = match content {
+                Version { msize, version } => self.handle_version(msize, version),
+                Auth { .. } | Attach { .. } => Err("session is already attached".into()),
+
+                Walk {
+                    fid,
+                    new_fid,
+                    wnames,
+                } => self.handle_walk(fid, new_fid, wnames),
+                Clunk { fid } => self.handle_clunk(fid),
+                Stat { fid } => self.handle_stat(fid),
+                Open { fid, mode } => self.handle_open(fid, mode),
+                Read { fid, offset, count } => self.handle_read(fid, offset, count),
+
+                _ => {
+                    eprintln!("tag={tag} content={content:?}");
+                    continue;
+                }
+            };
+
+            self.reply(tag, resp);
+        }
     }
 
     /// The walk request carries as arguments an existing fid and a proposed newfid (which must not
@@ -326,82 +526,73 @@ where
     /// this restriction, the system imposes no limit on the number of elements in a file name,
     /// only the number that may be transmitted in a single message.
     fn handle_walk(&mut self, fid: u32, new_fid: u32, wnames: Vec<String>) -> Result<Rdata> {
-        if new_fid != fid && self.fids.contains_key(&new_fid) {
+        if new_fid != fid && self.state.fids.contains_key(&new_fid) {
             return Err(E_DUPLICATE_FID.to_string());
         }
 
-        let fm = match self.fids.get(&fid) {
+        let fm = match file_meta!(self, fid) {
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
 
         if wnames.is_empty() {
-            self.fids.insert(new_fid, fm.clone());
+            self.state.fids.insert(new_fid, fm.qid);
             return Ok(Rdata::Walk { wqids: vec![] });
         } else if matches!(fm.ty, FileType::Regular) {
             return Err(E_WALK_NON_DIR.to_string());
         }
 
-        let suffix = PathBuf::from_iter(wnames);
-        let paths = self.s.walk(&fm.path.join(suffix))?;
-        let mut wqids = Vec::with_capacity(paths.len());
-        let mut last = None;
+        let file_metas = self.s.lock().unwrap().walk(&fm.path, &wnames)?;
+        // if lens match, associate the final one
+        // also store new qids
+        let mut wqids = Vec::with_capacity(file_metas.len());
 
-        for (ty, p) in paths.into_iter() {
-            if let Some(qid) = self.qids.get(&p) {
-                wqids.push(*qid);
-                continue;
-            }
-
-            let path = self.next_qid();
-            let qid = Qid {
-                ty: ty.into(),
-                version: 0,
-                path,
-            };
-            last = Some(FileMeta {
-                path: p.clone(),
-                ty,
-                qid: path,
-            });
-            self.qids.insert(p, qid);
-            wqids.push(qid);
+        for fm in file_metas.into_iter() {
+            wqids.push(fm.as_qid());
+            self.qids.write().unwrap().insert(fm.qid, fm);
         }
 
-        if let Some(fm) = last {
-            self.fids.insert(new_fid, fm);
+        if wqids.len() == wnames.len() {
+            self.state.fids.insert(new_fid, wqids.last().unwrap().path);
         }
 
         Ok(Rdata::Walk { wqids })
     }
 
+    /// If a client clunks a fid we simply remove it from the list of fids
+    /// we have for them
     fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
-        self.fids.remove(&fid);
+        self.state.fids.remove(&fid);
         Ok(Rdata::Clunk {})
     }
 
     fn handle_stat(&mut self, fid: u32) -> Result<Rdata> {
-        let FileMeta { path, .. } = match self.fids.get(&fid) {
+        let fm = match file_meta!(self, fid) {
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
-        let s = self.s.stat(path)?;
-        let q = self.qids.get(path).unwrap();
-        let stat: RawStat = (*q, s).into();
+        let s = self.s.lock().unwrap().stat(&fm.path)?;
+        let stat: RawStat = (fm.as_qid(), s).into();
         let size = stat.size + size_of::<u16>() as u16;
 
         Ok(Rdata::Stat { size, stat })
     }
 
     fn handle_open(&mut self, fid: u32, mode: u8) -> Result<Rdata> {
-        let FileMeta { path, .. } = match self.fids.get(&fid) {
+        let fm = match file_meta!(self, fid) {
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
-        let iounit = self.s.open(path, mode)?;
-        let qid = *self.qids.get(path).unwrap();
+        let iounit = self
+            .s
+            .lock()
+            .unwrap()
+            .open(&fm.path, mode, &self.state.uname)?;
 
-        Ok(Rdata::Open { qid, iounit })
+        Ok(Rdata::Open {
+            qid: fm.as_qid(),
+            iounit,
+        })
     }
 
     // The read request asks for count bytes of data from the file identified by fid, which must be
@@ -416,7 +607,7 @@ where
     // number of bytes returned in the previous read. In other words, seeking other than to the
     // beginning is illegal in a directory.
     fn handle_read(&mut self, fid: u32, offset: u64, count: u32) -> Result<Rdata> {
-        let FileMeta { path, ty, .. } = match self.fids.get(&fid) {
+        let fm = match file_meta!(self, fid) {
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
@@ -425,16 +616,27 @@ where
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
-        match ty {
+        match fm.ty {
             FileType::Directory => {
                 let mut buf = Vec::with_capacity(count as usize);
-                for stat in self.s.read_dir(path)? {
-                    let q = self.qids.entry(PathBuf::from(&stat.name)).or_insert(Qid {
-                        ty: stat.ty.into(),
-                        version: 0,
-                        path: stat.qid,
-                    });
-                    let rstat: RawStat = (*q, stat).into();
+                let stats = self
+                    .s
+                    .lock()
+                    .unwrap()
+                    .read_dir(&fm.path, &self.state.uname)?;
+                for stat in stats.into_iter() {
+                    let fm = self
+                        .qids
+                        .write()
+                        .unwrap()
+                        .entry(stat.qid)
+                        .or_insert(FileMeta {
+                            path: stat.name.clone().into(),
+                            ty: stat.ty,
+                            qid: stat.qid,
+                        })
+                        .clone();
+                    let rstat: RawStat = (fm.as_qid(), stat).into();
                     rstat.write_to(&mut buf).unwrap();
                 }
 
@@ -446,7 +648,12 @@ where
             }
 
             FileType::Regular => {
-                let buf = self.s.read(path, offset as usize, count as usize)?;
+                let buf = self.s.lock().unwrap().read(
+                    &fm.path,
+                    offset as usize,
+                    count as usize,
+                    &self.state.uname,
+                )?;
 
                 Ok(Rdata::Read { data: Data(buf) })
             }
