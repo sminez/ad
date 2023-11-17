@@ -17,40 +17,31 @@ const FOO: u64 = 2;
 const BAZ: u64 = 3;
 
 impl Serve9p for EchoServer {
-    fn walk(&mut self, qid: u64, elems: &[String]) -> Result<Vec<FileMeta>> {
-        match qid {
-            ROOT | BAR if elems.is_empty() => Ok(vec![]),
-
-            ROOT if elems == ["bar".to_string()] => Ok(vec![FileMeta {
+    fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta> {
+        match (parent_qid, child) {
+            (ROOT, "bar") => Ok(FileMeta {
                 path: "bar".into(),
                 ty: FileType::Directory,
                 qid: BAR,
-            }]),
+            }),
 
-            ROOT if elems == ["foo".to_string()] => Ok(vec![FileMeta {
+            (ROOT, "foo") => Ok(FileMeta {
                 path: "foo".into(),
                 ty: FileType::Regular,
                 qid: FOO,
-            }]),
+            }),
 
-            ROOT if elems == ["bar".to_string(), "baz".to_string()] => Ok(vec![
-                FileMeta {
-                    path: "bar".into(),
-                    ty: FileType::Directory,
-                    qid: BAR,
-                },
-                FileMeta {
-                    path: "baz".into(),
-                    ty: FileType::Regular,
-                    qid: BAZ,
-                },
-            ]),
+            (BAR, "baz") => Ok(FileMeta {
+                path: "baz".into(),
+                ty: FileType::Regular,
+                qid: BAZ,
+            }),
 
-            qid => Err(format!("unknown directory {qid}")),
+            (qid, child) => Err(format!("unknown child: qid={qid}, child={child}")),
         }
     }
 
-    fn stat(&mut self, qid: u64) -> Result<Stat> {
+    fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat> {
         match qid {
             ROOT => Ok(Stat {
                 qid: ROOT,
@@ -73,9 +64,9 @@ impl Serve9p for EchoServer {
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
-                owner: "ad".into(),
-                group: "ad".into(),
-                last_modified_by: "ad".into(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
             }),
 
             FOO => Ok(Stat {
@@ -86,9 +77,9 @@ impl Serve9p for EchoServer {
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
-                owner: "ad".into(),
-                group: "ad".into(),
-                last_modified_by: "ad".into(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
             }),
 
             BAZ => Ok(Stat {
@@ -99,9 +90,9 @@ impl Serve9p for EchoServer {
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
-                owner: "ad".into(),
-                group: "ad".into(),
-                last_modified_by: "ad".into(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
             }),
 
             qid => Err(format!("stat for qid={qid}")),
@@ -124,7 +115,7 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn read_dir(&mut self, qid: u64, _uname: &str) -> Result<Vec<Stat>> {
+    fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>> {
         match qid {
             ROOT => Ok(vec![
                 Stat {
@@ -135,9 +126,9 @@ impl Serve9p for EchoServer {
                     n_bytes: 0,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
-                    owner: "ad".into(),
-                    group: "ad".into(),
-                    last_modified_by: "ad".into(),
+                    owner: uname.into(),
+                    group: uname.into(),
+                    last_modified_by: uname.into(),
                 },
                 Stat {
                     qid: FOO,
@@ -147,9 +138,9 @@ impl Serve9p for EchoServer {
                     n_bytes: 42,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
-                    owner: "ad".into(),
-                    group: "ad".into(),
-                    last_modified_by: "ad".into(),
+                    owner: uname.into(),
+                    group: uname.into(),
+                    last_modified_by: uname.into(),
                 },
             ]),
 
@@ -161,9 +152,9 @@ impl Serve9p for EchoServer {
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
-                owner: "ad".into(),
-                group: "ad".into(),
-                last_modified_by: "ad".into(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
             }]),
 
             s => Err(format!("unknown dir: '{s}'")),

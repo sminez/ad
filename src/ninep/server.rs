@@ -80,7 +80,7 @@ pub trait Serve9p {
         Err("authentication not required".to_string())
     }
 
-    fn walk(&mut self, qid: u64, elems: &[String]) -> Result<Vec<FileMeta>>;
+    fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta>;
 
     fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
@@ -94,7 +94,7 @@ pub trait Serve9p {
 
     // fn remove(&mut self, qid: u64) -> Result<()>;
 
-    fn stat(&mut self, qid: u64) -> Result<Stat>;
+    fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat>;
 
     // fn write_stat(&mut self, fid: &Fid, stat: Stat) -> Result<()>;
 }
@@ -545,13 +545,20 @@ where
             return Err(E_WALK_NON_DIR.to_string());
         }
 
-        let file_metas = self.s.lock().unwrap().walk(fm.qid, &wnames)?;
-        let mut wqids = Vec::with_capacity(file_metas.len());
+        let mut wqids = Vec::with_capacity(wnames.len());
+        let mut s = self.s.lock().unwrap();
+        let mut qids = self.qids.write().unwrap();
+        let mut qid = fm.qid;
 
-        for fm in file_metas.into_iter() {
+        for name in wnames.iter() {
+            let fm = s.walk(qid, name)?;
+            qid = fm.qid;
             wqids.push(fm.as_qid());
-            self.qids.write().unwrap().insert(fm.qid, fm);
+            qids.insert(qid, fm);
         }
+
+        drop(s);
+        drop(qids);
 
         if wqids.len() == wnames.len() {
             let qid = wqids.last().expect("empty was handled above").path;
@@ -573,7 +580,7 @@ where
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
-        let s = self.s.lock().unwrap().stat(fm.qid)?;
+        let s = self.s.lock().unwrap().stat(fm.qid, &self.state.uname)?;
         let stat: RawStat = (fm.as_qid(), s).into();
         let size = stat.size + size_of::<u16>() as u16;
 
