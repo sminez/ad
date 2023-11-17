@@ -3,7 +3,7 @@
 //!   http://man.cat-v.org/plan_9/5/
 use std::{
     fmt,
-    io::{self, ErrorKind, Read, Write},
+    io::{self, Cursor, ErrorKind, Read, Write},
     mem::size_of,
 };
 
@@ -107,7 +107,7 @@ impl Format9p for String {
 // From [INTRO(5)](http://man.cat-v.org/plan_9/5/intro):
 //   Data items of larger or variable lengths are represented by a two-byte field specifying
 //   a count, n, followed by n bytes of data.
-impl<T: Format9p> Format9p for Vec<T> {
+impl<T: Format9p + std::fmt::Debug> Format9p for Vec<T> {
     fn n_bytes(&self) -> usize {
         size_of::<u16>() + self.iter().map(|t| t.n_bytes()).sum::<usize>()
     }
@@ -121,7 +121,7 @@ impl<T: Format9p> Format9p for Vec<T> {
             ));
         }
 
-        (n_bytes as u16).write_to(w)?;
+        (self.len() as u16).write_to(w)?;
         for t in self {
             t.write_to(w)?;
         }
@@ -130,15 +130,12 @@ impl<T: Format9p> Format9p for Vec<T> {
     }
 
     fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let n_bytes = u16::read_from(r)? as usize;
-        let len = n_bytes / size_of::<T>();
-        let mut buf = Vec::with_capacity(len);
+        let n = u16::read_from(r)? as usize;
+        let mut buf = Vec::with_capacity(n);
 
-        for _ in 0..len {
+        for _ in 0..n {
             buf.push(T::read_from(r)?);
         }
-
-        // Unexpected EOF should be handled by T::read_from
 
         Ok(buf)
     }
@@ -169,6 +166,25 @@ impl fmt::Debug for Data {
 impl From<Vec<u8>> for Data {
     fn from(value: Vec<u8>) -> Self {
         Self(value)
+    }
+}
+
+impl TryFrom<Data> for Vec<RawStat> {
+    type Error = io::Error;
+
+    fn try_from(value: Data) -> Result<Self, io::Error> {
+        let mut r = Cursor::new(value.0);
+        let mut buf = Vec::new();
+
+        loop {
+            match RawStat::read_from(&mut r) {
+                Ok(rs) => buf.push(rs),
+                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(buf)
     }
 }
 
@@ -767,9 +783,10 @@ mod tests {
         U32(u32),
         U64(u64),
         S(&'static str),
-        V(Vec<u32>),
+        V(Vec<String>),
         D(Vec<u8>),
         Clunk,
+        Walk,
     }
 
     // simple_test_case doesn't handle generic args for parameterised
@@ -794,9 +811,10 @@ mod tests {
     #[test_case(F9::U64(123456); "u64_")]
     #[test_case(F9::S("testing"); "single-byte char string")]
     #[test_case(F9::S("Hello, 世界"); "multi-byte char string")]
-    #[test_case(F9::V(vec![0, 1, 2, 3, u32::MAX]); "vec u32")]
+    #[test_case(F9::V(vec!["foo".to_string(), "bar".to_string()]); "vec String")]
     #[test_case(F9::D(vec![5, 6, 7, 8, u8::MAX]); "data")]
     #[test_case(F9::Clunk; "clunk")]
+    #[test_case(F9::Walk; "walk")]
     #[test]
     fn round_trip_is_fine(data: F9) {
         match data {
@@ -810,6 +828,14 @@ mod tests {
             F9::Clunk => round_trip_inner(Rmessage {
                 tag: 0,
                 content: Rdata::Clunk {},
+            }),
+            F9::Walk => round_trip_inner(Tmessage {
+                tag: 0,
+                content: Tdata::Walk {
+                    fid: 0,
+                    new_fid: 2,
+                    wnames: vec!["bar".to_string()],
+                },
             }),
         }
     }

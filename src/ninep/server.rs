@@ -11,7 +11,6 @@ use std::{
     mem::size_of,
     net::TcpListener,
     os::unix::net::UnixListener,
-    path::Path,
     sync::{Arc, Mutex, RwLock},
     thread::spawn,
 };
@@ -81,21 +80,21 @@ pub trait Serve9p {
         Err("authentication not required".to_string())
     }
 
-    fn walk(&mut self, path: &Path, elems: &[String]) -> Result<Vec<FileMeta>>;
+    fn walk(&mut self, qid: u64, elems: &[String]) -> Result<Vec<FileMeta>>;
 
-    fn open(&mut self, path: &Path, mode: Mode, uname: &str) -> Result<IoUnit>;
+    fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
-    // fn create(&mut self, fid: &Fid, name: &str, perm: u32, mode: Mode) -> Result<u32>;
+    // fn create(&mut self, qid: u64, name: &str, perm: u32, mode: Mode) -> Result<u32>;
 
-    fn read(&mut self, path: &Path, offset: usize, count: usize, uname: &str) -> Result<Vec<u8>>;
+    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<Vec<u8>>;
 
-    fn read_dir(&mut self, path: &Path, uname: &str) -> Result<Vec<Stat>>;
+    fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>>;
 
-    // fn write(&mut self, fid: &Fid, offset: usize, data: Vec<u8>) -> Result<usize>;
+    // fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize>;
 
-    // fn remove(&mut self, fid: &Fid) -> Result<()>;
+    // fn remove(&mut self, qid: u64) -> Result<()>;
 
-    fn stat(&mut self, path: &Path) -> Result<Stat>;
+    fn stat(&mut self, qid: u64) -> Result<Stat>;
 
     // fn write_stat(&mut self, fid: &Fid, stat: Stat) -> Result<()>;
 }
@@ -190,16 +189,14 @@ impl SessionType for Unattached {}
 #[derive(Debug)]
 struct Attached {
     uname: String,
-    aname: String,
     fids: BTreeMap<u32, u64>,
 }
 impl SessionType for Attached {}
 
 impl Attached {
-    fn new(uname: String, aname: String, root_fid: u32, root_qid: u64) -> Self {
+    fn new(uname: String, root_fid: u32, root_qid: u64) -> Self {
         Self {
             uname,
-            aname,
             fids: [(root_fid, root_qid)].into_iter().collect(),
         }
     }
@@ -403,7 +400,7 @@ where
 
         // TODO: handle checking afids (AFID_NO_AUTH should be accepted if there is no auth)
 
-        let st = Attached::new(uname, aname, root_fid, root_qid);
+        let st = Attached::new(uname, root_fid, root_qid);
         let aqid = self.qid(root_qid).expect("to have root qid");
 
         Ok((st, aqid))
@@ -458,7 +455,13 @@ where
             let Tmessage { tag, content } = t;
 
             let resp = match content {
-                Version { msize, version } => self.handle_version(msize, version),
+                Version { msize, version } => match self.handle_version(msize, version) {
+                    Ok(res) => {
+                        self.state.fids.clear();
+                        Ok(res)
+                    }
+                    Err(e) => Err(e),
+                },
                 Auth { .. } | Attach { .. } => Err("session is already attached".into()),
 
                 Walk {
@@ -542,9 +545,7 @@ where
             return Err(E_WALK_NON_DIR.to_string());
         }
 
-        let file_metas = self.s.lock().unwrap().walk(&fm.path, &wnames)?;
-        // if lens match, associate the final one
-        // also store new qids
+        let file_metas = self.s.lock().unwrap().walk(fm.qid, &wnames)?;
         let mut wqids = Vec::with_capacity(file_metas.len());
 
         for fm in file_metas.into_iter() {
@@ -553,7 +554,8 @@ where
         }
 
         if wqids.len() == wnames.len() {
-            self.state.fids.insert(new_fid, wqids.last().unwrap().path);
+            let qid = wqids.last().expect("empty was handled above").path;
+            self.state.fids.insert(new_fid, qid);
         }
 
         Ok(Rdata::Walk { wqids })
@@ -571,7 +573,7 @@ where
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
-        let s = self.s.lock().unwrap().stat(&fm.path)?;
+        let s = self.s.lock().unwrap().stat(fm.qid)?;
         let stat: RawStat = (fm.as_qid(), s).into();
         let size = stat.size + size_of::<u16>() as u16;
 
@@ -587,7 +589,7 @@ where
             .s
             .lock()
             .unwrap()
-            .open(&fm.path, mode, &self.state.uname)?;
+            .open(fm.qid, mode, &self.state.uname)?;
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -619,11 +621,7 @@ where
         match fm.ty {
             FileType::Directory => {
                 let mut buf = Vec::with_capacity(count as usize);
-                let stats = self
-                    .s
-                    .lock()
-                    .unwrap()
-                    .read_dir(&fm.path, &self.state.uname)?;
+                let stats = self.s.lock().unwrap().read_dir(fm.qid, &self.state.uname)?;
                 for stat in stats.into_iter() {
                     let fm = self
                         .qids
@@ -649,7 +647,7 @@ where
 
             FileType::Regular => {
                 let buf = self.s.lock().unwrap().read(
-                    &fm.path,
+                    fm.qid,
                     offset as usize,
                     count as usize,
                     &self.state.uname,

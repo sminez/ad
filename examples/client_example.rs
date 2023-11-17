@@ -1,5 +1,5 @@
 //! https://groups.google.com/g/plan9port-dev/c/Zef5lM0HgnM
-use ad::ninep::protocol::{Format9p, Rmessage, Tdata, Tmessage};
+use ad::ninep::protocol::{Format9p, RawStat, Rdata, Rmessage, Tdata, Tmessage};
 use std::{env, os::unix::net::UnixStream};
 
 fn main() {
@@ -51,6 +51,35 @@ fn main() {
     );
 
     send(0, Tdata::Open { fid: 1, mode: 0 }, &mut socket);
+    send(
+        0,
+        Tdata::Read {
+            fid: 1,
+            offset: 0,
+            count: 8168,
+        },
+        &mut socket,
+    );
+
+    send(
+        0,
+        Tdata::Walk {
+            fid: 0,
+            new_fid: 2,
+            wnames: vec!["1".to_string()],
+        },
+        &mut socket,
+    );
+
+    send(
+        0,
+        Tdata::Read {
+            fid: 2,
+            offset: 0,
+            count: 8168,
+        },
+        &mut socket,
+    );
 }
 
 fn send(tag: u16, content: Tdata, socket: &mut UnixStream) {
@@ -60,4 +89,12 @@ fn send(tag: u16, content: Tdata, socket: &mut UnixStream) {
 
     let r = Rmessage::read_from(socket).unwrap();
     println!("r-message: {r:?}\n");
+
+    if let Rdata::Read { data } = r.content {
+        let raw_stats: Vec<RawStat> = data.try_into().unwrap();
+        for rs in raw_stats {
+            println!("  raw stat: {} -> {}", rs.qid.path, rs.name);
+        }
+    }
+    println!("\n");
 }
