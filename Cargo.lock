@@ -6,6 +6,7 @@ version = 3
 name = "ad"
 version = "0.1.0"
 dependencies = [
+ "bitflags",
  "criterion",
  "fuser",
  "libc",

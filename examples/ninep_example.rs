@@ -57,7 +57,7 @@ impl Serve9p for EchoServer {
         match qid {
             ROOT => Ok(Stat {
                 fm: FileMeta::dir("/", ROOT),
-                perms: 0o500,
+                perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -68,7 +68,7 @@ impl Serve9p for EchoServer {
 
             BAR => Ok(Stat {
                 fm: FileMeta::dir("bar", BAR),
-                perms: 0o500,
+                perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -79,7 +79,7 @@ impl Serve9p for EchoServer {
 
             FOO => Ok(Stat {
                 fm: FileMeta::file("foo", FOO),
-                perms: 0o600,
+                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -90,7 +90,7 @@ impl Serve9p for EchoServer {
 
             BAZ => Ok(Stat {
                 fm: FileMeta::file("baz", BAZ),
-                perms: 0o600,
+                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -105,8 +105,8 @@ impl Serve9p for EchoServer {
 
     fn open(&mut self, qid: u64, mode: Mode, _uname: &str) -> Result<IoUnit> {
         match (qid, mode) {
-            (ROOT | FOO | BAR | BAZ, 0) => Ok(8168),
-            (qid, mode) => Err(format!("{qid} is not a known qid (mode={mode})")),
+            (ROOT | FOO | BAR | BAZ, Mode::FILE) => Ok(8168),
+            (qid, mode) => Err(format!("{qid} is not a known qid (mode={mode:?})")),
         }
     }
 
@@ -124,7 +124,7 @@ impl Serve9p for EchoServer {
             ROOT => Ok(vec![
                 Stat {
                     fm: FileMeta::dir("bar", BAR),
-                    perms: 0o500,
+                    perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
                     n_bytes: 0,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -134,7 +134,7 @@ impl Serve9p for EchoServer {
                 },
                 Stat {
                     fm: FileMeta::file("foo", FOO),
-                    perms: 0o600,
+                    perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
                     n_bytes: 42,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -146,7 +146,7 @@ impl Serve9p for EchoServer {
 
             BAR => Ok(vec![Stat {
                 fm: FileMeta::file("baz", BAZ),
-                perms: 0o500,
+                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
