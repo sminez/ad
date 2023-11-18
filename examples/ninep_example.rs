@@ -1,6 +1,6 @@
 //! A simple demo of the filesystem interface
 use ad::ninep::{
-    fs::{FileMeta, FileType, IoUnit, Mode, Stat},
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     server::{Result, Serve9p, Server, DEFAULT_SOCKET_NAME},
 };
 use std::time::SystemTime;
@@ -17,26 +17,38 @@ const FOO: u64 = 2;
 const BAZ: u64 = 3;
 
 impl Serve9p for EchoServer {
+    #[allow(unused_variables)]
+    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize> {
+        Err("write not supported".to_string())
+    }
+
+    #[allow(unused_variables)]
+    fn create(
+        &mut self,
+        parent: u64,
+        name: &str,
+        perm: Perm,
+        mode: Mode,
+        uname: &str,
+    ) -> Result<(FileMeta, IoUnit)> {
+        Err("create not supported".to_string())
+    }
+
+    #[allow(unused_variables)]
+    fn remove(&mut self, qid: u64, uname: &str) -> Result<()> {
+        Err("remove not supported".to_string())
+    }
+
+    #[allow(unused_variables)]
+    fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+        Err("write_stat not supported".to_string())
+    }
+
     fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta> {
         match (parent_qid, child) {
-            (ROOT, "bar") => Ok(FileMeta {
-                path: "bar".into(),
-                ty: FileType::Directory,
-                qid: BAR,
-            }),
-
-            (ROOT, "foo") => Ok(FileMeta {
-                path: "foo".into(),
-                ty: FileType::Regular,
-                qid: FOO,
-            }),
-
-            (BAR, "baz") => Ok(FileMeta {
-                path: "baz".into(),
-                ty: FileType::Regular,
-                qid: BAZ,
-            }),
-
+            (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),
+            (ROOT, "foo") => Ok(FileMeta::file("foo", FOO)),
+            (BAR, "baz") => Ok(FileMeta::file("baz", BAZ)),
             (qid, child) => Err(format!("unknown child: qid={qid}, child={child}")),
         }
     }
@@ -44,22 +56,18 @@ impl Serve9p for EchoServer {
     fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat> {
         match qid {
             ROOT => Ok(Stat {
-                qid: ROOT,
-                name: "/".into(),
-                ty: FileType::Directory,
+                fm: FileMeta::dir("/", ROOT),
                 perms: 0o500,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
-                owner: "ad".into(),
-                group: "ad".into(),
-                last_modified_by: "ad".into(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
             }),
 
             BAR => Ok(Stat {
-                qid: BAR,
-                name: "bar".into(),
-                ty: FileType::Directory,
+                fm: FileMeta::dir("bar", BAR),
                 perms: 0o500,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
@@ -70,9 +78,7 @@ impl Serve9p for EchoServer {
             }),
 
             FOO => Ok(Stat {
-                qid: FOO,
-                name: "foo".into(),
-                ty: FileType::Regular,
+                fm: FileMeta::file("foo", FOO),
                 perms: 0o600,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
@@ -83,9 +89,7 @@ impl Serve9p for EchoServer {
             }),
 
             BAZ => Ok(Stat {
-                qid: BAZ,
-                name: "baz".into(),
-                ty: FileType::Regular,
+                fm: FileMeta::file("baz", BAZ),
                 perms: 0o600,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
@@ -119,9 +123,7 @@ impl Serve9p for EchoServer {
         match qid {
             ROOT => Ok(vec![
                 Stat {
-                    qid: BAR,
-                    name: "bar".into(),
-                    ty: FileType::Directory,
+                    fm: FileMeta::dir("bar", BAR),
                     perms: 0o500,
                     n_bytes: 0,
                     last_accesses: SystemTime::now(),
@@ -131,9 +133,7 @@ impl Serve9p for EchoServer {
                     last_modified_by: uname.into(),
                 },
                 Stat {
-                    qid: FOO,
-                    name: "foo".into(),
-                    ty: FileType::Regular,
+                    fm: FileMeta::file("foo", FOO),
                     perms: 0o600,
                     n_bytes: 42,
                     last_accesses: SystemTime::now(),
@@ -145,9 +145,7 @@ impl Serve9p for EchoServer {
             ]),
 
             BAR => Ok(vec![Stat {
-                qid: BAZ,
-                name: "baz".into(),
-                ty: FileType::Regular,
+                fm: FileMeta::file("baz", BAZ),
                 perms: 0o500,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
