@@ -15,11 +15,10 @@ fn main() {
     let fs = AdFs::new(mtx, brx);
 
     println!("mounting at {}", fs.mount_path());
-    let fs_handle = fs.run_threaded();
+    fs.run_threaded();
     let ed_thread = mock_editor_thread(mrx, btx);
 
     ed_thread.join().unwrap();
-    fs_handle.join()
 }
 
 fn mock_editor_thread(rx: Receiver<InputEvent>, btx: Sender<BufId>) -> JoinHandle<()> {

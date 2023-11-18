@@ -104,11 +104,10 @@ impl Editor {
 
         let (tx, brx) = self.fs_chans.take().expect("to have fsys channels");
         Input::new(tx.clone()).run_threaded();
-        let fs_handle = AdFs::new(tx, brx).run_threaded();
+        AdFs::new(tx, brx).run_threaded();
 
         self.run_event_loop();
         clear_screen(&mut self.stdout);
-        fs_handle.join()
     }
 
     fn run_event_loop(&mut self) {

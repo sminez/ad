@@ -12,7 +12,7 @@ use std::{
     net::TcpListener,
     os::unix::net::UnixListener,
     sync::{Arc, Mutex, RwLock},
-    thread::spawn,
+    thread::{spawn, JoinHandle},
 };
 
 pub const DEFAULT_TCP_PORT: u16 = 0xADD;
@@ -107,7 +107,7 @@ pub trait Serve9p {
 #[derive(Debug)]
 pub struct Server<S>
 where
-    S: Serve9p + Sync + Send + 'static,
+    S: Serve9p + Send + 'static,
 {
     s: Arc<Mutex<S>>,
     msize: u32,
@@ -117,7 +117,7 @@ where
 
 impl<S> Server<S>
 where
-    S: Serve9p + Sync + Send + 'static,
+    S: Serve9p + Send + 'static,
 {
     /// Create a new file server with a single anonymous root (name will be "") and
     /// qid of [QID_ROOT].
@@ -140,38 +140,42 @@ where
         }
     }
 
-    pub fn serve_tcp(self, port: u16) {
-        let listener = tcp_socket(port);
+    pub fn serve_tcp(self, port: u16) -> JoinHandle<()> {
+        spawn(move || {
+            let listener = tcp_socket(port);
 
-        for stream in listener.incoming() {
-            let stream = stream.unwrap();
-            let session = Session::new_unattached(
-                self.msize,
-                self.roots.clone(),
-                self.s.clone(),
-                self.qids.clone(),
-                stream,
-            );
+            for stream in listener.incoming() {
+                let stream = stream.unwrap();
+                let session = Session::new_unattached(
+                    self.msize,
+                    self.roots.clone(),
+                    self.s.clone(),
+                    self.qids.clone(),
+                    stream,
+                );
 
-            spawn(move || session.handle_connection());
-        }
+                spawn(move || session.handle_connection());
+            }
+        })
     }
 
-    pub fn serve_socket(self, socket_name: &str) {
-        let sock = unix_socket(socket_name);
+    pub fn serve_socket(self, socket_name: String) -> JoinHandle<()> {
+        spawn(move || {
+            let sock = unix_socket(&socket_name);
 
-        for stream in sock.listener.incoming() {
-            let stream = stream.unwrap();
-            let session = Session::new_unattached(
-                self.msize,
-                self.roots.clone(),
-                self.s.clone(),
-                self.qids.clone(),
-                stream,
-            );
+            for stream in sock.listener.incoming() {
+                let stream = stream.unwrap();
+                let session = Session::new_unattached(
+                    self.msize,
+                    self.roots.clone(),
+                    self.s.clone(),
+                    self.qids.clone(),
+                    stream,
+                );
 
-            spawn(move || session.handle_connection());
-        }
+                spawn(move || session.handle_connection());
+            }
+        })
     }
 }
 
@@ -203,7 +207,7 @@ impl Attached {
 struct Session<T, S, RW>
 where
     T: SessionType,
-    S: Serve9p + Sync + Send + 'static,
+    S: Serve9p + Send + 'static,
     RW: Read + Write,
 {
     state: T,
@@ -217,7 +221,7 @@ where
 impl<T, S, RW> Session<T, S, RW>
 where
     T: SessionType,
-    S: Serve9p + Sync + Send + 'static,
+    S: Serve9p + Send + 'static,
     RW: Read + Write,
 {
     fn qid(&self, qid: u64) -> Option<Qid> {
@@ -293,7 +297,7 @@ where
 
 impl<S, RW> Session<Unattached, S, RW>
 where
-    S: Serve9p + Sync + Send + 'static,
+    S: Serve9p + Send + 'static,
     RW: Read + Write,
 {
     fn new_unattached(
@@ -410,7 +414,7 @@ macro_rules! file_meta {
 
 impl<S, RW> Session<Attached, S, RW>
 where
-    S: Serve9p + Sync + Send + 'static,
+    S: Serve9p + Send + 'static,
     RW: Read + Write,
 {
     fn new_attached(

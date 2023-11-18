@@ -7,7 +7,7 @@ use std::time::SystemTime;
 
 fn main() {
     let s = Server::new(EchoServer);
-    s.serve_socket(DEFAULT_SOCKET_NAME)
+    _ = s.serve_socket(DEFAULT_SOCKET_NAME.to_string()).join();
 }
 
 struct EchoServer;

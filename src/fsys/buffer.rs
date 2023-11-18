@@ -1,28 +1,26 @@
 //! Buffer state for the fuse filesystem
-use super::{
-    empty_dir_attrs, empty_file_attrs, Ino, Message, Req, BLOCK_SIZE, BUFFERS_INO, INO_OFFSET,
-};
-use crate::editor::InputEvent;
-use fuser::FileAttr;
+use super::{empty_dir_stat, empty_file_stat, Message, Req, BUFFERS_DIR, BUFFERS_QID, QID_OFFSET};
+use crate::{editor::InputEvent, ninep::fs::Stat};
 use std::{
     collections::BTreeMap,
     sync::mpsc::{Receiver, Sender},
     time::SystemTime,
 };
 
-pub(super) const BUFFER_FILES: [(Ino, &str); INO_OFFSET as usize - 1] = [
-    (1, "filename"),
-    (2, "dot"),
-    (3, "addr"),
-    (4, "body"),
-    (5, "event"),
-];
+const FILENAME: &str = "filename";
+const DOT: &str = "dot";
+const ADDR: &str = "addr";
+const BODY: &str = "body";
+const EVENT: &str = "event";
 
-fn parent_and_fname(ino: Ino) -> (Ino, &'static str) {
-    assert!(ino > BUFFERS_INO, "invalid buffer file Ino");
+pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] =
+    [(1, FILENAME), (2, DOT), (3, ADDR), (4, BODY), (5, EVENT)];
 
-    let parent = BUFFERS_INO + (ino - BUFFERS_INO) / INO_OFFSET + 1;
-    let fname = BUFFER_FILES[((ino - BUFFERS_INO - 2) % INO_OFFSET) as usize].1;
+fn parent_and_fname(qid: u64) -> (u64, &'static str) {
+    assert!(qid > BUFFERS_QID, "invalid buffer file qid");
+
+    let parent = BUFFERS_QID + (qid - BUFFERS_QID) / QID_OFFSET + 1;
+    let fname = BUFFER_FILES[((qid - BUFFERS_QID - 2) % QID_OFFSET) as usize].1;
 
     (parent, fname)
 }
@@ -36,9 +34,9 @@ pub enum BufId {
 
 #[derive(Debug)]
 pub(super) struct BufferNodes {
-    known: BTreeMap<Ino, BufferNode>,
-    next_ino: Ino,
-    attrs: FileAttr,
+    known: BTreeMap<u64, BufferNode>,
+    next_qid: u64,
+    stat: Stat,
     tx: Sender<InputEvent>,
     brx: Receiver<BufId>,
 }
@@ -47,91 +45,91 @@ impl BufferNodes {
     pub(super) fn new(tx: Sender<InputEvent>, brx: Receiver<BufId>) -> Self {
         Self {
             known: BTreeMap::default(),
-            next_ino: BUFFERS_INO + 1,
-            attrs: empty_dir_attrs(BUFFERS_INO),
+            next_qid: BUFFERS_QID + 1,
+            stat: empty_dir_stat(BUFFERS_QID, BUFFERS_DIR),
             tx,
             brx,
         }
     }
 
-    pub(super) fn attrs(&self) -> FileAttr {
-        // self.attrs.atime = SystemTime::now();
-
-        self.attrs
+    pub(super) fn stat(&self) -> Stat {
+        self.stat.clone()
     }
 
-    pub(super) fn is_known_buffer_ino(&self, ino: Ino) -> bool {
-        self.known.contains_key(&ino)
+    pub(super) fn top_level_stats(&self) -> Vec<Stat> {
+        self.known.values().map(|b| b.stat.clone()).collect()
     }
 
-    pub(super) fn known_buffer_ids(&self) -> Vec<(Ino, &str)> {
-        self.known
-            .values()
-            .map(|b| (b.ino, b.str_id.as_str()))
-            .collect()
+    pub(super) fn buffer_level_stats(&self, qid: u64) -> Option<Vec<Stat>> {
+        self.known.get(&qid).map(|b| b.file_stats())
     }
 
-    pub(super) fn lookup_file_attrs(&mut self, parent: Ino, name: &str) -> Option<FileAttr> {
-        if parent == BUFFERS_INO {
+    pub(super) fn is_known_buffer_qid(&self, qid: u64) -> bool {
+        self.known.contains_key(&qid)
+    }
+
+    pub(super) fn lookup_file_stat(&mut self, parent: u64, name: &str) -> Option<Stat> {
+        if parent == BUFFERS_QID {
             self.known
                 .values()
                 .find(|b| b.str_id == name)
-                .map(|b| b.attrs())
+                .map(|b| b.stat())
         } else {
             self.known
                 .get_mut(&parent)?
-                .refreshed_file_attrs(name, &self.tx)
+                .refreshed_file_stat(name, &self.tx)
+                .clone()
         }
     }
 
-    pub(super) fn get_attr_for_inode(&mut self, ino: Ino) -> Option<FileAttr> {
-        // If this is a known directory then we return the attrs for it
-        if ino == BUFFERS_INO {
-            return Some(self.attrs());
-        } else if let Some(b) = self.known.get(&ino) {
-            return Some(b.attrs());
+    pub(super) fn get_stat_for_qid(&mut self, qid: u64) -> Option<Stat> {
+        // If this is a known directory then we return the stat for it
+        if qid == BUFFERS_QID {
+            return Some(self.stat());
+        } else if let Some(b) = self.known.get(&qid) {
+            return Some(b.stat());
         }
 
         // Otherwise we see if this is known buffer file
-        let (parent, fname) = parent_and_fname(ino);
+        let (parent, fname) = parent_and_fname(qid);
         self.known
             .get_mut(&parent)?
-            .refreshed_file_attrs(fname, &self.tx)
+            .refreshed_file_stat(fname, &self.tx)
     }
 
-    pub(super) fn get_file_content(&mut self, ino: Ino) -> Option<String> {
-        let (parent, fname) = parent_and_fname(ino);
+    pub(super) fn get_file_content(&mut self, qid: u64) -> Option<String> {
+        let (parent, fname) = parent_and_fname(qid);
         self.known
             .get(&parent)?
             .current_file_content(fname, &self.tx)
     }
 
-    pub(super) fn truncate(&mut self, ino: Ino) {
-        let (parent, fname) = parent_and_fname(ino);
+    pub(super) fn truncate(&mut self, qid: u64) {
+        let (parent, fname) = parent_and_fname(qid);
         let b = match self.known.get_mut(&parent) {
             Some(b) => b,
             None => return,
         };
-        b.attrs.mtime = SystemTime::now();
-        b.attrs.size = 0;
+        b.stat.last_modified = SystemTime::now();
+        b.stat.n_bytes = 0;
         let id = b.id;
 
-        if fname == "body" {
+        if fname == BODY {
             _ = Message::send(Req::ClearBufferBody { id }, &self.tx);
         }
     }
 
-    pub(super) fn req_for_write(&mut self, ino: Ino, s: String, offset: usize) -> Option<Req> {
-        let (parent, fname) = parent_and_fname(ino);
+    pub(super) fn req_for_write(&mut self, qid: u64, s: String, offset: usize) -> Option<Req> {
+        let (parent, fname) = parent_and_fname(qid);
         let b = self.known.get_mut(&parent)?;
-        b.attrs.mtime = SystemTime::now();
+        b.stat.last_modified = SystemTime::now();
         let id = b.id;
 
         match fname {
-            "dot" => Some(Req::SetBufferDot { id, s }),
-            "addr" => Some(Req::SetBufferAddr { id, s }),
-            "body" => Some(Req::InsertBufferBody { id, s, offset }),
-            "filename" | "event" => None,
+            DOT => Some(Req::SetBufferDot { id, s }),
+            ADDR => Some(Req::SetBufferAddr { id, s }),
+            BODY => Some(Req::InsertBufferBody { id, s, offset }),
+            FILENAME | EVENT => None,
             _ => None,
         }
     }
@@ -141,9 +139,9 @@ impl BufferNodes {
         for bid in self.brx.try_iter() {
             match bid {
                 BufId::Add(id) => {
-                    let ino = self.next_ino;
-                    self.next_ino += INO_OFFSET;
-                    self.known.insert(ino, BufferNode::new(id, ino));
+                    let qid = self.next_qid;
+                    self.next_qid += QID_OFFSET;
+                    self.known.insert(qid, BufferNode::new(id, qid));
                 }
 
                 BufId::Remove(id) => self.known.retain(|_, v| v.id != id),
@@ -155,60 +153,59 @@ impl BufferNodes {
 /// A BufferNode in the filesystem is a directory containing a fixed
 /// set of control files
 ///
-/// The inodes generated for each of the control files are based on offsets
-/// from the inode of the buffer directory itself (see INO_OFFSET above).
+/// The qids generated for each of the control files are based on offsets
+/// from the qid of the buffer directory itself (see QID_OFFSET above).
 #[derive(Debug)]
 pub(super) struct BufferNode {
     id: usize,
-    ino: Ino,
     str_id: String,
-    attrs: FileAttr,
-    file_attrs: BTreeMap<&'static str, FileAttr>,
+    stat: Stat,
+    file_stats: BTreeMap<&'static str, Stat>,
 }
 
 impl BufferNode {
-    fn new(id: usize, ino: Ino) -> Self {
+    fn new(id: usize, qid: u64) -> Self {
         Self {
             id,
-            ino,
             str_id: id.to_string(),
-            attrs: empty_dir_attrs(ino),
-            file_attrs: stub_file_attrs(ino),
+            stat: empty_dir_stat(qid, &id.to_string()),
+            file_stats: stub_file_stats(qid),
         }
     }
 
-    fn attrs(&self) -> FileAttr {
-        // self.attrs.atime = SystemTime::now();
-
-        self.attrs
+    fn stat(&self) -> Stat {
+        self.stat.clone()
     }
 
-    fn refreshed_file_attrs(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<FileAttr> {
-        let content = self.current_file_content(fname, tx)?;
-        let attrs = self.file_attrs.get_mut(fname)?;
-        attrs.size = content.as_bytes().len() as u64;
-        attrs.blocks = (attrs.size + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    fn file_stats(&self) -> Vec<Stat> {
+        self.file_stats.values().cloned().collect()
+    }
 
-        Some(*attrs)
+    fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<Stat> {
+        let content = self.current_file_content(fname, tx)?;
+        let stat = self.file_stats.get_mut(fname)?;
+        stat.n_bytes = content.as_bytes().len() as u64;
+
+        Some(stat.clone())
     }
 
     fn current_file_content(&self, fname: &str, tx: &Sender<InputEvent>) -> Option<String> {
         match fname {
-            "filename" => Message::send(Req::ReadBufferName { id: self.id }, tx).ok(),
-            "dot" => Message::send(Req::ReadBufferDot { id: self.id }, tx).ok(),
-            "addr" => Message::send(Req::ReadBufferAddr { id: self.id }, tx).ok(),
-            "body" => Message::send(Req::ReadBufferBody { id: self.id }, tx).ok(),
-            "event" => Some("".to_string()), // TODO: sort out the event file
+            FILENAME => Message::send(Req::ReadBufferName { id: self.id }, tx).ok(),
+            DOT => Message::send(Req::ReadBufferDot { id: self.id }, tx).ok(),
+            ADDR => Message::send(Req::ReadBufferAddr { id: self.id }, tx).ok(),
+            BODY => Message::send(Req::ReadBufferBody { id: self.id }, tx).ok(),
+            EVENT => Some("".to_string()), // TODO: sort out the event file
             _ => None,
         }
     }
 }
 
-fn stub_file_attrs(ino: Ino) -> BTreeMap<&'static str, FileAttr> {
+fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {
     let mut m = BTreeMap::new();
 
     for (offset, name) in BUFFER_FILES.into_iter() {
-        m.insert(name, empty_file_attrs(ino + offset));
+        m.insert(name, empty_file_stat(qid + offset, name));
     }
 
     m
@@ -219,14 +216,14 @@ mod tests {
     use super::*;
     use simple_test_case::test_case;
 
-    #[test_case(1, 0, "filename"; "filename first buffer")]
-    #[test_case(INO_OFFSET+2, 1, "dot"; "dot second buffer")]
-    #[test_case(INO_OFFSET+4, 1, "body"; "body second buffer")]
+    #[test_case(1, 0, FILENAME; "filename first buffer")]
+    #[test_case(QID_OFFSET+2, 1, DOT; "dot second buffer")]
+    #[test_case(QID_OFFSET+4, 1, BODY; "body second buffer")]
     #[test]
-    fn parent_and_fname_works(ino: Ino, parent: Ino, fname: &str) {
-        let (p, f) = parent_and_fname(ino + BUFFERS_INO + 1);
+    fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
+        let (p, f) = parent_and_fname(qid + BUFFERS_QID + 1);
 
-        assert_eq!(p, parent + BUFFERS_INO + 1);
+        assert_eq!(p, parent + BUFFERS_QID + 1);
         assert_eq!(f, fname);
     }
 }

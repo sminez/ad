@@ -16,7 +16,6 @@
 //! ## Filesystem contents
 //! ```text
 //! $HOME/.ad/mnt/
-//!   log
 //!   ctrl
 //!   buffers/
 //!     [n]/
@@ -26,23 +25,20 @@
 //!       body
 //!       event
 //! ```
-use crate::editor::InputEvent;
-use fuser::{
-    spawn_mount2, BackgroundSession, FileAttr, FileType, Filesystem, MountOption, ReplyAttr,
-    ReplyData, ReplyDirectory, ReplyEmpty, ReplyEntry, ReplyOpen, Request,
+use crate::{
+    editor::InputEvent,
+    ninep::{
+        fs::{FileMeta, IoUnit, Mode, Perm, Stat},
+        server::{Result, Serve9p, Server, DEFAULT_SOCKET_NAME},
+    },
 };
-// See the following for an overview of libc error codes:
-//   https://www.gnu.org/software/libc/manual/html_node/Error-Codes.html
-use libc::{EINVAL, EIO, ENOENT};
+
 use std::{
     env,
-    ffi::OsStr,
     fs::create_dir_all,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        mpsc::{Receiver, Sender},
-    },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    sync::mpsc::{Receiver, Sender},
+    thread::JoinHandle,
+    time::SystemTime,
 };
 
 mod buffer;
@@ -51,28 +47,23 @@ mod message;
 pub use buffer::BufId;
 pub use message::{Message, Req};
 
-use buffer::{BufferNodes, BUFFER_FILES};
+use buffer::BufferNodes;
 
-const TTL: Duration = Duration::from_secs(1);
 const MOUNT_DIR: &str = ".ad/mnt";
-const FS_NAME: &str = "ad";
-const BLOCK_SIZE: u64 = 512;
+const IO_UNIT: u32 = 8168;
 
-/// Inode number
-type Ino = u64;
-
-// Fixed inodes inside of '$HOME/.ad/mnt/buffers':
-///   1. $HOME/.ad/mnt  -> The directory we mount to
-const MOUNT_ROOT_INO: Ino = 1;
-///   2.   ctrl         -> control file for issuing commands
-const CONTROL_FILE_INO: Ino = 2;
+// Fixed qids inside of '$HOME/.ad/mnt/buffers':
+///   0. $HOME/.ad/mnt  -> The directory we mount to
+const MOUNT_ROOT_QID: u64 = 0;
+///   1.   ctrl         -> control file for issuing commands
+const CONTROL_FILE_QID: u64 = 1;
 const CONTROL_FILE: &str = "ctrl";
-///   3    buffers/     -> parent directory for buffers
-const BUFFERS_INO: Ino = 3;
+///   2    buffers/     -> parent directory for buffers
+const BUFFERS_QID: u64 = 2;
 const BUFFERS_DIR: &str = "buffers";
 
-/// The number of inodes required to serve both the directory and contents
-/// of a buffer node (used to generate Ino values for buffers):
+/// The number of qids required to serve both the directory and contents
+/// of a buffer node (used to generate qid values for buffers):
 ///
 ///   1. $id            -> The buffer directory
 ///   2.   filename     -> The current filename for the buffer
@@ -80,25 +71,26 @@ const BUFFERS_DIR: &str = "buffers";
 ///   4.   addr         -> The address value of dot
 ///   5.   body         -> The full body of the buffer
 ///   6.   event        -> Contol file for intercepting input events for the buffer
-const INO_OFFSET: Ino = 6;
+const QID_OFFSET: u64 = 6;
+
+const E_UNKNOWN_FILE: &str = "unknown file";
 
 #[derive(Debug)]
 pub struct AdFs {
     mount_path: String,
-    next_fh: AtomicU64,
     tx: Sender<InputEvent>,
     buffer_nodes: BufferNodes,
     // Root level files and directories
-    mount_dir_attrs: FileAttr,
-    control_file_attrs: FileAttr,
+    mount_dir_stat: Stat,
+    control_file_stat: Stat,
 }
 
 #[derive(Debug)]
-pub struct FsHandle(BackgroundSession);
+pub struct FsHandle(JoinHandle<()>);
 
 impl FsHandle {
     pub fn join(self) {
-        self.0.join()
+        _ = self.0.join();
     }
 }
 
@@ -112,11 +104,10 @@ impl AdFs {
 
         Self {
             mount_path,
-            next_fh: AtomicU64::new(1),
             tx,
             buffer_nodes,
-            mount_dir_attrs: empty_dir_attrs(MOUNT_ROOT_INO),
-            control_file_attrs: empty_file_attrs(CONTROL_FILE_INO),
+            mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
+            control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
         }
     }
 
@@ -124,295 +115,175 @@ impl AdFs {
         &self.mount_path
     }
 
-    fn next_fh(&mut self) -> u64 {
-        self.next_fh.fetch_add(1, Ordering::SeqCst)
-    }
-
     /// Spawn a thread for running this filesystem and return a handle to it
     pub fn run_threaded(self) -> FsHandle {
-        let options = [
-            MountOption::FSName(FS_NAME.to_string()),
-            MountOption::AutoUnmount,
-            MountOption::AllowRoot,
-            MountOption::RW,
-        ];
-        let path = self.mount_path.clone();
-
-        FsHandle(spawn_mount2(self, path, &options).expect("to be able to start fsys thread"))
+        let s = Server::new(self);
+        FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()))
     }
 }
 
-impl Filesystem for AdFs {
-    fn lookup(&mut self, _req: &Request, parent: u64, name: &OsStr, reply: ReplyEntry) {
+impl Serve9p for AdFs {
+    fn stat(&mut self, qid: u64, _uname: &str) -> Result<Stat> {
         self.buffer_nodes.update();
 
-        let str_name = match name.to_str() {
-            Some(s) => s,
-            None => {
-                reply.error(ENOENT);
-                return;
-            }
-        };
+        match qid {
+            MOUNT_ROOT_QID => Ok(self.mount_dir_stat.clone()),
+            CONTROL_FILE_QID => Ok(self.control_file_stat.clone()),
+            BUFFERS_QID => Ok(self.buffer_nodes.stat().clone()),
+            qid => match self.buffer_nodes.get_stat_for_qid(qid) {
+                Some(stat) => Ok(stat.clone()),
+                None => Err(E_UNKNOWN_FILE.to_string()),
+            },
+        }
+    }
 
-        match parent {
-            MOUNT_ROOT_INO => match str_name {
-                CONTROL_FILE => reply.entry(&TTL, &self.control_file_attrs, 0),
-                BUFFERS_DIR => reply.entry(&TTL, &self.buffer_nodes.attrs(), 0),
-                _ => match self.buffer_nodes.lookup_file_attrs(parent, str_name) {
-                    Some(attrs) => reply.entry(&TTL, &attrs, 0),
-                    None => reply.error(ENOENT),
+    fn write_stat(&mut self, qid: u64, stat: Stat, _uname: &str) -> Result<()> {
+        self.buffer_nodes.update();
+
+        if stat.n_bytes == 0 {
+            match qid {
+                MOUNT_ROOT_QID => self.mount_dir_stat.n_bytes = 0,
+                CONTROL_FILE_QID => self.control_file_stat.n_bytes = 0,
+                qid => self.buffer_nodes.truncate(qid),
+            }
+        }
+
+        Ok(())
+    }
+
+    fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta> {
+        self.buffer_nodes.update();
+
+        match parent_qid {
+            MOUNT_ROOT_QID => match child {
+                CONTROL_FILE => Ok(self.control_file_stat.fm.clone()),
+                BUFFERS_DIR => Ok(self.buffer_nodes.stat().fm.clone()),
+                _ => match self.buffer_nodes.lookup_file_stat(parent_qid, child) {
+                    Some(stat) => Ok(stat.fm.clone()),
+                    None => Err(E_UNKNOWN_FILE.to_string()),
                 },
             },
 
-            ino if ino == BUFFERS_INO || self.buffer_nodes.is_known_buffer_ino(ino) => {
-                match self.buffer_nodes.lookup_file_attrs(ino, str_name) {
-                    Some(attrs) => reply.entry(&TTL, &attrs, 0),
-                    None => reply.error(ENOENT),
+            qid if qid == BUFFERS_QID || self.buffer_nodes.is_known_buffer_qid(qid) => {
+                match self.buffer_nodes.lookup_file_stat(qid, child) {
+                    Some(stat) => Ok(stat.fm.clone()),
+                    None => Err(E_UNKNOWN_FILE.to_string()),
                 }
             }
 
-            _ => reply.error(ENOENT),
+            _ => Err(E_UNKNOWN_FILE.to_string()),
         }
     }
 
-    fn getattr(&mut self, _req: &Request, ino: u64, reply: ReplyAttr) {
+    fn open(&mut self, _qid: u64, _mode: Mode, _uname: &str) -> Result<IoUnit> {
         self.buffer_nodes.update();
 
-        match ino {
-            MOUNT_ROOT_INO => reply.attr(&TTL, &self.mount_dir_attrs),
-            CONTROL_FILE_INO => reply.attr(&TTL, &self.control_file_attrs),
+        Ok(IO_UNIT)
+    }
 
-            ino => match self.buffer_nodes.get_attr_for_inode(ino) {
-                Some(attrs) => reply.attr(&TTL, &attrs),
-                None => reply.error(ENOENT),
+    fn read(&mut self, qid: u64, offset: usize, count: usize, _uname: &str) -> Result<Vec<u8>> {
+        self.buffer_nodes.update();
+
+        match qid {
+            CONTROL_FILE_QID => Ok(vec![]),
+
+            qid => match self.buffer_nodes.get_file_content(qid) {
+                Some(content) => Ok(content
+                    .as_bytes()
+                    .iter()
+                    .copied()
+                    .skip(offset)
+                    .take(count)
+                    .collect()),
+
+                None => Err(E_UNKNOWN_FILE.to_string()),
             },
         }
     }
 
-    fn read(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        _size: u32,
-        _flags: i32,
-        _lock: Option<u64>,
-        reply: ReplyData,
-    ) {
+    fn read_dir(&mut self, qid: u64, _uname: &str) -> Result<Vec<Stat>> {
         self.buffer_nodes.update();
 
-        match ino {
-            CONTROL_FILE_INO => reply.data(&[]),
-
-            ino => match self.buffer_nodes.get_file_content(ino) {
-                Some(content) => reply.data(&content.as_bytes()[offset as usize..]),
-                None => reply.error(ENOENT),
-            },
+        match qid {
+            MOUNT_ROOT_QID => Ok(vec![
+                self.control_file_stat.clone(),
+                self.buffer_nodes.stat().clone(),
+            ]),
+            BUFFERS_QID => Ok(self.buffer_nodes.top_level_stats()),
+            qid => self
+                .buffer_nodes
+                .buffer_level_stats(qid)
+                .ok_or_else(|| E_UNKNOWN_FILE.to_string()),
         }
     }
 
-    fn readdir(
-        &mut self,
-        _req: &Request,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        mut reply: ReplyDirectory,
-    ) {
+    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize> {
         self.buffer_nodes.update();
 
-        let entries = match ino {
-            MOUNT_ROOT_INO => vec![
-                (1, FileType::Directory, "."),
-                (1, FileType::Directory, ".."),
-                (CONTROL_FILE_INO, FileType::RegularFile, CONTROL_FILE),
-                (BUFFERS_INO, FileType::Directory, BUFFERS_DIR),
-            ],
-
-            BUFFERS_INO => {
-                let mut entries = vec![
-                    (BUFFERS_INO, FileType::Directory, "."),
-                    (BUFFERS_INO, FileType::Directory, ".."),
-                ];
-
-                for (ino, id) in self.buffer_nodes.known_buffer_ids() {
-                    entries.push((ino, FileType::Directory, id));
-                }
-
-                entries
-            }
-
-            ino if self.buffer_nodes.is_known_buffer_ino(ino) => {
-                let mut entries = vec![
-                    (ino, FileType::Directory, "."),
-                    (ino, FileType::Directory, ".."),
-                ];
-
-                for (offset, fname) in BUFFER_FILES.into_iter() {
-                    entries.push((ino + offset, FileType::RegularFile, fname));
-                }
-
-                entries
-            }
-
-            _ => return reply.error(ENOENT),
-        };
-
-        for (i, entry) in entries.into_iter().enumerate().skip(offset as usize) {
-            // i + 1 means the index of the next entry
-            if reply.add(entry.0, (i + 1) as i64, entry.1, entry.2) {
-                break;
-            }
-        }
-
-        reply.ok();
-    }
-
-    // TODO: restrict by filehandle for the events file
-    fn write(
-        &mut self,
-        _req: &Request<'_>,
-        ino: u64,
-        _fh: u64,
-        offset: i64,
-        data: &[u8],
-        _write_flags: u32,
-        _flags: i32,
-        _lock_owner: Option<u64>,
-        reply: fuser::ReplyWrite,
-    ) {
-        assert!(offset >= 0, "negative read offset");
-        self.buffer_nodes.update();
-
-        let n_bytes = data.len() as u32;
-        let msg = match String::from_utf8(data.to_vec()) {
+        let n_bytes = data.len();
+        let s = match String::from_utf8(data.to_vec()) {
             Ok(s) => s,
-            Err(_) => {
-                reply.error(EINVAL);
-                return;
-            }
+            Err(e) => return Err(format!("Invalid data: {e}")),
         };
 
-        match ino {
-            CONTROL_FILE_INO => {
-                self.control_file_attrs.mtime = SystemTime::now();
-                match Message::send(Req::ControlMessage { msg }, &self.tx) {
-                    Ok(_) => reply.written(n_bytes),
-                    Err(_) => reply.error(EIO),
+        match qid {
+            CONTROL_FILE_QID => {
+                self.control_file_stat.last_modified = SystemTime::now();
+                match Message::send(Req::ControlMessage { msg: s }, &self.tx) {
+                    Ok(_) => Ok(n_bytes),
+                    Err(e) => Err(format!("unable to execute control message: {e}")),
                 }
             }
 
-            ino => match self.buffer_nodes.req_for_write(ino, msg, offset as usize) {
+            qid => match self.buffer_nodes.req_for_write(qid, s, offset) {
                 Some(req) => match Message::send(req, &self.tx) {
-                    Ok(_) => reply.written(n_bytes),
-                    Err(_) => reply.error(EIO),
+                    Ok(_) => Ok(n_bytes),
+                    Err(e) => Err(format!("unable to execute control message: {e}")),
                 },
-                None => reply.error(ENOENT),
+                None => Err(E_UNKNOWN_FILE.to_string()),
             },
         }
     }
 
-    fn access(&mut self, _req: &Request<'_>, _ino: u64, _mask: i32, reply: ReplyEmpty) {
-        reply.ok()
+    fn remove(&mut self, _qid: u64, _uname: &str) -> Result<()> {
+        // TODO: allow remove of a buffer to close the buffer
+        Err("remove not allowed".to_string())
     }
 
-    fn open(&mut self, _req: &Request<'_>, _ino: u64, _flags: i32, reply: ReplyOpen) {
-        let flags = 0;
-        let fh = self.next_fh();
-
-        reply.opened(fh, flags)
-    }
-
-    fn setattr(
+    fn create(
         &mut self,
-        _req: &Request<'_>,
-        ino: u64,
-        _mode: Option<u32>,
-        _uid: Option<u32>,
-        _gid: Option<u32>,
-        size: Option<u64>,
-        _atime: Option<fuser::TimeOrNow>,
-        _mtime: Option<fuser::TimeOrNow>,
-        _ctime: Option<SystemTime>,
-        _fh: Option<u64>,
-        _crtime: Option<SystemTime>,
-        _chgtime: Option<SystemTime>,
-        _bkuptime: Option<SystemTime>,
-        _flags: Option<u32>,
-        reply: ReplyAttr,
-    ) {
-        // Truncation of a file
-        if let Some(0) = size {
-            match ino {
-                MOUNT_ROOT_INO => self.mount_dir_attrs.size = 0,
-                CONTROL_FILE_INO => self.control_file_attrs.size = 0,
-                ino => self.buffer_nodes.truncate(ino),
-            }
-        }
-
-        let attrs = match ino {
-            MOUNT_ROOT_INO => self.mount_dir_attrs,
-            CONTROL_FILE_INO => self.control_file_attrs,
-            ino => match self.buffer_nodes.get_attr_for_inode(ino) {
-                Some(attrs) => attrs,
-                None => {
-                    reply.error(ENOENT);
-                    return;
-                }
-            },
-        };
-
-        reply.attr(&TTL, &attrs);
+        _parent: u64,
+        _name: &str,
+        _perm: Perm,
+        _mode: Mode,
+        _uname: &str,
+    ) -> Result<(FileMeta, IoUnit)> {
+        Err("create not allowed".to_string())
     }
 }
 
-fn empty_dir_attrs(ino: Ino) -> FileAttr {
-    FileAttr {
-        ino,
-        size: 0,
-        blocks: 0,
-        atime: SystemTime::now(),
-        mtime: SystemTime::now(),
-        ctime: SystemTime::now(),
-        crtime: UNIX_EPOCH,
-        kind: FileType::Directory,
-        perm: 0o755,
-        nlink: 2,
-        uid: get_uid(),
-        gid: get_gid(),
-        rdev: 0,
-        flags: 0,
-        blksize: BLOCK_SIZE as u32,
+fn empty_dir_stat(qid: u64, name: &str) -> Stat {
+    Stat {
+        fm: FileMeta::dir(name, qid),
+        perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
+        n_bytes: 0,
+        last_accesses: SystemTime::now(),
+        last_modified: SystemTime::now(),
+        owner: "ad".into(),
+        group: "ad".into(),
+        last_modified_by: "ad".into(),
     }
 }
 
-fn empty_file_attrs(ino: Ino) -> FileAttr {
-    FileAttr {
-        ino,
-        size: 0,
-        blocks: 0,
-        atime: SystemTime::now(),
-        mtime: SystemTime::now(),
-        ctime: SystemTime::now(),
-        crtime: UNIX_EPOCH,
-        kind: FileType::RegularFile,
-        perm: 0o644,
-        nlink: 1,
-        uid: get_uid(),
-        gid: get_gid(),
-        // uid: 501,
-        // gid: 20,
-        rdev: 0,
-        flags: 0,
-        blksize: BLOCK_SIZE as u32,
+fn empty_file_stat(qid: u64, name: &str) -> Stat {
+    Stat {
+        fm: FileMeta::file(name, qid),
+        perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+        n_bytes: 0,
+        last_accesses: SystemTime::now(),
+        last_modified: SystemTime::now(),
+        owner: "ad".into(),
+        group: "ad".into(),
+        last_modified_by: "ad".into(),
     }
-}
-
-fn get_uid() -> u32 {
-    unsafe { libc::getuid() }
-}
-
-fn get_gid() -> u32 {
-    unsafe { libc::getgid() }
 }
