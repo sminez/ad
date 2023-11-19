@@ -680,6 +680,12 @@ where
         Ok(Rdata::Read { data: Data(buf) })
     }
 
+    // TODO: need to handle offsets properly here. Having the Serve9p impl return all stats
+    // for a given dir and then storing the remainder for responding to future client calls
+    // would make implementing things simpler with the trade off of very large directories
+    // resulting in lots of pending state.
+    // The alternative is to pass the offset and count through to the Serve9p impl and have
+    // the impl care about maintaining things correctly.
     fn read_dir(&mut self, qid: u64, offset: usize, count: usize) -> Result<Vec<u8>> {
         let mut buf = Vec::with_capacity(count);
         let stats = self.s.lock().unwrap().read_dir(qid, &self.state.uname)?;
