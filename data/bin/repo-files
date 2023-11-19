@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# Pop open an st terminal running fzf to interactively select a file to open
+# from the current git repo
+
+outfile="$(mktemp /tmp/ad-selection-XXX)"
+root="$(git rev-parse --show-toplevel)"
+st \
+  -c "floatTerm" \
+  -e zsh -c "cd $root && fd | fzf > $outfile" &
+
+fname=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
+rm "$outfile"
+
+if [[ -n "$fname" ]]; then
+  echo -n "open $fname" | 9p write ad/ctrl
+fi

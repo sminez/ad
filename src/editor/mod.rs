@@ -271,6 +271,7 @@ impl Editor {
             Action::ReloadActiveBuffer => self.reload_active_buffer(),
             Action::ReloadBuffer { id } => self.reload_buffer(id),
             Action::ReloadConfig => self.reload_config(),
+            Action::RunMode => self.run_mode(),
             Action::SamMode => self.sam_mode(),
             Action::SaveBufferAs { path } => self.save_current_buffer(Some(path)),
             Action::SaveBuffer => self.save_current_buffer(None),
@@ -280,6 +281,7 @@ impl Editor {
             Action::SetMode { m } => self.set_mode(m),
             Action::ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             Action::ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
+            Action::ShellRun { cmd } => self.run_shell_cmd(&cmd),
             Action::Yank => self.set_clipboard(self.buffers.active().dot_contents()),
 
             Action::DebugBufferContents => self.debug_buffer_contents(),

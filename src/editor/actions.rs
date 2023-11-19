@@ -9,7 +9,7 @@ use crate::{
     key::Key,
     mode::Mode,
     replace_config, update_config,
-    util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
+    util::{pipe_through_command, read_clipboard, run_command, set_clipboard, spawn_command},
 };
 use std::{env, fs, io::Write, path::PathBuf};
 
@@ -55,6 +55,7 @@ pub enum Action {
     ReloadActiveBuffer,
     ReloadBuffer { id: usize },
     ReloadConfig,
+    RunMode,
     SamMode,
     SaveBuffer,
     SaveBufferAs { path: String },
@@ -350,6 +351,16 @@ impl Editor {
         self.modes.remove(0);
     }
 
+    pub(super) fn run_mode(&mut self) {
+        self.modes.insert(0, Mode::ephemeral_mode("RUN"));
+
+        if let Some(input) = MiniBuffer::prompt("!", self) {
+            self.run_shell_cmd(&input);
+        }
+
+        self.modes.remove(0);
+    }
+
     pub(super) fn sam_mode(&mut self) {
         self.modes.insert(0, Mode::ephemeral_mode("EDIT"));
 
@@ -381,6 +392,18 @@ impl Editor {
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
+            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+        }
+    }
+
+    pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
+        let res = match raw_cmd_str.split_once(' ') {
+            Some((cmd, rest)) => spawn_command(cmd, rest.split_whitespace()),
+            None => spawn_command(raw_cmd_str, std::iter::empty::<&str>()),
+        };
+
+        match res {
+            Ok(_) => (),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
     }

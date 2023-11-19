@@ -1,9 +1,9 @@
 #! /usr/bin/env sh
 # Spell check with suggestions for the currently focused ad buffer
 
-bufid="$(9p read ad/buffers/current)"
-fname="$(basename "$(9p read "ad/buffers/$bufid/filename")")"
-body="$(9p read "ad/buffers/$bufid/body")"
+bufid=$(9p read "ad/buffers/current")
+fname=$(basename $(9p read "ad/buffers/$bufid/filename"))
+body=$(9p read "ad/buffers/$bufid/body")
 errors="$(echo "$body" | aspell -a 2>&1 | grep -E '^&' | tr -d ':' | while read -r line ; do
   echo "$line" | cut -d' ' -f2,5,6,7 | tr -d ','
 done)"
@@ -12,6 +12,6 @@ echo "$errors" | sort -u | while read -r line ; do
   mistake="$(echo "$line" | cut -d' ' -f1)"
   suggestions="$(echo "$line" | cut -d' ' -f2,3,4)"
   echo "$body" | grep -n "$mistake" | cut -d':' -f1 |  while read -r lnum ; do
-    echo -e "$fname:$lnum\t$mistake -- $suggestions"
+    echo -e "$lnum\t$mistake -- $suggestions"
   done
-done | sort | column -t
+done | sort | column -t | dmenu -i -p '? '

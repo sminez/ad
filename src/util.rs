@@ -1,4 +1,5 @@
 use std::{
+    env,
     ffi::OsStr,
     io::{self, Read, Write},
     iter::Peekable,
@@ -42,8 +43,31 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let output = Command::new(cmd).args(args).output()?;
+    let path = env::var("PATH").unwrap();
+    let home = env::var("HOME").unwrap();
+    let output = Command::new(cmd)
+        .env("PATH", format!("{path}:{home}/.ad/bin"))
+        .args(args)
+        .output()?;
+
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
+}
+
+pub fn spawn_command<I, S>(cmd: &str, args: I) -> io::Result<()>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let path = env::var("PATH").unwrap();
+    let home = env::var("HOME").unwrap();
+    Command::new(cmd)
+        .env("PATH", format!("{path}:{home}/.ad/bin"))
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()?;
+
+    Ok(())
 }
 
 pub fn pipe_through_command<I, S>(cmd: &str, args: I, input: &str) -> io::Result<String>
