@@ -1,4 +1,6 @@
 #!/usr/bin/env sh
+# "repo fd open"
+#
 # Pop open an st terminal running fzf to interactively select a file to open
 # from the current git repo
 
@@ -12,5 +14,5 @@ fname=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
 rm "$outfile"
 
 if [[ -n "$fname" ]]; then
-  echo -n "open $fname" | 9p write ad/ctrl
+  echo -n "open $root/$fname" | 9p write ad/ctrl
 fi

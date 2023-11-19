@@ -1,4 +1,0 @@
-#! /usr/bin/env sh
-# fd file search without output for opening in ad
-
-fd -t f "$*"

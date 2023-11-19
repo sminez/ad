@@ -1,5 +1,0 @@
-#! /usr/bin/env sh
-# rg with output suited for opening results in ad
-
-rg --color='never' --line-number --no-heading "$*"
-exit 0
