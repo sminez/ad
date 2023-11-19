@@ -256,10 +256,18 @@ impl Editor {
             Action::DeleteBuffer { force } => self.delete_current_buffer(force),
             Action::EditCommand { cmd } => self.execute_edit_command(&cmd),
             Action::Exit { force } => self.exit(force),
-            Action::NextBuffer => self.buffers.next(),
+            Action::NextBuffer => {
+                self.buffers.next();
+                let id = self.buffers.active().id;
+                self.btx.send(BufId::Current(id)).unwrap();
+            }
             Action::OpenFile { path } => self.open_file(&path),
             Action::Paste => self.paste_from_clipboard(),
-            Action::PreviousBuffer => self.buffers.previous(),
+            Action::PreviousBuffer => {
+                self.buffers.previous();
+                let id = self.buffers.active().id;
+                self.btx.send(BufId::Current(id)).unwrap();
+            }
             Action::ReloadActiveBuffer => self.reload_active_buffer(),
             Action::ReloadBuffer { id } => self.reload_buffer(id),
             Action::ReloadConfig => self.reload_config(),

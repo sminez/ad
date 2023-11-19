@@ -107,7 +107,10 @@ impl Editor {
     pub fn open_file(&mut self, path: &str) {
         match self.buffers.open_or_focus(self.cwd.join(path)) {
             Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
-            Ok(Some(new_id)) => self.btx.send(BufId::Add(new_id)).unwrap(),
+            Ok(Some(new_id)) => {
+                self.btx.send(BufId::Add(new_id)).unwrap();
+                self.btx.send(BufId::Current(new_id)).unwrap();
+            }
             Ok(None) => (),
         };
     }

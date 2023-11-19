@@ -6,20 +6,31 @@ use ad::ninep::{
 use std::time::SystemTime;
 
 fn main() {
-    let s = Server::new(EchoServer);
+    let s = Server::new(EchoServer {
+        rw: "initial".to_string(),
+    });
     _ = s.serve_socket(DEFAULT_SOCKET_NAME.to_string()).join();
 }
 
-struct EchoServer;
+struct EchoServer {
+    rw: String,
+}
+
 const ROOT: u64 = 0;
 const BAR: u64 = 1;
 const FOO: u64 = 2;
 const BAZ: u64 = 3;
+const RW: u64 = 4;
 
 impl Serve9p for EchoServer {
-    #[allow(unused_variables)]
     fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize> {
-        Err("write not supported".to_string())
+        if qid != RW {
+            return Err(format!("write not supported for {qid} @ {offset}"));
+        }
+
+        self.rw = String::from_utf8(data).unwrap();
+
+        Ok(self.rw.len())
     }
 
     #[allow(unused_variables)]
@@ -48,6 +59,7 @@ impl Serve9p for EchoServer {
         match (parent_qid, child) {
             (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),
             (ROOT, "foo") => Ok(FileMeta::file("foo", FOO)),
+            (ROOT, "rw") => Ok(FileMeta::file("rw", RW)),
             (BAR, "baz") => Ok(FileMeta::file("baz", BAZ)),
             (qid, child) => Err(format!("unknown child: qid={qid}, child={child}")),
         }
@@ -99,13 +111,25 @@ impl Serve9p for EchoServer {
                 last_modified_by: uname.into(),
             }),
 
+            RW => Ok(Stat {
+                fm: FileMeta::file("rw", BAZ),
+                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                n_bytes: self.rw.len() as u64,
+                last_accesses: SystemTime::now(),
+                last_modified: SystemTime::now(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
+            }),
+
             qid => Err(format!("stat for qid={qid}")),
         }
     }
 
     fn open(&mut self, qid: u64, mode: Mode, _uname: &str) -> Result<IoUnit> {
         match (qid, mode) {
-            (ROOT | FOO | BAR | BAZ, Mode::FILE) => Ok(8168),
+            (ROOT | FOO | BAR | BAZ | RW, Mode::FILE) => Ok(8168),
+            (RW, _) => Ok(8168),
             (qid, mode) => Err(format!("{qid} is not a known qid (mode={mode:?})")),
         }
     }
@@ -114,6 +138,9 @@ impl Serve9p for EchoServer {
         match (qid, offset) {
             (FOO, 0) => Ok("foo contents\n".as_bytes().to_vec()),
             (BAZ, 0) => Ok("contents of baz\n".as_bytes().to_vec()),
+            (RW, 0) => Ok(format!("server state is currently: '{}'", self.rw)
+                .as_bytes()
+                .to_vec()),
 
             _ => Ok(vec![]),
         }
@@ -136,6 +163,16 @@ impl Serve9p for EchoServer {
                     fm: FileMeta::file("foo", FOO),
                     perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
                     n_bytes: 42,
+                    last_accesses: SystemTime::now(),
+                    last_modified: SystemTime::now(),
+                    owner: uname.into(),
+                    group: uname.into(),
+                    last_modified_by: uname.into(),
+                },
+                Stat {
+                    fm: FileMeta::file("rw", FOO),
+                    perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                    n_bytes: self.rw.len() as u64,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
                     owner: uname.into(),

@@ -55,12 +55,15 @@ const IO_UNIT: u32 = 8168;
 // Fixed qids inside of '$HOME/.ad/mnt/buffers':
 ///   0. $HOME/.ad/mnt  -> The directory we mount to
 const MOUNT_ROOT_QID: u64 = 0;
-///   1.   ctrl         -> control file for issuing commands
+///   1.   /ctrl        -> control file for issuing commands
 const CONTROL_FILE_QID: u64 = 1;
 const CONTROL_FILE: &str = "ctrl";
-///   2    buffers/     -> parent directory for buffers
+///   2    /buffers/    -> parent directory for buffers
 const BUFFERS_QID: u64 = 2;
 const BUFFERS_DIR: &str = "buffers";
+//    3      /current   -> the fsys filename of the current buffer
+const CURRENT_BUFFER_QID: u64 = 3;
+const CURRENT_BUFFER: &str = "current";
 
 /// The number of qids required to serve both the directory and contents
 /// of a buffer node (used to generate qid values for buffers):
@@ -160,18 +163,18 @@ impl Serve9p for AdFs {
                 BUFFERS_DIR => Ok(self.buffer_nodes.stat().fm.clone()),
                 _ => match self.buffer_nodes.lookup_file_stat(parent_qid, child) {
                     Some(stat) => Ok(stat.fm.clone()),
-                    None => Err(E_UNKNOWN_FILE.to_string()),
+                    None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
                 },
             },
 
             qid if qid == BUFFERS_QID || self.buffer_nodes.is_known_buffer_qid(qid) => {
                 match self.buffer_nodes.lookup_file_stat(qid, child) {
                     Some(stat) => Ok(stat.fm.clone()),
-                    None => Err(E_UNKNOWN_FILE.to_string()),
+                    None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
                 }
             }
 
-            _ => Err(E_UNKNOWN_FILE.to_string()),
+            _ => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
         }
     }
 
@@ -196,7 +199,7 @@ impl Serve9p for AdFs {
                     .take(count)
                     .collect()),
 
-                None => Err(E_UNKNOWN_FILE.to_string()),
+                None => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
             },
         }
     }

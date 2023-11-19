@@ -34,7 +34,7 @@
 - [ ] FEATURE: run a shell command against the current buffer state via fsys
       - Initial idea here is to support things like formatters
 - [ ] FEATURE: support a $HOME/.ad/bin directory of commands that will be treated as builtins
-      - $AD_BUFFER_ID should be set to the current buffer ID so that commands are able to
+      - $BUFID should be set to the current buffer ID so that commands are able to
         target the buffer they are in
 - [ ] FEATURE: support opening and navigating directories
 

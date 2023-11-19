@@ -14,6 +14,7 @@ todo:
 setup-dotfiles:
 	mkdir -p $$HOME/.ad/mnt
 	cp data/init.conf $$HOME/.ad
+	cp -r data/bin $$HOME/.ad
 
 .PHONY: force-unmount
 force-unmount:
