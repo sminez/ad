@@ -72,16 +72,48 @@ impl From<(u16, Result<Rdata>)> for Rmessage {
     }
 }
 
+/// A type capable of handling [9p](http://9p.cat-v.org/) requests in order to implement a
+/// 9p virtual filesystem. The [Server] struct is used to handle the lower level protocal and
+/// underlying connection, allowing implementers of this trait to focus on the semantics of the
+/// virtual filesystem itself.
+///
+/// # The 9p protocol
+/// Please see [the documentation page on cat-v](http://9p.cat-v.org/documentation/) for an
+/// overview of how the protocol works along with various papers covering the original implementation
+/// from Bell Labs. For simple filesystems you should be able to get away with referring to the
+/// docs on each of the methods for this trait, but you are advised to read through the semantics
+/// around permissions and file creation as this is something handled by the trait implementer, not
+/// [Server].
+///
+/// ## Client fids and server-side qids
+/// [Server] handles establishing and maintaining per-client sessions along with all of their `fids`,
+/// as such, [Serve9p] only needs to worry about maintaining `qids` for resources.
+///
+/// The source code of [Server] is a useful reference for those wanting to learn more.
 pub trait Serve9p {
     // #[allow(unused_variables)]
     // fn auth(&mut self, afid: u32, uname: &str, aname: &str) -> Result<Qid> {
     //     Err("authentication not required".to_string())
     // }
 
+    /// Lookup a child node under a known parent directory by name.
+    ///
+    /// `9p` Twalk messages received by the server will specify a full path from a known parent
+    /// to a target child. This method is called for each element of that path in sequence in order,
+    /// stopping either when the target is reached or some element of the path returns an error.
+    ///
+    /// [Server] will ensure that this method is only called for known parents who have previously
+    /// been identified has having [FileType::Directory].
     fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta>;
 
+    /// Open an existing file in the requested mode for subsequent I/O via [read](Serve9p::read) and
+    /// [write](Serve9p::write) calls.
+    ///
+    /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
+    /// bytes that will be supported per read/write call on this resource.
     fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
+    /// Create a new file in the given parent directory.
     fn create(
         &mut self,
         parent: u64,
@@ -91,19 +123,26 @@ pub trait Serve9p {
         uname: &str,
     ) -> Result<(FileMeta, IoUnit)>;
 
+    /// Read `count` bytes from the requested file starting from the given `offset`.
     fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<Vec<u8>>;
 
+    /// List the contents of the given directory.
     fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>>;
 
+    /// Write the given `data` to the requested file starting at `offset`
     fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize>;
 
+    /// Remove the requested file from the filesystem.
     fn remove(&mut self, qid: u64, uname: &str) -> Result<()>;
 
+    /// Request a machine independent "directory entry" for the given resource.
     fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat>;
 
+    /// Attempt to set the machine independent "directory entry" for the given resource.
     fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()>;
 }
 
+/// A threaded `9p` server capable of listening on either a TCP socket or UNIX domain socket.
 #[derive(Debug)]
 pub struct Server<S>
 where

@@ -53,6 +53,3 @@
         offsets that have built up
 - [ ] Storing the history of previous edit commands and allowing for cycling through
       them would be helpful (same for Command mode).
-- [ ] Update the current "Command Mode" dummy mode to just take a string for the mode
-      name so that it can be re-used nicely rather than just calling EVERYTHING using
-      the single line mini-buffer "command mode" in the UI.
