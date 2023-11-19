@@ -58,6 +58,11 @@ impl Editor {
                 }
             }
 
+            "pwd" => {
+                self.set_status_message(&self.cwd.display().to_string());
+                None
+            }
+
             "q" | "quit" => Some(Single(Exit { force: false })),
             "q!" | "quit!" => Some(Single(Exit { force: true })),
 
