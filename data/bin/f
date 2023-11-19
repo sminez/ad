@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+# Pop open a tmux split running fzf to interactively select a file to open
+# from the current directory
+
+bufid=$(9p read "ad/buffers/current")
+dirname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
+files=$(cd $dirname && fd)
+fname=$(tmux-select "$files" | cut -d'|' -f1)
+
+if [[ -n "$fname" ]]; then
+  echo -n "open $fname" | 9p write ad/ctrl
+fi

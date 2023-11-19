@@ -1,0 +1,19 @@
+#!/usr/bin/env sh
+# Open a vertical tmux split to run fzf for selecting and echoing back a value
+# for use in another script
+
+if [[ -z "$TMUX" ]]; then
+  echo "echo not running in tmux" | 9p write ad/ctrl
+  exit 1
+fi
+
+input="$1"
+outfile="$(mktemp /tmp/ad-selection-XXX)"
+tmux split-window -v \
+  -e input="$input" \
+  -e outfile="$outfile" \
+    'echo $input | fzf --layout=reverse --cycle > $outfile'
+output=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
+rm "$outfile"
+
+echo "$output"

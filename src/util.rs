@@ -46,7 +46,7 @@ where
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
     let output = Command::new(cmd)
-        .env("PATH", format!("{path}:{home}/.ad/bin"))
+        .env("PATH", format!("{home}/.ad/bin:{path}"))
         .args(args)
         .output()?;
 
@@ -61,7 +61,7 @@ where
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
     Command::new(cmd)
-        .env("PATH", format!("{path}:{home}/.ad/bin"))
+        .env("PATH", format!("{home}/.ad/bin:{path}"))
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())

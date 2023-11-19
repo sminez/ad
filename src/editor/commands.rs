@@ -36,6 +36,11 @@ impl Editor {
             "db" | "delete-buffer" => Some(Single(DeleteBuffer { force: false })),
             "db!" | "delete-buffer!" => Some(Single(DeleteBuffer { force: true })),
 
+            "echo" => {
+                self.set_status_message(args);
+                None
+            }
+
             "E" | "Edit" => {
                 if args.is_empty() {
                     self.set_status_message("No edit script provided");

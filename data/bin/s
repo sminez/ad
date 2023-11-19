@@ -1,8 +1,9 @@
 #!/usr/bin/env sh
-# Search in the current buffer using dmenu and jump to the selected line
+# Search in the current buffer and jump to the selected line
 
 bufid=$(9p read "ad/buffers/current")
 body=$(9p read "ad/buffers/$bufid/body")
 numbered=$(echo "$body" | nl -ba -nln -s'| ' -w4)
-lnum=$(echo "$numbered" | dmenu -i -p '/ ' | cut -d'|' -f1)
+lnum=$(tmux-select "$numbered" | cut -d'|' -f1)
+
 echo -n "$lnum" | 9p write "ad/buffers/$bufid/addr"

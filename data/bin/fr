@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# "repo fd open"
+#
+# Pop open a tmux split running fzf to interactively select a file to open
+# from the current git repo
+
+root="$(git rev-parse --show-toplevel)"
+files=$(cd $root && fd)
+fname=$(tmux-select "$files" | cut -d'|' -f1)
+
+if [[ -n "$fname" ]]; then
+  echo -n "open $root/$fname" | 9p write ad/ctrl
+fi

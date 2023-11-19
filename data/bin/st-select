@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Open a floating st window under penrose to run fzf for selecting and echoing
+# back a value for use in another script
+
+outfile="$(mktemp /tmp/ad-selection-XXX)"
+
+setsid st \
+  -c "floatTerm" \
+  -e zsh -c "echo $1 | fzf --layout=reverse --cycle > $outfile" &
+output=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
+rm "$outfile"
+
+echo "$output"
