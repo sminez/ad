@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+# Search in the current buffer using dmenu and jump to the selected line
+
+winid="1"
+body=$(9p read "ad/buffers/$winid/body")
+numbered=$(echo "$body" | nl -ba -nln -s'| ' -w4)
+lnum=$(echo "$numbered" | dmenu -i -p '/ ' | cut -d'|' -f1)
+echo -n "$lnum" | 9p write "ad/buffers/$winid/addr"

@@ -209,9 +209,9 @@ impl From<FileType> for Perm {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileMeta {
-    pub(super) name: String,
-    pub(super) ty: FileType,
-    pub(super) qid: u64,
+    pub name: String,
+    pub ty: FileType,
+    pub qid: u64,
 }
 
 impl FileMeta {
