@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 
+[ -e "$HOME/.profile" ] && source ~/.profile
 bufids=$(9p ls "ad/buffers" | grep -v current)
 lines=$(
   echo "$bufids" | while read -r bufid ; do

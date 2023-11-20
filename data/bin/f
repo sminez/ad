@@ -2,6 +2,7 @@
 # Pop open a tmux split running fzf to interactively select a file to open
 # from the current directory
 
+[ -e "$HOME/.profile" ] && source ~/.profile
 bufid=$(9p read "ad/buffers/current")
 dirname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
 files=$(cd $dirname && fd)

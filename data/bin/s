@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # Search in the current buffer and jump to the selected line
 
+[ -e "$HOME/.profile" ] && source ~/.profile
 bufid=$(9p read "ad/buffers/current")
 body=$(9p read "ad/buffers/$bufid/body")
 numbered=$(echo "$body" | nl -ba -nln -s'| ' -w4)

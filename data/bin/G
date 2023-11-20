@@ -4,6 +4,7 @@
 # Run ripgrep to search for a pattern under the current file directory and open
 # the selected match in ad
 
+[ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$*" ]]; then
   echo "echo Need a pattern to grep for" | 9p write ad/ctl
   exit 1

@@ -2,6 +2,7 @@
 # Open a vertical tmux split to run fzf for selecting and echoing back a value
 # for use in another script
 
+[ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$TMUX" ]]; then
   echo "echo not running in tmux" | 9p write ad/ctl
   exit 1

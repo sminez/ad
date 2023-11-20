@@ -2,6 +2,7 @@
 # Open a floating st window under penrose to run fzf for selecting and echoing
 # back a value for use in another script
 
+[ -e "$HOME/.profile" ] && source ~/.profile
 outfile="$(mktemp /tmp/ad-selection-XXX)"
 
 setsid st \
