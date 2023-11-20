@@ -6,6 +6,7 @@
 #   tmux-select "$input"      -- echo $input into fzf for selection
 #   tmux-select -f "$infile"  -- cat $infile into fzf for selection
 #                                (Useful for large inputs)
+#   tmux-select -c cmd...     -- pipe output of cmd... into fzf for selection
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$TMUX" ]]; then
@@ -21,6 +22,9 @@ if [ "$1" = "-f" ]; then
     -e infile="$infile" \
     -e outfile="$outfile" \
       'cat "$infile" | fzf --layout=reverse --cycle > $outfile'
+elif [ "$1" = "-c" ]; then
+  cmd="$2"
+  tmux split-window -v "$cmd | fzf --layout=reverse --cycle > $outfile"
 else
   input="$1"
   tmux split-window -v \
