@@ -9,5 +9,5 @@ files=$(cd $dirname && fd)
 fname=$(tmux-select "$files")
 
 if [[ -n "$fname" ]]; then
-  echo -n "open $fname" | 9p write ad/ctl
+  echo -n "open $dirname/$fname" | 9p write ad/ctl
 fi
