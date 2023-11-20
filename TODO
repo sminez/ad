@@ -31,11 +31,6 @@
         _really_ should all make use of the same sort of event loop rather than having
         multiple, but that'll likely make things a lot more fiddly compared to using mpsc
         channels.
-- [ ] FEATURE: run a shell command against the current buffer state via fsys
-      - Initial idea here is to support things like formatters
-- [ ] FEATURE: support a $HOME/.ad/bin directory of commands that will be treated as builtins
-      - $BUFID should be set to the current buffer ID so that commands are able to
-        target the buffer they are in
 - [ ] FEATURE: support opening and navigating directories
 
 -- Fsys --

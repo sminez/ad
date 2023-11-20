@@ -1,6 +1,11 @@
 #!/usr/bin/env sh
 # Open a vertical tmux split to run fzf for selecting and echoing back a value
-# for use in another script
+# for use in another script.
+#
+# usage:
+#   tmux-select "$input"      -- echo $input into fzf for selection
+#   tmux-select -f "$infile"  -- cat $infile into fzf for selection
+#                                (Useful for large inputs)
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$TMUX" ]]; then
@@ -8,13 +13,22 @@ if [[ -z "$TMUX" ]]; then
   exit 1
 fi
 
-input="$1"
 outfile="$(mktemp /tmp/ad-selection-XXX)"
-tmux split-window -v \
-  -e input="$input" \
-  -e outfile="$outfile" \
-    'echo "$input" | fzf --layout=reverse --cycle > $outfile'
+
+if [ "$1" = "-f" ]; then
+  infile="$2"
+  tmux split-window -v \
+    -e infile="$infile" \
+    -e outfile="$outfile" \
+      'cat "$infile" | fzf --layout=reverse --cycle > $outfile'
+else
+  input="$1"
+  tmux split-window -v \
+    -e input="$input" \
+    -e outfile="$outfile" \
+      'echo "$input" | fzf --layout=reverse --cycle > $outfile'
+fi
+
 output=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
 rm "$outfile"
-
 echo "$output"
