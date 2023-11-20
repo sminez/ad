@@ -55,9 +55,9 @@ const IO_UNIT: u32 = 8168;
 // Fixed qids inside of '$HOME/.ad/mnt/buffers':
 ///   0. $HOME/.ad/mnt  -> The directory we mount to
 const MOUNT_ROOT_QID: u64 = 0;
-///   1.   /ctrl        -> control file for issuing commands
+///   1.   /ctl         -> control file for issuing commands
 const CONTROL_FILE_QID: u64 = 1;
-const CONTROL_FILE: &str = "ctrl";
+const CONTROL_FILE: &str = "ctl";
 ///   2    /buffers/    -> parent directory for buffers
 const BUFFERS_QID: u64 = 2;
 const BUFFERS_DIR: &str = "buffers";

@@ -1,4 +1,4 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Arrow {
     Up,
     Down,
@@ -18,7 +18,7 @@ impl Arrow {
 }
 
 // using 'showkey -a' to view keycodes is useful for adding to this
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Key {
     Char(char),
     Ctrl(char),
@@ -84,7 +84,7 @@ impl Key {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MouseButton {
     Left,
     Middle,
@@ -93,7 +93,7 @@ pub enum MouseButton {
     WheelDown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MouseEvent {
     Press { b: MouseButton, x: usize, y: usize },
     Hold { x: usize, y: usize },

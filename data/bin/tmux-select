@@ -3,7 +3,7 @@
 # for use in another script
 
 if [[ -z "$TMUX" ]]; then
-  echo "echo not running in tmux" | 9p write ad/ctrl
+  echo "echo not running in tmux" | 9p write ad/ctl
   exit 1
 fi
 
@@ -12,7 +12,7 @@ outfile="$(mktemp /tmp/ad-selection-XXX)"
 tmux split-window -v \
   -e input="$input" \
   -e outfile="$outfile" \
-    'echo $input | fzf --layout=reverse --cycle > $outfile'
+    'echo "$input" | fzf --layout=reverse --cycle > $outfile'
 output=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
 rm "$outfile"
 

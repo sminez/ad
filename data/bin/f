@@ -5,8 +5,8 @@
 bufid=$(9p read "ad/buffers/current")
 dirname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
 files=$(cd $dirname && fd)
-fname=$(tmux-select "$files" | cut -d'|' -f1)
+fname=$(tmux-select "$files")
 
 if [[ -n "$fname" ]]; then
-  echo -n "open $fname" | 9p write ad/ctrl
+  echo -n "open $fname" | 9p write ad/ctl
 fi

@@ -1,6 +1,7 @@
 //! vim style normal mode
 use crate::{
     buffer::TextObject::*,
+    config,
     editor::{Action::*, Actions, ViewPort},
     key::{Arrow::*, Key::*},
     keymap,
@@ -17,11 +18,11 @@ pub(crate) fn normal_mode() -> Mode {
         [ leader, Char('Q') ] => [ Exit { force: true } ],
 
         // Modes
-        [ leader, Char('b') ] => [ SelectBuffer ],
+        // [ leader, Char('b') ] => [ SelectBuffer ],
+        // [ Char('/') ] => [ SearchInCurrentBuffer ],
         [ Char(':') ] => [ CommandMode ],
         [ Char('!') ] => [ RunMode ],
         [ Char('.') ] => [ SamMode ],
-        [ Char('/') ] => [ SearchInCurrentBuffer ],
 
         // DEBUG
         [ Alt('?') ] => [ DebugBufferContents ],
@@ -98,6 +99,11 @@ pub(crate) fn normal_mode() -> Mode {
         name: "NORMAL".to_string(),
         cur_shape: CurShape::Block,
         keymap,
-        handle_expired_pending: |_| None,
+        handle_expired_pending: |keys| {
+            config!()
+                .bindings
+                .get(keys)
+                .map(|prog| Actions::Single(ShellRun { cmd: prog.clone() }))
+        },
     }
 }

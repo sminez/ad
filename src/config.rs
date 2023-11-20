@@ -1,6 +1,6 @@
 //! A minimal config file format for ad
-use crate::term::Color;
-use std::{env, fs, io};
+use crate::{key::Key, mode::normal_mode, term::Color};
+use std::{collections::BTreeMap, env, fs, io};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -10,6 +10,7 @@ pub struct Config {
     pub(crate) status_timeout: u64,
     pub(crate) minibuffer_lines: usize,
     pub(crate) colorscheme: ColorScheme,
+    pub(crate) bindings: BTreeMap<Vec<Key>, String>,
 }
 
 impl Default for Config {
@@ -21,6 +22,7 @@ impl Default for Config {
             status_timeout: 5,
             minibuffer_lines: 10,
             colorscheme: ColorScheme::default(),
+            bindings: BTreeMap::new(),
         }
     }
 }
@@ -77,8 +79,33 @@ impl Config {
             }
 
             match line.strip_prefix("set ") {
-                None => return Err(format!("'{line}' is not a 'set prop=val' command")),
                 Some(line) => cfg.try_set_prop(line)?,
+                None => match line.strip_prefix("map ") {
+                    Some(line) => cfg.try_add_mapping(line)?,
+                    None => {
+                        return Err(format!(
+                            "'{line}' should be 'set prop=val' or 'map ... => prog'"
+                        ))
+                    }
+                },
+            }
+        }
+
+        if !cfg.bindings.is_empty() {
+            // Make sure that none of the user provided bindings clash with Normal mode
+            // bindings as that will mean they never get run
+            let nm = normal_mode();
+            for keys in cfg.bindings.keys() {
+                if nm.keymap.contains_key_or_prefix(keys) {
+                    let mut s = String::new();
+                    for k in keys {
+                        if let Key::Char(c) = k {
+                            s.push(*c);
+                        }
+                    }
+
+                    return Err(format!("mapping '{s}' collides with a Normal mode mapping"));
+                }
             }
         }
 
@@ -86,10 +113,9 @@ impl Config {
     }
 
     pub(crate) fn try_set_prop(&mut self, input: &str) -> Result<(), String> {
-        let (prop, val) = match input.split_once('=') {
-            None => return Err(format!("'{input}' is not a 'set prop=val' command")),
-            Some(parts) => parts,
-        };
+        let (prop, val) = input
+            .split_once('=')
+            .ok_or_else(|| format!("'{input}' is not a 'set prop=val' statement"))?;
 
         match prop {
             // Numbers
@@ -111,6 +137,35 @@ impl Config {
 
             _ => return Err(format!("'{prop}' is not a known config property")),
         }
+
+        Ok(())
+    }
+
+    pub(crate) fn try_add_mapping(&mut self, input: &str) -> Result<(), String> {
+        let (keys, prog) = input
+            .split_once("=>")
+            .ok_or_else(|| format!("'{input}' is not a 'map ... => prog' statement"))?;
+
+        let keys: Vec<Key> = keys
+            .split_whitespace()
+            .filter_map(|s| {
+                if s.len() == 1 {
+                    let c = s.chars().next().unwrap();
+                    if c.is_whitespace() {
+                        None
+                    } else {
+                        Some(Key::Char(c))
+                    }
+                } else {
+                    match s {
+                        "<space>" => Some(Key::Char(' ')),
+                        _ => None,
+                    }
+                }
+            })
+            .collect();
+
+        self.bindings.insert(keys, prog.trim().to_string());
 
         Ok(())
     }
@@ -152,6 +207,8 @@ set tabstop=7
 
 set expand-tab=false
 set match-indent=false
+
+map G G => my-prog
 ";
 
     // This should be our default so we are just verifying that we have not diverged from
@@ -159,11 +216,20 @@ set match-indent=false
     #[test]
     fn parse_of_example_config_works() {
         let cfg = Config::parse(EXAMPLE_CONFIG).unwrap();
+        let bindings: BTreeMap<Vec<Key>, String> = [
+            (vec![Key::Char(' '), Key::Char('b')], "B".to_string()),
+            (vec![Key::Char('/')], "s".to_string()),
+            (vec![Key::Char('-')], "f".to_string()),
+            (vec![Key::Char('_')], "fr".to_string()),
+        ]
+        .into_iter()
+        .collect();
 
         let expected = Config {
             tabstop: 4,
             expand_tab: true,
             match_indent: true,
+            bindings,
             ..Default::default()
         };
 
@@ -178,6 +244,9 @@ set match-indent=false
             tabstop: 7,
             expand_tab: false,
             match_indent: false,
+            bindings: [(vec![Key::Char('G'), Key::Char('G')], "my-prog".to_string())]
+                .into_iter()
+                .collect(),
             ..Default::default()
         };
 

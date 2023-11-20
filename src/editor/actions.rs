@@ -43,6 +43,7 @@ pub enum Action {
     EditCommand { cmd: String },
     ExecuteDot,
     Exit { force: bool },
+    FocusBuffer { id: usize },
     InsertChar { c: char },
     InsertString { s: String },
     LoadDot,
@@ -280,9 +281,14 @@ impl Editor {
         if let MiniBufferSelection::Line { line, .. } = selection {
             // unwrap is fine here because we know the format of the buf list we are supplying
             if let Ok(id) = line.split_once(' ').unwrap().0.parse::<usize>() {
-                self.buffers.focus_id(id);
+                self.focus_buffer(id);
             }
         }
+    }
+
+    pub(super) fn focus_buffer(&mut self, id: usize) {
+        self.buffers.focus_id(id);
+        self.btx.send(BufId::Current(id)).unwrap();
     }
 
     pub(super) fn debug_buffer_contents(&mut self) {

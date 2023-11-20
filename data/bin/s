@@ -7,3 +7,4 @@ numbered=$(echo "$body" | nl -ba -nln -s'| ' -w4)
 lnum=$(tmux-select "$numbered" | cut -d'|' -f1)
 
 echo -n "$lnum" | 9p write "ad/buffers/$bufid/addr"
+echo -n "viewport-center" | 9p write "ad/ctl"

@@ -1,0 +1,15 @@
+#!/usr/bin/env sh
+
+bufids=$(9p ls "ad/buffers" | grep -v current)
+lines=$(
+  echo "$bufids" | while read -r bufid ; do
+    fname=$(9p read "ad/buffers/$bufid/filename")
+    echo -e "$bufid |\t$fname"
+  done | column -t
+)
+
+bufid=$(tmux-select "$lines" | cut -d'|' -f1)
+
+if [[ -n "$bufid" ]]; then
+  echo -n "buffer $bufid" | 9p write ad/ctl
+fi

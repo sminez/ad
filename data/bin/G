@@ -5,11 +5,11 @@
 # the selected match in ad
 
 if [[ -z "$*" ]]; then
-  echo "echo Need a pattern to grep for" | 9p write ad/ctrl
+  echo "echo Need a pattern to grep for" | 9p write ad/ctl
   exit 1
 fi
 if [[ -z "$TMUX" ]]; then
-  echo "echo not running in tmux" | 9p write ad/ctrl
+  echo "echo not running in tmux" | 9p write ad/ctl
   exit 1
 fi
 
@@ -34,7 +34,7 @@ rm "$outfile"
 if [[ -n $output ]]; then 
   fname=$(echo $output | cut -d':' -f1)
   lnum=$(echo $output | cut -d':' -f2)
-  echo -n "open $dirname/$fname" | 9p write ad/ctrl
+  echo -n "open $dirname/$fname" | 9p write ad/ctl
   bufid=$(9p read "ad/buffers/current")
   echo -n "$lnum" | 9p write ad/buffers/$bufid/addr
 fi

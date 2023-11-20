@@ -9,6 +9,8 @@ use std::fmt;
 mod insert;
 mod normal;
 
+pub(crate) use normal::normal_mode;
+
 /// The modes available for ad
 pub(crate) fn modes() -> Vec<Mode> {
     vec![normal::normal_mode(), insert::insert_mode()]
@@ -17,7 +19,7 @@ pub(crate) fn modes() -> Vec<Mode> {
 pub struct Mode {
     pub(crate) name: String,
     pub(crate) cur_shape: CurShape,
-    keymap: Trie<Key, Actions>,
+    pub(crate) keymap: Trie<Key, Actions>,
     handle_expired_pending: fn(&[Key]) -> Option<Actions>,
 }
 

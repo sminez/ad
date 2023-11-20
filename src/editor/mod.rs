@@ -256,6 +256,7 @@ impl Editor {
             Action::DeleteBuffer { force } => self.delete_current_buffer(force),
             Action::EditCommand { cmd } => self.execute_edit_command(&cmd),
             Action::Exit { force } => self.exit(force),
+            Action::FocusBuffer { id } => self.focus_buffer(id),
             Action::NextBuffer => {
                 self.buffers.next();
                 let id = self.buffers.active().id;

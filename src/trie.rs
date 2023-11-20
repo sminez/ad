@@ -115,6 +115,10 @@ where
     pub fn is_empty(&self) -> bool {
         self.roots.is_empty()
     }
+
+    pub fn contains_key_or_prefix(&self, key: &[K]) -> bool {
+        !matches!(self.get(key), QueryResult::Missing)
+    }
 }
 
 impl<V> Trie<char, V>

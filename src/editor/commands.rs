@@ -2,7 +2,7 @@
 use crate::editor::{
     Action::*,
     Actions::{self, *},
-    Editor,
+    Editor, ViewPort,
 };
 
 impl Editor {
@@ -19,7 +19,13 @@ impl Editor {
         };
 
         match command {
-            "b" | "buffer" => Some(Single(SelectBuffer)),
+            "b" | "buffer" => match args.parse::<usize>() {
+                Ok(id) => Some(Single(FocusBuffer { id })),
+                Err(_) => {
+                    self.set_status_message(&format!("'{args}' is not a valid buffer id"));
+                    None
+                }
+            },
             "bn" | "buffer-next" => Some(Single(NextBuffer)),
             "bp" | "buffer-previous" => Some(Single(PreviousBuffer)),
 
@@ -90,6 +96,10 @@ impl Editor {
 
             "wq" | "write-quit" => Some(Multi(vec![SaveBuffer, Exit { force: false }])),
             "wq!" | "write-quit!" => Some(Multi(vec![SaveBuffer, Exit { force: true }])),
+
+            "zb" | "viewport-bottom" => Some(Single(SetViewPort(ViewPort::Bottom))),
+            "zt" | "viewport-top" => Some(Single(SetViewPort(ViewPort::Top))),
+            "zz" | "viewport-center" => Some(Single(SetViewPort(ViewPort::Center))),
 
             "" => None,
 
