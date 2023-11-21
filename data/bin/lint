@@ -3,13 +3,11 @@
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 root="$(git rev-parse --show-toplevel)"
-bufid=$(9p read "ad/buffers/current")
-dirname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
 
 # Determine project type
 if [ -e "$root/Cargo.toml" ]; then
   echo "echo running 'cargo clippy'..." | 9p write ad/ctl
-  cmd="cd $dirname && cargo clippy -q --message-format=short --color=never --all-targets 2>&1"
+  cmd="cd $root && cargo clippy -q --message-format=short --color=never --all-targets 2>&1"
   line="$(tmux-select -c "$cmd" | cut -d' ' -f1)"
   fname="$(echo $line | cut -d':' -f1)"
   lnum="$(echo $line | cut -d':' -f2)"
