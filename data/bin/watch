@@ -1,0 +1,43 @@
+#!/usr/bin/env sh
+# Open a vertical tmux split to run the given command under entr so that it is rerun when
+# the requested files change
+#
+# usage:
+#   watch -b cmd [args...]    -- run cmd with args when the current file changes
+#   watch -d cmd [args... ]   -- run cmd with args when files in the current directory change
+#   watch -g cmd [args...]    -- run cmd with args when files in the current git repo change
+
+[ -e "$HOME/.profile" ] && source ~/.profile
+if [[ -z "$TMUX" ]]; then
+  echo "echo not running in tmux" | 9p write ad/ctl
+  exit 1
+fi
+
+case "$1" in
+  -b)
+    bufid=$(9p read "ad/buffers/current")
+    fname=$(9p read "ad/buffers/$bufid/filename")
+    fcmd="echo $fname"
+    ;;
+
+  -d)
+    bufid=$(9p read "ad/buffers/current")
+    dname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
+    fcmd="cd $dname && fd"
+    ;;
+
+  -g)
+    fcmd="git ls-files"
+    ;;
+
+  *)
+    echo "echo invalid flag for watch: expected -b/-d/-g" | 9p write ad/ctl
+    exit 1
+    ;;
+esac
+
+shift
+
+echo "echo running '$*'" | 9p write ad/ctl
+
+tmux split-window -v -l 10 "$fcmd | entr -ac $*"
