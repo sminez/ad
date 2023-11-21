@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Alias for running watch in a vertical split, re-running on changes inside
+# of the current git repo
+
+watch -v -g $*

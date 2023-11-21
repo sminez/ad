@@ -1,17 +1,43 @@
 #!/usr/bin/env sh
-# Open a vertical tmux split to run the given command under entr so that it is rerun when
-# the requested files change
+# Open a tmux split to run the given command under entr so that it is rerun when
+# the requested files change.
+#
+# By default the split will be vertical, but the -h flag can be used to change it to
+# horizontal
 #
 # usage:
-#   watch -b cmd [args...]    -- run cmd with args when the current file changes
-#   watch -d cmd [args... ]   -- run cmd with args when files in the current directory change
-#   watch -g cmd [args...]    -- run cmd with args when files in the current git repo change
+#   watch [-h/-v] -b cmd [args...]    -- run cmd with args when the current file changes
+#   watch [-h/-v] -d cmd [args... ]   -- run cmd with args when files in the current directory change
+#   watch [-h/-v] -g cmd [args...]    -- run cmd with args when files in the current git repo change
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$TMUX" ]]; then
   echo "echo not running in tmux" | 9p write ad/ctl
   exit 1
 fi
+
+split="-v"
+p="20"
+
+case "$1" in
+  -h)
+    split="-h"
+    p="40"
+    shift
+    ;;
+
+  -v)
+    shift
+    ;;
+
+  -b|-d|-g)
+    ;;
+
+  *) 
+    echo "echo invalid flag for watch: expected -b/-d/-g" | 9p write ad/ctl
+    exit 1
+    ;;
+esac
 
 case "$1" in
   -b)
@@ -40,4 +66,4 @@ shift
 
 echo "echo running '$*'" | 9p write ad/ctl
 
-tmux split-window -v -l 10 "$fcmd | entr -ac $*"
+tmux split-window -d $split -p $p "$fcmd | entr -ac $*"
