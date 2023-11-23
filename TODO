@@ -35,6 +35,13 @@
         the file but this is normal behaviour for sed so not an issue with ad
 - [ ] need to detect an existing Fuse mount and handle the conflict gracefully
 - [ ] decide on the event format for the events file and implement the events file
+- [ ] add top level logfile calling out:
+  - buffer open
+  - buffer close
+  - buffer save
+  - change of active buffer
+- [ ] need per buffer/directory '+errors' style buffer that can also operate something like
+      vim's quickfix list (possibly need a top level one as well then?)
 
 -- Structural regular expressions --
 - [ ] FEATURE: Piping through a shell command
