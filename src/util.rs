@@ -38,7 +38,7 @@ pub fn read_clipboard() -> io::Result<String> {
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
 }
 
-pub fn run_command<I, S>(cmd: &str, args: I) -> io::Result<String>
+pub fn run_command<I, S>(cmd: &str, args: I, cwd: &Path) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -47,13 +47,14 @@ where
     let home = env::var("HOME").unwrap();
     let output = Command::new(cmd)
         .env("PATH", format!("{home}/.ad/bin:{path}"))
+        .current_dir(cwd)
         .args(args)
         .output()?;
 
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
 }
 
-pub fn spawn_command<I, S>(cmd: &str, args: I) -> io::Result<()>
+pub fn spawn_command<I, S>(cmd: &str, args: I, cwd: &Path) -> io::Result<()>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -62,6 +63,7 @@ where
     let home = env::var("HOME").unwrap();
     Command::new(cmd)
         .env("PATH", format!("{home}/.ad/bin:{path}"))
+        .current_dir(cwd)
         .args(args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -70,12 +72,16 @@ where
     Ok(())
 }
 
-pub fn pipe_through_command<I, S>(cmd: &str, args: I, input: &str) -> io::Result<String>
+pub fn pipe_through_command<I, S>(cmd: &str, args: I, input: &str, cwd: &Path) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
+    let path = env::var("PATH").unwrap();
+    let home = env::var("HOME").unwrap();
     let mut child = Command::new(cmd)
+        .env("PATH", format!("{home}/.ad/bin:{path}"))
+        .current_dir(cwd)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

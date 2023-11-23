@@ -169,6 +169,13 @@ impl Buffer {
         }
     }
 
+    pub fn dir(&self) -> Option<&Path> {
+        match &self.kind {
+            BufferKind::File(p) => p.parent(),
+            _ => None,
+        }
+    }
+
     pub fn is_unnamed(&self) -> bool {
         self.kind == BufferKind::Unnamed
     }

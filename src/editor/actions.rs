@@ -378,10 +378,14 @@ impl Editor {
     }
 
     pub(super) fn pipe_dot_through_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let s = self.buffers.active().dot_contents();
+        let (s, d) = {
+            let b = self.buffers.active();
+            (b.dot_contents(), b.dir().unwrap_or(&self.cwd))
+        };
+
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s),
-            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s),
+            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s, d),
+            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s, d),
         };
 
         match res {
@@ -391,9 +395,10 @@ impl Editor {
     }
 
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
+        let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace()),
-            None => run_command(raw_cmd_str, std::iter::empty::<&str>()),
+            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d),
+            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d),
         };
 
         match res {
@@ -403,9 +408,10 @@ impl Editor {
     }
 
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
+        let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => spawn_command(cmd, rest.split_whitespace()),
-            None => spawn_command(raw_cmd_str, std::iter::empty::<&str>()),
+            Some((cmd, rest)) => spawn_command(cmd, rest.split_whitespace(), d),
+            None => spawn_command(raw_cmd_str, std::iter::empty::<&str>(), d),
         };
 
         match res {

@@ -12,25 +12,20 @@
 - [ ] FEATURE: Edit log transactions
 	  - paste should always be a new transaction
 - [ ] implement remaining text objects
+      - Target character
+      - Delimited between a given character pair
       >> The implementation for these is yet another way of hunting through the buffer for
          a certain position. Now that the regex engine works it might actually be simpler
          (though probably not faster) to just use that for all text object style Dot changes?
-      - Target character
-      - Delimited between a given character pair
 - [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
 - [ ] FEATURE: mini-buffer tab complete
 - [ ] FEATURE: completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
-- [ ] FEATURE: auto-reload files when they are modified on disk
-      - This is a feature that has saved me countless times when pulling changes from git
-        so it really does need to be there, but having this implemented cross platform
-        is likely going to bring in a bunch of dependencies.
-      - The notify crate (https://crates.io/crates/notify) seems to be what a lot of things
-        use but it brings in mio it seems so the other inter-thread communication pieces
-        _really_ should all make use of the same sort of event loop rather than having
-        multiple, but that'll likely make things a lot more fiddly compared to using mpsc
-        channels.
+- [ ] FEATURE: when focusing a buffer, check if the underlying file has changed on disk and
+               prompt to see if it should be reloaded
+- [ ] FEATURE: when saving a buffer, check if the underlying file has changed and warn if
+               it has
 - [ ] FEATURE: support opening and navigating directories
 
 -- Fsys --
@@ -39,6 +34,7 @@
       - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
         the file but this is normal behaviour for sed so not an issue with ad
 - [ ] need to detect an existing Fuse mount and handle the conflict gracefully
+- [ ] decide on the event format for the events file and implement the events file
 
 -- Structural regular expressions --
 - [ ] FEATURE: Piping through a shell command
