@@ -75,11 +75,15 @@ pub struct Buffer {
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
     pub(super) fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
-        let raw = match fs::read_to_string(&path) {
+        let mut raw = match fs::read_to_string(&path) {
             Ok(contents) => contents,
             Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
             Err(e) => return Err(e),
         };
+
+        if raw.ends_with('\n') {
+            raw.pop();
+        }
 
         Ok(Self {
             id,
@@ -100,10 +104,14 @@ impl Buffer {
             _ => return "Buffer is not backed by a file on disk".to_string(),
         };
 
-        let raw = match fs::read_to_string(path) {
+        let mut raw = match fs::read_to_string(path) {
             Ok(contents) => contents,
             Err(e) => return format!("Error reloading file: {e}"),
         };
+
+        if raw.ends_with('\n') {
+            raw.pop();
+        }
 
         self.txt = Rope::from_str(&raw);
         self.edit_log.clear();
@@ -134,8 +142,7 @@ impl Buffer {
     }
 
     pub fn new_virtual(id: usize, name: String, mut content: String) -> Self {
-        let has_trailing_newline = content.ends_with('\n');
-        if has_trailing_newline {
+        if content.ends_with('\n') {
             content.pop();
         }
 
@@ -181,11 +188,15 @@ impl Buffer {
     }
 
     pub fn contents(&self) -> Vec<u8> {
-        self.txt.bytes().collect()
+        let mut contents: Vec<u8> = self.txt.bytes().collect();
+        contents.push(b'\n');
+        contents
     }
 
     pub fn str_contents(&self) -> String {
-        self.txt.to_string()
+        let mut s = self.txt.to_string();
+        s.push('\n');
+        s
     }
 
     pub(crate) fn string_lines(&self) -> Vec<String> {
