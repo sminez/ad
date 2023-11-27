@@ -9,6 +9,11 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
+- [ ] support dot expressions using '-/+' to set search direction and manipulation of simple
+      dot expressions.
+      - The docs for Sam and Acme cover the sorts of expressions that are supported. A big one
+        is using -/re/ to search backwards with a regex. Things like '#5-+' to select all of line
+        5 are also in there.
 - [ ] FEATURE: Edit log transactions
 	  - paste should always be a new transaction
 - [ ] implement remaining text objects

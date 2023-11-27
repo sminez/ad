@@ -5,7 +5,6 @@ use std::{iter::Peekable, mem::swap, str::Chars};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Ast {
-    // FIXME: should just be Comp(Op),
     Comp(Comp),
     Assertion(Assertion),
     Alt(Vec<Ast>),
@@ -228,6 +227,9 @@ fn handle_alt(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Error
 
     loop {
         if parse1(it, &mut buf)?.is_some() {
+            if buf.is_empty() {
+                return Err(Error::UnbalancedAlt);
+            }
             alt.push(Ast::concat_or_node(buf));
             break;
         }
