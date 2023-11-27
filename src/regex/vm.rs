@@ -55,15 +55,33 @@ impl Regex {
     /// that the allocation cost is paid once up front rather than on each use of the Regex.
     pub fn compile(re: &str) -> Result<Self, Error> {
         let ast = parse(re)?;
-        let ops = optimise(compile_ast(ast));
-        let prog: Prog = ops.into_iter().map(|op| Inst { op, gen: 0 }).collect();
+        Ok(Self::new(compile_ast(ast)))
+    }
+
+    /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
+    /// This is used for searching backwards through an input stream.
+    ///
+    /// This method handles pre-allocation of the memory required for running the VM so
+    /// that the allocation cost is paid once up front rather than on each use of the Regex.
+    pub fn compile_reverse(re: &str) -> Result<Self, Error> {
+        let mut ast = parse(re)?;
+        ast.reverse();
+
+        Ok(Self::new(compile_ast(ast)))
+    }
+
+    fn new(ops: Vec<Op>) -> Self {
+        let prog: Prog = optimise(ops)
+            .into_iter()
+            .map(|op| Inst { op, gen: 0 })
+            .collect();
 
         let clist = vec![Thread::default(); prog.len()].into_boxed_slice();
         let nlist = vec![Thread::default(); prog.len()].into_boxed_slice();
         let sms = vec![SubMatches::default(); prog.len()].into_boxed_slice();
         let free_sms = (1..prog.len()).collect();
 
-        Ok(Self {
+        Self {
             prog,
             clist,
             nlist,
@@ -75,7 +93,7 @@ impl Regex {
             sms,
             free_sms,
             track_submatches: true,
-        })
+        }
     }
 
     /// Attempt to match this Regex against a given `&str` input, returning the position
