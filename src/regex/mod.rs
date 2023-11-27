@@ -6,6 +6,7 @@
 use crate::util::parse_num;
 use std::{iter::Peekable, str::Chars};
 
+mod ast;
 mod compile;
 mod matches;
 mod vm;
