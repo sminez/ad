@@ -1,5 +1,5 @@
 //! A simple AST for parsing and manipulating regex strings
-use super::{compile::Assertion, next_char, CharClass, Error};
+use super::{next_char, CharClass, Error};
 use crate::util::parse_num;
 use std::{iter::Peekable, mem::swap, str::Chars};
 
@@ -56,6 +56,45 @@ pub(super) enum Comp {
     Class(CharClass),
     Any,
     TrueAny,
+}
+
+impl Comp {
+    /// Whether or not this Comp matches the current VM state.
+    #[inline]
+    pub(super) fn matches(&self, ch: char) -> bool {
+        match self {
+            Comp::Char(c) => *c == ch,
+            Comp::Class(cls) => cls.matches(ch),
+            Comp::Any => ch != '\n',
+            Comp::TrueAny => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Assertion {
+    LineStart,
+    LineEnd,
+    WordBoundary,
+    NonWordBoundary,
+}
+
+impl Assertion {
+    #[inline]
+    pub(super) fn holds_for(&self, prev: Option<char>, next: Option<char>) -> bool {
+        match self {
+            Assertion::LineStart => matches!(prev, Some('\n') | None),
+            Assertion::LineEnd => matches!(next, Some('\n') | None),
+            Assertion::WordBoundary => match (prev, next) {
+                (_, None) | (None, _) => true,
+                (Some(p), Some(n)) => p.is_alphanumeric() != n.is_alphanumeric(),
+            },
+            Assertion::NonWordBoundary => match (prev, next) {
+                (_, None) | (None, _) => false,
+                (Some(p), Some(n)) => p.is_alphanumeric() == n.is_alphanumeric(),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

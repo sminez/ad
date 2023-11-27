@@ -9,8 +9,8 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use super::{
-    ast::parse,
-    compile::{compile_ast, optimise, Assertion, Inst, Op, Prog},
+    ast::{parse, Assertion},
+    compile::{compile_ast, optimise, Inst, Op, Prog},
     matches::{Match, MatchIter},
     Error,
 };
@@ -271,15 +271,13 @@ impl Regex {
         let t = &self.clist[i];
         match &self.prog[t.pc].op {
             // If comparisons and their assertions hold then queue the resulting threads
-            op @ (Op::Char(_) | Op::Class(_) | Op::Any | Op::TrueAny) if op.matches(ch) => {
-                match t.assertion {
-                    Some(a) if !a.holds_for(self.prev, self.next) => {
-                        self.sm_dec_ref(t.sm);
-                        return None;
-                    }
-                    _ => self.add_thread(thread(t.pc + 1, t.sm), sp, false),
+            Op::Comp(comp) if comp.matches(ch) => match t.assertion {
+                Some(a) if !a.holds_for(self.prev, self.next) => {
+                    self.sm_dec_ref(t.sm);
+                    return None;
                 }
-            }
+                _ => self.add_thread(thread(t.pc + 1, t.sm), sp, false),
+            },
 
             Op::Match => return Some(t.sm),
 

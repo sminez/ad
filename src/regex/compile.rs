@@ -1,8 +1,5 @@
 //! The op-code compiler and optimised for the regex VM
-use super::{
-    ast::{Ast, Comp, Greed, Rep},
-    CharClass,
-};
+use super::ast::{Assertion, Ast, Comp, Greed, Rep};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,42 +10,10 @@ pub(super) struct Inst {
 
 pub(super) type Prog = Vec<Inst>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Assertion {
-    LineStart,
-    LineEnd,
-    WordBoundary,
-    NonWordBoundary,
-}
-
-impl Assertion {
-    #[inline]
-    pub(super) fn holds_for(&self, prev: Option<char>, next: Option<char>) -> bool {
-        match self {
-            Assertion::LineStart => matches!(prev, Some('\n') | None),
-            Assertion::LineEnd => matches!(next, Some('\n') | None),
-            Assertion::WordBoundary => match (prev, next) {
-                (_, None) | (None, _) => true,
-                (Some(p), Some(n)) => p.is_alphanumeric() != n.is_alphanumeric(),
-            },
-            Assertion::NonWordBoundary => match (prev, next) {
-                (_, None) | (None, _) => false,
-                (Some(p), Some(n)) => p.is_alphanumeric() == n.is_alphanumeric(),
-            },
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Op {
-    // Comparison ops
-    Char(char),
-    Class(CharClass),
-    Any,
-    TrueAny,
-    // Assertions
+    Comp(Comp),
     Assertion(Assertion),
-    // Control ops
     Split(usize, usize),
     Jump(usize),
     Save(usize),
@@ -56,23 +21,8 @@ pub(super) enum Op {
 }
 
 impl Op {
-    /// Whether or not this Op matches the current VM state.
-    /// This will panic if not called on a comparison or assertion Op.
-    #[inline]
-    pub(super) fn matches(&self, ch: char) -> bool {
-        match self {
-            Op::Char(c) => *c == ch,
-            Op::Class(cls) => cls.matches(ch),
-            Op::Any => ch != '\n',
-            Op::TrueAny => true,
-
-            op => panic!("matches called on invalid op: {op:?}"),
-        }
-    }
-
-    #[inline]
-    fn is_comp(&self) -> bool {
-        !matches!(self, Op::Split(_, _) | Op::Jump(_) | Op::Match)
+    fn is_control(&self) -> bool {
+        matches!(self, Op::Jump(_) | Op::Split(_, _) | Op::Match)
     }
 }
 
@@ -116,7 +66,7 @@ fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut usize) -> Vec<Op> {
     buf
 }
 
-fn concat_nodes(nodes: Vec<Ast>, offset: usize, saves: &mut usize) -> Vec<Op> {
+fn concat_ops(nodes: Vec<Ast>, offset: usize, saves: &mut usize) -> Vec<Op> {
     let concat_len = nodes.iter().map(|n| n.op_len()).sum();
     let mut buf = Vec::with_capacity(concat_len);
     for node in nodes.into_iter() {
@@ -138,7 +88,7 @@ fn submatch_ops(node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
     buf
 }
 
-fn rep_nodes(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
+fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
     match r {
         Rep::Quest(greed) => {
             let (mut l1, mut l2) = (offset + 1, offset + 1 + node.op_len());
@@ -179,20 +129,15 @@ fn rep_nodes(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
 
 impl Ast {
     /// Each AST node returns split and jump offsets as if it were zero indexed.
-    /// Wrapper nodes (alts, reps, cats) update those offsets as needed
+    /// Wrapper nodes (alts, reps, cats, subexprs) update those offsets as needed
     fn into_ops(self, offset: usize, saves: &mut usize) -> Ops {
         match self {
-            Ast::Comp(Comp::Char(ch)) => Ops::One(Op::Char(ch)),
-            Ast::Comp(Comp::Class(cls)) => Ops::One(Op::Class(cls)),
-            Ast::Comp(Comp::Any) => Ops::One(Op::Any),
-            Ast::Comp(Comp::TrueAny) => Ops::One(Op::TrueAny),
-
+            Ast::Comp(comp) => Ops::One(Op::Comp(comp)),
             Ast::Assertion(a) => Ops::One(Op::Assertion(a)),
-
             Ast::Alt(nodes) => Ops::Many(alt_ops(nodes, offset, saves)),
-            Ast::Concat(nodes) => Ops::Many(concat_nodes(nodes, offset, saves)),
+            Ast::Concat(nodes) => Ops::Many(concat_ops(nodes, offset, saves)),
             Ast::SubMatch(node) => Ops::Many(submatch_ops(*node, offset, saves)),
-            Ast::Rep(r, node) => Ops::Many(rep_nodes(r, *node, offset, saves)),
+            Ast::Rep(r, node) => Ops::Many(rep_ops(r, *node, offset, saves)),
         }
     }
 }
@@ -206,7 +151,12 @@ pub(super) fn compile_ast(ast: Ast) -> Vec<Op> {
 
     // Compiled code for "@*?" to allow for unanchored matching.
     // Save(0) marks the beginning of the regex in the input
-    let mut full = vec![Op::Split(3, 1), Op::TrueAny, Op::Split(3, 1), Op::Save(0)];
+    let mut full = vec![
+        Op::Split(3, 1),
+        Op::Comp(Comp::TrueAny),
+        Op::Split(3, 1),
+        Op::Save(0),
+    ];
     // Unconditionally increment all jumps and splits in the compiled program
     // to account for the prefix we just added.
     full.extend(prog.into_iter().map(|op| match op {
@@ -294,7 +244,7 @@ fn strip_unreachable_instructions(ops: &mut Vec<Op>) {
     }
 
     for i in (1..ops.len() - 1).rev() {
-        if ops[i - 1].is_comp() || jumps.contains(&i) {
+        if !ops[i - 1].is_control() || jumps.contains(&i) {
             continue;
         }
 
@@ -330,7 +280,7 @@ mod tests {
     }
 
     fn c(ch: char) -> Op {
-        Op::Char(ch)
+        Op::Comp(Comp::Char(ch))
     }
 
     fn sv(s: usize) -> Op {
@@ -357,7 +307,7 @@ mod tests {
         let ast = parse(re).unwrap();
         let prog = compile_ast(ast);
 
-        let mut full = vec![sp(3, 1), Op::TrueAny, sp(3, 1), sv(0)];
+        let mut full = vec![sp(3, 1), Op::Comp(Comp::TrueAny), sp(3, 1), sv(0)];
         full.extend(expected);
         full.extend([sv(1), Op::Match]);
 
@@ -373,7 +323,7 @@ mod tests {
     fn opcode_optimise_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();
         let prog = optimise(compile_ast(ast));
-        let mut full = vec![sp(3, 1), Op::TrueAny, sp(3, 1), sv(0)];
+        let mut full = vec![sp(3, 1), Op::Comp(Comp::TrueAny), sp(3, 1), sv(0)];
         full.extend(expected);
         full.extend([sv(1), Op::Match]);
 
