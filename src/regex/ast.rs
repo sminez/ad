@@ -1,7 +1,7 @@
 //! A simple AST for parsing and manipulating regex strings
 use super::{compile::Assertion, next_char, CharClass, Error};
 use crate::util::parse_num;
-use std::{iter::Peekable, str::Chars};
+use std::{iter::Peekable, mem::swap, str::Chars};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Ast {
@@ -15,6 +15,13 @@ pub(super) enum Ast {
 }
 
 impl Ast {
+    fn concat_or_node(mut nodes: Vec<Ast>) -> Ast {
+        match nodes.len() {
+            1 => nodes.remove(0),
+            _ => Ast::Concat(nodes),
+        }
+    }
+
     pub fn op_len(&self) -> usize {
         match self {
             Ast::Comp(_) | Ast::Assertion(_) => 1,
@@ -63,9 +70,6 @@ pub(super) enum Rep {
     Quest(Greed),
     Star(Greed),
     Plus(Greed),
-    Rep(usize),               // {n}
-    RepAtLeast(usize),        // {n,}
-    RepBetween(usize, usize), // {n,m}
 }
 
 impl Rep {
@@ -74,23 +78,17 @@ impl Rep {
             Rep::Quest(g) => *g = Greed::Lazy,
             Rep::Star(g) => *g = Greed::Lazy,
             Rep::Plus(g) => *g = Greed::Lazy,
-            _ => (),
         }
     }
 
     fn apply(self, nodes: &mut Vec<Ast>) -> Result<(), Error> {
-        use self::Rep::*;
-
         let last = nodes.pop().ok_or(Error::InvalidRepetition)?;
 
         match (self, last) {
-            (Quest(_), Ast::Rep(r, node)) => match r {
-                mut r @ Star(_) | mut r @ Plus(_) | mut r @ Quest(_) => {
-                    r.make_lazy();
-                    nodes.push(Ast::Rep(r, node));
-                }
-                _ => return Err(Error::InvalidRepetition),
-            },
+            (Rep::Quest(_), Ast::Rep(mut r, node)) => {
+                r.make_lazy();
+                nodes.push(Ast::Rep(r, node));
+            }
             (r, last) => nodes.push(Ast::Rep(r, Box::new(last))),
         }
 
@@ -105,14 +103,37 @@ impl Rep {
             Rep::Star(_) => child_len + 2,
             // op, sp(n-1, n+1)
             Rep::Plus(_) => child_len + 1,
-
-            // e{3} -> eee
-            Rep::Rep(n) => n * child_len,
-            // e{3,} -> eee+
-            Rep::RepAtLeast(n) => n * child_len + 1,
-            // e{3,5} -> eeee?e?  (so nc + (m-n)(c+1) = nc + mc - nc + m + n = n + m(c+1) )
-            Rep::RepBetween(n, m) => n + m * (child_len - 1),
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Counted {
+    Rep(usize),               // {n}
+    RepAtLeast(usize),        // {n,}
+    RepBetween(usize, usize), // {n,m}
+}
+
+impl Counted {
+    fn apply(self, nodes: &mut Vec<Ast>) -> Result<(), Error> {
+        let last = nodes.pop().ok_or(Error::InvalidRepetition)?;
+
+        match self {
+            Counted::Rep(n) => nodes.extend(vec![last; n]),
+            Counted::RepAtLeast(n) => {
+                nodes.extend(vec![last.clone(); n - 1]);
+                nodes.push(Ast::Rep(Rep::Plus(Greed::Greedy), Box::new(last)));
+            }
+            Counted::RepBetween(n, m) => {
+                nodes.extend(vec![last.clone(); n]);
+                nodes.extend(vec![
+                    Ast::Rep(Rep::Quest(Greed::Greedy), Box::new(last));
+                    m - n
+                ]);
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -122,7 +143,11 @@ pub(super) fn parse(re: &str) -> Result<Ast, Error> {
 
     parse_many(&mut it, &mut root)?;
 
-    Ok(Ast::Concat(root))
+    match root.len() {
+        0 => Err(Error::EmptyRegex),
+        1 => Ok(root.remove(0)),
+        _ => Ok(Ast::Concat(root)),
+    }
 }
 
 enum ParseEnd {
@@ -153,38 +178,9 @@ fn handle_char(
     root: &mut Vec<Ast>,
 ) -> Result<Option<ParseEnd>, Error> {
     match ch {
-        '(' => {
-            let mut sub = Vec::new();
-            match parse_many(it, &mut sub)? {
-                ParseEnd::Eof => return Err(Error::UnbalancedParens),
-                ParseEnd::Rparen => {
-                    let node = match sub.len() {
-                        0 => return Err(Error::EmptyParens),
-                        1 => sub.remove(0),
-                        _ => Ast::Concat(sub),
-                    };
-
-                    root.push(Ast::SubMatch(Box::new(node)));
-                }
-            }
-        }
-
+        '|' => handle_alt(it, root)?,
+        '(' => handle_subexp(it, root)?,
         ')' => return Ok(Some(ParseEnd::Rparen)),
-
-        '|' => {
-            let elem = root.pop().ok_or(Error::UnbalancedAlt)?;
-            let mut alt = vec![elem];
-
-            loop {
-                parse1(it, &mut alt)?;
-                if let Some('|') = it.peek() {
-                    it.next();
-                } else {
-                    break;
-                }
-            }
-            root.push(Ast::Alt(alt));
-        }
 
         '?' => Rep::Quest(Greed::Greedy).apply(root)?,
         '*' => Rep::Star(Greed::Greedy).apply(root)?,
@@ -201,6 +197,57 @@ fn handle_char(
     }
 
     Ok(None)
+}
+
+fn handle_subexp(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Error> {
+    let mut sub = Vec::new();
+    match parse_many(it, &mut sub)? {
+        ParseEnd::Eof => return Err(Error::UnbalancedParens),
+        ParseEnd::Rparen => {
+            let node = match sub.len() {
+                0 => return Err(Error::EmptyParens),
+                1 => sub.remove(0),
+                _ => Ast::Concat(sub),
+            };
+
+            root.push(Ast::SubMatch(Box::new(node)));
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_alt(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Error> {
+    if root.is_empty() {
+        return Err(Error::UnbalancedAlt);
+    }
+    let mut first = Vec::new();
+    swap(&mut first, root);
+    let mut alt = vec![Ast::concat_or_node(first)];
+    let mut buf = Vec::new();
+
+    loop {
+        if parse1(it, &mut buf)?.is_some() {
+            alt.push(Ast::concat_or_node(buf));
+            break;
+        }
+
+        match it.peek() {
+            Some('|') => {
+                it.next();
+                alt.push(Ast::concat_or_node(buf.clone()));
+                buf.clear();
+            }
+            Some(')') => {
+                alt.push(Ast::concat_or_node(buf.clone()));
+                break;
+            }
+            _ => (),
+        }
+    }
+
+    root.push(Ast::Alt(alt));
+    Ok(())
 }
 
 fn handle_escaped(ch: char, root: &mut Vec<Ast>) -> Result<(), Error> {
@@ -248,7 +295,7 @@ fn handle_escaped(ch: char, root: &mut Vec<Ast>) -> Result<(), Error> {
     Ok(())
 }
 
-fn try_parse_counted_repetition(it: &mut Peekable<Chars>) -> Result<Rep, Error> {
+fn try_parse_counted_repetition(it: &mut Peekable<Chars>) -> Result<Counted, Error> {
     let (mut ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
 
     if !ch.is_ascii_digit() {
@@ -261,14 +308,14 @@ fn try_parse_counted_repetition(it: &mut Peekable<Chars>) -> Result<Rep, Error> 
 
     (ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
     if ch == '}' {
-        return Ok(Rep::Rep(n));
+        return Ok(Counted::Rep(n));
     } else if ch != ',' {
         return Err(Error::InvalidRepetition);
     }
 
     (ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
     if ch == '}' {
-        return Ok(Rep::RepAtLeast(n));
+        return Ok(Counted::RepAtLeast(n));
     }
 
     if !ch.is_ascii_digit() {
@@ -281,7 +328,7 @@ fn try_parse_counted_repetition(it: &mut Peekable<Chars>) -> Result<Rep, Error> 
 
     (ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
     if ch == '}' {
-        Ok(Rep::RepBetween(n, m))
+        Ok(Counted::RepBetween(n, m))
     } else {
         Err(Error::InvalidRepetition)
     }
@@ -319,7 +366,7 @@ mod tests {
         Ast::Rep(r, Box::new(ch(c)))
     }
 
-    #[test_case("a", cat(vec![ch('a')]); "single char")]
+    #[test_case("a", ch('a'); "single char")]
     #[test_case("abc", cat(vec![ch('a'), ch('b'), ch('c')]); "chars only")]
     #[test_case("^a", cat(vec![asr(LineStart), ch('a')]); "line start")]
     #[test_case("a$", cat(vec![ch('a'), asr(LineEnd)]); "line end")]
@@ -329,7 +376,7 @@ mod tests {
     #[test_case("ab+?", cat(vec![ch('a'), rep(Plus(Lazy), 'b')]); "lazy plus")]
     #[test_case("ab*?", cat(vec![ch('a'), rep(Star(Lazy), 'b')]); "lazy star")]
     #[test_case("ab??", cat(vec![ch('a'), rep(Quest(Lazy), 'b')]); "lazy question mark")]
-    #[test_case("a|b", cat(vec![alt(vec![ch('a'), ch('b')])]); "single char alt")]
+    #[test_case("a|b", alt(vec![ch('a'), ch('b')]); "single char alt")]
     #[test_case(
         "ab(c|d)",
         cat(vec![ch('a'), ch('b'), sub(alt(vec![ch('c'), ch('d')]))]);

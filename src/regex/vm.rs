@@ -9,9 +9,10 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use super::{
-    compile::{compile, optimise, Assertion, Inst, Op, Prog},
+    ast::parse,
+    compile::{compile_ast, optimise, Assertion, Inst, Op, Prog},
     matches::{Match, MatchIter},
-    re_to_postfix, Error,
+    Error,
 };
 use crate::buffer::Buffer;
 use ropey::Rope;
@@ -53,8 +54,8 @@ impl Regex {
     /// This method handles pre-allocation of the memory required for running the VM so
     /// that the allocation cost is paid once up front rather than on each use of the Regex.
     pub fn compile(re: &str) -> Result<Self, Error> {
-        let pfix = re_to_postfix(re)?;
-        let ops = optimise(compile(pfix));
+        let ast = parse(re)?;
+        let ops = optimise(compile_ast(ast));
         let prog: Prog = ops.into_iter().map(|op| Inst { op, gen: 0 }).collect();
 
         let clist = vec![Thread::default(); prog.len()].into_boxed_slice();
@@ -402,7 +403,7 @@ mod tests {
     #[test_case("1.*b", "123b", Some("123b"); "dot star inner")]
     #[test_case("(c|C)ase matters", "case matters", Some("case matters"); "alternation first")]
     #[test_case("(c|C)ase matters", "Case matters", Some("Case matters"); "alternation second")]
-    #[test_case("(a|b|c)", "c", Some("c"); "chained alternation")]
+    #[test_case("(aa|bbb|c|dd)", "c", Some("c"); "chained alternation")]
     #[test_case("this@*works", "this contains\nbut still works", Some("this contains\nbut still works"); "true any")]
     #[test_case(r"literal\?", "literal?", Some("literal?"); "escape special char")]
     #[test_case(r"literal\t", "literal\t", Some("literal\t"); "escape sequence")]
@@ -423,12 +424,14 @@ mod tests {
     #[test_case("(25[0-5]|2[0-4][0-9])", "255", Some("255"); "ipv4 elements one and two matching one")]
     #[test_case("(25[0-5]|2[0-4][0-9])", "219", Some("219"); "ipv4 elements one and two matching two")]
     #[test_case("(25[0-5]|2[0-4][0-9])", "42", None; "ipv4 elements one and two not matching")]
+    #[test_case("(2[0-4][0-9]|1?[0-9]?[0-9])", "237", Some("237"); "ipv4 elements two and three matching two")]
+    #[test_case("(2[0-4][0-9]|1?[0-9]?[0-9])", "142", Some("142"); "ipv4 elements two and three matching three")]
     #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "251", Some("251"); "ipv4 all elements matching one")]
     #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "237", Some("237"); "ipv4 all elements matching two")]
     #[test_case("(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])", "142", Some("142"); "ipv4 all elements matching three")]
     #[test_case(
         r"(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])",
-        "127.0.0.1",
+        "127.0.0.1 ",
         Some("127.0.0.1");
         "ipv4 full"
     )]
