@@ -61,14 +61,6 @@ struct CharClass {
 }
 
 impl CharClass {
-    fn new(negated: bool, chars: Vec<char>, ranges: Vec<(char, char)>) -> Self {
-        Self {
-            negated,
-            chars,
-            ranges,
-        }
-    }
-
     fn try_parse(it: &mut Peekable<Chars>) -> Result<Self, Error> {
         let mut next = || next_char(it)?.ok_or(Error::InvalidClass);
         let (mut ch, _) = next()?;

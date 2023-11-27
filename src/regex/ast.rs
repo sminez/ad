@@ -48,6 +48,46 @@ impl Ast {
             _ => (),
         }
     }
+
+    pub fn optimise(&mut self) {
+        let mut optimising = true;
+
+        while optimising {
+            optimising = match self {
+                Ast::Comp(cmp) => cmp.replace_common_classes(),
+                Ast::Concat(nodes) => compress_cats(nodes),
+                // TODO: extract common alt prefixes & dedup cases
+                _ => false,
+            };
+        }
+    }
+}
+
+fn compress_cats(nodes: &mut Vec<Ast>) -> bool {
+    let mut buf = Vec::new();
+    swap(&mut buf, nodes);
+
+    let mut buf2 = Vec::with_capacity(buf.len());
+    let mut compressing = true;
+    let mut compressed = false;
+
+    while compressing {
+        compressing = false;
+        for node in buf.drain(..) {
+            if let Ast::Concat(children) = node {
+                buf2.extend(children);
+                compressing = true;
+            } else {
+                buf2.push(node);
+            }
+        }
+        swap(&mut buf, &mut buf2);
+        compressed |= compressing;
+    }
+
+    swap(&mut buf, nodes);
+
+    compressed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,6 +96,13 @@ pub(super) enum Comp {
     Class(CharClass),
     Any,
     TrueAny,
+    // Common classes
+    Numeric,
+    NonNumeric,
+    AlphaNumeric,
+    NonAlphaNumeric,
+    WhiteSpace,
+    NonWhiteSpace,
 }
 
 impl Comp {
@@ -67,6 +114,62 @@ impl Comp {
             Comp::Class(cls) => cls.matches(ch),
             Comp::Any => ch != '\n',
             Comp::TrueAny => true,
+            Comp::Numeric => ch.is_ascii_digit(),
+            Comp::NonNumeric => !ch.is_ascii_digit(),
+            Comp::AlphaNumeric => ch.is_ascii_alphanumeric() || ch == '_',
+            Comp::NonAlphaNumeric => !(ch.is_ascii_alphanumeric() || ch == '_'),
+            Comp::WhiteSpace => ch.is_whitespace(),
+            Comp::NonWhiteSpace => !ch.is_whitespace(),
+        }
+    }
+
+    fn replace_common_classes(&mut self) -> bool {
+        match self {
+            Comp::Class(CharClass {
+                negated: false,
+                chars,
+                ranges,
+            }) if chars.is_empty() && ranges == &[('0', '9')] => {
+                *self = Comp::Numeric;
+                true
+            }
+
+            Comp::Class(CharClass {
+                negated: true,
+                chars,
+                ranges,
+            }) if chars.is_empty() && ranges == &[('0', '9')] => {
+                *self = Comp::NonNumeric;
+                true
+            }
+
+            Comp::Class(CharClass {
+                negated: false,
+                chars,
+                ranges,
+            }) if chars == &['_']
+                && ranges.contains(&('0', '9'))
+                && ranges.contains(&('a', 'z'))
+                && ranges.contains(&('A', 'Z')) =>
+            {
+                *self = Comp::AlphaNumeric;
+                true
+            }
+
+            Comp::Class(CharClass {
+                negated: true,
+                chars,
+                ranges,
+            }) if chars == &['_']
+                && ranges.contains(&('0', '9'))
+                && ranges.contains(&('a', 'z'))
+                && ranges.contains(&('A', 'Z')) =>
+            {
+                *self = Comp::NonAlphaNumeric;
+                true
+            }
+
+            _ => false,
         }
     }
 }
@@ -295,40 +398,13 @@ fn handle_escaped(ch: char, root: &mut Vec<Ast>) -> Result<(), Error> {
     match ch {
         'b' => root.push(Ast::Assertion(Assertion::WordBoundary)),
         'B' => root.push(Ast::Assertion(Assertion::NonWordBoundary)),
-        // digits
-        'd' => root.push(Ast::Comp(Comp::Class(CharClass::new(
-            false,
-            vec![],
-            vec![('0', '9')],
-        )))),
-        'D' => root.push(Ast::Comp(Comp::Class(CharClass::new(
-            true,
-            vec![],
-            vec![('0', '9')],
-        )))),
-        // alphanumeric
-        'w' => root.push(Ast::Comp(Comp::Class(CharClass::new(
-            false,
-            vec!['_'],
-            vec![('a', 'z'), ('A', 'Z'), ('0', '9')],
-        )))),
-        'W' => root.push(Ast::Comp(Comp::Class(CharClass::new(
-            true,
-            vec!['_'],
-            vec![('a', 'z'), ('A', 'Z'), ('0', '9')],
-        )))),
-        // whitespace (this is not the full utf8 whitespace character semantics used by
-        // other engines currently)
-        's' => root.push(Ast::Comp(Comp::Class(CharClass::new(
-            false,
-            vec![' ', '\t', '\n', '\r'],
-            vec![],
-        )))),
-        'S' => root.push(Ast::Comp(Comp::Class(CharClass::new(
-            true,
-            vec![' ', '\t', '\n', '\r'],
-            vec![],
-        )))),
+
+        'd' => root.push(Ast::Comp(Comp::Numeric)),
+        'D' => root.push(Ast::Comp(Comp::NonNumeric)),
+        'w' => root.push(Ast::Comp(Comp::AlphaNumeric)),
+        'W' => root.push(Ast::Comp(Comp::NonAlphaNumeric)),
+        's' => root.push(Ast::Comp(Comp::WhiteSpace)),
+        'S' => root.push(Ast::Comp(Comp::NonWhiteSpace)),
 
         ch => root.push(Ast::Comp(Comp::Char(ch))),
     }

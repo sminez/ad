@@ -54,7 +54,9 @@ impl Regex {
     /// This method handles pre-allocation of the memory required for running the VM so
     /// that the allocation cost is paid once up front rather than on each use of the Regex.
     pub fn compile(re: &str) -> Result<Self, Error> {
-        let ast = parse(re)?;
+        let mut ast = parse(re)?;
+        ast.optimise();
+
         Ok(Self::new(compile_ast(ast)))
     }
 
@@ -65,6 +67,7 @@ impl Regex {
     /// that the allocation cost is paid once up front rather than on each use of the Regex.
     pub fn compile_reverse(re: &str) -> Result<Self, Error> {
         let mut ast = parse(re)?;
+        ast.optimise();
         ast.reverse();
 
         Ok(Self::new(compile_ast(ast)))
