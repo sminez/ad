@@ -144,6 +144,7 @@ pub struct IdxRopeChars<'a> {
     inner: ropey::iter::Chars<'a>,
     from: usize,
     to: usize,
+    rev: bool,
 }
 
 impl<'a> IdxRopeChars<'a> {
@@ -152,6 +153,34 @@ impl<'a> IdxRopeChars<'a> {
             inner: r.chars_at(from),
             from,
             to,
+            rev: false,
+        }
+    }
+
+    pub fn new_reversed(r: &'a ropey::Rope, from: usize, to: usize) -> Self {
+        IdxRopeChars {
+            inner: r.chars_at(from).reversed(),
+            from,
+            to,
+            rev: true,
+        }
+    }
+
+    /// self.from == self.to -/+ 1 is the last character so
+    /// we catch end of iteration on the subsequent call
+    fn complete(&self) -> bool {
+        if self.rev {
+            self.from <= self.to
+        } else {
+            self.from >= self.to
+        }
+    }
+
+    fn inc(&mut self) {
+        if self.rev {
+            self.from -= 1;
+        } else {
+            self.from += 1;
         }
     }
 }
@@ -160,14 +189,12 @@ impl<'a> Iterator for IdxRopeChars<'a> {
     type Item = (usize, char);
 
     fn next(&mut self) -> Option<Self::Item> {
-        // self.from == self.to - 1 is the last character so
-        // we catch end of iteration on the subsequent call
-        if self.from >= self.to {
+        if self.complete() {
             None
         } else {
             self.inner.next().map(|c| {
                 let res = (self.from, c);
-                self.from += 1;
+                self.inc();
 
                 res
             })

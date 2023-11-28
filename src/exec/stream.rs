@@ -21,6 +21,7 @@ const LINE_BUF_LEN: usize = 100;
 /// lazy character stream and access to the historic text via a Rope.
 pub trait IterableStream {
     fn iter_between(&self, from: usize, to: usize) -> StreamIter<'_>;
+    fn rev_iter_between(&self, from: usize, to: usize) -> StreamIter<'_>;
     fn contents(&self) -> Rope;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
@@ -113,6 +114,10 @@ impl IterableStream for Rope {
         StreamIter::Rope(IdxRopeChars::new(self, from, to))
     }
 
+    fn rev_iter_between(&self, from: usize, to: usize) -> StreamIter<'_> {
+        StreamIter::Rope(IdxRopeChars::new_reversed(self, from, to))
+    }
+
     fn contents(&self) -> Rope {
         self.clone()
     }
@@ -152,6 +157,10 @@ impl IterableStream for Rope {
 impl IterableStream for Buffer {
     fn iter_between(&self, from: usize, to: usize) -> StreamIter<'_> {
         StreamIter::Rope(IdxRopeChars::new(&self.txt, from, to))
+    }
+
+    fn rev_iter_between(&self, from: usize, to: usize) -> StreamIter<'_> {
+        StreamIter::Rope(IdxRopeChars::new_reversed(&self.txt, from, to))
     }
 
     fn contents(&self) -> Rope {
@@ -295,6 +304,15 @@ impl<'a> Iterator for CachedStdinIter<'a> {
 
 impl IterableStream for CachedStdin {
     fn iter_between(&self, from: usize, to: usize) -> StreamIter {
+        StreamIter::StdIn(CachedStdinIter {
+            inner: self,
+            from,
+            to,
+        })
+    }
+
+    /// This will always return None
+    fn rev_iter_between(&self, from: usize, to: usize) -> StreamIter {
         StreamIter::StdIn(CachedStdinIter {
             inner: self,
             from,
