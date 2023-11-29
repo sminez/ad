@@ -175,14 +175,6 @@ impl<'a> IdxRopeChars<'a> {
             self.from >= self.to
         }
     }
-
-    fn inc(&mut self) {
-        if self.rev {
-            self.from -= 1;
-        } else {
-            self.from += 1;
-        }
-    }
 }
 
 impl<'a> Iterator for IdxRopeChars<'a> {
@@ -193,8 +185,15 @@ impl<'a> Iterator for IdxRopeChars<'a> {
             None
         } else {
             self.inner.next().map(|c| {
+                if self.rev {
+                    self.from -= 1;
+                }
+
                 let res = (self.from, c);
-                self.inc();
+
+                if !self.rev {
+                    self.from += 1;
+                }
 
                 res
             })

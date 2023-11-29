@@ -286,6 +286,13 @@ pub trait Address: IterBoundedChars {
         dot.unwrap_or_default()
     }
 
+    fn full_line(&self, line_idx: usize) -> Option<Dot> {
+        let from = self.line_to_char(line_idx)?;
+        let to = self.char_to_line_end(from)?.saturating_sub(1);
+
+        Some(Dot::from_char_indices(from, to))
+    }
+
     fn map_simple_addr(&self, addr: &mut SimpleAddr, cur_dot: Dot) -> Option<Dot> {
         use AddrBase::*;
 
@@ -294,12 +301,11 @@ pub trait Address: IterBoundedChars {
             Bof => Cur { idx: 0 }.into(),
             Eof => Cur::new(self.len_chars()).into(),
 
-            Line(line) => Cur::new(self.line_to_char(*line)?).into(),
+            Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
                 let mut line_idx = self.char_to_line(cur_dot.active_cur().idx)?;
                 line_idx = (line_idx as isize + *offset) as usize;
-                let idx = self.line_to_char(line_idx)?;
-                Cur { idx }.into()
+                self.full_line(line_idx)?
             }
 
             Char(idx) => Cur { idx: *idx }.into(),
@@ -324,8 +330,7 @@ pub trait Address: IterBoundedChars {
 
             RegexBack(re) => {
                 let from = cur_dot.first_cur().idx;
-                let to = 0;
-                let m = re.match_iter(&mut self.rev_iter_between(from, to), from)?;
+                let m = re.match_iter(&mut self.rev_iter_between(from, 0), from)?;
                 let (from, to) = m.loc();
                 Dot::from_char_indices(from, to)
             }
@@ -440,8 +445,8 @@ mod tests {
     #[test_case("-#12", Simple(RelativeChar(-12).into()); "relative char backward")]
     #[test_case("3:9", Simple(LineAndColumn(2, 8).into()); "line and column cursor")]
     #[test_case("/foo/", Simple(Regex(re("foo")).into()); "regex")]
-    #[test_case("-/bar/", Simple(RegexBack(re("rab")).into()); "regex back")]
     #[test_case("+/baz/", Simple(Regex(re("baz")).into()); "regex explicit forward")]
+    #[test_case("-/bar/", Simple(RegexBack(Regex::compile_reverse("bar").unwrap()).into()); "regex back")]
     // Simple with suffix
     #[test_case(
         "#3+",
@@ -474,5 +479,22 @@ mod tests {
     fn parse_works(s: &str, expected: Addr) {
         let addr = Addr::parse(&mut s.chars().peekable()).expect("valid input");
         assert_eq!(addr, expected);
+    }
+
+    #[test_case("0", Dot::default(); "bof")]
+    #[test_case("2", Dot::from_char_indices(15, 26); "line 2")]
+    #[test_case("-1", Dot::from_char_indices(0, 14); "line 1 relative to 2")]
+    #[test_case("/something/", Dot::from_char_indices(33, 42); "regex forward")]
+    #[test_case("-/line/", Dot::from_char_indices(10, 14); "regex back")]
+    #[test_case("-/his/", Dot::from_char_indices(1, 4); "regex back 2")]
+    #[test]
+    fn map_addr_works(s: &str, expected: Dot) {
+        let mut b = Buffer::new_unnamed(0, "this is a line\nand another\n- [ ] something to do\n");
+        b.dot = Cur::new(16).into();
+
+        let mut addr = Addr::parse(&mut s.chars().peekable()).expect("valid addr");
+        b.dot = b.map_addr(&mut addr);
+
+        assert_eq!(b.dot, expected, ">{}<", b.dot_contents());
     }
 }

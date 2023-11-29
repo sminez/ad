@@ -15,6 +15,7 @@ mod expr;
 use addr::ParseError;
 pub use addr::{Addr, Address};
 pub use cached_stdin::CachedStdin;
+pub use char_iter::IterBoundedChars;
 use expr::{Expr, ParseOutput};
 
 /// Variable usable in templates for injecting the current filename.

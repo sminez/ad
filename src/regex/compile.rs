@@ -17,6 +17,7 @@ pub(super) enum Op {
     Split(usize, usize),
     Jump(usize),
     Save(usize),
+    RSave(usize),
     Match,
 }
 
@@ -47,7 +48,7 @@ impl Ops {
     }
 }
 
-fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut usize) -> Vec<Op> {
+fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
     // Each node other than the last has an additional split and jump op
     let alt_len = nodes.iter().map(|n| n.op_len()).sum::<usize>() + (nodes.len() - 1) * 2;
     let mut buf = Vec::with_capacity(alt_len);
@@ -57,45 +58,58 @@ fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut usize) -> Vec<Op> {
     for node in it {
         let base = offset + buf.len();
         buf.push(Op::Split(base + 1, base + 2 + node.op_len()));
-        node.into_ops(base + 1, saves).add_to(&mut buf);
+        node.into_ops(base + 1, saves, reverse).add_to(&mut buf);
         buf.push(Op::Jump(offset + alt_len));
     }
 
-    last.into_ops(offset + buf.len(), saves).add_to(&mut buf);
+    last.into_ops(offset + buf.len(), saves, reverse)
+        .add_to(&mut buf);
 
     buf
 }
 
-fn concat_ops(nodes: Vec<Ast>, offset: usize, saves: &mut usize) -> Vec<Op> {
+fn concat_ops(nodes: Vec<Ast>, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
     let concat_len = nodes.iter().map(|n| n.op_len()).sum();
     let mut buf = Vec::with_capacity(concat_len);
     for node in nodes.into_iter() {
-        node.into_ops(offset + buf.len(), saves).add_to(&mut buf);
+        node.into_ops(offset + buf.len(), saves, reverse)
+            .add_to(&mut buf);
     }
 
     buf
 }
 
-fn submatch_ops(node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
+fn submatch_ops(node: Ast, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
     *saves += 1;
-    let s = *saves;
-    let ops = node.into_ops(offset + 1, saves);
+    let s = *saves * 2;
+    let ops = node.into_ops(offset + 1, saves, reverse);
     let mut buf = Vec::with_capacity(ops.len() + 2);
-    buf.push(Op::Save(s * 2));
+
+    buf.push(if reverse {
+        Op::RSave(s + 1)
+    } else {
+        Op::Save(s)
+    });
+
     ops.add_to(&mut buf);
-    buf.push(Op::Save(s * 2 + 1));
+
+    buf.push(if reverse {
+        Op::RSave(s)
+    } else {
+        Op::Save(s + 1)
+    });
 
     buf
 }
 
-fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
+fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
     match r {
         Rep::Quest(greed) => {
             let (mut l1, mut l2) = (offset + 1, offset + 1 + node.op_len());
             if greed == Greed::Lazy {
                 (l1, l2) = (l2, l1);
             };
-            let ops = node.into_ops(offset + 1, saves);
+            let ops = node.into_ops(offset + 1, saves, reverse);
             let mut buf = vec![Op::Split(l1, l2)];
             ops.add_to(&mut buf);
             buf
@@ -106,7 +120,7 @@ fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
             if greed == Greed::Lazy {
                 (l1, l2) = (l2, l1);
             };
-            let ops = node.into_ops(offset + 1, saves);
+            let ops = node.into_ops(offset + 1, saves, reverse);
             let mut buf = vec![Op::Split(l1, l2)];
             ops.add_to(&mut buf);
             buf.push(Op::Jump(offset));
@@ -118,7 +132,7 @@ fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
             if greed == Greed::Lazy {
                 (l1, l2) = (l2, l1);
             };
-            let ops = node.into_ops(offset, saves);
+            let ops = node.into_ops(offset, saves, reverse);
             let mut buf = Vec::new();
             ops.add_to(&mut buf);
             buf.push(Op::Split(l1, l2));
@@ -130,32 +144,43 @@ fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize) -> Vec<Op> {
 impl Ast {
     /// Each AST node returns split and jump offsets as if it were zero indexed.
     /// Wrapper nodes (alts, reps, cats, subexprs) update those offsets as needed
-    fn into_ops(self, offset: usize, saves: &mut usize) -> Ops {
+    fn into_ops(self, offset: usize, saves: &mut usize, reverse: bool) -> Ops {
         match self {
             Ast::Comp(comp) => Ops::One(Op::Comp(comp)),
             Ast::Assertion(a) => Ops::One(Op::Assertion(a)),
-            Ast::Alt(nodes) => Ops::Many(alt_ops(nodes, offset, saves)),
-            Ast::Concat(nodes) => Ops::Many(concat_ops(nodes, offset, saves)),
-            Ast::SubMatch(node) => Ops::Many(submatch_ops(*node, offset, saves)),
-            Ast::Rep(r, node) => Ops::Many(rep_ops(r, *node, offset, saves)),
+            Ast::Alt(nodes) => Ops::Many(alt_ops(nodes, offset, saves, reverse)),
+            Ast::Concat(nodes) => Ops::Many(concat_ops(nodes, offset, saves, reverse)),
+            Ast::SubMatch(node) => Ops::Many(submatch_ops(*node, offset, saves, reverse)),
+            Ast::Rep(r, node) => Ops::Many(rep_ops(r, *node, offset, saves, reverse)),
         }
     }
 }
 
-pub(super) fn compile_ast(ast: Ast) -> Vec<Op> {
+pub(super) fn compile_ast(mut ast: Ast, reverse: bool) -> Vec<Op> {
+    if reverse {
+        ast.reverse();
+    }
+
     let mut saves = 0;
-    let prog = match ast.into_ops(0, &mut saves) {
+    let prog = match ast.into_ops(0, &mut saves, reverse) {
         Ops::One(op) => vec![op],
         Ops::Many(prog) => prog,
     };
 
+    let (first_save, second_save) = if reverse {
+        (Op::RSave(1), Op::RSave(0))
+    } else {
+        (Op::Save(0), Op::Save(1))
+    };
+
     // Compiled code for "@*?" to allow for unanchored matching.
     // Save(0) marks the beginning of the regex in the input
+    // Save(1) marks the end of the regex in the input
     let mut full = vec![
         Op::Split(3, 1),
         Op::Comp(Comp::TrueAny),
         Op::Split(3, 1),
-        Op::Save(0),
+        first_save,
     ];
     // Unconditionally increment all jumps and splits in the compiled program
     // to account for the prefix we just added.
@@ -164,8 +189,7 @@ pub(super) fn compile_ast(ast: Ast) -> Vec<Op> {
         Op::Split(l1, l2) => Op::Split(l1 + 4, l2 + 4),
         op => op,
     }));
-    // Save(1) marks the end of the regex in the input
-    full.extend([Op::Save(1), Op::Match]);
+    full.extend([second_save, Op::Match]);
 
     full
 }
@@ -305,7 +329,7 @@ mod tests {
     #[test]
     fn ast_compile_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();
-        let prog = compile_ast(ast);
+        let prog = compile_ast(ast, false);
 
         let mut full = vec![sp(3, 1), Op::Comp(Comp::TrueAny), sp(3, 1), sv(0)];
         full.extend(expected);
@@ -322,7 +346,7 @@ mod tests {
     #[test]
     fn opcode_optimise_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();
-        let prog = optimise(compile_ast(ast));
+        let prog = optimise(compile_ast(ast, false));
         let mut full = vec![sp(3, 1), Op::Comp(Comp::TrueAny), sp(3, 1), sv(0)];
         full.extend(expected);
         full.extend([sv(1), Op::Match]);

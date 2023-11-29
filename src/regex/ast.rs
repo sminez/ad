@@ -35,6 +35,9 @@ impl Ast {
 
     pub fn reverse(&mut self) {
         match self {
+            Self::Assertion(Assertion::LineStart) => *self = Self::Assertion(Assertion::LineEnd),
+            Self::Assertion(Assertion::LineEnd) => *self = Self::Assertion(Assertion::LineStart),
+
             Self::Alt(nodes) => {
                 nodes.reverse();
                 nodes.iter_mut().for_each(|n| n.reverse());

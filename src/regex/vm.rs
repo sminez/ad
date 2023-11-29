@@ -57,7 +57,7 @@ impl Regex {
         let mut ast = parse(re)?;
         ast.optimise();
 
-        Ok(Self::new(compile_ast(ast)))
+        Ok(Self::new(compile_ast(ast, false)))
     }
 
     /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
@@ -68,9 +68,8 @@ impl Regex {
     pub fn compile_reverse(re: &str) -> Result<Self, Error> {
         let mut ast = parse(re)?;
         ast.optimise();
-        ast.reverse();
 
-        Ok(Self::new(compile_ast(ast)))
+        Ok(Self::new(compile_ast(ast, true)))
     }
 
     fn new(ops: Vec<Op>) -> Self {
@@ -225,7 +224,6 @@ impl Regex {
 
                     matched = true;
                     sub_matches = self.sms[sm].inner;
-                    sub_matches[1] = sp; // Save end of the match
 
                     // We're ending this thread and all others that have lower priority
                     // so decrement the references they have to their submatches
@@ -316,7 +314,15 @@ impl Regex {
             match t.assertion {
                 Some(a) if !a.holds_for(self.prev, self.next) => self.sm_dec_ref(t.sm),
                 _ => {
-                    let sm = self.sm_update(t.sm, s, sp, initial);
+                    let sm = self.sm_update(t.sm, s, sp, initial, false);
+                    self.add_thread(thread(t.pc + 1, sm), sp, initial);
+                }
+            }
+        } else if let Op::RSave(s) = self.prog[t.pc].op {
+            match t.assertion {
+                Some(a) if !a.holds_for(self.prev, self.next) => self.sm_dec_ref(t.sm),
+                _ => {
+                    let sm = self.sm_update(t.sm, s, sp, initial, true);
                     self.add_thread(thread(t.pc + 1, sm), sp, initial);
                 }
             }
@@ -339,7 +345,7 @@ impl Regex {
     }
 
     #[inline]
-    fn sm_update(&mut self, i: usize, s: usize, sp: usize, initial: bool) -> usize {
+    fn sm_update(&mut self, i: usize, s: usize, sp: usize, initial: bool, reverse: bool) -> usize {
         // We don't hard error on compiling a regex with more than 9 submatches
         // but we don't track anything past the 9th
         if !self.track_submatches || s >= 20 {
@@ -359,7 +365,11 @@ impl Regex {
         // If we are saving our initial position then we are looking at the correct
         // character, otherwise the Save op is being processed at the character
         // before the one we need to save.
-        let val = if !initial { sp + 1 } else { sp };
+        let mut val = if !initial { sp + 1 } else { sp };
+        if reverse && !initial {
+            val = val.saturating_sub(1);
+        }
+
         self.sms[i].inner[s] = val;
 
         i
@@ -474,6 +484,37 @@ mod tests {
     fn match_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = Regex::compile(re).unwrap();
         let m = r.match_str(s).map(|m| m.str_match_text(s));
+        assert_eq!(m.as_deref(), expected);
+    }
+
+    #[test_case("foo", "foo", Some("foo"); "literal full string")]
+    #[test_case("ba*", " baaaaa foo", Some("baaaaa"); "zero or more present")]
+    #[test_case("ba*", "b foo", Some("b"); "zero or more not present")]
+    #[test_case("foo$", "a line that ends with foo\nnow bar", Some("foo"); "BOL holding before newline")]
+    #[test_case("\\b\\w+\\b", "foo", Some("foo"); "word boundary at end of input")]
+    #[test_case(
+        r"(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])",
+        "127.0.0.1 ",
+        Some("127.0.0.1");
+        "ipv4 full"
+    )]
+    #[test_case(
+        "his",
+        "this is a line\nand another\n- [ ] something to do\n",
+        Some("his");
+        "multiline intput"
+    )]
+    #[test]
+    fn rev_match_works(re: &str, s: &str, expected: Option<&str>) {
+        use crate::exec::IterBoundedChars;
+
+        let mut r = Regex::compile_reverse(re).unwrap();
+        let rope = Rope::from(s);
+        let mut it = rope.rev_iter_between(s.len(), 0);
+        let m = r
+            .match_iter(&mut it, s.len())
+            .map(|m| m.rope_match_text(&rope).to_string());
+
         assert_eq!(m.as_deref(), expected);
     }
 
