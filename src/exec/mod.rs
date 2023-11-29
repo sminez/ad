@@ -1,19 +1,21 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
-    buffer::{
-        parse_dot::{DotExpression, ParseError},
-        Dot,
-    },
+    buffer::{Buffer, Cur, Dot, Range},
+    editor::Action,
     regex::{self, Match},
 };
 use ropey::Rope;
 use std::{cmp::min, io::Write, iter::Peekable, str::Chars};
 
+mod addr;
+mod cached_stdin;
+mod char_iter;
 mod expr;
-mod stream;
 
+use addr::ParseError;
+pub use addr::{Addr, Address};
+pub use cached_stdin::CachedStdin;
 use expr::{Expr, ParseOutput};
-pub use stream::{CachedStdin, IterableStream};
 
 /// Variable usable in templates for injecting the current filename.
 /// (Following the naming convention used in Awk)
@@ -27,6 +29,7 @@ pub enum Error {
     Eof,
     InvalidRegex(regex::Error),
     InvalidSubstitution(usize),
+    InvalidSuffix,
     MissingAction,
     MissingDelimiter(&'static str),
     UnclosedDelimiter(&'static str, char),
@@ -41,21 +44,67 @@ impl From<regex::Error> for Error {
     }
 }
 
+/// Something that can be edited by a Program
+pub trait Edit: Address {
+    fn contents(&self) -> Rope;
+    fn insert(&mut self, ix: usize, s: &str);
+    fn remove(&mut self, from: usize, to: usize);
+}
+
+impl Edit for Rope {
+    fn contents(&self) -> Rope {
+        self.clone()
+    }
+
+    fn insert(&mut self, ix: usize, s: &str) {
+        self.insert(ix, s)
+    }
+
+    fn remove(&mut self, from: usize, to: usize) {
+        self.remove(from..to)
+    }
+}
+
+impl Edit for Buffer {
+    fn contents(&self) -> Rope {
+        self.txt.clone()
+    }
+
+    fn insert(&mut self, idx: usize, s: &str) {
+        self.dot = Dot::Cur { c: Cur { idx } };
+        self.handle_action(Action::InsertString { s: s.to_string() });
+    }
+
+    fn remove(&mut self, from: usize, to: usize) {
+        self.dot = Dot::Range {
+            r: Range::from_cursors(
+                Cur { idx: from },
+                Cur {
+                    idx: to.saturating_sub(1),
+                },
+                true,
+            ),
+        }
+        .collapse_null_range();
+        self.handle_action(Action::Delete);
+    }
+}
+
 /// A parsed and compiled program that can be executed against an input
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    initial_dot: DotExpression,
+    initial_dot: Addr,
     exprs: Vec<Expr>,
 }
 
 impl Program {
     /// Execute this program against a given IterableStream
-    pub fn execute<S, W>(&mut self, stream: &mut S, fname: &str, out: &mut W) -> Result<Dot, Error>
+    pub fn execute<E, W>(&mut self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, Error>
     where
-        S: IterableStream,
+        E: Edit,
         W: Write,
     {
-        let initial_dot = stream.map_dot_expr(&mut self.initial_dot);
+        let initial_dot = ed.map_addr(&mut self.initial_dot);
 
         if self.exprs.is_empty() {
             return Ok(initial_dot);
@@ -68,22 +117,22 @@ impl Program {
         // usize::MAX which needs to be clamped to the size of the input. For Buffers and Ropes
         // where we know that we should already be in bounds this is not required but the overhead
         // of always doing it is fairly minimal.
-        let (from, to) = self.step(stream, initial, 0, fname, out)?.as_char_indices();
-        let ix_max = stream.len_chars();
+        let (from, to) = self.step(ed, initial, 0, fname, out)?.as_char_indices();
+        let ix_max = ed.len_chars();
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
     }
 
-    fn step<S, W>(
+    fn step<E, W>(
         &mut self,
-        stream: &mut S,
+        ed: &mut E,
         m: Match,
         pc: usize,
         fname: &str,
         out: &mut W,
     ) -> Result<Dot, Error>
     where
-        S: IterableStream,
+        E: Edit,
         W: Write,
     {
         let (mut from, to) = m.loc();
@@ -93,10 +142,10 @@ impl Program {
                 let mut dot = Dot::from_char_indices(from, to);
                 for exprs in g {
                     let mut p = Program {
-                        initial_dot: DotExpression::Explicit(dot),
+                        initial_dot: Addr::Explicit(dot),
                         exprs: exprs.clone(),
                     };
-                    dot = p.step(stream, m, 0, fname, out)?;
+                    dot = p.step(ed, m, 0, fname, out)?;
                 }
 
                 Ok(dot)
@@ -104,7 +153,7 @@ impl Program {
 
             Expr::LoopMatches(mut re) => {
                 let mut initial_matches = Vec::new();
-                while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
+                while let Some(m) = re.match_iter(&mut ed.iter_between(from, to), from) {
                     initial_matches.push(m);
 
                     // It's possible for the Regex we're using to match a 0-length string which
@@ -122,13 +171,13 @@ impl Program {
                     }
                 }
 
-                self.apply_matches(initial_matches, stream, m, pc, fname, out)
+                self.apply_matches(initial_matches, ed, m, pc, fname, out)
             }
 
             Expr::LoopBetweenMatches(mut re) => {
                 let mut initial_matches = Vec::new();
 
-                while let Some(m) = re.match_iter(&mut stream.iter_between(from, to), from) {
+                while let Some(m) = re.match_iter(&mut ed.iter_between(from, to), from) {
                     let (new_from, new_to) = m.loc();
                     if from < new_from {
                         initial_matches.push(Match::synthetic(from, new_from));
@@ -143,87 +192,85 @@ impl Program {
                     initial_matches.push(Match::synthetic(from, to));
                 }
 
-                self.apply_matches(initial_matches, stream, m, pc, fname, out)
+                self.apply_matches(initial_matches, ed, m, pc, fname, out)
             }
 
             Expr::IfContains(mut re) => {
-                if re.matches_iter(&mut stream.iter_between(from, to), from) {
-                    self.step(stream, m, pc + 1, fname, out)
+                if re.matches_iter(&mut ed.iter_between(from, to), from) {
+                    self.step(ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
                 }
             }
 
             Expr::IfNotContains(mut re) => {
-                if !re.matches_iter(&mut stream.iter_between(from, to), from) {
-                    self.step(stream, m, pc + 1, fname, out)
+                if !re.matches_iter(&mut ed.iter_between(from, to), from) {
+                    self.step(ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
                 }
             }
 
             Expr::Print(pat) => {
-                let s = template_match(&pat, m, stream.contents(), fname)?;
+                let s = template_match(&pat, m, ed.contents(), fname)?;
                 writeln!(out, "{s}").expect("to be able to write");
                 Ok(Dot::from_char_indices(from, to))
             }
 
             Expr::Insert(pat) => {
-                let s = template_match(&pat, m, stream.contents(), fname)?;
-                stream.insert(from, &s);
+                let s = template_match(&pat, m, ed.contents(), fname)?;
+                ed.insert(from, &s);
                 Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
             Expr::Append(pat) => {
-                let s = template_match(&pat, m, stream.contents(), fname)?;
-                stream.insert(to, &s);
+                let s = template_match(&pat, m, ed.contents(), fname)?;
+                ed.insert(to, &s);
                 Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
             Expr::Change(pat) => {
-                let s = template_match(&pat, m, stream.contents(), fname)?;
-                stream.remove(from, to);
-                stream.insert(from, &s);
+                let s = template_match(&pat, m, ed.contents(), fname)?;
+                ed.remove(from, to);
+                ed.insert(from, &s);
                 Ok(Dot::from_char_indices(from, from + s.chars().count()))
             }
 
             Expr::Delete => {
-                stream.remove(from, to);
+                ed.remove(from, to);
                 Ok(Dot::from_char_indices(from, from))
             }
 
-            Expr::Sub(mut re, pat) => {
-                match re.match_iter(&mut stream.iter_between(from, to), from) {
-                    Some(m) => {
-                        let (mfrom, mto) = m.loc();
-                        let s = template_match(&pat, m, stream.contents(), fname)?;
-                        stream.remove(mfrom, mto);
-                        stream.insert(mfrom, &s);
-                        Ok(Dot::from_char_indices(
-                            from,
-                            to - (mto - mfrom) + s.chars().count(),
-                        ))
-                    }
-                    None => Ok(Dot::from_char_indices(from, to)),
+            Expr::Sub(mut re, pat) => match re.match_iter(&mut ed.iter_between(from, to), from) {
+                Some(m) => {
+                    let (mfrom, mto) = m.loc();
+                    let s = template_match(&pat, m, ed.contents(), fname)?;
+                    ed.remove(mfrom, mto);
+                    ed.insert(mfrom, &s);
+                    Ok(Dot::from_char_indices(
+                        from,
+                        to - (mto - mfrom) + s.chars().count(),
+                    ))
                 }
-            }
+                None => Ok(Dot::from_char_indices(from, to)),
+            },
         }
     }
 
     /// When looping over disjoint matches in the input we need to determin all of the initial
     /// match points before we start making any edits as the edits may alter the semantics of
     /// future matches.
-    fn apply_matches<S, W>(
+    fn apply_matches<E, W>(
         &mut self,
         initial_matches: Vec<Match>,
-        stream: &mut S,
+        ed: &mut E,
         m: Match,
         pc: usize,
         fname: &str,
         out: &mut W,
     ) -> Result<Dot, Error>
     where
-        S: IterableStream,
+        E: Edit,
         W: Write,
     {
         let (mut from, to) = m.loc();
@@ -232,9 +279,9 @@ impl Program {
         for mut m in initial_matches.into_iter() {
             m.apply_offset(offset);
 
-            let cur_len = stream.len_chars();
-            from = self.step(stream, m, pc + 1, fname, out)?.last_cur().idx;
-            let new_len = stream.len_chars();
+            let cur_len = ed.len_chars();
+            from = self.step(ed, m, pc + 1, fname, out)?.last_cur().idx;
+            let new_len = ed.len_chars();
 
             offset += new_len as isize - cur_len as isize;
         }
@@ -254,17 +301,18 @@ impl Program {
             return Err(Error::EmptyProgram);
         }
 
-        let initial_dot = match DotExpression::parse(&mut it) {
+        let initial_dot = match Addr::parse(&mut it) {
             Ok(dot_expr) => dot_expr,
             // If the start of input is not a dot expression we default to Full and
             // attempt to parse the rest of the program
-            Err(ParseError::NotADotExpression) => DotExpression::full(),
+            Err(ParseError::NotAnAddress) => Addr::full(),
             // All other errors are parse errors for us
             Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
             Err(ParseError::UnclosedDelimiter) => {
                 return Err(Error::UnclosedDelimiter("dot expr regex", '/'))
             }
             Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
+            Err(ParseError::InvalidSuffix) => return Err(Error::InvalidSuffix),
         };
 
         consume_whitespace(&mut it);
@@ -383,7 +431,7 @@ mod tests {
         assert_eq!(
             p,
             Program {
-                initial_dot: DotExpression::full(),
+                initial_dot: Addr::full(),
                 exprs: expected
             }
         );
@@ -407,7 +455,7 @@ mod tests {
     #[test]
     fn step_works(expr: Expr, expected: &str, expected_dot: (usize, usize)) {
         let mut prog = Program {
-            initial_dot: DotExpression::full(),
+            initial_dot: Addr::full(),
             exprs: vec![expr, Delete],
         };
         let mut r = Rope::from_str("foo foo foo");

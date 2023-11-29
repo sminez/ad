@@ -1,8 +1,8 @@
 use crate::{
-    buffer::{parse_dot::DotExpression, ActionOutcome, Buffer, Buffers, Cur, Dot, TextObject},
+    buffer::{ActionOutcome, Buffer, Buffers, Cur, Dot, TextObject},
     config::Config,
     die,
-    exec::IterableStream,
+    exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
@@ -201,8 +201,8 @@ impl Editor {
             }),
 
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(mut expr) = DotExpression::parse(&mut s.trim_end().chars().peekable()) {
-                    b.dot = b.map_dot_expr(&mut expr);
+                if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
+                    b.dot = b.map_addr(&mut expr);
                 };
 
                 None

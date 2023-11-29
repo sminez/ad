@@ -12,13 +12,11 @@ use ropey::RopeSlice;
 use std::{cmp::min, iter::Peekable};
 
 mod cur;
-pub(crate) mod parse;
 mod range;
 mod search;
 mod util;
 
 pub(crate) use cur::Cur;
-pub(crate) use parse as parse_dot;
 pub(crate) use range::{LineRange, Range};
 pub(crate) use search::Matcher;
 
@@ -42,6 +40,18 @@ pub enum Dot {
 impl Default for Dot {
     fn default() -> Self {
         Self::Cur { c: Cur::default() }
+    }
+}
+
+impl From<Cur> for Dot {
+    fn from(c: Cur) -> Self {
+        Self::Cur { c }
+    }
+}
+
+impl From<Range> for Dot {
+    fn from(r: Range) -> Self {
+        Self::Range { r }
     }
 }
 

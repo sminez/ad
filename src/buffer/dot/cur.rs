@@ -7,6 +7,10 @@ pub struct Cur {
 }
 
 impl Cur {
+    pub fn new(idx: usize) -> Self {
+        Self { idx }
+    }
+
     pub fn buffer_start() -> Self {
         Cur { idx: 0 }
     }

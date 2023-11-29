@@ -23,7 +23,7 @@ mod minibuffer;
 use edit::{Edit, EditLog, Kind, Txt};
 
 pub(crate) use buffers::Buffers;
-pub(crate) use dot::{parse_dot, Cur, Dot, LineRange, Matcher, Range, TextObject, UpdateDot};
+pub(crate) use dot::{Cur, Dot, LineRange, Matcher, Range, TextObject, UpdateDot};
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
