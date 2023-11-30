@@ -1,7 +1,7 @@
 use crate::{
     config,
     config::ColorScheme,
-    dot::{Cur, Dot, LineRange, Range, TextObject},
+    dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
     key::Key,
     term::Style,
@@ -493,12 +493,11 @@ impl Buffer {
             Action::DotSet(t, count) => self.set_dot(t, count),
 
             Action::LoadDot => {
-                // FIXME: reimplement
-                // if let Dot::Cur { .. } = self.dot {
-                //     self.set_dot(TextObject::Word, 1);
-                // }
-                // let s = self.dot.content(self);
-                // self.find_forward(s);
+                if let Dot::Cur { .. } = self.dot {
+                    self.set_dot(TextObject::Word, 1);
+                }
+                let s = self.dot.content(self);
+                self.find_forward(&s);
             }
 
             Action::RawKey { k } => return self.handle_raw_key(k),
@@ -707,11 +706,11 @@ impl Buffer {
         (r.start, Some(s))
     }
 
-    // fn find_forward<M: Matcher>(&mut self, m: M) {
-    //     if let Some(dot) = m.match_forward_from_wrapping(self.dot.active_cur(), self) {
-    //         self.dot = dot;
-    //     }
-    // }
+    fn find_forward(&mut self, s: &str) {
+        if let Some(dot) = find_forward_wrapping(&s, self) {
+            self.dot = dot;
+        }
+    }
 
     // fn find_backward<M: Matcher>(&mut self, m: M) {
     //     if let Some(dot) = m.match_backward_from_wrapping(self.dot.active_cur(), self) {

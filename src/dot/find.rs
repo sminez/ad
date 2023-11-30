@@ -33,10 +33,10 @@ pub fn find_forward_end<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
     find_forward(f, cur, b).unwrap_or_default().last_cur()
 }
 
-// pub fn find_forward_wrapping<F: Find>(f: &F, b: &Buffer) -> Option<Dot> {
-//     find_between(f, b.dot.last_cur().idx, b.txt.len_chars(), b)
-//         .or_else(|| find_between(f, 0, b.dot.last_cur().idx, b))
-// }
+pub fn find_forward_wrapping<F: Find>(f: &F, b: &Buffer) -> Option<Dot> {
+    find_between(f, b.dot.last_cur().idx, b.txt.len_chars(), b)
+        .or_else(|| find_between(f, 0, b.dot.last_cur().idx, b))
+}
 
 pub fn find_backward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
     rev_find_between(f, cur.idx, 0, b)
@@ -149,7 +149,7 @@ impl<'a> Find for &'a str {
             }
 
             if cix == last {
-                return Some((start, i));
+                return Some((start, i + 1));
             }
 
             cix += 1;

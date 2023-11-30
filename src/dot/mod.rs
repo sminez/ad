@@ -11,7 +11,7 @@ use crate::buffer::Buffer;
 use std::cmp::min;
 
 mod cur;
-mod find;
+pub(crate) mod find;
 mod range;
 mod text_object;
 
