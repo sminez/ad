@@ -1,6 +1,6 @@
 //! vim style insert mode where most keys are directly modifying the buffer
 use crate::{
-    dot::TextObject,
+    dot::TextObject::*,
     editor::{Action::*, Actions},
     key::{Arrow::*, Key::*},
     keymap,
@@ -12,10 +12,15 @@ pub(crate) fn insert_mode() -> Mode {
     let mut keymap = keymap! {
         [ Esc ] => [ SetMode { m: "NORMAL" } ],
         [ Char('f'), Char('d') ] => [ SetMode { m: "NORMAL" } ],
-        [ Backspace ] => [ DotSet(TextObject::Arr(Left), 1), Delete ],
+        [ Backspace ] => [ DotSet(Arr(Left), 1), Delete ],
         [ Del ] => [ Delete ],
-        [ Home ] => [ DotSet(TextObject::LineStart, 1) ],
-        [ End ] => [ DotSet(TextObject::LineEnd, 1) ],
+        [ Home ] => [ DotSet(LineStart, 1) ],
+        [ End ] => [ DotSet(LineEnd, 1) ],
+
+        // readline style bindings
+        [ Ctrl('a') ] => [ DotSet(LineStart, 1) ],
+        [ Ctrl('e') ] => [ DotSet(LineEnd, 1) ],
+        [ Ctrl('w') ] => [ DotSet(Arr(Left), 1), DotExtendBackward(Word, 1), Delete ],
 
     };
 
