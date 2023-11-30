@@ -30,7 +30,9 @@ pub fn find_forward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
 }
 
 pub fn find_forward_end<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
-    find_forward(f, cur, b).unwrap_or_default().last_cur()
+    find_forward(f, cur, b)
+        .unwrap_or_else(|| Cur::buffer_end(b).into())
+        .last_cur()
 }
 
 pub fn find_forward_wrapping<F: Find>(f: &F, b: &Buffer) -> Option<Dot> {
