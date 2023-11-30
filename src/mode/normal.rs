@@ -53,6 +53,18 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('g'), Char('e') ] => [ DotSet(BufferEnd, 1) ],
         [ Char('g'), Char('h') ] => [ DotSet(LineStart, 1) ],
         [ Char('g'), Char('l') ] => [ DotSet(LineEnd, 1) ],
+        // Delimited pairs
+        [ Alt('i'), Char('(') ] => [ DotSet(Delimited('(', ')'), 1) ],
+        [ Alt('i'), Char(')') ] => [ DotSet(Delimited('(', ')'), 1) ],
+        [ Alt('i'), Char('[') ] => [ DotSet(Delimited('[', ']'), 1) ],
+        [ Alt('i'), Char(']') ] => [ DotSet(Delimited('[', ']'), 1) ],
+        [ Alt('i'), Char('{') ] => [ DotSet(Delimited('{', '}'), 1) ],
+        [ Alt('i'), Char('}') ] => [ DotSet(Delimited('{', '}'), 1) ],
+        [ Alt('i'), Char('<') ] => [ DotSet(Delimited('<', '>'), 1) ],
+        [ Alt('i'), Char('>') ] => [ DotSet(Delimited('<', '>'), 1) ],
+        [ Alt('i'), Char('"') ] => [ DotSet(Delimited('"', '"'), 1) ],
+        [ Alt('i'), Char('\'') ] => [ DotSet(Delimited('\'', '\''), 1) ],
+        [ Alt('i'), Char('/') ] => [ DotSet(Delimited('/', '/'), 1) ],
 
         // Extending dot
         [ Char('H') ] => [ DotExtendBackward(Character, 1) ],

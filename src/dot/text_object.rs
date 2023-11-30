@@ -15,8 +15,8 @@ pub enum TextObject {
     BufferEnd,
     BufferStart,
     Character,
-    // Delimited(char, char),
     FindChar(char),
+    Delimited(char, char),
     Line,
     LineEnd,
     LineStart,
@@ -34,6 +34,7 @@ impl TextObject {
             BufferStart => Cur::buffer_start().into(),
             Character => b.dot.active_cur().arr(Arrow::Right, b).into(),
             FindChar(ch) => find_forward_end(ch, b.dot.active_cur(), b).into(),
+            Delimited(l, r) => expand(&FindDelimited::new(*l, *r), b.dot, b),
             LineEnd => b.dot.active_cur().move_to_line_end(b).into(),
             LineStart => b.dot.active_cur().move_to_line_start(b).into(),
             Line => Dot::from(
@@ -63,7 +64,6 @@ impl TextObject {
             (Arr(arr), _) => (start, end.arr(*arr, b)),
             (BufferEnd, true) => (end, Cur::buffer_end(b)),
             (BufferEnd, false) => (start, Cur::buffer_end(b)),
-            (BufferStart, _) => return, // Can't move forward to the buffer start
             (Character, true) => (start.arr_w_count(Arrow::Right, 1, b), end),
             (Character, false) => (start, end.arr_w_count(Arrow::Right, 1, b)),
             (FindChar(ch), true) => (find_forward_end(ch, start, b), end),
@@ -78,6 +78,8 @@ impl TextObject {
             (Paragraph, false) => (start, find_forward_end(&FindParagraph::Fwd, end, b)),
             (Word, true) => (find_forward_end(&FindWord::Fwd, start, b), end),
             (Word, false) => (start, find_forward_end(&FindWord::Fwd, end, b)),
+            // Can't move forward to the buffer start or move forward between delimiters
+            (BufferStart | Delimited(_, _), _) => return,
         };
 
         b.dot = Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range();
@@ -94,7 +96,6 @@ impl TextObject {
 
         (start, end) = match (self, start_active) {
             (Arr(arr), _) => (start.arr(arr.flip(), b), end),
-            (BufferEnd, _) => return, // Can't move back to the buffer end
             (BufferStart, true) => (Cur::buffer_start(), end),
             (BufferStart, false) => (Cur::buffer_start(), start),
             (Character, true) => (start.arr_w_count(Arrow::Left, 1, b), end),
@@ -111,9 +112,60 @@ impl TextObject {
             (Paragraph, false) => (start, find_backward_start(&FindParagraph::Fwd, end, b)),
             (Word, true) => (find_backward_start(&FindWord::Fwd, start, b), end),
             (Word, false) => (start, find_backward_start(&FindWord::Fwd, end, b)),
+            // Can't move back to the buffer end or move back between delimiters
+            (BufferEnd | Delimited(_, _), _) => return,
         };
 
         b.dot = Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range();
+    }
+}
+
+struct FindDelimited {
+    l: char,
+    r: char,
+    rev: bool,
+}
+
+impl FindDelimited {
+    fn new(l: char, r: char) -> Self {
+        Self { l, r, rev: false }
+    }
+}
+
+impl Find for FindDelimited {
+    type Reversed = FindDelimited;
+
+    fn reversed(&self) -> Self::Reversed {
+        Self {
+            l: self.l,
+            r: self.r,
+            rev: !self.rev,
+        }
+    }
+
+    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    where
+        I: Iterator<Item = (usize, char)>,
+    {
+        let (target, other) = if self.rev {
+            (self.l, self.r)
+        } else {
+            (self.r, self.l)
+        };
+        let mut skips = 0;
+
+        for (i, ch) in it {
+            if ch == other {
+                skips += 1;
+            } else if skips == 0 && ch == target {
+                let ix = if self.rev { i + 1 } else { i - 1 };
+                return Some((ix, ix));
+            } else if ch == target {
+                skips -= 1;
+            }
+        }
+
+        None
     }
 }
 
