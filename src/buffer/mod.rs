@@ -1,6 +1,7 @@
 use crate::{
     config,
     config::ColorScheme,
+    dot::{Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
     key::Key,
     term::Style,
@@ -16,14 +17,12 @@ use std::{
 };
 
 mod buffers;
-mod dot;
 mod edit;
 mod minibuffer;
 
 use edit::{Edit, EditLog, Kind, Txt};
 
 pub(crate) use buffers::Buffers;
-pub(crate) use dot::{Cur, Dot, LineRange, Matcher, Range, TextObject, UpdateDot};
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
@@ -494,11 +493,12 @@ impl Buffer {
             Action::DotSet(t, count) => self.set_dot(t, count),
 
             Action::LoadDot => {
-                if let Dot::Cur { .. } = self.dot {
-                    self.set_dot(TextObject::Word, 1);
-                }
-                let s = self.dot.content(self);
-                self.find_forward(s);
+                // FIXME: reimplement
+                // if let Dot::Cur { .. } = self.dot {
+                //     self.set_dot(TextObject::Word, 1);
+                // }
+                // let s = self.dot.content(self);
+                // self.find_forward(s);
             }
 
             Action::RawKey { k } => return self.handle_raw_key(k),
@@ -564,23 +564,26 @@ impl Buffer {
 
     /// Set dot and clamp to ensure it is within bounds
     fn set_dot(&mut self, t: TextObject, n: usize) {
-        let mut dot = t.set_dot_n(self.dot, n, self);
-        dot.clamp_idx(self.txt.len_chars());
-        self.dot = dot;
+        for _ in 0..n {
+            t.set_dot(self);
+        }
+        self.dot.clamp_idx(self.txt.len_chars());
     }
 
     /// Extend dot foward and clamp to ensure it is within bounds
     fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
-        let mut dot = t.extend_dot_forward_n(self.dot, n, self);
-        dot.clamp_idx(self.txt.len_chars());
-        self.dot = dot;
+        for _ in 0..n {
+            t.extend_dot_forward(self);
+        }
+        self.dot.clamp_idx(self.txt.len_chars());
     }
 
     /// Extend dot backward and clamp to ensure it is within bounds
     fn extend_dot_backward(&mut self, t: TextObject, n: usize) {
-        let mut dot = t.extend_dot_backward_n(self.dot, n, self);
-        dot.clamp_idx(self.txt.len_chars());
-        self.dot = dot;
+        for _ in 0..n {
+            t.extend_dot_backward(self);
+        }
+        self.dot.clamp_idx(self.txt.len_chars());
     }
 
     fn undo(&mut self) -> Option<ActionOutcome> {
@@ -704,11 +707,11 @@ impl Buffer {
         (r.start, Some(s))
     }
 
-    fn find_forward<M: Matcher>(&mut self, m: M) {
-        if let Some(dot) = m.match_forward_from_wrapping(self.dot.active_cur(), self) {
-            self.dot = dot;
-        }
-    }
+    // fn find_forward<M: Matcher>(&mut self, m: M) {
+    //     if let Some(dot) = m.match_forward_from_wrapping(self.dot.active_cur(), self) {
+    //         self.dot = dot;
+    //     }
+    // }
 
     // fn find_backward<M: Matcher>(&mut self, m: M) {
     //     if let Some(dot) = m.match_backward_from_wrapping(self.dot.active_cur(), self) {
@@ -732,7 +735,7 @@ fn n_digits(mut n: usize) -> usize {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::key::Arrow;
     use edit::tests::{del_c, del_s, in_c, in_s};

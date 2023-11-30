@@ -1,7 +1,7 @@
 //! vim style normal mode
 use crate::{
-    buffer::TextObject::*,
     config,
+    dot::TextObject::*,
     editor::{Action::*, Actions, ViewPort},
     key::{Arrow::*, Key::*},
     keymap,
@@ -47,6 +47,7 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('b') ] => [ DotExtendBackward(Word, 1), DotCollapseFirst ],
         [ Char('x') ] => [ DotSet(Line, 1) ],
         [ Char('X') ] => [ DotSet(Paragraph, 1) ],
+        [ Char('*') ] => [ DotSet(Word, 1) ],
         [ Char('%') ] => [ DotSet(BufferStart, 1), DotExtendForward(BufferEnd, 1) ],
         [ Char('g'), Char('g') ] => [ DotSet(BufferStart, 1) ],
         [ Char('g'), Char('e') ] => [ DotSet(BufferEnd, 1) ],

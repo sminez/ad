@@ -7,6 +7,7 @@ use std::{
 
 pub mod buffer;
 pub mod config;
+pub mod dot;
 pub mod editor;
 pub mod exec;
 pub mod fsys;

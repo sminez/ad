@@ -1,5 +1,5 @@
 use crate::{
-    buffer::Dot,
+    dot::Dot,
     exec::{addr::Address, Edit},
 };
 use ropey::Rope;

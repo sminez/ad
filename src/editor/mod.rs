@@ -1,7 +1,8 @@
 use crate::{
-    buffer::{ActionOutcome, Buffer, Buffers, Cur, Dot, TextObject},
+    buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
     die,
+    dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
     key::{Arrow, Key, MouseButton, MouseEvent},

@@ -1,4 +1,4 @@
-use crate::buffer::{dot::Cur, Buffer};
+use crate::{buffer::Buffer, dot::Cur};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {

@@ -18,7 +18,8 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, Cur, Dot, Range},
+    buffer::Buffer,
+    dot::{Cur, Dot, Range},
     exec::char_iter::IterBoundedChars,
     regex::{self, Regex},
     util::parse_num,

@@ -1,6 +1,6 @@
 //! vim style insert mode where most keys are directly modifying the buffer
 use crate::{
-    buffer::TextObject,
+    dot::TextObject,
     editor::{Action::*, Actions},
     key::{Arrow::*, Key::*},
     keymap,

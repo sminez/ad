@@ -56,7 +56,7 @@ impl Cur {
         cur
     }
 
-    fn arr(&self, arr: Arrow, b: &Buffer) -> Self {
+    pub(super) fn arr(&self, arr: Arrow, b: &Buffer) -> Self {
         let mut cur = *self;
 
         match arr {

@@ -1,6 +1,7 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
-    buffer::{Buffer, Cur, Dot, Range},
+    buffer::Buffer,
+    dot::{Cur, Dot, Range},
     editor::Action,
     regex::{self, Match},
 };

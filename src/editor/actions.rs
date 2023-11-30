@@ -1,8 +1,9 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferKind, Cur, Dot, MiniBuffer, MiniBufferSelection, TextObject},
+    buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
     config::Config,
     die,
+    dot::{Cur, Dot, TextObject},
     editor::Editor,
     exec::Program,
     fsys::BufId,
