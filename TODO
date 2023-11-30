@@ -9,11 +9,6 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
-- [ ] support dot expressions using '-/+' to set search direction and manipulation of simple
-      dot expressions.
-      - The docs for Sam and Acme cover the sorts of expressions that are supported. A big one
-        is using -/re/ to search backwards with a regex. Things like '#5-+' to select all of line
-        5 are also in there.
 - [ ] FEATURE: Edit log transactions
 	  - paste should always be a new transaction
 - [ ] implement remaining text objects
@@ -38,7 +33,6 @@
       files right next to the file that is being edited.
       - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
         the file but this is normal behaviour for sed so not an issue with ad
-- [ ] need to detect an existing Fuse mount and handle the conflict gracefully
 - [ ] decide on the event format for the events file and implement the events file
 - [ ] add top level logfile calling out:
   - buffer open

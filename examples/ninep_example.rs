@@ -1,4 +1,4 @@
-//! A simple demo of the filesystem interface
+//! A simple demo of the 9p server interface
 use ad::ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     server::{Result, Serve9p, Server, DEFAULT_SOCKET_NAME},

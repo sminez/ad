@@ -1,3 +1,8 @@
+//! A one-shot run of Burntsushi's full torture test for the regex engine
+//!
+//! See the full benchmark tests in '/benches' for a trimmed down version of this test that
+//! runs under criterion. (Cut down because the ad engine is not fast enough currently to
+//! handle the full test in a reasonable time.)
 use ad::regex::Regex;
 use std::{fs, time::Instant};
 

@@ -99,7 +99,60 @@ pub struct Program {
 }
 
 impl Program {
-    /// Execute this program against a given IterableStream
+    /// Attempt to parse a given program input
+    pub fn try_parse(s: &str) -> Result<Self, Error> {
+        let mut exprs = vec![];
+        let mut it = s.trim().chars().peekable();
+
+        if it.peek().is_none() {
+            return Err(Error::EmptyProgram);
+        }
+
+        let initial_dot = match Addr::parse(&mut it) {
+            Ok(dot_expr) => dot_expr,
+            // If the start of input is not a dot expression we default to Full and
+            // attempt to parse the rest of the program
+            Err(ParseError::NotAnAddress) => Addr::full(),
+            // All other errors are parse errors for us
+            Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
+            Err(ParseError::UnclosedDelimiter) => {
+                return Err(Error::UnclosedDelimiter("dot expr regex", '/'))
+            }
+            Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
+            Err(ParseError::InvalidSuffix) => return Err(Error::InvalidSuffix),
+        };
+
+        consume_whitespace(&mut it);
+
+        loop {
+            if it.peek().is_none() {
+                break;
+            }
+
+            match Expr::try_parse(&mut it) {
+                Ok(ParseOutput::Single(expr)) => {
+                    exprs.push(expr);
+                    consume_whitespace(&mut it);
+                }
+                Ok(ParseOutput::Pair(e1, e2)) => {
+                    exprs.extend([e1, e2]);
+                    consume_whitespace(&mut it);
+                }
+                Err(Error::Eof) => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        if exprs.is_empty() {
+            return Ok(Self { initial_dot, exprs });
+        }
+
+        validate(&exprs)?;
+
+        Ok(Self { initial_dot, exprs })
+    }
+
+    /// Execute this program against a given Edit
     pub fn execute<E, W>(&mut self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, Error>
     where
         E: Edit,
@@ -291,59 +344,6 @@ impl Program {
             from,
             (to as isize + offset) as usize,
         ))
-    }
-
-    /// Attempt to parse a given program input using a known max dot position
-    pub fn try_parse(s: &str) -> Result<Self, Error> {
-        let mut exprs = vec![];
-        let mut it = s.trim().chars().peekable();
-
-        if it.peek().is_none() {
-            return Err(Error::EmptyProgram);
-        }
-
-        let initial_dot = match Addr::parse(&mut it) {
-            Ok(dot_expr) => dot_expr,
-            // If the start of input is not a dot expression we default to Full and
-            // attempt to parse the rest of the program
-            Err(ParseError::NotAnAddress) => Addr::full(),
-            // All other errors are parse errors for us
-            Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
-            Err(ParseError::UnclosedDelimiter) => {
-                return Err(Error::UnclosedDelimiter("dot expr regex", '/'))
-            }
-            Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
-            Err(ParseError::InvalidSuffix) => return Err(Error::InvalidSuffix),
-        };
-
-        consume_whitespace(&mut it);
-
-        loop {
-            if it.peek().is_none() {
-                break;
-            }
-
-            match Expr::try_parse(&mut it) {
-                Ok(ParseOutput::Single(expr)) => {
-                    exprs.push(expr);
-                    consume_whitespace(&mut it);
-                }
-                Ok(ParseOutput::Pair(e1, e2)) => {
-                    exprs.extend([e1, e2]);
-                    consume_whitespace(&mut it);
-                }
-                Err(Error::Eof) => break,
-                Err(e) => return Err(e),
-            }
-        }
-
-        if exprs.is_empty() {
-            return Ok(Self { initial_dot, exprs });
-        }
-
-        validate(&exprs)?;
-
-        Ok(Self { initial_dot, exprs })
     }
 }
 

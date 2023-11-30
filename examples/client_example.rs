@@ -1,4 +1,8 @@
 //! https://groups.google.com/g/plan9port-dev/c/Zef5lM0HgnM
+//!
+//! This is just a scratch file for testing out the 9p implementation by interacting with Acme.
+//! Eventually it might be nice to provide an actual client library in the same way that we do for
+//! servers.
 use ad::ninep::protocol::{Format9p, RawStat, Rdata, Rmessage, Tdata, Tmessage};
 use std::{env, os::unix::net::UnixStream};
 
