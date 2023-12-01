@@ -218,6 +218,7 @@ map G G => my-prog
         let cfg = Config::parse(EXAMPLE_CONFIG).unwrap();
         let bindings: BTreeMap<Vec<Key>, String> = [
             (vec![Key::Char(' '), Key::Char('b')], "B".to_string()),
+            (vec![Key::Char(' '), Key::Char('F')], "fmt".to_string()),
             (vec![Key::Char('/')], "s".to_string()),
             (vec![Key::Char('-')], "f".to_string()),
             (vec![Key::Char('_')], "fr".to_string()),
