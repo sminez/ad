@@ -1,3 +1,0 @@
-#! /usr/bin/env sh
-formatted=$(jq -M < "$1")
-echo "$formatted" > "$1"
