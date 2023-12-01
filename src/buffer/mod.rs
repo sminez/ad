@@ -30,7 +30,7 @@ pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActionOutcome {
     SetClipboard(String),
-    SetStatusMessag(String),
+    SetStatusMessage(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +63,7 @@ pub struct Buffer {
     pub(crate) id: usize,
     pub(crate) kind: BufferKind,
     pub(crate) dot: Dot,
+    pub(crate) xdot: Dot,
     pub(crate) txt: Rope,
     pub(crate) rx: usize,
     pub(crate) row_off: usize,
@@ -88,6 +89,7 @@ impl Buffer {
             id,
             kind: BufferKind::File(path),
             dot: Dot::default(),
+            xdot: Dot::default(),
             txt: Rope::from_str(&raw),
             rx: 0,
             row_off: 0,
@@ -131,6 +133,7 @@ impl Buffer {
             id,
             kind: BufferKind::Unnamed,
             dot: Dot::default(),
+            xdot: Dot::default(),
             txt: Rope::from_str(content),
             rx: 0,
             row_off: 0,
@@ -149,6 +152,7 @@ impl Buffer {
             id,
             kind: BufferKind::Virtual(name),
             dot: Dot::default(),
+            xdot: Dot::default(),
             txt: Rope::from_str(&content),
             rx: 0,
             row_off: 0,
@@ -211,6 +215,14 @@ impl Buffer {
 
     pub fn addr(&self) -> String {
         self.dot.addr(self)
+    }
+
+    pub fn xdot_contents(&self) -> String {
+        self.xdot.content(self)
+    }
+
+    pub fn xaddr(&self) -> String {
+        self.xdot.addr(self)
     }
 
     #[inline]
@@ -594,7 +606,7 @@ impl Buffer {
                 self.dirty = !self.edit_log.is_empty();
                 None
             }
-            None => Some(ActionOutcome::SetStatusMessag(
+            None => Some(ActionOutcome::SetStatusMessage(
                 "Nothing to undo".to_string(),
             )),
         }
@@ -608,7 +620,7 @@ impl Buffer {
                 self.edit_log.paused = false;
                 None
             }
-            None => Some(ActionOutcome::SetStatusMessag(
+            None => Some(ActionOutcome::SetStatusMessage(
                 "Nothing to redo".to_string(),
             )),
         }

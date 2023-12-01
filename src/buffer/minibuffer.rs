@@ -55,6 +55,7 @@ impl MiniBuffer {
                 id: usize::MAX,
                 kind: BufferKind::MiniBuffer,
                 dot: Default::default(),
+                xdot: Default::default(),
                 txt: Rope::new(),
                 rx: 0,
                 row_off: 0,

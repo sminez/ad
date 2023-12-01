@@ -72,9 +72,11 @@ const CURRENT_BUFFER: &str = "current";
 ///   2.   filename     -> The current filename for the buffer
 ///   3.   dot          -> The text currently held in dot
 ///   4.   addr         -> The address value of dot
-///   5.   body         -> The full body of the buffer
-///   6.   event        -> Contol file for intercepting input events for the buffer
-const QID_OFFSET: u64 = 6;
+///   5.   xdot         -> The text currently held in xdot (a virtual dot not affecting real dot)
+///   6.   xaddr        -> The address value of xdot
+///   7.   body         -> The full body of the buffer
+///   8.   event        -> Contol file for intercepting input events for the buffer
+const QID_OFFSET: u64 = 8;
 
 const E_UNKNOWN_FILE: &str = "unknown file";
 
@@ -238,13 +240,9 @@ impl Serve9p for AdFs {
                 }
             }
 
-            qid => match self.buffer_nodes.req_for_write(qid, s, offset) {
-                Some(req) => match Message::send(req, &self.tx) {
-                    Ok(_) => Ok(n_bytes),
-                    Err(e) => Err(format!("unable to execute control message: {e}")),
-                },
-                None => Err(E_UNKNOWN_FILE.to_string()),
-            },
+            CURRENT_BUFFER_QID => Err(E_UNKNOWN_FILE.to_string()),
+
+            qid => self.buffer_nodes.write(qid, s, offset),
         }
     }
 

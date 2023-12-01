@@ -13,7 +13,7 @@ case $maybext in
     ;;
 
   rs)
-    formatted=$(9p read "ad/buffers/$bufid/body" | rustfmt)
+    formatted=$(9p read "ad/buffers/$bufid/body" | rustfmt --edition 2021)
     ;;
 
   *)
@@ -23,8 +23,8 @@ case $maybext in
 esac
 
 if [[ -n "$formatted" ]]; then
-  echo 'E ,' | 9p write ad/ctl
-  echo -n "$formatted" | 9p write "ad/buffers/$bufid/dot"
+  echo ',' | 9p write "ad/buffers/$bufid/xaddr"
+  echo -n "$formatted" | 9p write "ad/buffers/$bufid/xdot"
   echo "$addr" | 9p write "ad/buffers/$bufid/addr"
   echo -n "viewport-center" | 9p write "ad/ctl"
 fi

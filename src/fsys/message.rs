@@ -25,11 +25,15 @@ pub enum Req {
 
     ReadBufferName { id: usize },
     ReadBufferDot { id: usize },
+    ReadBufferXDot { id: usize },
     ReadBufferAddr { id: usize },
+    ReadBufferXAddr { id: usize },
     ReadBufferBody { id: usize },
 
     SetBufferDot { id: usize, s: String },
+    SetBufferXDot { id: usize, s: String },
     SetBufferAddr { id: usize, s: String },
+    SetBufferXAddr { id: usize, s: String },
     ClearBufferBody { id: usize },
     InsertBufferBody { id: usize, s: String, offset: usize },
 }

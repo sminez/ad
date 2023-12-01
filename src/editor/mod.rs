@@ -157,7 +157,7 @@ impl Editor {
             }
         }
     }
-    fn handle_buffer_mutation<F: FnOnce(&mut Buffer, String) -> Option<ActionOutcome>>(
+    fn handle_buffer_mutation<F: FnOnce(&mut Buffer, String)>(
         &mut self,
         id: usize,
         tx: Sender<Result<String, String>>,
@@ -166,13 +166,7 @@ impl Editor {
     ) {
         match self.buffers.with_id_mut(id) {
             Some(b) => {
-                if let Some(o) = (f)(b, s) {
-                    match o {
-                        ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
-                        ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
-                    }
-                };
-
+                (f)(b, s);
                 tx.send(Ok("handled".to_string())).unwrap()
             }
 
@@ -193,32 +187,42 @@ impl Editor {
             }
 
             ReadBufferName { id } => self.send_buffer_resp(id, tx, |b| b.full_name().to_string()),
-            ReadBufferDot { id } => self.send_buffer_resp(id, tx, |b| b.dot_contents()),
             ReadBufferAddr { id } => self.send_buffer_resp(id, tx, |b| b.addr()),
+            ReadBufferDot { id } => self.send_buffer_resp(id, tx, |b| b.dot_contents()),
+            ReadBufferXAddr { id } => self.send_buffer_resp(id, tx, |b| b.xaddr()),
+            ReadBufferXDot { id } => self.send_buffer_resp(id, tx, |b| b.xdot_contents()),
             ReadBufferBody { id } => self.send_buffer_resp(id, tx, |b| b.str_contents()),
-
-            SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                b.handle_action(Action::InsertString { s })
-            }),
 
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
                     b.dot = b.map_addr(&mut expr);
                 };
-
-                None
+            }),
+            SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                b.handle_action(Action::InsertString { s });
+            }),
+            SetBufferXAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
+                    b.xdot = b.map_addr(&mut expr);
+                };
+            }),
+            SetBufferXDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                let dot = b.dot;
+                b.dot = b.xdot;
+                b.handle_action(Action::InsertString { s });
+                (b.xdot, b.dot) = (b.dot, dot);
             }),
 
             ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
                 b.handle_action(Action::DotSet(TextObject::BufferStart, 1));
                 b.handle_action(Action::DotExtendForward(TextObject::BufferEnd, 1));
-                b.handle_action(Action::Delete)
+                b.handle_action(Action::Delete);
             }),
 
             InsertBufferBody { id, s, offset } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 let idx = b.txt.byte_to_char(offset);
                 b.dot = Dot::Cur { c: Cur { idx } };
-                b.handle_action(Action::InsertString { s })
+                b.handle_action(Action::InsertString { s });
             }),
         }
     }
@@ -311,7 +315,7 @@ impl Editor {
     fn forward_action_to_active_buffer(&mut self, a: Action) {
         if let Some(o) = self.buffers.active_mut().handle_action(a) {
             match o {
-                ActionOutcome::SetStatusMessag(msg) => self.set_status_message(&msg),
+                ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
             }
         }

@@ -1,7 +1,7 @@
 //! Buffer state for the fuse filesystem
 use super::{
-    empty_dir_stat, empty_file_stat, Message, Req, BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER,
-    CURRENT_BUFFER_QID, QID_OFFSET,
+    empty_dir_stat, empty_file_stat, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID,
+    CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, QID_OFFSET,
 };
 use crate::{editor::InputEvent, ninep::fs::Stat};
 use std::{
@@ -15,9 +15,18 @@ const DOT: &str = "dot";
 const ADDR: &str = "addr";
 const BODY: &str = "body";
 const EVENT: &str = "event";
+const XDOT: &str = "xdot";
+const XADDR: &str = "xaddr";
 
-pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] =
-    [(1, FILENAME), (2, DOT), (3, ADDR), (4, BODY), (5, EVENT)];
+pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] = [
+    (1, FILENAME),
+    (2, DOT),
+    (3, ADDR),
+    (4, XDOT),
+    (5, XADDR),
+    (6, BODY),
+    (7, EVENT),
+];
 
 fn parent_and_fname(qid: u64) -> (u64, &'static str) {
     assert!(qid > CURRENT_BUFFER_QID, "invalid buffer file qid");
@@ -142,22 +151,29 @@ impl BufferNodes {
         }
     }
 
-    pub(super) fn req_for_write(&mut self, qid: u64, s: String, offset: usize) -> Option<Req> {
-        if qid == CURRENT_BUFFER_QID {
-            return None;
-        }
-
+    pub(super) fn write(&mut self, qid: u64, s: String, offset: usize) -> Result<usize> {
         let (parent, fname) = parent_and_fname(qid);
-        let b = self.known.get_mut(&parent)?;
+        let b = match self.known.get_mut(&parent) {
+            Some(b) => b,
+            None => return Err(E_UNKNOWN_FILE.to_string()),
+        };
         b.stat.last_modified = SystemTime::now();
         let id = b.id;
 
-        match fname {
-            DOT => Some(Req::SetBufferDot { id, s }),
-            ADDR => Some(Req::SetBufferAddr { id, s }),
-            BODY => Some(Req::InsertBufferBody { id, s, offset }),
-            FILENAME | EVENT => None,
-            _ => None,
+        let n_bytes = s.len();
+        let req = match fname {
+            DOT => Req::SetBufferDot { id, s },
+            ADDR => Req::SetBufferAddr { id, s },
+            BODY => Req::InsertBufferBody { id, s, offset },
+            XDOT => Req::SetBufferXDot { id, s },
+            XADDR => Req::SetBufferXAddr { id, s },
+            FILENAME | EVENT => return Err(E_UNKNOWN_FILE.to_string()),
+            _ => return Err(E_UNKNOWN_FILE.to_string()),
+        };
+
+        match Message::send(req, &self.tx) {
+            Ok(_) => Ok(n_bytes),
+            Err(e) => Err(format!("unable to execute control message: {e}")),
         }
     }
 
@@ -221,14 +237,18 @@ impl BufferNode {
     }
 
     fn current_file_content(&self, fname: &str, tx: &Sender<InputEvent>) -> Option<String> {
-        match fname {
-            FILENAME => Message::send(Req::ReadBufferName { id: self.id }, tx).ok(),
-            DOT => Message::send(Req::ReadBufferDot { id: self.id }, tx).ok(),
-            ADDR => Message::send(Req::ReadBufferAddr { id: self.id }, tx).ok(),
-            BODY => Message::send(Req::ReadBufferBody { id: self.id }, tx).ok(),
-            EVENT => Some("".to_string()), // TODO: sort out the event file
-            _ => None,
-        }
+        let req = match fname {
+            FILENAME => Req::ReadBufferName { id: self.id },
+            DOT => Req::ReadBufferDot { id: self.id },
+            ADDR => Req::ReadBufferAddr { id: self.id },
+            BODY => Req::ReadBufferBody { id: self.id },
+            XDOT => Req::ReadBufferXDot { id: self.id },
+            XADDR => Req::ReadBufferXAddr { id: self.id },
+            EVENT => return Some("".to_string()), // TODO: sort out the event file
+            _ => return None,
+        };
+
+        Message::send(req, tx).ok()
     }
 }
 
