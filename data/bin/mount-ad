@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# mount the ad virtual filesystem using 9pfuse
+
+9pfuse /tmp/ns.$USER.:0/ad $HOME/.ad/mnt
+echo "echo mounted ad filesystem to $HOME/.ad/mnt" | 9p write ad/ctl
