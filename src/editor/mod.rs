@@ -211,6 +211,8 @@ impl Editor {
                 b.dot = b.xdot;
                 b.handle_action(Action::InsertString { s });
                 (b.xdot, b.dot) = (b.dot, dot);
+                b.dot.clamp_idx(b.txt.len_chars());
+                b.xdot.clamp_idx(b.txt.len_chars());
             }),
 
             ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
