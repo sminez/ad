@@ -1,0 +1,30 @@
+#!/usr/bin/env sh
+# Attempt to format the current buffer based on the filetype
+
+[ -e "$HOME/.profile" ] && source ~/.profile
+bufid=$(9p read "ad/buffers/current")
+fname=$(9p read "ad/buffers/$bufid/filename")
+addr=$(9p read "ad/buffers/$bufid/addr")
+maybext=$(echo ${fname##*.})
+
+case $maybext in
+  json)
+    formatted=$(9p read "ad/buffers/$bufid/body" | jq)
+    ;;
+
+  rs)
+    formatted=$(9p read "ad/buffers/$bufid/body" | rustfmt)
+    ;;
+
+  *)
+    echo "echo no format rules found for '$maybext'" | 9p write ad/ctl
+    exit 0
+    ;;
+esac
+
+if [[ -n "$formatted" ]]; then
+  echo 'E ,' | 9p write ad/ctl
+  echo -n "$formatted" | 9p write "ad/buffers/$bufid/dot"
+  echo "$addr" | 9p write "ad/buffers/$bufid/addr"
+  echo -n "viewport-center" | 9p write "ad/ctl"
+fi
