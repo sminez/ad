@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Use the users warprc to navigate to files in known projects
+
+[ -e "$HOME/.profile" ] && source ~/.profile
+opt=$(tmux-select -c "cat $HOME/.warprc | cut -d: -f1 | sort")
+
+if [[ -n "$opt" ]]; then
+  dirname=$(cat "$HOME/.warprc" | grep "^$opt" | cut -d: -f2 | sed "s:~/:$HOME/:g")
+  fname=$(tmux-select -c "cd $dirname && fd")
+  if [[ -n "$fname" ]]; then
+    echo -n "open $dirname/$fname" | 9p write ad/ctl
+  fi
+fi
