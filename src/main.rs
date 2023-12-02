@@ -100,7 +100,13 @@ fn parse_args() -> Args {
 }
 
 fn run_script(script: &str, files: Vec<String>) {
-    let mut prog = Program::try_parse(script).unwrap();
+    let mut prog = match Program::try_parse(script) {
+        Ok(prog) => prog,
+        Err(e) => {
+            eprintln!("error parsing script: {e:?}");
+            exit(1);
+        }
+    };
     let mut buf = vec![];
 
     if files.is_empty() {

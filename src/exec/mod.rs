@@ -111,10 +111,15 @@ impl Program {
 
         let initial_dot = match Addr::parse(&mut it) {
             Ok(dot_expr) => dot_expr,
-            // If the start of input is not a dot expression we default to Full and
-            // attempt to parse the rest of the program
-            Err(ParseError::NotAnAddress) => Addr::full(),
-            // All other errors are parse errors for us
+
+            // If the start of input is not an address we default to Full and attempt to parse the
+            // rest of the program. We need to reconstruct the iterator here as we may have
+            // advanced through the string while we attempt to parse the initial address.
+            Err(ParseError::NotAnAddress) => {
+                it = s.trim().chars().peekable();
+                Addr::full()
+            }
+
             Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
             Err(ParseError::UnclosedDelimiter) => {
                 return Err(Error::UnclosedDelimiter("dot expr regex", '/'))
