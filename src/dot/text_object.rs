@@ -155,7 +155,7 @@ impl Find for FindDelimited {
         let mut skips = 0;
 
         for (i, ch) in it {
-            if ch == other {
+            if ch == other && target != other {
                 skips += 1;
             } else if skips == 0 && ch == target {
                 let ix = if self.rev { i + 1 } else { i - 1 };
