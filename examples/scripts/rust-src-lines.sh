@@ -5,7 +5,7 @@
 srcDir="$1"
 cd $srcDir
 
-files="$(fd -t f)"
+files="$(fd -t f -e rs)"
 sourceLines=$(ad -e 'y:#\[cfg\(test\)\]@*^}: X g:\S: v:^\s*//: P' $files | wc -l)
 sourceComment=$(ad -e 'y:#\[cfg\(test\)\]@*^}: X g:^\s*//: P' $files | wc -l)
 testLines=$(ad -e 'x:#\[cfg\(test\)\]@*^}: X g:\S: v:^\s*//: P' $files | wc -l)
