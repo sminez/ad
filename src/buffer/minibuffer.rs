@@ -1,7 +1,7 @@
 //! A transient buffer for handling interactive input from the user without
 //! modifying the current buffer state.
 use crate::{
-    buffer::{Buffer, BufferKind, TextObject},
+    buffer::{Buffer, TextObject},
     config,
     editor::Editor,
     key::{Arrow, Key},
@@ -51,18 +51,7 @@ impl MiniBuffer {
         Self {
             prompt,
             initial_lines: lines,
-            b: Buffer {
-                id: usize::MAX,
-                kind: BufferKind::MiniBuffer,
-                dot: Default::default(),
-                xdot: Default::default(),
-                txt: Rope::new(),
-                rx: 0,
-                row_off: 0,
-                col_off: 0,
-                dirty: false,
-                edit_log: Default::default(),
-            },
+            b: Buffer::new_minibuffer(),
             max_height,
         }
     }

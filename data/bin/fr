@@ -3,6 +3,7 @@
 #
 # Pop open a tmux split running fzf to interactively select a file to open
 # from the current git repo
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 root="$(git rev-parse --show-toplevel)"

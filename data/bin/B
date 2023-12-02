@@ -1,4 +1,5 @@
 #!/usr/bin/env sh
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 bufids=$(9p ls "ad/buffers" | grep -v current)

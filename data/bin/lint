@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 # Run lint for the current project and show the results so errors can be jumped to
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 root="$(git rev-parse --show-toplevel)"
@@ -9,12 +10,15 @@ if [ -e "$root/Cargo.toml" ]; then
   echo "echo running 'cargo clippy'..." | 9p write ad/ctl
   cmd="cd $root && cargo clippy -q --message-format=short --color=never --all-targets 2>&1"
   line="$(tmux-select -c "$cmd" | cut -d' ' -f1)"
+  if [ -z "$line" ]; then
+    exit 0
+  fi
   fname="$(echo $line | cut -d':' -f1)"
   lnum="$(echo $line | cut -d':' -f2)"
   col="$(echo $line | cut -d':' -f3)"
   echo -n "open $root/$fname" | 9p write ad/ctl
   bufid=$(9p read "ad/buffers/current")
-  echo -n "$lnum:$col" | 9p write ad/buffers/$bufid/addr
+  echo -n "$lnum:$col" | 9p write "ad/buffers/$bufid/addr"
   echo -n "viewport-center" | 9p write "ad/ctl"
 else
   echo "echo not linters configured for this file/project type" | 9p write ad/ctl

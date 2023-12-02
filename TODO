@@ -16,10 +16,6 @@
 - [ ] FEATURE: completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
-- [ ] FEATURE: when focusing a buffer, check if the underlying file has changed on disk and
-               prompt to see if it should be reloaded
-- [ ] FEATURE: when saving a buffer, check if the underlying file has changed and warn if
-               it has
 - [ ] FEATURE: support opening and navigating directories
 
 -- Fsys --

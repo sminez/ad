@@ -7,6 +7,7 @@
 #   tmux-select -f "$infile"  -- cat $infile into fzf for selection
 #                                (Useful for large inputs)
 #   tmux-select -c cmd...     -- pipe output of cmd... into fzf for selection
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$TMUX" ]]; then

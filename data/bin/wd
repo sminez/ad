@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 # Use the users warprc to navigate to files in known projects
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 opt=$(tmux-select -c "cat $HOME/.warprc | cut -d: -f1 | sort")

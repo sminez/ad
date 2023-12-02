@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 # Search in the current buffer and jump to the selected line
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 bufid=$(9p read "ad/buffers/current")

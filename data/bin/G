@@ -3,6 +3,7 @@
 #
 # Run ripgrep to search for a pattern under the current file directory and open
 # the selected match in ad
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$*" ]]; then

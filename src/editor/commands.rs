@@ -86,16 +86,27 @@ impl Editor {
 
             "w" | "write" => {
                 if args.is_empty() {
-                    Some(Single(SaveBuffer))
+                    Some(Single(SaveBuffer { force: false }))
                 } else {
                     Some(Single(SaveBufferAs {
                         path: args.to_string(),
+                        force: false
+                    }))
+                }
+            }
+            "w!" | "write!" => {
+                if args.is_empty() {
+                    Some(Single(SaveBuffer { force: true }))
+                } else {
+                    Some(Single(SaveBufferAs {
+                        path: args.to_string(),
+                        force: true
                     }))
                 }
             }
 
-            "wq" | "write-quit" => Some(Multi(vec![SaveBuffer, Exit { force: false }])),
-            "wq!" | "write-quit!" => Some(Multi(vec![SaveBuffer, Exit { force: true }])),
+            "wq" | "write-quit" => Some(Multi(vec![SaveBuffer { force: false }, Exit { force: false }])),
+            "wq!" | "write-quit!" => Some(Multi(vec![SaveBuffer { force: true }, Exit { force: true }])),
 
             "zb" | "viewport-bottom" => Some(Single(SetViewPort(ViewPort::Bottom))),
             "zt" | "viewport-top" => Some(Single(SetViewPort(ViewPort::Top))),

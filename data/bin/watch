@@ -9,6 +9,7 @@
 #   watch [-h/-v] -b cmd [args...]    -- run cmd with args when the current file changes
 #   watch [-h/-v] -d cmd [args... ]   -- run cmd with args when files in the current directory change
 #   watch [-h/-v] -g cmd [args...]    -- run cmd with args when files in the current git repo change
+set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
 if [[ -z "$TMUX" ]]; then

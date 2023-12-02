@@ -59,8 +59,8 @@ pub enum Action {
     ReloadConfig,
     RunMode,
     SamMode,
-    SaveBuffer,
-    SaveBufferAs { path: String },
+    SaveBuffer { force: bool },
+    SaveBufferAs { path: String, force: bool },
     SearchInCurrentBuffer,
     SelectBuffer,
     SetConfigProp { input: String },
@@ -110,11 +110,27 @@ impl Editor {
     pub fn open_file(&mut self, path: &str) {
         match self.buffers.open_or_focus(self.cwd.join(path)) {
             Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
+
             Ok(Some(new_id)) => {
                 self.btx.send(BufId::Add(new_id)).unwrap();
                 self.btx.send(BufId::Current(new_id)).unwrap();
             }
-            Ok(None) => (),
+
+            Ok(None) => {
+                match self.buffers.active().state_changed_on_disk() {
+                    Ok(true) => {
+                        let res = MiniBuffer::prompt("File changed on disk, reload? [y/n]: ", self);
+                        if let Some("y" | "Y" | "yes") = res.as_deref() {
+                            let msg = self.buffers.active_mut().reload_from_disk();
+                            self.set_status_message(&msg);
+                        }
+                    }
+                    Ok(false) => (),
+                    Err(e) => self.set_status_message(&e),
+                }
+                let id = self.buffers.active().id;
+                self.btx.send(BufId::Current(id)).unwrap();
+            }
         };
     }
 
@@ -134,29 +150,13 @@ impl Editor {
         }
     }
 
-    pub(super) fn save_current_buffer(&mut self, fname: Option<String>) {
+    pub(super) fn save_current_buffer(&mut self, fname: Option<String>, force: bool) {
         let p = match self.get_buffer_save_path(fname) {
             Some(p) => p,
             None => return,
         };
 
-        let b = self.buffers.active_mut();
-        let contents = b.contents();
-        let n_lines = b.len_lines();
-        let display_path = match p.canonicalize() {
-            Ok(cp) => cp.display().to_string(),
-            Err(_) => p.display().to_string(),
-        };
-        let n_bytes = contents.len();
-
-        let msg = match fs::write(p, contents) {
-            Ok(_) => {
-                b.dirty = false;
-                format!("\"{display_path}\" {n_lines}L {n_bytes}B written")
-            }
-            Err(e) => format!("Unable to save buffer: {e}"),
-        };
-
+        let msg = self.buffers.active_mut().save_to_disk_at(p, force);
         self.set_status_message(&msg);
     }
 

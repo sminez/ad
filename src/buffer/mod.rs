@@ -14,6 +14,7 @@ use std::{
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
+    time::SystemTime,
 };
 
 mod buffers;
@@ -58,7 +59,7 @@ impl BufferKind {
     }
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Buffer {
     pub(crate) id: usize,
     pub(crate) kind: BufferKind,
@@ -68,6 +69,7 @@ pub struct Buffer {
     pub(crate) rx: usize,
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
+    pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     edit_log: EditLog,
 }
@@ -94,9 +96,55 @@ impl Buffer {
             rx: 0,
             row_off: 0,
             col_off: 0,
+            last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
         })
+    }
+
+    pub(crate) fn state_changed_on_disk(&self) -> Result<bool, String> {
+        fn inner(p: &Path, last_save: SystemTime) -> io::Result<bool> {
+            let modified = p.metadata()?.modified()?;
+            Ok(modified > last_save)
+        }
+
+        let path = match &self.kind {
+            BufferKind::File(p) => p,
+            _ => return Ok(false),
+        };
+
+        match inner(path, self.last_save) {
+            Ok(modified) => Ok(modified),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
+            Err(e) => Err(format!("Error checking file state: {e}")),
+        }
+    }
+
+    pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> String {
+        if !force {
+            match self.state_changed_on_disk() {
+                Ok(false) => (),
+                Ok(true) => return "File modified on disk, use :w! to force".to_string(),
+                Err(s) => return s,
+            }
+        }
+
+        let contents = self.contents();
+        let n_lines = self.len_lines();
+        let display_path = match path.canonicalize() {
+            Ok(cp) => cp.display().to_string(),
+            Err(_) => path.display().to_string(),
+        };
+        let n_bytes = contents.len();
+
+        match fs::write(path, contents) {
+            Ok(_) => {
+                self.dirty = false;
+                self.last_save = SystemTime::now();
+                format!("\"{display_path}\" {n_lines}L {n_bytes}B written")
+            }
+            Err(e) => format!("Unable to save buffer: {e}"),
+        }
     }
 
     pub(super) fn reload_from_disk(&mut self) -> String {
@@ -117,6 +165,7 @@ impl Buffer {
         self.txt = Rope::from_str(&raw);
         self.edit_log.clear();
         self.dirty = false;
+        self.last_save = SystemTime::now();
 
         let n_bytes = raw.len();
         let n_lines = self.txt.len_lines();
@@ -126,6 +175,22 @@ impl Buffer {
         };
 
         format!("\"{display_path}\" {n_lines}L {n_bytes}B loaded")
+    }
+
+    pub(super) fn new_minibuffer() -> Self {
+        Self {
+            id: usize::MAX,
+            kind: BufferKind::MiniBuffer,
+            dot: Default::default(),
+            xdot: Default::default(),
+            txt: Rope::new(),
+            rx: 0,
+            row_off: 0,
+            col_off: 0,
+            last_save: SystemTime::now(),
+            dirty: false,
+            edit_log: Default::default(),
+        }
     }
 
     pub fn new_unnamed(id: usize, content: &str) -> Self {
@@ -138,6 +203,7 @@ impl Buffer {
             rx: 0,
             row_off: 0,
             col_off: 0,
+            last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
         }
@@ -157,6 +223,7 @@ impl Buffer {
             rx: 0,
             row_off: 0,
             col_off: 0,
+            last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
         }
