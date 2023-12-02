@@ -51,6 +51,9 @@ pub trait Edit: Address {
     fn contents(&self) -> Rope;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
+
+    fn begin_edit_transaction(&mut self) {}
+    fn end_edit_transaction(&mut self) {}
 }
 
 impl Edit for Rope {
@@ -89,6 +92,14 @@ impl Edit for Buffer {
         }
         .collapse_null_range();
         self.handle_action(Action::Delete);
+    }
+
+    fn begin_edit_transaction(&mut self) {
+        self.new_edit_log_transaction()
+    }
+
+    fn end_edit_transaction(&mut self) {
+        self.new_edit_log_transaction()
     }
 }
 
@@ -173,11 +184,14 @@ impl Program {
         let (from, to) = initial_dot.as_char_indices();
         let initial = Match::synthetic(from, to);
 
+        ed.begin_edit_transaction();
+        let (from, to) = self.step(ed, initial, 0, fname, out)?.as_char_indices();
+        ed.end_edit_transaction();
+
         // In the case of running against a lazy stream our initial `to` will be a sential value of
         // usize::MAX which needs to be clamped to the size of the input. For Buffers and Ropes
         // where we know that we should already be in bounds this is not required but the overhead
         // of always doing it is fairly minimal.
-        let (from, to) = self.step(ed, initial, 0, fname, out)?.as_char_indices();
         let ix_max = ed.len_chars();
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))

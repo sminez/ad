@@ -664,11 +664,17 @@ impl Buffer {
         self.dot.clamp_idx(self.txt.len_chars());
     }
 
+    pub(crate) fn new_edit_log_transaction(&mut self) {
+        self.edit_log.new_transaction()
+    }
+
     fn undo(&mut self) -> Option<ActionOutcome> {
         match self.edit_log.undo() {
-            Some(edit) => {
+            Some(edits) => {
                 self.edit_log.paused = true;
-                self.apply_edit(edit);
+                for edit in edits.into_iter() {
+                    self.apply_edit(edit);
+                }
                 self.edit_log.paused = false;
                 self.dirty = !self.edit_log.is_empty();
                 None
@@ -681,9 +687,11 @@ impl Buffer {
 
     fn redo(&mut self) -> Option<ActionOutcome> {
         match self.edit_log.redo() {
-            Some(edit) => {
+            Some(edits) => {
                 self.edit_log.paused = true;
-                self.apply_edit(edit);
+                for edit in edits.into_iter() {
+                    self.apply_edit(edit);
+                }
                 self.edit_log.paused = false;
                 None
             }
@@ -860,7 +868,7 @@ pub(crate) mod tests {
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
-            vec![in_s(0, &format!("{LINE_1}\n{LINE_2}"))]
+            vec![vec![in_s(0, &format!("{LINE_1}\n{LINE_2}"))]]
         );
     }
 
@@ -878,11 +886,11 @@ pub(crate) mod tests {
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
-            vec![
+            vec![vec![
                 in_s(0, &format!("{LINE_1}\n{LINE_2}")),
                 del_s(LINE_1.len() + 1, LINE_2),
                 in_c(LINE_1.len() + 1, 'x'),
-            ]
+            ]]
         );
     }
 
@@ -905,7 +913,7 @@ pub(crate) mod tests {
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0], "");
-        assert_eq!(b.edit_log.edits, vec![]);
+        assert!(b.edit_log.edits.is_empty());
     }
 
     #[test]
@@ -923,10 +931,10 @@ pub(crate) mod tests {
         assert_eq!(lines[1], "involving multiple line");
         assert_eq!(
             b.edit_log.edits,
-            vec![
+            vec![vec![
                 in_s(0, &format!("{LINE_1}\n{LINE_2}")),
                 del_c(LINE_1.len() + 24, 's')
-            ]
+            ]]
         );
     }
 
@@ -934,6 +942,7 @@ pub(crate) mod tests {
     fn delete_undo_works() {
         let mut b = simple_initial_buffer();
         let original_lines = b.string_lines();
+        b.new_edit_log_transaction();
 
         b.handle_action(Action::DotExtendBackward(TextObject::Word, 1));
         b.handle_action(Action::Delete);
@@ -942,7 +951,6 @@ pub(crate) mod tests {
         b.handle_action(Action::DotExtendForward(TextObject::Word, 1));
         b.handle_action(Action::Delete);
 
-        b.handle_action(Action::Undo);
         b.handle_action(Action::Undo);
 
         let lines = b.string_lines();

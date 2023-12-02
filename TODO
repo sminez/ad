@@ -9,8 +9,6 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
-- [ ] FEATURE: Edit log transactions
-	  - paste should always be a new transaction
 - [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
 - [ ] FEATURE: mini-buffer tab complete
 - [ ] FEATURE: completion of command mode commands

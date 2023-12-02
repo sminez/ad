@@ -48,6 +48,7 @@ pub enum Action {
     InsertChar { c: char },
     InsertString { s: String },
     LoadDot,
+    NewEditLogTransaction,
     NextBuffer,
     OpenFile { path: String },
     Paste,

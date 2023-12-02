@@ -252,63 +252,65 @@ impl Editor {
     }
 
     fn handle_action(&mut self, action: Action) {
+        use Action::*;
+
         match action {
-            Action::SetViewPort(vp) => {
+            SetViewPort(vp) => {
                 self.buffers
                     .active_mut()
                     .view_port(vp, self.screen_rows, self.screen_cols)
             }
-            Action::ChangeDirectory { path } => self.change_directory(path),
-            Action::CommandMode => self.command_mode(),
-            Action::DeleteBuffer { force } => self.delete_current_buffer(force),
-            Action::EditCommand { cmd } => self.execute_edit_command(&cmd),
-            Action::Exit { force } => self.exit(force),
-            Action::FocusBuffer { id } => self.focus_buffer(id),
-            Action::NextBuffer => {
+            ChangeDirectory { path } => self.change_directory(path),
+            CommandMode => self.command_mode(),
+            DeleteBuffer { force } => self.delete_current_buffer(force),
+            EditCommand { cmd } => self.execute_edit_command(&cmd),
+            Exit { force } => self.exit(force),
+            FocusBuffer { id } => self.focus_buffer(id),
+            NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
+            NextBuffer => {
                 self.buffers.next();
                 let id = self.buffers.active().id;
                 self.btx.send(BufId::Current(id)).unwrap();
             }
-            Action::OpenFile { path } => self.open_file(&path),
-            Action::Paste => self.paste_from_clipboard(),
-            Action::PreviousBuffer => {
+            OpenFile { path } => self.open_file(&path),
+            Paste => self.paste_from_clipboard(),
+            PreviousBuffer => {
                 self.buffers.previous();
                 let id = self.buffers.active().id;
                 self.btx.send(BufId::Current(id)).unwrap();
             }
-            Action::ReloadActiveBuffer => self.reload_active_buffer(),
-            Action::ReloadBuffer { id } => self.reload_buffer(id),
-            Action::ReloadConfig => self.reload_config(),
-            Action::RunMode => self.run_mode(),
-            Action::SamMode => self.sam_mode(),
-            Action::SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),
-            Action::SaveBuffer { force } => self.save_current_buffer(None, force),
-            Action::SearchInCurrentBuffer => self.search_in_current_buffer(),
-            Action::SelectBuffer => self.select_buffer(),
-            Action::SetConfigProp { input } => self.set_config_prop(&input),
-            Action::SetMode { m } => self.set_mode(m),
-            Action::ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
-            Action::ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
-            Action::ShellRun { cmd } => self.run_shell_cmd(&cmd),
-            Action::Yank => self.set_clipboard(self.buffers.active().dot_contents()),
+            ReloadActiveBuffer => self.reload_active_buffer(),
+            ReloadBuffer { id } => self.reload_buffer(id),
+            ReloadConfig => self.reload_config(),
+            RunMode => self.run_mode(),
+            SamMode => self.sam_mode(),
+            SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),
+            SaveBuffer { force } => self.save_current_buffer(None, force),
+            SearchInCurrentBuffer => self.search_in_current_buffer(),
+            SelectBuffer => self.select_buffer(),
+            SetConfigProp { input } => self.set_config_prop(&input),
+            SetMode { m } => self.set_mode(m),
+            ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
+            ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
+            ShellRun { cmd } => self.run_shell_cmd(&cmd),
+            Yank => self.set_clipboard(self.buffers.active().dot_contents()),
 
-            Action::DebugBufferContents => self.debug_buffer_contents(),
-            Action::DebugEditLog => self.debug_edit_log(),
+            DebugBufferContents => self.debug_buffer_contents(),
+            DebugEditLog => self.debug_edit_log(),
 
-            Action::RawKey { k } if k == Key::PageUp || k == Key::PageDown => {
+            RawKey { k } if k == Key::PageUp || k == Key::PageDown => {
                 let arr = if k == Key::PageUp {
                     Arrow::Up
                 } else {
                     Arrow::Down
                 };
 
-                self.forward_action_to_active_buffer(Action::DotSet(
+                self.forward_action_to_active_buffer(DotSet(
                     TextObject::Arr(arr),
                     self.screen_rows,
                 ));
             }
-
-            Action::RawKey { k: Key::Mouse(evt) } => self.handle_mouse_event(evt),
+            RawKey { k: Key::Mouse(evt) } => self.handle_mouse_event(evt),
 
             a => self.forward_action_to_active_buffer(a),
         }

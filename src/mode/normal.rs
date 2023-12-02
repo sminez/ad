@@ -29,12 +29,12 @@ pub(crate) fn normal_mode() -> Mode {
         [ Alt('#') ] => [ DebugEditLog ],
 
         // Entering INSERT mode
-        [ Char('i') ] => [ SetMode { m: "INSERT" } ],
-        [ Char('I') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" } ],
-        [ Char('a') ] => [ DotSet(Arr(Right), 1), SetMode { m: "INSERT" } ],
-        [ Char('A') ] => [ DotSet(LineEnd, 1), SetMode { m: "INSERT" } ],
-        [ Char('o') ] => [ DotSet(LineEnd, 1), SetMode { m: "INSERT" }, InsertChar { c: '\n' } ],
-        [ Char('O') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" }, InsertChar { c: '\n' }, DotSet(Arr(Up), 1) ],
+        [ Char('i') ] => [ SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('I') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('a') ] => [ DotSet(Arr(Right), 1), SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('A') ] => [ DotSet(LineEnd, 1), SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('o') ] => [ DotSet(LineEnd, 1), SetMode { m: "INSERT" }, NewEditLogTransaction, InsertChar { c: '\n' } ],
+        [ Char('O') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" }, NewEditLogTransaction, InsertChar { c: '\n' }, DotSet(Arr(Up), 1) ],
 
         // Setting dot
         [ Char('h') ] => [ DotSet(Arr(Left), 1) ],
@@ -95,7 +95,7 @@ pub(crate) fn normal_mode() -> Mode {
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],
         [ Char('d') ] => [ Delete ],
-        [ Char('p') ] => [ Paste ],
+        [ Char('p') ] => [ NewEditLogTransaction, Paste, NewEditLogTransaction ],
         [ Char('y') ] => [ Yank ],
         [ Char('u') ] => [ Undo ],
         [ Char('U') ] => [ Redo ],

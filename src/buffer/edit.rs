@@ -130,14 +130,16 @@ impl Edit {
     }
 }
 
+pub type Transaction = Vec<Edit>;
+
 /// An edit log represents the currently undo-able state changes made to a Buffer.
 ///
 /// The log can be unwound, restoring the buffer to a previous state, and rewound as long
 /// as no new edits have been made to the buffer (i.e. it is a flat timeline not a tree).
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EditLog {
-    pub(super) edits: Vec<Edit>,
-    pub(super) undone_edits: Vec<Edit>,
+    pub(super) edits: Vec<Transaction>,
+    pub(super) undone_edits: Vec<Transaction>,
     pub(super) paused: bool,
 }
 
@@ -149,21 +151,33 @@ impl EditLog {
     }
 
     pub(crate) fn debug_edits(&self, b: &Buffer) -> Vec<String> {
-        self.edits.iter().map(|e| e.string_repr(b)).collect()
+        self.edits
+            .iter()
+            .flat_map(|t| t.iter().map(|e| e.string_repr(b)))
+            .collect()
     }
 
-    pub(crate) fn undo(&mut self) -> Option<Edit> {
-        let e = self.edits.pop()?;
-        self.undone_edits.push(e.clone());
+    pub(crate) fn undo(&mut self) -> Option<Transaction> {
+        let mut t = self.edits.pop()?;
+        while t.is_empty() {
+            t = self.edits.pop()?;
+        }
 
-        Some(e.into_undo())
+        self.undone_edits.push(t.clone());
+        t.reverse();
+
+        Some(t.into_iter().map(|e| e.into_undo()).collect())
     }
 
-    pub(crate) fn redo(&mut self) -> Option<Edit> {
-        let e = self.undone_edits.pop()?;
-        self.push(e.clone());
+    pub(crate) fn redo(&mut self) -> Option<Transaction> {
+        let mut t = self.undone_edits.pop()?;
+        while t.is_empty() {
+            t = self.edits.pop()?;
+        }
 
-        Some(e)
+        self.edits.push(t.clone());
+
+        Some(t)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -214,19 +228,33 @@ impl EditLog {
         }
     }
 
+    pub(crate) fn new_transaction(&mut self) {
+        match self.edits.last() {
+            Some(t) if t.is_empty() => return,
+            _ => (),
+        }
+        self.edits.push(Vec::new());
+    }
+
     fn push(&mut self, e: Edit) {
         self.undone_edits.clear();
 
         if self.edits.is_empty() {
-            self.edits.push(e);
+            self.edits.push(vec![e]);
+            return;
+        }
+
+        let transaction = self.edits.last_mut().unwrap();
+        if transaction.is_empty() {
+            transaction.push(e);
             return;
         }
 
         // So long as we have at least one existing edit we can try to extend it
         // by combining it with this new one. If that fails we simply store the
         // new edit as provided.
-        if let Some(e) = self.edits.last_mut().unwrap().try_combine(e) {
-            self.edits.push(e);
+        if let Some(e) = transaction.last_mut().unwrap().try_combine(e) {
+            self.edits.last_mut().unwrap().push(e);
         }
     }
 }
@@ -315,7 +343,7 @@ pub(crate) mod tests {
             log.push(e);
         }
 
-        assert_eq!(&log.edits, expected);
+        assert_eq!(&log.edits, &[expected.to_vec()]);
     }
 
     #[test_case(
@@ -365,6 +393,6 @@ pub(crate) mod tests {
             log.push(e);
         }
 
-        assert_eq!(&log.edits, expected);
+        assert_eq!(&log.edits, &[expected.to_vec()]);
     }
 }
