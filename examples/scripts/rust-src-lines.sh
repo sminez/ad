@@ -5,15 +5,11 @@
 srcDir="$1"
 cd $srcDir
 
-# The 'y' and 'x' prefixes used below set the initial loop construct to either be
-# "blocks not matching..." or "blocks matching..." respectively
-loop=':#\[cfg\(test\)\]@*^}: X'
-
 files="$(fd -t f)"
-sourceLines=$(ad -e "y$loop g:\\S: v:^\\s*//: P" $files | wc -l)
-sourceComment=$(ad -e "y$loop g:^\\s*//: P" $files | wc -l)
-testLines=$(ad -e "x$loop g:\\S: v:^\\s*//: P" $files | wc -l)
-testComment=$(ad -e "x$loop g:^\\s*//: P" $files | wc -l)
+sourceLines=$(ad -e 'y:#\[cfg\(test\)\]@*^}: X g:\S: v:^\s*//: P' $files | wc -l)
+sourceComment=$(ad -e 'y:#\[cfg\(test\)\]@*^}: X g:^\s*//: P' $files | wc -l)
+testLines=$(ad -e 'x:#\[cfg\(test\)\]@*^}: X g:\S: v:^\s*//: P' $files | wc -l)
+testComment=$(ad -e 'x:#\[cfg\(test\)\]@*^}: X g:^\s*//: P' $files | wc -l)
 
 echo "Rust Source lines in '$srcDir'"
 echo -e "  FILES       $(echo $files | wc -w)"
