@@ -18,8 +18,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ leader, Char('Q') ] => [ Exit { force: true } ],
 
         // Modes
-        // [ leader, Char('b') ] => [ SelectBuffer ],
-        // [ Char('/') ] => [ SearchInCurrentBuffer ],
+        [ leader, Char('b') ] => [ SelectBuffer ],
+        [ Char('/') ] => [ SearchInCurrentBuffer ],
         [ Char(':') ] => [ CommandMode ],
         [ Char('!') ] => [ RunMode ],
         [ Char('.') ] => [ SamMode ],

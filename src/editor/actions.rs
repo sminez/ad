@@ -269,7 +269,16 @@ impl Editor {
     }
 
     pub(super) fn search_in_current_buffer(&mut self) {
-        let selection = MiniBuffer::select_from("> ", self.buffers.active().string_lines(), self);
+        let numbered_lines = self
+            .buffers
+            .active()
+            .string_lines()
+            .into_iter()
+            .enumerate()
+            .map(|(i, line)| format!("{:>4} | {}", i + 1, line))
+            .collect();
+
+        let selection = MiniBuffer::select_from("> ", numbered_lines, self);
         if let MiniBufferSelection::Line { cy, .. } = selection {
             self.buffers.active_mut().dot = Dot::Cur {
                 c: Cur::from_yx(cy, 0, self.buffers.active()),

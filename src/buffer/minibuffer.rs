@@ -151,10 +151,18 @@ impl MiniBuffer {
                 Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
                 Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
                 Key::Alt('k') | Key::Arrow(Arrow::Up) => {
-                    mb.b.set_dot(TextObject::Arr(Arrow::Up), 1);
+                    if selected_line_idx == 0 {
+                        mb.b.set_dot(TextObject::BufferEnd, 1);
+                    } else {
+                        mb.b.set_dot(TextObject::Arr(Arrow::Up), 1);
+                    }
                 }
                 Key::Alt('j') | Key::Arrow(Arrow::Down) => {
-                    mb.b.set_dot(TextObject::Arr(Arrow::Down), 1);
+                    if selected_line_idx == visible_lines.len() - 1 {
+                        mb.b.set_dot(TextObject::BufferStart, 1);
+                    } else {
+                        mb.b.set_dot(TextObject::Arr(Arrow::Down), 1);
+                    }
                 }
 
                 _ => (),

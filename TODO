@@ -9,12 +9,19 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
+- [ ] FEATURE: jump list
+  - Probably not exactly the same as vim's but the plan is to track positions:
+    - When moving between buffers
+    - When setting dot via mouse
+    - When setting dot via addr / Edit
 - [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
 - [ ] FEATURE: mini-buffer tab complete
 - [ ] FEATURE: completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
 - [ ] FEATURE: support opening and navigating directories
+- [ ] FEATURE: support using the minibuffer as a dmenu-like feature exposed through the
+               filesystem interface
 
 -- Fsys --
 - [ ] sed edit in place doesn't seem to work because it needs to be able to create temp
