@@ -16,7 +16,8 @@ use crate::{
 };
 use std::{
     env,
-    io::{self, Stdout},
+    io::{self, Stdout, Write},
+    panic,
     path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
@@ -64,6 +65,13 @@ impl Editor {
 
         enable_raw_mode(original_termios);
         _ = ORIGINAL_TERMIOS.set(original_termios);
+
+        panic::set_hook(Box::new(|panic_info| {
+            let mut stdout = io::stdout();
+            restore_terminal_state(&mut stdout);
+            println!("{panic_info}");
+            _ = stdout.flush();
+        }));
 
         let mut stdout = io::stdout();
         enable_mouse_support(&mut stdout);
