@@ -5,9 +5,10 @@ use crate::{
     config,
     editor::Editor,
     key::{Arrow, Key},
+    util::run_command,
 };
 use ropey::Rope;
-use std::cmp::min;
+use std::{cmp::min, ffi::OsStr, path::Path};
 
 #[derive(Debug, Default)]
 pub(crate) struct MiniBufferState<'a> {
@@ -89,7 +90,15 @@ impl MiniBuffer {
             let mut visible_lines = vec![];
 
             for (i, line) in mb.initial_lines.iter().enumerate() {
-                if input_fragments.iter().all(|f| line.contains(f)) {
+                let matching = input_fragments.iter().all(|f| {
+                    if f.chars().all(|c| c.is_lowercase()) {
+                        line.to_lowercase().contains(f)
+                    } else {
+                        line.contains(f)
+                    }
+                });
+
+                if matching {
                     visible_lines.push(line.clone());
                     line_indices.push(i);
                 }
@@ -190,6 +199,28 @@ impl MiniBuffer {
         initial_lines: Vec<String>,
         ed: &mut Editor,
     ) -> MiniBufferSelection {
+        MiniBuffer::prompt_w_callback(prompt, initial_lines, |_| None, ed)
+    }
+
+    pub fn select_from_command_output<S, I>(
+        prompt: &str,
+        cmd: &str,
+        args: I,
+        dir: &Path,
+        ed: &mut Editor,
+    ) -> MiniBufferSelection
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let initial_lines = match run_command(cmd, args, dir) {
+            Ok(s) => s.lines().map(String::from).collect(),
+            Err(e) => {
+                ed.set_status_message(&format!("unable to get minibuffer input: {e}"));
+                return MiniBufferSelection::Cancelled;
+            }
+        };
+
         MiniBuffer::prompt_w_callback(prompt, initial_lines, |_| None, ed)
     }
 }

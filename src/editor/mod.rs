@@ -265,6 +265,8 @@ impl Editor {
             DeleteBuffer { force } => self.delete_current_buffer(force),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
             Exit { force } => self.exit(force),
+            FindFile => self.find_file(),
+            FindRepoFile => self.find_repo_file(),
             FocusBuffer { id } => self.focus_buffer(id),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {

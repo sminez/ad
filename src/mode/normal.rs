@@ -23,6 +23,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char(':') ] => [ CommandMode ],
         [ Char('!') ] => [ RunMode ],
         [ Char('.') ] => [ SamMode ],
+        [ Char('-') ] => [ FindFile ],
+        [ Char('_') ] => [ FindRepoFile ],
 
         // DEBUG
         [ Alt('?') ] => [ DebugBufferContents ],

@@ -12,7 +12,7 @@ use crate::{
     replace_config, update_config,
     util::{pipe_through_command, read_clipboard, run_command, set_clipboard, spawn_command},
 };
-use std::{env, fs, io::Write, path::PathBuf};
+use std::{env, fs, io::Write, path::{PathBuf, Path}};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actions {
@@ -44,6 +44,8 @@ pub enum Action {
     EditCommand { cmd: String },
     ExecuteDot,
     Exit { force: bool },
+    FindFile,
+    FindRepoFile,
     FocusBuffer { id: usize },
     InsertChar { c: char },
     InsertString { s: String },
@@ -133,6 +135,33 @@ impl Editor {
                 self.btx.send(BufId::Current(id)).unwrap();
             }
         };
+    }
+
+    /// This shells out to the fd command line program
+    pub fn find_file(&mut self) {
+        let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
+        let selection = MiniBuffer::select_from_command_output(">", "fd", ["-t", "f"], &d, self);
+        if let MiniBufferSelection::Line { line, .. } = selection {
+            self.open_file(&format!("{}/{}", d.display(), line.trim()));
+        }
+    }
+
+    /// This shells out to the git and fd command line programs
+    pub fn find_repo_file(&mut self) {
+        let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
+        let s = match run_command("git", ["rev-parse", "--show-toplevel"], &d) {
+            Ok(s) => s,
+            Err(e) => {
+                self.set_status_message(&format!("unable to find git root: {e}"));
+                return;
+            }
+        };
+
+        let root = Path::new(s.trim());
+        let selection = MiniBuffer::select_from_command_output(">", "fd", ["-t", "f"], root, self);
+        if let MiniBufferSelection::Line { line, .. } = selection {
+            self.open_file(&format!("{}/{}", root.display(), line.trim()));
+        }
     }
 
     pub fn delete_current_buffer(&mut self, force: bool) {
