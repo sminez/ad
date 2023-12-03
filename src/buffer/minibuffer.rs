@@ -105,6 +105,7 @@ impl MiniBuffer {
             }
 
             mb.b.txt = Rope::from_str(&visible_lines.join("\n"));
+            mb.b.dot.clamp_idx(mb.b.txt.len_chars());
 
             let n_visible_lines = min(visible_lines.len(), mb.max_height);
             let (y, _) = mb.b.dot.active_cur().as_yx(&mb.b);
