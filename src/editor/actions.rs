@@ -1,6 +1,7 @@
 //! Editor actions in response to user input
 use crate::{
     buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
+    config,
     config::Config,
     die,
     dot::{Cur, Dot, TextObject},
@@ -12,7 +13,11 @@ use crate::{
     replace_config, update_config,
     util::{pipe_through_command, read_clipboard, run_command, set_clipboard, spawn_command},
 };
-use std::{env, fs, io::Write, path::{PathBuf, Path}};
+use std::{
+    env, fs,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Actions {
@@ -137,13 +142,31 @@ impl Editor {
         };
     }
 
-    /// This shells out to the fd command line program
-    pub fn find_file(&mut self) {
-        let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        let selection = MiniBuffer::select_from_command_output(">", "fd", ["-t", "f"], &d, self);
+    fn find_file_under_dir(&mut self, d: &Path) {
+        let cmd = config!().find_command.clone();
+
+        let selection = match cmd.split_once(' ') {
+            Some((cmd, args)) => {
+                MiniBuffer::select_from_command_output("> ", cmd, args.split_whitespace(), d, self)
+            }
+            None => MiniBuffer::select_from_command_output(
+                "> ",
+                &cmd,
+                std::iter::empty::<&str>(),
+                d,
+                self,
+            ),
+        };
+
         if let MiniBufferSelection::Line { line, .. } = selection {
             self.open_file(&format!("{}/{}", d.display(), line.trim()));
         }
+    }
+
+    /// This shells out to the fd command line program
+    pub fn find_file(&mut self) {
+        let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
+        self.find_file_under_dir(&d);
     }
 
     /// This shells out to the git and fd command line programs
@@ -158,10 +181,7 @@ impl Editor {
         };
 
         let root = Path::new(s.trim());
-        let selection = MiniBuffer::select_from_command_output(">", "fd", ["-t", "f"], root, self);
-        if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file(&format!("{}/{}", root.display(), line.trim()));
-        }
+        self.find_file_under_dir(root);
     }
 
     pub fn delete_current_buffer(&mut self, force: bool) {

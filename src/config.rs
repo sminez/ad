@@ -9,6 +9,7 @@ pub struct Config {
     pub(crate) match_indent: bool,
     pub(crate) status_timeout: u64,
     pub(crate) minibuffer_lines: usize,
+    pub(crate) find_command: String,
     pub(crate) colorscheme: ColorScheme,
     pub(crate) bindings: BTreeMap<Vec<Key>, String>,
 }
@@ -21,6 +22,7 @@ impl Default for Config {
             match_indent: true,
             status_timeout: 5,
             minibuffer_lines: 10,
+            find_command: "fd -t f".to_string(),
             colorscheme: ColorScheme::default(),
             bindings: BTreeMap::new(),
         }
@@ -118,6 +120,9 @@ impl Config {
             .ok_or_else(|| format!("'{input}' is not a 'set prop=val' statement"))?;
 
         match prop {
+            // Strings
+            "find-command" => self.find_command = val.trim().to_string(),
+
             // Numbers
             "tabstop" => self.tabstop = parse_usize(prop, val)?,
             "minibuffer-lines" => self.minibuffer_lines = parse_usize(prop, val)?,
