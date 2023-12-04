@@ -30,24 +30,27 @@ impl Chunk {
         }
     }
 
-    #[inline]
-    fn has_cap_ch(&self, ch: char) -> bool {
-        self.p + ch.len_utf8() < CHUNK_LEN
-    }
-
-    #[inline]
-    fn has_cap_str(&self, s: &str) -> bool {
-        self.p + s.len() < CHUNK_LEN
-    }
-
-    fn push(&mut self, ch: char) -> Edit {
+    fn push(&mut self, ch: char, chunk: usize) -> Edit {
         let len = ch.len_utf8();
         ch.encode_utf8(&mut self.data[self.p..]);
         let start = self.p;
         self.p += len;
 
         Edit {
-            chunk: None,
+            chunk: Some(chunk),
+            start,
+            len,
+        }
+    }
+
+    fn push_str(&mut self, s: &str, chunk: usize) -> Edit {
+        let len = s.len();
+        self.data[self.p..(self.p + len)].copy_from_slice(s.as_bytes());
+        let start = self.p;
+        self.p += len;
+
+        Edit {
+            chunk: Some(chunk),
             start,
             len,
         }
@@ -118,14 +121,39 @@ impl BufferImpl {
             self.last_chunk_cap = CHUNK_LEN;
         }
         self.last_chunk_cap -= len;
-        let mut e = self.chunks.last_mut().unwrap().push(ch);
-        e.chunk = Some(self.chunks.len() - 1);
+
+        let chunk = self.chunks.len() - 1;
+        let e = self.chunks.last_mut().unwrap().push(ch, chunk);
 
         if idx == 0 {
             self.edits.push_front(e);
             return;
         }
 
+        self.insert_edit(idx, e);
+    }
+
+    // TODO: Should be able to extend existing edits if they are at the end of the last edit we have
+    pub fn insert_str(&mut self, idx: usize, s: &str) {
+        let len = s.len();
+        if self.last_chunk_cap < len {
+            self.chunks.push(Chunk::new());
+            self.last_chunk_cap = CHUNK_LEN;
+        }
+        self.last_chunk_cap -= len;
+
+        let chunk = self.chunks.len() - 1;
+        let e = self.chunks.last_mut().unwrap().push_str(s, chunk);
+
+        if idx == 0 {
+            self.edits.push_front(e);
+            return;
+        }
+
+        self.insert_edit(idx, e);
+    }
+
+    fn insert_edit(&mut self, idx: usize, e: Edit) {
         // Find insert point for the edit and split what's there
         // -> this is where we really need a B-tree
         let (edit_idx, offset) = self.split_idx(idx);
@@ -191,6 +219,19 @@ mod tests {
         let mut bi = BufferImpl::from("ello world");
         for &(idx, ch) in inserts {
             bi.insert_char(idx, ch);
+        }
+
+        assert_eq!(bi.edits.into_iter().collect::<Vec<_>>(), expected)
+    }
+
+    #[test_case(&[(0, "hell")], &[edit(0, 0, 4), orig(0, 7)]; "insert front")]
+    #[test_case(&[(1, ",")], &[orig(0, 1), edit(0, 0, 1), orig(1, 6)]; "insert inner")]
+    #[test_case(&[(7, "!")], &[orig(0, 7), edit(0, 0, 1)]; "insert back")]
+    #[test]
+    fn insert_str(inserts: &[(usize, &str)], expected: &[Edit]) {
+        let mut bi = BufferImpl::from("o world");
+        for &(idx, s) in inserts {
+            bi.insert_str(idx, s);
         }
 
         assert_eq!(bi.edits.into_iter().collect::<Vec<_>>(), expected)
