@@ -19,6 +19,7 @@ use std::{
 
 mod buffers;
 mod edit;
+mod internal;
 mod minibuffer;
 
 use edit::{Edit, EditLog, Kind, Txt};
