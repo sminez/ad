@@ -10,8 +10,8 @@
 //! - https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation
 use std::cmp::{max, min, Ordering};
 
-// The internal data is all u8s so the values here are in terms of bytes
-const MIN_GAP: usize = 8; //64;
+// The internal data is [u8] so the values here are in terms of bytes
+const MIN_GAP: usize = 64;
 const MAX_GAP: usize = 1024 * 8;
 
 /// For a given buffer length, calculate the new size of the gap we need when reallocating.
@@ -20,10 +20,7 @@ fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
     min(max(len / 20, min_gap), MAX_GAP)
 }
 
-//      <--         cap         -->
-// gap_start -v
-//      [f,o,o,     ...     ,b,a,r]
-//             <-   gap   ->
+/// An implementation of a gap buffer that tracks line offsets
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GapBuffer {
     data: Box<[u8]>,
@@ -196,6 +193,25 @@ impl GapBuffer {
         self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
         self.gap_start += len;
     }
+
+    /// Remove the requested character index from the visible region of the buffer
+    pub fn remove_char(&mut self, idx: usize) {
+        if idx == self.gap_start {
+            self.gap_end += 1;
+        } else if idx + self.gap() == self.gap_end {
+            self.gap_end -= 1;
+        } else {
+            self.move_gap_to(idx);
+            self.gap_end += 1;
+        }
+    }
+
+    // /// Remove the requested range from the visible region of the buffer
+    // pub fn remove_range(&mut self, from: usize, to: usize) {
+    //     if from == to {
+    //         return;
+    //     }
+    // }
 }
 
 #[cfg(test)]
@@ -242,6 +258,18 @@ mod tests {
         for &(idx, s) in inserts {
             gb.insert_str(idx, s);
         }
+
+        assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
+    }
+
+    #[test_case(6, "hello,world!"; "remove at gap")]
+    #[test_case(12, "hello, world"; "remove after gap")]
+    #[test_case(0, "ello, world!"; "remove before gap")]
+    #[test]
+    fn remove_char(idx: usize, expected: &str) {
+        let mut gb = GapBuffer::from("hello, world!");
+        gb.move_gap_to(6); // space before world
+        gb.remove_char(idx);
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
