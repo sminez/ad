@@ -120,11 +120,6 @@ impl GapBuffer {
         self.gap_end - self.gap_start
     }
 
-    /// Grow the current gap to be able to hold the text being inserted along with
-    /// our normal gap growth on top.
-    ///
-    /// This does not alter position of the gap within the data buffer relative to
-    /// the live data: it only increases the gap size.
     fn grow_gap(&mut self, n: usize) {
         if n >= self.next_gap {
             self.next_gap = clamp_gap_size(self.len() + n, n.next_power_of_two());
@@ -204,12 +199,16 @@ impl GapBuffer {
         }
     }
 
-    // /// Remove the requested range from the visible region of the buffer
-    // pub fn remove_range(&mut self, from: usize, to: usize) {
-    //     if from == to {
-    //         return;
-    //     }
-    // }
+    /// Remove the requested range (from..to) from the visible region of the buffer
+    pub fn remove_range(&mut self, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
+
+        assert!(from < to, "invalid range: from={from} > to={to}");
+        self.move_gap_to(from);
+        self.gap_end += to - from;
+    }
 }
 
 #[cfg(test)]
@@ -273,12 +272,39 @@ mod tests {
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
 
+    #[test_case(6, 9, "hello,rld!"; "at gap start")]
+    #[test_case(7, 10, "hello, ld!"; "at gap end")]
+    #[test_case(10, 13, "hello, wor"; "after gap")]
+    #[test_case(0, 5, ", world!"; "before gap")]
+    #[test_case(0, 13, ""; "remove all")]
+    #[test]
+    fn remove_str(from: usize, to: usize, expected: &str) {
+        let s = "hello, world!";
+        assert_eq!(s.len(), 13, "remove all case is not 0..s.len()");
+
+        let mut gb = GapBuffer::from(s);
+        gb.move_gap_to(6); // space before world
+        gb.remove_range(from, to);
+
+        assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
+    }
+
     #[test]
     fn inset_remove_char_is_idempotent() {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
         gb.insert_char(6, 'X');
         gb.remove_char(6);
+
+        assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
+    }
+
+    #[test]
+    fn inset_remove_str_is_idempotent() {
+        let s = "hello, world!";
+        let mut gb = GapBuffer::from(s);
+        gb.insert_str(6, "TEST");
+        gb.remove_range(6, 10);
 
         assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
     }
