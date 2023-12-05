@@ -294,8 +294,34 @@ impl GapBuffer {
     }
 
     fn insert_newlines(&mut self, mut it: impl Iterator<Item = usize>) {
-        if it.next().is_some() {
-            todo!()
+        loop {
+            let idx = match it.next() {
+                Some(idx) => idx,
+                None => return,
+            };
+
+            let LineStat {
+                offset,
+                n_chars,
+                n_bytes,
+            } = self.line_stats.lines[self.line_stats.current_line];
+
+            let new_n_bytes = idx - offset + 1;
+            let mut new_n_chars = 0;
+            for &b in &self.data[offset..idx + 1] {
+                if is_char_boundary(b) {
+                    new_n_chars += 1;
+                }
+            }
+
+            let ls = self.line_stats.current_line_mut();
+            ls.n_bytes = new_n_bytes;
+            ls.n_chars = new_n_chars;
+            self.line_stats.current_line += 1;
+            self.line_stats.lines.insert(
+                self.line_stats.current_line,
+                LineStat::new(idx + 1, n_chars - new_n_chars, n_bytes - new_n_bytes),
+            );
         }
     }
 
@@ -459,6 +485,14 @@ struct LineStat {
 // struct CharSlice<'a>(ByteSlice<'a>);
 
 impl LineStat {
+    fn new(offset: usize, n_chars: usize, n_bytes: usize) -> Self {
+        Self {
+            offset,
+            n_chars,
+            n_bytes,
+        }
+    }
+
     #[inline]
     fn bytes<'a>(&self, gb: &'a GapBuffer) -> (&'a [u8], &'a [u8]) {
         let mut end = self.offset + self.n_bytes;
@@ -570,6 +604,21 @@ mod tests {
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
 
+    #[test]
+    fn insert_newline_char_is_tracked_correctly() {
+        let s = "hello, world!\nhow are you?";
+        let mut gb = GapBuffer::from(s);
+        assert_eq!(gb.len_lines(), 2);
+
+        gb.insert_char(6, '\n');
+        gb.move_gap_to(s.len() + 1);
+        assert_eq!(gb.len_lines(), 3);
+
+        assert_eq!(gb.line_string(0), "hello,\n");
+        assert_eq!(gb.line_string(1), " world!\n");
+        assert_eq!(gb.line_string(2), "how are you?");
+    }
+
     #[test_case(&[(0, "hell")], "helloworl"; "insert front")]
     #[test_case(&[(1, ", ")], "o, worl"; "insert inner")]
     #[test_case(&[(5, "d!")], "oworld!"; "insert back")]
@@ -582,6 +631,23 @@ mod tests {
         }
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
+    }
+
+    #[test]
+    fn insert_newline_in_str_is_tracked_correctly() {
+        let s = "hello, world!\nhow are you?";
+        let mut gb = GapBuffer::from(s);
+        assert_eq!(gb.len_lines(), 2);
+
+        let s2 = " sailor\nisn't this fun?\nwhat a wonderful";
+        gb.insert_str(6, s2);
+        gb.move_gap_to(s2.len() + 1);
+        assert_eq!(gb.len_lines(), 4);
+
+        assert_eq!(gb.line_string(0), "hello, sailor\n");
+        assert_eq!(gb.line_string(1), "isn't this fun?\n");
+        assert_eq!(gb.line_string(2), "what a wonderful world!\n");
+        assert_eq!(gb.line_string(3), "how are you?");
     }
 
     #[test_case(6, "hello,world!"; "at gap start")]
