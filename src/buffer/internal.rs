@@ -145,6 +145,10 @@ impl GapBuffer {
         v
     }
 
+    pub fn line_string(&self, line_idx: usize) -> String {
+        self.line_stats.lines[line_idx].as_string(self)
+    }
+
     pub fn len_lines(&self) -> usize {
         self.line_stats.lines.len()
     }
@@ -196,11 +200,14 @@ impl GapBuffer {
         self.cap = cap;
     }
 
-    /// The byte_idx passed here must be an absolute position within the data buffer
+    /// The byte_idx passed here must be an absolute position within the data buffer.
     fn move_gap_to(&mut self, byte_idx: usize) {
-        if byte_idx > self.data.len() {
-            panic!("index out of bounds: {byte_idx} > {}", self.data.len());
-        }
+        // we need space to fit the current gap size
+        assert!(
+            byte_idx <= self.len(),
+            "index out of bounds: {byte_idx} > {}",
+            self.len()
+        );
 
         let gap = self.gap();
 
@@ -221,21 +228,27 @@ impl GapBuffer {
             // Gap moving right
             Ordering::Greater => {
                 for ls in self.line_stats.lines.iter_mut() {
-                    if ls.offset >= self.gap_end && ls.offset <= byte_idx + self.gap_end {
+                    if ls.offset >= self.gap_end && ls.offset <= byte_idx + gap {
                         ls.offset -= gap;
                     }
                 }
 
-                (self.gap_end..byte_idx + gap, self.gap_start)
+                if byte_idx > self.gap_end {
+                    (self.gap_end..byte_idx + gap, self.gap_start)
+                } else {
+                    let diff = byte_idx - self.gap_start;
+                    (self.gap_end..self.gap_end + diff, self.gap_start)
+                }
             }
         };
 
+        self.line_stats.current_line = self.byte_to_line(byte_idx);
         self.data.copy_within(src, dest);
         self.gap_end = byte_idx + gap;
         self.gap_start = byte_idx;
     }
 
-    pub fn byte_to_line(&self, byte_idx: usize) -> usize {
+    fn byte_to_line(&self, byte_idx: usize) -> usize {
         let mut n = 0;
         for (i, ls) in self.line_stats.lines.iter().enumerate() {
             n += ls.n_bytes;
@@ -247,11 +260,11 @@ impl GapBuffer {
         panic!("out of bounds: {byte_idx} > {}", self.len());
     }
 
-    pub fn line_to_byte(&self, line_idx: usize) -> usize {
-        self.line_stats.lines[line_idx].offset
-    }
+    // fn line_to_raw_byte(&self, line_idx: usize) -> usize {
+    //     self.line_stats.lines[line_idx].offset
+    // }
 
-    pub fn char_to_byte(&self, char_idx: usize) -> usize {
+    fn char_to_byte(&self, char_idx: usize) -> usize {
         let mut n = 0;
 
         for ls in self.line_stats.lines.iter() {
@@ -263,12 +276,11 @@ impl GapBuffer {
 
             let mut count = char_idx - n;
             let (b1, b2) = ls.bytes(self);
-            for (n_bytes, b) in b1.iter().chain(b2).enumerate() {
-                if count == 0 {
-                    return ls.offset + n_bytes;
-                }
 
-                if is_char_boundary(*b) {
+            for (n_bytes, b) in b1.iter().chain(b2.iter()).enumerate() {
+                if count == 0 {
+                    return n_bytes;
+                } else if is_char_boundary(*b) {
                     count -= 1;
                 }
             }
@@ -281,7 +293,11 @@ impl GapBuffer {
         panic!("out of bounds: {char_idx} > {}", self.len());
     }
 
-    fn insert_newlines(&mut self, it: impl Iterator<Item = usize>) {}
+    fn insert_newlines(&mut self, mut it: impl Iterator<Item = usize>) {
+        if it.next().is_some() {
+            todo!()
+        }
+    }
 
     /// Insert a single character at the specifified byte index.
     ///
@@ -298,9 +314,14 @@ impl GapBuffer {
 
         ch.encode_utf8(&mut self.data[self.gap_start..]);
         self.gap_start += len;
+        self.line_stats.n_chars += 1;
+
         let ls = self.line_stats.current_line_mut();
         ls.n_chars += 1;
-        ls.n_bytes += ch.len_utf8();
+        ls.n_bytes += len;
+        if idx < ls.offset {
+            ls.offset = idx;
+        }
 
         if ch == '\n' {
             self.insert_newlines(std::iter::once(idx));
@@ -322,6 +343,14 @@ impl GapBuffer {
 
         self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
         self.gap_start += len;
+        self.line_stats.n_chars += len;
+
+        let ls = self.line_stats.current_line_mut();
+        ls.n_chars += s.chars().count();
+        ls.n_bytes += len;
+        if idx < ls.offset {
+            ls.offset = idx;
+        }
 
         self.insert_newlines(s.chars().enumerate().filter_map(|(i, ch)| {
             if ch == '\n' {
@@ -443,6 +472,15 @@ impl LineStat {
             &gb.data[gb.gap_end..end],
         )
     }
+
+    fn as_string(&self, gb: &GapBuffer) -> String {
+        let (b1, b2) = self.bytes(gb);
+        let mut v = Vec::with_capacity(b1.len() + b2.len());
+        v.extend(b1);
+        v.extend(b2);
+
+        String::from_utf8(v).expect("valid utf8")
+    }
 }
 
 #[cfg(test)]
@@ -482,8 +520,12 @@ mod tests {
         assert_eq!(&gb.line_stats.lines, expected);
     }
 
-    #[test_case(0, 0, 64; "BOF cur at BOF")]
+    #[test_case(0, 0, 0; "BOF cur at BOF")]
     #[test_case(26, 0, 0; "BOF cur at EOF")]
+    #[test_case(26, 5, 5; "in the buffer cur at EOF")]
+    #[test_case(5, 5, 5; "in the buffer cur at gap")]
+    #[test_case(5, 3, 3; "in the buffer cur before gap")]
+    #[test_case(5, 10, 10; "in the buffer cur after gap")]
     #[test]
     fn char_to_byte_works(cur: usize, char_idx: usize, expected: usize) {
         let s = "hello, world!\nhow are you?";
@@ -506,26 +548,22 @@ mod tests {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
         gb.move_gap_to(cur);
 
-        let (b1, b2) = gb.line_stats.lines[line].bytes(&gb);
-
-        let mut v = Vec::with_capacity(b1.len() + b2.len());
-        v.extend(b1);
-        v.extend(b2);
-        let s = String::from_utf8(v).expect("valid utf8");
-
+        let s = gb.line_string(line);
         assert_eq!(s, expected);
     }
 
     #[test_case(&[(0, 'h')], "hello world"; "insert front")]
     #[test_case(&[(4, ',')], "ello, world"; "insert inner")]
     #[test_case(&[(10, '!')], "ello world!"; "insert back")]
+    #[test_case(&[(4, ','), (11, '!')], "ello, world!"; "insert inner then back")]
+    #[test_case(&[(4, ','), (0, 'h')], "hello, world"; "insert inner then front")]
+    #[test_case(&[(0, 'h'), (5, ','),], "hello, world"; "insert front then inner")]
     #[test_case(&[(10, '!'), (0, 'h'), (5, ',')], "hello, world!"; "insert all")]
     #[test]
     fn insert_char(inserts: &[(usize, char)], expected: &str) {
         let mut gb = GapBuffer::from("ello world");
 
         for &(idx, ch) in inserts {
-            println!("{:?}", debug_buffer_content(&gb));
             gb.insert_char(idx, ch);
         }
 
