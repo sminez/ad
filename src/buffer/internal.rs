@@ -260,10 +260,6 @@ impl GapBuffer {
         panic!("out of bounds: {byte_idx} > {}", self.len());
     }
 
-    // fn line_to_raw_byte(&self, line_idx: usize) -> usize {
-    //     self.line_stats.lines[line_idx].offset
-    // }
-
     fn char_to_byte(&self, char_idx: usize) -> usize {
         let mut n = 0;
 
@@ -279,7 +275,12 @@ impl GapBuffer {
 
             for (n_bytes, b) in b1.iter().chain(b2.iter()).enumerate() {
                 if count == 0 {
-                    return n_bytes;
+                    let offset = if ls.offset > self.gap_start {
+                        ls.offset - self.gap_end
+                    } else {
+                        ls.offset
+                    };
+                    return offset + n_bytes;
                 } else if is_char_boundary(*b) {
                     count -= 1;
                 }
@@ -291,38 +292,6 @@ impl GapBuffer {
         }
 
         panic!("out of bounds: {char_idx} > {}", self.len());
-    }
-
-    fn insert_newlines(&mut self, mut it: impl Iterator<Item = usize>) {
-        loop {
-            let idx = match it.next() {
-                Some(idx) => idx,
-                None => return,
-            };
-
-            let LineStat {
-                offset,
-                n_chars,
-                n_bytes,
-            } = self.line_stats.lines[self.line_stats.current_line];
-
-            let new_n_bytes = idx - offset + 1;
-            let mut new_n_chars = 0;
-            for &b in &self.data[offset..idx + 1] {
-                if is_char_boundary(b) {
-                    new_n_chars += 1;
-                }
-            }
-
-            let ls = self.line_stats.current_line_mut();
-            ls.n_bytes = new_n_bytes;
-            ls.n_chars = new_n_chars;
-            self.line_stats.current_line += 1;
-            self.line_stats.lines.insert(
-                self.line_stats.current_line,
-                LineStat::new(idx + 1, n_chars - new_n_chars, n_bytes - new_n_bytes),
-            );
-        }
     }
 
     /// Insert a single character at the specifified byte index.
@@ -350,7 +319,7 @@ impl GapBuffer {
         }
 
         if ch == '\n' {
-            self.insert_newlines(std::iter::once(idx));
+            self.line_stats.insert_newline(idx, &self.data);
         }
     }
 
@@ -378,27 +347,40 @@ impl GapBuffer {
             ls.offset = idx;
         }
 
-        self.insert_newlines(s.chars().enumerate().filter_map(|(i, ch)| {
-            if ch == '\n' {
-                Some(i + idx)
-            } else {
-                None
+        for (i, b) in s.bytes().enumerate() {
+            if b == b'\n' {
+                self.line_stats.insert_newline(idx + i, &self.data);
             }
-        }));
+        }
     }
 
     /// Remove the requested character index from the visible region of the buffer
     pub fn remove_char(&mut self, char_idx: usize) {
         let idx = self.char_to_byte(char_idx);
-
-        if idx == self.gap_start {
-            self.gap_end += 1;
-        } else {
-            self.move_gap_to(idx);
-            self.gap_end += 1;
+        let mut len = 1;
+        for n in 0.. {
+            if is_char_boundary(self.data[idx + n]) {
+                break;
+            }
+            len += 1;
         }
 
-        // TODO: handle removal of newlines
+        if idx == self.gap_start {
+            self.gap_end += len;
+        } else {
+            self.move_gap_to(idx);
+            self.gap_end += len;
+        }
+
+        self.line_stats.n_chars -= 1;
+
+        let ls = self.line_stats.current_line_mut();
+        ls.n_chars -= 1;
+        ls.n_bytes -= len;
+
+        if self.data[idx] == b'\n' {
+            self.line_stats.remove_newline();
+        }
     }
 
     /// Remove the requested range (from..to) from the visible region of the buffer
@@ -418,7 +400,26 @@ impl GapBuffer {
         self.move_gap_to(from);
         self.gap_end += to - from;
 
-        // TODO: handle removal of newlines
+        let mut n_chars = 0;
+        for n in from..to {
+            if is_char_boundary(self.data[n]) {
+                n_chars += 1;
+            }
+        }
+
+        self.line_stats.n_chars -= n_chars;
+
+        // FIXME: this breaks if the range was over multiple lines.
+        // See the failing "insert_remove_str_is_idempotent" test
+        let ls = self.line_stats.current_line_mut();
+        ls.n_chars -= n_chars;
+        ls.n_bytes -= to - from;
+
+        for b in self.data[from..to].iter() {
+            if *b == b'\n' {
+                self.line_stats.remove_newline();
+            }
+        }
     }
 }
 
@@ -464,6 +465,45 @@ impl From<&str> for LineStats {
 impl LineStats {
     fn current_line_mut(&mut self) -> &mut LineStat {
         &mut self.lines[self.current_line]
+    }
+
+    fn insert_newline(&mut self, idx: usize, data: &[u8]) {
+        let LineStat {
+            offset,
+            n_chars,
+            n_bytes,
+        } = self.lines[self.current_line];
+
+        let new_n_bytes = idx - offset + 1;
+        let mut new_n_chars = 0;
+        for &b in &data[offset..idx + 1] {
+            if is_char_boundary(b) {
+                new_n_chars += 1;
+            }
+        }
+
+        let ls = self.current_line_mut();
+        ls.n_bytes = new_n_bytes;
+        ls.n_chars = new_n_chars;
+        self.current_line += 1;
+        self.lines.insert(
+            self.current_line,
+            LineStat::new(idx + 1, n_chars - new_n_chars, n_bytes - new_n_bytes),
+        );
+    }
+
+    fn remove_newline(&mut self) {
+        if self.current_line == self.lines.len() - 1 {
+            return; // no line to join with
+        }
+
+        let LineStat {
+            n_chars, n_bytes, ..
+        } = self.lines.remove(self.current_line + 1);
+
+        let ls = self.current_line_mut();
+        ls.n_bytes += n_bytes;
+        ls.n_chars += n_chars;
     }
 }
 
@@ -663,6 +703,18 @@ mod tests {
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
 
+    #[test]
+    fn remove_newline_char_is_tracked_correctly() {
+        let s = "hello, world!\nhow are you?";
+        let mut gb = GapBuffer::from(s);
+        assert_eq!(gb.len_lines(), 2);
+
+        gb.remove_char(13);
+
+        assert_eq!(gb.len_lines(), 1);
+        assert_eq!(gb.line_string(0), "hello, world!how are you?");
+    }
+
     #[test_case(6, 9, "hello,rld!"; "at gap start")]
     #[test_case(7, 10, "hello, ld!"; "at gap end")]
     #[test_case(10, 13, "hello, wor"; "after gap")]
@@ -681,6 +733,18 @@ mod tests {
     }
 
     #[test]
+    fn remove_newline_in_str_is_tracked_correctly() {
+        let s = "hello, world!\nhow are you?";
+        let mut gb = GapBuffer::from(s);
+        assert_eq!(gb.len_lines(), 2);
+
+        gb.remove_range(10, 15);
+
+        assert_eq!(gb.len_lines(), 1);
+        assert_eq!(gb.line_string(0), "hello, worow are you?");
+    }
+
+    #[test]
     fn insert_remove_char_is_idempotent() {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
@@ -694,8 +758,8 @@ mod tests {
     fn insert_remove_str_is_idempotent() {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
-        gb.insert_str(6, "TEST");
-        gb.remove_range(6, 10);
+        gb.insert_str(6, "TEST\n");
+        gb.remove_range(6, 11);
 
         assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
     }
