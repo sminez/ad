@@ -198,8 +198,6 @@ impl GapBuffer {
     pub fn remove_char(&mut self, idx: usize) {
         if idx == self.gap_start {
             self.gap_end += 1;
-        } else if idx + self.gap() == self.gap_end {
-            self.gap_end -= 1;
         } else {
             self.move_gap_to(idx);
             self.gap_end += 1;
@@ -262,9 +260,10 @@ mod tests {
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
 
-    #[test_case(6, "hello,world!"; "remove at gap")]
-    #[test_case(12, "hello, world"; "remove after gap")]
-    #[test_case(0, "ello, world!"; "remove before gap")]
+    #[test_case(6, "hello,world!"; "at gap start")]
+    #[test_case(7, "hello, orld!"; "at gap end")]
+    #[test_case(12, "hello, world"; "after gap")]
+    #[test_case(0, "ello, world!"; "before gap")]
     #[test]
     fn remove_char(idx: usize, expected: &str) {
         let mut gb = GapBuffer::from("hello, world!");
@@ -272,5 +271,15 @@ mod tests {
         gb.remove_char(idx);
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
+    }
+
+    #[test]
+    fn inset_remove_char_is_idempotent() {
+        let s = "hello, world!";
+        let mut gb = GapBuffer::from(s);
+        gb.insert_char(6, 'X');
+        gb.remove_char(6);
+
+        assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
     }
 }
