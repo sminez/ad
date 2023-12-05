@@ -24,6 +24,8 @@ mod minibuffer;
 
 use edit::{Edit, EditLog, Kind, Txt};
 
+pub use internal::GapBuffer;
+
 pub(crate) use buffers::Buffers;
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
