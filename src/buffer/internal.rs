@@ -16,6 +16,7 @@ const MAX_GAP: usize = 1024 * 8;
 
 /// For a given buffer length, calculate the new size of the gap we need when reallocating.
 /// This is set to 5% of the length of our data buffer but bounded by MIN_GAP and MAX_GAP.
+#[inline]
 fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
     min(max(len / 20, min_gap), MAX_GAP)
 }
@@ -23,8 +24,21 @@ fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
 // This is bit magic equivalent to: b < 128 || b >= 192
 // -> taken from the impl of is_utf8_char_boundary in
 //    https://doc.rust-lang.org/src/core/num/mod.rs.html
+#[inline]
 fn is_char_boundary(b: u8) -> bool {
     (b as i8) >= -0x40
+}
+
+#[inline]
+fn count_chars(bytes: &[u8]) -> usize {
+    assert!(is_char_boundary(bytes[bytes.len() - 1]), "invalid utf8");
+    let mut n_chars = 0;
+    for &b in bytes {
+        if is_char_boundary(b) {
+            n_chars += 1;
+        }
+    }
+    n_chars
 }
 
 /// An implementation of a gap buffer that tracks internal meta-data to help with accessing
@@ -161,6 +175,23 @@ impl GapBuffer {
     #[inline]
     fn gap(&self) -> usize {
         self.gap_end - self.gap_start
+    }
+
+    #[inline]
+    fn current_line_is_last_line(&self) -> bool {
+        self.line_stats.current_line == self.line_stats.lines.len() - 1
+    }
+
+    #[inline]
+    fn char_len(&self, idx: usize) -> usize {
+        let mut len = 1;
+        for n in 0.. {
+            if is_char_boundary(self.data[idx + n]) {
+                return len;
+            }
+            len += 1;
+        }
+        panic!("invalid utf8 character data");
     }
 
     // #[inline]
@@ -357,13 +388,7 @@ impl GapBuffer {
     /// Remove the requested character index from the visible region of the buffer
     pub fn remove_char(&mut self, char_idx: usize) {
         let idx = self.char_to_byte(char_idx);
-        let mut len = 1;
-        for n in 0.. {
-            if is_char_boundary(self.data[idx + n]) {
-                break;
-            }
-            len += 1;
-        }
+        let len = self.char_len(idx);
 
         if idx == self.gap_start {
             self.gap_end += len;
@@ -378,8 +403,17 @@ impl GapBuffer {
         ls.n_chars -= 1;
         ls.n_bytes -= len;
 
-        if self.data[idx] == b'\n' {
-            self.line_stats.remove_newline();
+        if self.data[idx] == b'\n' && !self.current_line_is_last_line() {
+            let LineStat {
+                n_chars, n_bytes, ..
+            } = self
+                .line_stats
+                .lines
+                .remove(self.line_stats.current_line + 1);
+
+            let ls = self.line_stats.current_line_mut();
+            ls.n_bytes += n_bytes;
+            ls.n_chars += n_chars;
         }
     }
 
@@ -389,36 +423,70 @@ impl GapBuffer {
             return;
         }
 
-        assert!(
-            char_from < char_to,
-            "invalid range: char_from={char_from} > char_to={char_to}"
-        );
-
         let from = self.char_to_byte(char_from);
         let to = self.char_to_byte(char_to);
-
+        assert!(from < to, "invalid range: from={from} > to={to}");
         self.move_gap_to(from);
-        self.gap_end += to - from;
 
-        let mut n_chars = 0;
-        for n in from..to {
-            if is_char_boundary(self.data[n]) {
-                n_chars += 1;
-            }
-        }
+        let mut n_bytes = to - from;
+        let mut n_chars = count_chars(&self.data[from..to]);
 
+        self.gap_end += n_bytes;
         self.line_stats.n_chars -= n_chars;
 
-        // FIXME: this breaks if the range was over multiple lines.
-        // See the failing "insert_remove_str_is_idempotent" test
-        let ls = self.line_stats.current_line_mut();
-        ls.n_chars -= n_chars;
-        ls.n_bytes -= to - from;
-
-        for b in self.data[from..to].iter() {
-            if *b == b'\n' {
-                self.line_stats.remove_newline();
+        // cases:
+        //   - delete is entirely within current line
+        //   - delete is all of current line
+        //   - delete goes over to next line
+        //   - delete spans multiple intermediate lines
+        match (
+            to.cmp(&self.line_stats.current_line_end()),
+            self.current_line_is_last_line(),
+        ) {
+            (Ordering::Less, _) | (Ordering::Equal, true) => {
+                let ls = self.line_stats.current_line_mut();
+                ls.n_chars -= n_chars;
+                ls.n_bytes -= n_bytes;
             }
+
+            (Ordering::Equal, false) => {
+                let idx = self.line_stats.current_line + 1;
+                let next_ls = self.line_stats.lines.remove(idx);
+                let ls = self.line_stats.current_line_mut();
+                ls.n_bytes += next_ls.n_bytes;
+                ls.n_chars += next_ls.n_chars;
+            }
+
+            (Ordering::Greater, false) => {
+                while n_bytes > 0 {
+                    let offset = self.line_stats.current_line_offset();
+                    let end = self.line_stats.current_line_end();
+                    // FIXME: to-from for n_bytes is probably wrong?
+                    println!("bytes={n_bytes}");
+
+                    if to > end && from > offset {
+                        let ls = self.line_stats.current_line_mut();
+                        n_bytes -= end - from;
+                        ls.n_bytes = from - ls.offset;
+                        ls.n_chars = count_chars(&self.data[from..end]);
+                        n_chars -= ls.n_chars;
+                        self.line_stats.current_line += 1;
+                    } else if from < offset && to > end {
+                        let ls = self.line_stats.lines.remove(self.line_stats.current_line);
+                        n_bytes -= ls.n_bytes;
+                        n_chars -= ls.n_chars;
+                    } else {
+                        let ls_last = self.line_stats.lines.remove(self.line_stats.current_line);
+                        self.line_stats.current_line -= 1;
+                        let ls = self.line_stats.current_line_mut();
+                        ls.n_bytes += ls_last.n_bytes - n_bytes;
+                        ls.n_chars += ls_last.n_chars - n_chars;
+                        break;
+                    }
+                }
+            }
+
+            (Ordering::Greater, true) => panic!("remove_range out of bounds"),
         }
     }
 }
@@ -467,6 +535,16 @@ impl LineStats {
         &mut self.lines[self.current_line]
     }
 
+    #[inline]
+    fn current_line_offset(&self) -> usize {
+        self.lines[self.current_line].offset
+    }
+
+    #[inline]
+    fn current_line_end(&self) -> usize {
+        self.lines[self.current_line].end()
+    }
+
     fn insert_newline(&mut self, idx: usize, data: &[u8]) {
         let LineStat {
             offset,
@@ -475,13 +553,7 @@ impl LineStats {
         } = self.lines[self.current_line];
 
         let new_n_bytes = idx - offset + 1;
-        let mut new_n_chars = 0;
-        for &b in &data[offset..idx + 1] {
-            if is_char_boundary(b) {
-                new_n_chars += 1;
-            }
-        }
-
+        let new_n_chars = count_chars(&data[offset..idx + 1]);
         let ls = self.current_line_mut();
         ls.n_bytes = new_n_bytes;
         ls.n_chars = new_n_chars;
@@ -490,20 +562,6 @@ impl LineStats {
             self.current_line,
             LineStat::new(idx + 1, n_chars - new_n_chars, n_bytes - new_n_bytes),
         );
-    }
-
-    fn remove_newline(&mut self) {
-        if self.current_line == self.lines.len() - 1 {
-            return; // no line to join with
-        }
-
-        let LineStat {
-            n_chars, n_bytes, ..
-        } = self.lines.remove(self.current_line + 1);
-
-        let ls = self.current_line_mut();
-        ls.n_bytes += n_bytes;
-        ls.n_chars += n_chars;
     }
 }
 
@@ -531,6 +589,11 @@ impl LineStat {
             n_chars,
             n_bytes,
         }
+    }
+
+    #[inline]
+    fn end(&self) -> usize {
+        self.offset + self.n_bytes
     }
 
     #[inline]
