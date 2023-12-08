@@ -31,6 +31,9 @@ fn is_char_boundary(b: u8) -> bool {
 
 #[inline]
 fn count_chars(bytes: &[u8]) -> usize {
+    if bytes.is_empty() {
+        return 0;
+    }
     assert!(is_char_boundary(bytes[bytes.len() - 1]), "invalid utf8");
     let mut n_chars = 0;
     for &b in bytes {
@@ -259,17 +262,12 @@ impl GapBuffer {
             // Gap moving right
             Ordering::Greater => {
                 for ls in self.line_stats.lines.iter_mut() {
-                    if ls.offset >= self.gap_end && ls.offset <= byte_idx + gap {
+                    if ls.offset >= self.gap_end && ls.offset < byte_idx + gap {
                         ls.offset -= gap;
                     }
                 }
 
-                if byte_idx > self.gap_end {
-                    (self.gap_end..byte_idx + gap, self.gap_start)
-                } else {
-                    let diff = byte_idx - self.gap_start;
-                    (self.gap_end..self.gap_end + diff, self.gap_start)
-                }
+                (self.gap_end..byte_idx + gap, self.gap_start)
             }
         };
 
@@ -350,7 +348,7 @@ impl GapBuffer {
         }
 
         if ch == '\n' {
-            self.line_stats.insert_newline(idx, &self.data);
+            self.line_stats.mark_newline(idx, &self.data);
         }
     }
 
@@ -369,7 +367,7 @@ impl GapBuffer {
 
         self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
         self.gap_start += len;
-        self.line_stats.n_chars += len;
+        self.line_stats.n_chars += s.chars().count();
 
         let ls = self.line_stats.current_line_mut();
         ls.n_chars += s.chars().count();
@@ -380,7 +378,7 @@ impl GapBuffer {
 
         for (i, b) in s.bytes().enumerate() {
             if b == b'\n' {
-                self.line_stats.insert_newline(idx + i, &self.data);
+                self.line_stats.mark_newline(idx + i, &self.data);
             }
         }
     }
@@ -434,11 +432,6 @@ impl GapBuffer {
         self.gap_end += n_bytes;
         self.line_stats.n_chars -= n_chars;
 
-        // cases:
-        //   - delete is entirely within current line
-        //   - delete is all of current line
-        //   - delete goes over to next line
-        //   - delete spans multiple intermediate lines
         match (
             to.cmp(&self.line_stats.current_line_end()),
             self.current_line_is_last_line(),
@@ -461,8 +454,6 @@ impl GapBuffer {
                 while n_bytes > 0 {
                     let offset = self.line_stats.current_line_offset();
                     let end = self.line_stats.current_line_end();
-                    // FIXME: to-from for n_bytes is probably wrong?
-                    println!("bytes={n_bytes}");
 
                     if to > end && from > offset {
                         let ls = self.line_stats.current_line_mut();
@@ -545,7 +536,7 @@ impl LineStats {
         self.lines[self.current_line].end()
     }
 
-    fn insert_newline(&mut self, idx: usize, data: &[u8]) {
+    fn mark_newline(&mut self, idx: usize, data: &[u8]) {
         let LineStat {
             offset,
             n_chars,
@@ -599,7 +590,7 @@ impl LineStat {
     #[inline]
     fn bytes<'a>(&self, gb: &'a GapBuffer) -> (&'a [u8], &'a [u8]) {
         let mut end = self.offset + self.n_bytes;
-        if end <= gb.gap_start || self.offset >= gb.gap_end || self.offset >= gb.gap_start {
+        if end <= gb.gap_start || self.offset >= gb.gap_end {
             return (&gb.data[self.offset..end], &[]);
         }
 
@@ -613,8 +604,8 @@ impl LineStat {
     fn as_string(&self, gb: &GapBuffer) -> String {
         let (b1, b2) = self.bytes(gb);
         let mut v = Vec::with_capacity(b1.len() + b2.len());
-        v.extend(b1);
-        v.extend(b2);
+        v.extend_from_slice(b1);
+        v.extend_from_slice(b2);
 
         String::from_utf8(v).expect("valid utf8")
     }
@@ -628,6 +619,19 @@ mod tests {
     fn debug_buffer_content(gb: &GapBuffer) -> String {
         let mut v = gb.data.to_vec();
         v[gb.gap_start..gb.gap_end].copy_from_slice("_".repeat(gb.gap()).as_bytes());
+        String::from_utf8(v).expect("valid utf8")
+    }
+
+    fn raw_debug_buffer_content(gb: &GapBuffer) -> String {
+        let mut v = gb.data.to_vec();
+        for b in v[gb.gap_start..gb.gap_end].iter_mut() {
+            if *b == b'\0' {
+                *b = b'_';
+            }
+        }
+        v.insert(gb.gap_end, b']');
+        v.insert(gb.gap_start, b'[');
+
         String::from_utf8(v).expect("valid utf8")
     }
 
@@ -655,6 +659,22 @@ mod tests {
         assert_eq!(s.len(), 26, "EOF case is not 0..s.len()");
         gb.move_gap_to(cur);
         assert_eq!(&gb.line_stats.lines, expected);
+    }
+
+    #[test]
+    fn move_gap_to_maintains_line_content() {
+        let s = "hello, world!\nhow are you?\nthis is a test";
+        assert_eq!(s.len(), 41, "EOF case is not 0..s.len()");
+        let mut gb = GapBuffer::from(s);
+
+        for idx in 0..=s.len() {
+            gb.move_gap_to(idx);
+            assert_eq!(gb.len_lines(), 3);
+
+            assert_eq!(gb.line_string(0), "hello, world!\n", "idx={idx}");
+            assert_eq!(gb.line_string(1), "how are you?\n", "idx={idx}");
+            assert_eq!(gb.line_string(2), "this is a test", "idx={idx}");
+        }
     }
 
     #[test_case(0, 0, 0; "BOF cur at BOF")]
@@ -713,19 +733,30 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 2);
 
+        println!("initial: {:?}", raw_debug_buffer_content(&gb));
         gb.insert_char(6, '\n');
-        gb.move_gap_to(s.len() + 1);
-        assert_eq!(gb.len_lines(), 3);
+        println!("insert:  {:?}", raw_debug_buffer_content(&gb));
 
+        assert_eq!(gb.len_lines(), 3);
         assert_eq!(gb.line_string(0), "hello,\n");
         assert_eq!(gb.line_string(1), " world!\n");
         assert_eq!(gb.line_string(2), "how are you?");
+
+        for idx in 0..=gb.len_chars() {
+            gb.move_gap_to(idx);
+            assert_eq!(gb.len_lines(), 3);
+
+            assert_eq!(gb.line_string(0), "hello,\n", "idx={idx}");
+            assert_eq!(gb.line_string(1), " world!\n", "idx={idx}");
+            assert_eq!(gb.line_string(2), "how are you?", "idx={idx}");
+        }
     }
 
     #[test_case(&[(0, "hell")], "helloworl"; "insert front")]
     #[test_case(&[(1, ", ")], "o, worl"; "insert inner")]
     #[test_case(&[(5, "d!")], "oworld!"; "insert back")]
     #[test_case(&[(5, "d!"), (0, "hell"), (5, ", ")], "hello, world!"; "insert all")]
+    #[test_case(&[(5, "d!"), (0, "hell"), (5, ",\n")], "hello,\nworld!"; "insert all w newline")]
     #[test]
     fn insert_str(inserts: &[(usize, &str)], expected: &str) {
         let mut gb = GapBuffer::from("oworl");
@@ -742,15 +773,19 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 2);
 
-        let s2 = " sailor\nisn't this fun?\nwhat a wonderful";
+        let s2 = " sailor\nisn't this fun?\nwhat a wonderful\n";
         gb.insert_str(6, s2);
-        gb.move_gap_to(s2.len() + 1);
-        assert_eq!(gb.len_lines(), 4);
 
-        assert_eq!(gb.line_string(0), "hello, sailor\n");
-        assert_eq!(gb.line_string(1), "isn't this fun?\n");
-        assert_eq!(gb.line_string(2), "what a wonderful world!\n");
-        assert_eq!(gb.line_string(3), "how are you?");
+        for idx in 0..=gb.len_chars() {
+            gb.move_gap_to(idx);
+            assert_eq!(gb.len_lines(), 5);
+
+            assert_eq!(gb.line_string(0), "hello, sailor\n", "idx={idx}");
+            assert_eq!(gb.line_string(1), "isn't this fun?\n", "idx={idx}");
+            assert_eq!(gb.line_string(2), "what a wonderful\n", "idx={idx}");
+            assert_eq!(gb.line_string(3), " world!\n", "idx={idx}");
+            assert_eq!(gb.line_string(4), "how are you?", "idx={idx}");
+        }
     }
 
     #[test_case(6, "hello,world!"; "at gap start")]
@@ -817,13 +852,32 @@ mod tests {
         assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
     }
 
+    #[test_case("TEST", 1; "without trailing newline")]
+    #[test_case("TEST\n", 2; "with trailing newline")]
+    #[test_case("TEST\nTEST", 2; "with internal newline")]
     #[test]
-    fn insert_remove_str_is_idempotent() {
+    fn insert_remove_str_is_idempotent(edit: &str, expected_lines: usize) {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
-        gb.insert_str(6, "TEST\n");
-        gb.remove_range(6, 11);
 
-        assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
+        println!("initial: {:?}", raw_debug_buffer_content(&gb));
+        for n in 0..gb.len_lines() {
+            println!("{:?}", gb.line_string(n));
+        }
+
+        gb.insert_str(6, edit);
+        assert_eq!(gb.len_lines(), expected_lines);
+        println!("insert:  {:?}", raw_debug_buffer_content(&gb));
+        for n in 0..gb.len_lines() {
+            println!("{:?}", gb.line_string(n));
+        }
+
+        gb.remove_range(6, 6 + edit.len());
+        println!("remove:  {:?}", raw_debug_buffer_content(&gb));
+        for n in 0..gb.len_lines() {
+            println!("{:?}", gb.line_string(n));
+        }
+
+        assert_eq!(gb.to_string(), s);
     }
 }
