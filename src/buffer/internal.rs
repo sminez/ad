@@ -316,7 +316,12 @@ impl GapBuffer {
             }
 
             if count == 0 {
-                return self.len();
+                let end = ls.end();
+                return if end > self.gap_end {
+                    end - self.gap_end
+                } else {
+                    end
+                };
             }
         }
 
@@ -421,9 +426,14 @@ impl GapBuffer {
             return;
         }
 
+        assert!(
+            char_from < char_to,
+            "invalid range: from={char_from} > to={char_to}"
+        );
+
         let from = self.char_to_byte(char_from);
         let to = self.char_to_byte(char_to);
-        assert!(from < to, "invalid range: from={from} > to={to}");
+        debug_assert!(from < to, "invalid byte range: from={from} > to={to}");
         self.move_gap_to(from);
 
         let mut n_bytes = to - from;
@@ -443,6 +453,10 @@ impl GapBuffer {
             }
 
             (Ordering::Equal, false) => {
+                let ls = self.line_stats.current_line_mut();
+                ls.n_chars -= n_chars;
+                ls.n_bytes -= n_bytes;
+
                 let idx = self.line_stats.current_line + 1;
                 let next_ls = self.line_stats.lines.remove(idx);
                 let ls = self.line_stats.current_line_mut();

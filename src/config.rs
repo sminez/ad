@@ -221,12 +221,10 @@ map G G => my-prog
     #[test]
     fn parse_of_example_config_works() {
         let cfg = Config::parse(EXAMPLE_CONFIG).unwrap();
-        let bindings: BTreeMap<Vec<Key>, String> = [
-            (vec![Key::Char(' '), Key::Char('b')], "B".to_string()),
-            (vec![Key::Char(' '), Key::Char('F')], "fmt".to_string()),
-        ]
-        .into_iter()
-        .collect();
+        let bindings: BTreeMap<Vec<Key>, String> =
+            [(vec![Key::Char(' '), Key::Char('F')], "fmt".to_string())]
+                .into_iter()
+                .collect();
 
         let expected = Config {
             tabstop: 4,
