@@ -53,7 +53,7 @@ pub struct GapBuffer {
     gap_start: usize,
     gap_end: usize,
     next_gap: usize,
-    line_stats: LineStats,
+    meta: Meta,
 }
 
 impl From<String> for GapBuffer {
@@ -65,13 +65,13 @@ impl From<String> for GapBuffer {
             return Self::from(s.as_str());
         }
 
-        let line_stats = LineStats::from(s.as_str());
+        let meta = Meta::from(s.as_str());
         let mut v = s.into_bytes();
         v.resize(cap, 0);
 
         let mut gb = Self {
             data: v.into_boxed_slice(),
-            line_stats,
+            meta,
             cap,
             gap_start,
             gap_end: cap,
@@ -89,13 +89,13 @@ impl From<&str> for GapBuffer {
         let next_gap = clamp_gap_size(gap_start, MIN_GAP);
         let cap = gap_start + next_gap;
         let mut v = Vec::with_capacity(cap);
-        let line_stats = LineStats::from(s);
+        let meta = Meta::from(s);
         v.extend_from_slice(s.as_bytes());
         v.resize(cap, 0);
 
         let mut gb = Self {
             data: v.into_boxed_slice(),
-            line_stats,
+            meta,
             cap,
             gap_start,
             gap_end: cap,
@@ -163,15 +163,15 @@ impl GapBuffer {
     }
 
     pub fn line_string(&self, line_idx: usize) -> String {
-        self.line_stats.lines[line_idx].as_string(self)
+        self.meta.lines[line_idx].as_string(self)
     }
 
     pub fn len_lines(&self) -> usize {
-        self.line_stats.lines.len()
+        self.meta.lines.len()
     }
 
     pub fn len_chars(&self) -> usize {
-        self.line_stats.n_chars
+        self.meta.n_chars
     }
 
     /// Number of bytes in the gap
@@ -182,7 +182,7 @@ impl GapBuffer {
 
     #[inline]
     fn current_line_is_last_line(&self) -> bool {
-        self.line_stats.current_line == self.line_stats.lines.len() - 1
+        self.meta.gap_line == self.meta.lines.len() - 1
     }
 
     #[inline]
@@ -222,7 +222,7 @@ impl GapBuffer {
         buf.resize(buf.len() + self.next_gap + n, 0); // the new gap (zeroed)
         buf.extend_from_slice(&self.data[self.gap_end..]); // data after gap
 
-        for ls in self.line_stats.lines.iter_mut() {
+        for ls in self.meta.lines.iter_mut() {
             if ls.offset > self.gap_start {
                 ls.offset += gap_increase;
             }
@@ -250,7 +250,7 @@ impl GapBuffer {
 
             // Gap moving left
             Ordering::Less => {
-                for ls in self.line_stats.lines.iter_mut() {
+                for ls in self.meta.lines.iter_mut() {
                     if ls.offset >= byte_idx && ls.offset <= self.gap_start {
                         ls.offset += gap;
                     }
@@ -261,7 +261,7 @@ impl GapBuffer {
 
             // Gap moving right
             Ordering::Greater => {
-                for ls in self.line_stats.lines.iter_mut() {
+                for ls in self.meta.lines.iter_mut() {
                     if ls.offset >= self.gap_end && ls.offset < byte_idx + gap {
                         ls.offset -= gap;
                     }
@@ -271,7 +271,7 @@ impl GapBuffer {
             }
         };
 
-        self.line_stats.current_line = self.byte_to_line(byte_idx);
+        self.meta.gap_line = self.byte_to_line(byte_idx);
         self.data.copy_within(src, dest);
         self.gap_end = byte_idx + gap;
         self.gap_start = byte_idx;
@@ -279,7 +279,7 @@ impl GapBuffer {
 
     fn byte_to_line(&self, byte_idx: usize) -> usize {
         let mut n = 0;
-        for (i, ls) in self.line_stats.lines.iter().enumerate() {
+        for (i, ls) in self.meta.lines.iter().enumerate() {
             n += ls.n_bytes;
             if byte_idx <= n {
                 return i;
@@ -292,7 +292,7 @@ impl GapBuffer {
     fn char_to_byte(&self, char_idx: usize) -> usize {
         let mut n = 0;
 
-        for ls in self.line_stats.lines.iter() {
+        for ls in self.meta.lines.iter() {
             let next_boundary = n + ls.n_chars;
             if char_idx > next_boundary {
                 n = next_boundary;
@@ -343,9 +343,9 @@ impl GapBuffer {
 
         ch.encode_utf8(&mut self.data[self.gap_start..]);
         self.gap_start += len;
-        self.line_stats.n_chars += 1;
+        self.meta.n_chars += 1;
 
-        let ls = self.line_stats.current_line_mut();
+        let ls = self.meta.gap_line_mut();
         ls.n_chars += 1;
         ls.n_bytes += len;
         if idx < ls.offset {
@@ -353,7 +353,7 @@ impl GapBuffer {
         }
 
         if ch == '\n' {
-            self.line_stats.mark_newline(idx, &self.data);
+            self.meta.mark_newline(idx, &self.data);
         }
     }
 
@@ -372,9 +372,9 @@ impl GapBuffer {
 
         self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
         self.gap_start += len;
-        self.line_stats.n_chars += s.chars().count();
+        self.meta.n_chars += s.chars().count();
 
-        let ls = self.line_stats.current_line_mut();
+        let ls = self.meta.gap_line_mut();
         ls.n_chars += s.chars().count();
         ls.n_bytes += len;
         if idx < ls.offset {
@@ -383,7 +383,7 @@ impl GapBuffer {
 
         for (i, b) in s.bytes().enumerate() {
             if b == b'\n' {
-                self.line_stats.mark_newline(idx + i, &self.data);
+                self.meta.mark_newline(idx + i, &self.data);
             }
         }
     }
@@ -400,21 +400,18 @@ impl GapBuffer {
             self.gap_end += len;
         }
 
-        self.line_stats.n_chars -= 1;
+        self.meta.n_chars -= 1;
 
-        let ls = self.line_stats.current_line_mut();
+        let ls = self.meta.gap_line_mut();
         ls.n_chars -= 1;
         ls.n_bytes -= len;
 
         if self.data[idx] == b'\n' && !self.current_line_is_last_line() {
-            let LineStat {
+            let LineMeta {
                 n_chars, n_bytes, ..
-            } = self
-                .line_stats
-                .lines
-                .remove(self.line_stats.current_line + 1);
+            } = self.meta.lines.remove(self.meta.gap_line + 1);
 
-            let ls = self.line_stats.current_line_mut();
+            let ls = self.meta.gap_line_mut();
             ls.n_bytes += n_bytes;
             ls.n_chars += n_chars;
         }
@@ -440,50 +437,50 @@ impl GapBuffer {
         let mut n_chars = count_chars(&self.data[from..to]);
 
         self.gap_end += n_bytes;
-        self.line_stats.n_chars -= n_chars;
+        self.meta.n_chars -= n_chars;
 
         match (
-            to.cmp(&self.line_stats.current_line_end()),
+            to.cmp(&self.meta.gap_line_end()),
             self.current_line_is_last_line(),
         ) {
             (Ordering::Less, _) | (Ordering::Equal, true) => {
-                let ls = self.line_stats.current_line_mut();
+                let ls = self.meta.gap_line_mut();
                 ls.n_chars -= n_chars;
                 ls.n_bytes -= n_bytes;
             }
 
             (Ordering::Equal, false) => {
-                let ls = self.line_stats.current_line_mut();
+                let ls = self.meta.gap_line_mut();
                 ls.n_chars -= n_chars;
                 ls.n_bytes -= n_bytes;
 
-                let idx = self.line_stats.current_line + 1;
-                let next_ls = self.line_stats.lines.remove(idx);
-                let ls = self.line_stats.current_line_mut();
+                let idx = self.meta.gap_line + 1;
+                let next_ls = self.meta.lines.remove(idx);
+                let ls = self.meta.gap_line_mut();
                 ls.n_bytes += next_ls.n_bytes;
                 ls.n_chars += next_ls.n_chars;
             }
 
             (Ordering::Greater, false) => {
                 while n_bytes > 0 {
-                    let offset = self.line_stats.current_line_offset();
-                    let end = self.line_stats.current_line_end();
+                    let offset = self.meta.gap_line_offset();
+                    let end = self.meta.gap_line_end();
 
                     if to > end && from > offset {
-                        let ls = self.line_stats.current_line_mut();
+                        let ls = self.meta.gap_line_mut();
                         n_bytes -= end - from;
                         ls.n_bytes = from - ls.offset;
                         ls.n_chars = count_chars(&self.data[from..end]);
                         n_chars -= ls.n_chars;
-                        self.line_stats.current_line += 1;
+                        self.meta.gap_line += 1;
                     } else if from < offset && to > end {
-                        let ls = self.line_stats.lines.remove(self.line_stats.current_line);
+                        let ls = self.meta.lines.remove(self.meta.gap_line);
                         n_bytes -= ls.n_bytes;
                         n_chars -= ls.n_chars;
                     } else {
-                        let ls_last = self.line_stats.lines.remove(self.line_stats.current_line);
-                        self.line_stats.current_line -= 1;
-                        let ls = self.line_stats.current_line_mut();
+                        let ls_last = self.meta.lines.remove(self.meta.gap_line);
+                        self.meta.gap_line -= 1;
+                        let ls = self.meta.gap_line_mut();
                         ls.n_bytes += ls_last.n_bytes - n_bytes;
                         ls.n_chars += ls_last.n_chars - n_chars;
                         break;
@@ -497,81 +494,81 @@ impl GapBuffer {
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
-struct LineStats {
-    lines: Vec<LineStat>,
+struct Meta {
+    lines: Vec<LineMeta>,
     n_chars: usize,
-    current_line: usize,
+    gap_line: usize,
 }
 
-impl From<&str> for LineStats {
+impl From<&str> for Meta {
     fn from(s: &str) -> Self {
         let mut lines = Vec::new();
-        let mut ls = LineStat::default();
+        let mut lm = LineMeta::default();
         let mut offset = 0;
 
         for ch in s.chars() {
-            ls.n_bytes += ch.len_utf8();
-            ls.n_chars += 1;
+            lm.n_bytes += ch.len_utf8();
+            lm.n_chars += 1;
             offset += 1;
 
             if ch == '\n' {
-                lines.push(ls);
-                ls = LineStat {
+                lines.push(lm);
+                lm = LineMeta {
                     offset,
                     ..Default::default()
                 };
             }
         }
 
-        if ls.n_chars > 0 {
-            lines.push(ls);
+        if lm.n_chars > 0 {
+            lines.push(lm);
         }
 
         Self {
             lines,
             n_chars: offset,
-            current_line: 0,
+            gap_line: 0,
         }
     }
 }
 
-impl LineStats {
-    fn current_line_mut(&mut self) -> &mut LineStat {
-        &mut self.lines[self.current_line]
+impl Meta {
+    fn gap_line_mut(&mut self) -> &mut LineMeta {
+        &mut self.lines[self.gap_line]
     }
 
     #[inline]
-    fn current_line_offset(&self) -> usize {
-        self.lines[self.current_line].offset
+    fn gap_line_offset(&self) -> usize {
+        self.lines[self.gap_line].offset
     }
 
     #[inline]
-    fn current_line_end(&self) -> usize {
-        self.lines[self.current_line].end()
+    fn gap_line_end(&self) -> usize {
+        self.lines[self.gap_line].end()
     }
 
     fn mark_newline(&mut self, idx: usize, data: &[u8]) {
-        let LineStat {
+        let LineMeta {
             offset,
             n_chars,
             n_bytes,
-        } = self.lines[self.current_line];
+        } = self.lines[self.gap_line];
 
         let new_n_bytes = idx - offset + 1;
         let new_n_chars = count_chars(&data[offset..idx + 1]);
-        let ls = self.current_line_mut();
+        let ls = self.gap_line_mut();
         ls.n_bytes = new_n_bytes;
         ls.n_chars = new_n_chars;
-        self.current_line += 1;
+        self.gap_line += 1;
         self.lines.insert(
-            self.current_line,
-            LineStat::new(idx + 1, n_chars - new_n_chars, n_bytes - new_n_bytes),
+            self.gap_line,
+            LineMeta::new(idx + 1, n_chars - new_n_chars, n_bytes - new_n_bytes),
         );
     }
 }
 
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-struct LineStat {
+struct LineMeta {
     offset: usize,
     n_chars: usize,
     n_bytes: usize,
@@ -587,7 +584,7 @@ struct LineStat {
 // #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 // struct CharSlice<'a>(ByteSlice<'a>);
 
-impl LineStat {
+impl LineMeta {
     fn new(offset: usize, n_chars: usize, n_bytes: usize) -> Self {
         Self {
             offset,
@@ -656,23 +653,23 @@ mod tests {
         assert_eq!(gb.to_string(), s);
     }
 
-    fn ls(offset: usize, n_chars: usize, n_bytes: usize) -> LineStat {
-        LineStat {
+    fn lm(offset: usize, n_chars: usize, n_bytes: usize) -> LineMeta {
+        LineMeta {
             offset,
             n_chars,
             n_bytes,
         }
     }
 
-    #[test_case(0, &[ls(64, 14, 14), ls(64+14, 12, 12)]; "BOF")]
-    #[test_case(26, &[ls(0, 14, 14), ls(14, 12, 12)]; "EOF")]
+    #[test_case(0, &[lm(64, 14, 14), lm(64+14, 12, 12)]; "BOF")]
+    #[test_case(26, &[lm(0, 14, 14), lm(14, 12, 12)]; "EOF")]
     #[test]
-    fn move_gap_to_cur_maintains_line_offsets(cur: usize, expected: &[LineStat]) {
+    fn move_gap_to_cur_maintains_line_offsets(cur: usize, expected: &[LineMeta]) {
         let s = "hello, world!\nhow are you?";
         let mut gb = GapBuffer::from(s);
         assert_eq!(s.len(), 26, "EOF case is not 0..s.len()");
         gb.move_gap_to(cur);
-        assert_eq!(&gb.line_stats.lines, expected);
+        assert_eq!(&gb.meta.lines, expected);
     }
 
     #[test]
