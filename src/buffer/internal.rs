@@ -121,25 +121,6 @@ impl ToString for GapBuffer {
     }
 }
 
-// methods to impl
-//   .txt.byte_to_char(offset)
-//   .txt.char(idx)
-//   .txt.char_to_line(cur.idx)
-//   .txt.len_chars()
-//   .txt.len_lines()
-//   .txt.line(y)
-//   .txt.slice(rng.clone()
-//   .txt.try_char_to_line(char_idx)
-//   .txt.try_line_to_char(line_idx)
-//
-// methods done:
-//   .txt.bytes()
-//   .txt.insert(idx, &s)
-//   .txt.insert_char(idx, ch)
-//   .txt.remove(idx..(idx + 1)
-//   .txt.remove(rng)
-//   .txt.to_string()
-
 impl GapBuffer {
     /// The current length of "active" data in the buffer (i.e. not including the gap)
     #[inline]
@@ -162,10 +143,6 @@ impl GapBuffer {
         v
     }
 
-    pub fn line_string(&self, line_idx: usize) -> String {
-        self.meta.lines[line_idx].as_string(self)
-    }
-
     pub fn len_lines(&self) -> usize {
         self.meta.lines.len()
     }
@@ -174,15 +151,263 @@ impl GapBuffer {
         self.meta.n_chars
     }
 
+    pub fn char(&self, char_idx: usize) -> char {
+        let byte_idx = self.char_to_byte(char_idx);
+        let len = self.char_len(byte_idx);
+
+        // SAFTEY: we know that we have valid utf8 data internally
+        unsafe {
+            std::str::from_utf8_unchecked(&self.data[byte_idx..byte_idx + len])
+                .chars()
+                .next()
+                .unwrap()
+        }
+    }
+
+    pub fn line(&self, line_idx: usize) -> Slice {
+        self.meta.lines[line_idx].as_slice(self)
+    }
+
+    pub fn slice(&self, char_from: usize, char_to: usize) -> Slice {
+        let from = self.char_to_raw_byte(char_from);
+        let to = self.char_to_raw_byte(char_to);
+
+        // NOTE: this is subtly different from LineMeta::as_slice as we have absolute
+        // indicies into the data buffer rather than ones that are unaware of the gap
+        if to <= self.gap_start || from >= self.gap_end {
+            return Slice {
+                left: &self.data[from..to],
+                right: &[],
+                cur: 0,
+            };
+        }
+
+        Slice {
+            left: &self.data[from..self.gap_start],
+            right: &self.data[self.gap_end..to],
+            cur: 0,
+        }
+    }
+
+    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
+        let line = self.byte_to_line(byte_idx);
+        let mut char_idx = self.meta.lines.iter().take(line).map(|lm| lm.n_chars).sum();
+        char_idx += count_chars(&self.data[self.meta.lines[line].offset..=byte_idx]);
+
+        char_idx
+    }
+
+    pub fn char_to_line(&self, char_idx: usize) -> usize {
+        match self.try_char_to_line(char_idx) {
+            Some(line_idx) => line_idx,
+            None => panic!("out of bounds: {char_idx} > {}", self.len()),
+        }
+    }
+
+    pub fn try_char_to_line(&self, char_idx: usize) -> Option<usize> {
+        let mut n = 0;
+
+        for (i, ls) in self.meta.lines.iter().enumerate() {
+            let next_boundary = n + ls.n_chars;
+            if char_idx <= next_boundary {
+                return Some(i);
+            }
+            n = next_boundary;
+        }
+
+        None
+    }
+
+    pub fn line_to_char(&self, line_idx: usize) -> usize {
+        match self.try_line_to_char(line_idx) {
+            Some(char_idx) => char_idx,
+            None => panic!("out of bounds: {line_idx} > {}", self.len_lines()),
+        }
+    }
+
+    pub fn try_line_to_char(&self, line_idx: usize) -> Option<usize> {
+        if line_idx > self.len_lines() - 1 {
+            return None;
+        }
+
+        Some(
+            self.meta
+                .lines
+                .iter()
+                .take(line_idx)
+                .map(|lm| lm.n_chars)
+                .sum(),
+        )
+    }
+
+    /// Insert a single character at the specifified byte index.
+    ///
+    /// This is O(1) if idx is at the current gap start and the gap is large enough to accomodate
+    /// the new text, otherwise data will need to be copied in order to relocate the gap.
+    pub fn insert_char(&mut self, char_idx: usize, ch: char) {
+        let len = ch.len_utf8();
+        if len >= self.gap() {
+            self.grow_gap(len);
+        }
+
+        let idx = self.char_to_byte(char_idx);
+        self.move_gap_to(idx);
+
+        ch.encode_utf8(&mut self.data[self.gap_start..]);
+        self.gap_start += len;
+        self.meta.n_chars += 1;
+
+        let ls = self.meta.gap_line_mut();
+        ls.n_chars += 1;
+        ls.n_bytes += len;
+        if idx < ls.offset {
+            ls.offset = idx;
+        }
+
+        if ch == '\n' {
+            self.meta.mark_newline(idx, &self.data);
+        }
+    }
+
+    /// Insert a string at the specifified byte index.
+    ///
+    /// This is O(1) if idx is at the current gap start and the gap is large enough to accomodate
+    /// the new text, otherwise data will need to be copied in order to relocate the gap.
+    pub fn insert_str(&mut self, char_idx: usize, s: &str) {
+        let len = s.len();
+        if len >= self.gap() {
+            self.grow_gap(len);
+        }
+
+        let idx = self.char_to_byte(char_idx);
+        self.move_gap_to(idx);
+
+        self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
+        self.gap_start += len;
+        self.meta.n_chars += s.chars().count();
+
+        let ls = self.meta.gap_line_mut();
+        ls.n_chars += s.chars().count();
+        ls.n_bytes += len;
+        if idx < ls.offset {
+            ls.offset = idx;
+        }
+
+        for (i, b) in s.bytes().enumerate() {
+            if b == b'\n' {
+                self.meta.mark_newline(idx + i, &self.data);
+            }
+        }
+    }
+
+    /// Remove the requested character index from the visible region of the buffer
+    pub fn remove_char(&mut self, char_idx: usize) {
+        let idx = self.char_to_byte(char_idx);
+        let len = self.char_len(idx);
+
+        if idx == self.gap_start {
+            self.gap_end += len;
+        } else {
+            self.move_gap_to(idx);
+            self.gap_end += len;
+        }
+
+        self.meta.n_chars -= 1;
+
+        let ls = self.meta.gap_line_mut();
+        ls.n_chars -= 1;
+        ls.n_bytes -= len;
+
+        if self.data[idx] == b'\n' && !self.meta.gap_line_is_last_line() {
+            let LineMeta {
+                n_chars, n_bytes, ..
+            } = self.meta.lines.remove(self.meta.gap_line + 1);
+
+            let ls = self.meta.gap_line_mut();
+            ls.n_bytes += n_bytes;
+            ls.n_chars += n_chars;
+        }
+    }
+
+    /// Remove the requested range (from..to) from the visible region of the buffer
+    pub fn remove_range(&mut self, char_from: usize, char_to: usize) {
+        if char_from == char_to {
+            return;
+        }
+
+        assert!(
+            char_from < char_to,
+            "invalid range: from={char_from} > to={char_to}"
+        );
+
+        let from = self.char_to_byte(char_from);
+        let to = self.char_to_byte(char_to);
+        debug_assert!(from < to, "invalid byte range: from={from} > to={to}");
+        self.move_gap_to(from);
+
+        let mut n_bytes = to - from;
+        let mut n_chars = count_chars(&self.data[from..to]);
+
+        self.gap_end += n_bytes;
+        self.meta.n_chars -= n_chars;
+
+        match (
+            to.cmp(&self.meta.gap_line_end()),
+            self.meta.gap_line_is_last_line(),
+        ) {
+            (Ordering::Less, _) | (Ordering::Equal, true) => {
+                let ls = self.meta.gap_line_mut();
+                ls.n_chars -= n_chars;
+                ls.n_bytes -= n_bytes;
+            }
+
+            (Ordering::Equal, false) => {
+                let ls = self.meta.gap_line_mut();
+                ls.n_chars -= n_chars;
+                ls.n_bytes -= n_bytes;
+
+                let idx = self.meta.gap_line + 1;
+                let next_ls = self.meta.lines.remove(idx);
+                let ls = self.meta.gap_line_mut();
+                ls.n_bytes += next_ls.n_bytes;
+                ls.n_chars += next_ls.n_chars;
+            }
+
+            (Ordering::Greater, false) => {
+                while n_bytes > 0 {
+                    let offset = self.meta.gap_line_offset();
+                    let end = self.meta.gap_line_end();
+
+                    if to > end && from > offset {
+                        let ls = self.meta.gap_line_mut();
+                        n_bytes -= end - from;
+                        ls.n_bytes = from - ls.offset;
+                        ls.n_chars = count_chars(&self.data[from..end]);
+                        n_chars -= ls.n_chars;
+                        self.meta.gap_line += 1;
+                    } else if from < offset && to > end {
+                        let ls = self.meta.lines.remove(self.meta.gap_line);
+                        n_bytes -= ls.n_bytes;
+                        n_chars -= ls.n_chars;
+                    } else {
+                        let ls_last = self.meta.lines.remove(self.meta.gap_line);
+                        self.meta.gap_line -= 1;
+                        let ls = self.meta.gap_line_mut();
+                        ls.n_bytes += ls_last.n_bytes - n_bytes;
+                        ls.n_chars += ls_last.n_chars - n_chars;
+                        break;
+                    }
+                }
+            }
+
+            (Ordering::Greater, true) => panic!("remove_range out of bounds"),
+        }
+    }
+
     /// Number of bytes in the gap
     #[inline]
     fn gap(&self) -> usize {
         self.gap_end - self.gap_start
-    }
-
-    #[inline]
-    fn current_line_is_last_line(&self) -> bool {
-        self.meta.gap_line == self.meta.lines.len() - 1
     }
 
     #[inline]
@@ -196,18 +421,6 @@ impl GapBuffer {
         }
         panic!("invalid utf8 character data");
     }
-
-    // #[inline]
-    // fn is_char_boundary(&self, idx: usize) -> bool {
-    //     if idx == 0 {
-    //         return true;
-    //     }
-
-    //     match self.data.get(idx) {
-    //         Some(&b) => is_char_boundary(b),
-    //         None => idx == self.data.len(),
-    //     }
-    // }
 
     fn grow_gap(&mut self, n: usize) {
         if n >= self.next_gap {
@@ -300,9 +513,9 @@ impl GapBuffer {
             }
 
             let mut count = char_idx - n;
-            let (b1, b2) = ls.bytes(self);
+            let Slice { left, right, .. } = ls.as_slice(self);
 
-            for (n_bytes, b) in b1.iter().chain(b2.iter()).enumerate() {
+            for (n_bytes, b) in left.iter().chain(right.iter()).enumerate() {
                 if count == 0 {
                     let offset = if ls.offset > self.gap_start {
                         ls.offset - self.gap_end
@@ -328,168 +541,33 @@ impl GapBuffer {
         panic!("out of bounds: {char_idx} > {}", self.len());
     }
 
-    /// Insert a single character at the specifified byte index.
-    ///
-    /// This is O(1) if idx is at the current gap start and the gap is large enough to accomodate
-    /// the new text, otherwise data will need to be copied in order to relocate the gap.
-    pub fn insert_char(&mut self, char_idx: usize, ch: char) {
-        let len = ch.len_utf8();
-        if len >= self.gap() {
-            self.grow_gap(len);
-        }
+    fn char_to_raw_byte(&self, char_idx: usize) -> usize {
+        let mut n = 0;
 
-        let idx = self.char_to_byte(char_idx);
-        self.move_gap_to(idx);
-
-        ch.encode_utf8(&mut self.data[self.gap_start..]);
-        self.gap_start += len;
-        self.meta.n_chars += 1;
-
-        let ls = self.meta.gap_line_mut();
-        ls.n_chars += 1;
-        ls.n_bytes += len;
-        if idx < ls.offset {
-            ls.offset = idx;
-        }
-
-        if ch == '\n' {
-            self.meta.mark_newline(idx, &self.data);
-        }
-    }
-
-    /// Insert a string at the specifified byte index.
-    ///
-    /// This is O(1) if idx is at the current gap start and the gap is large enough to accomodate
-    /// the new text, otherwise data will need to be copied in order to relocate the gap.
-    pub fn insert_str(&mut self, char_idx: usize, s: &str) {
-        let len = s.len();
-        if len >= self.gap() {
-            self.grow_gap(len);
-        }
-
-        let idx = self.char_to_byte(char_idx);
-        self.move_gap_to(idx);
-
-        self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
-        self.gap_start += len;
-        self.meta.n_chars += s.chars().count();
-
-        let ls = self.meta.gap_line_mut();
-        ls.n_chars += s.chars().count();
-        ls.n_bytes += len;
-        if idx < ls.offset {
-            ls.offset = idx;
-        }
-
-        for (i, b) in s.bytes().enumerate() {
-            if b == b'\n' {
-                self.meta.mark_newline(idx + i, &self.data);
-            }
-        }
-    }
-
-    /// Remove the requested character index from the visible region of the buffer
-    pub fn remove_char(&mut self, char_idx: usize) {
-        let idx = self.char_to_byte(char_idx);
-        let len = self.char_len(idx);
-
-        if idx == self.gap_start {
-            self.gap_end += len;
-        } else {
-            self.move_gap_to(idx);
-            self.gap_end += len;
-        }
-
-        self.meta.n_chars -= 1;
-
-        let ls = self.meta.gap_line_mut();
-        ls.n_chars -= 1;
-        ls.n_bytes -= len;
-
-        if self.data[idx] == b'\n' && !self.current_line_is_last_line() {
-            let LineMeta {
-                n_chars, n_bytes, ..
-            } = self.meta.lines.remove(self.meta.gap_line + 1);
-
-            let ls = self.meta.gap_line_mut();
-            ls.n_bytes += n_bytes;
-            ls.n_chars += n_chars;
-        }
-    }
-
-    /// Remove the requested range (from..to) from the visible region of the buffer
-    pub fn remove_range(&mut self, char_from: usize, char_to: usize) {
-        if char_from == char_to {
-            return;
-        }
-
-        assert!(
-            char_from < char_to,
-            "invalid range: from={char_from} > to={char_to}"
-        );
-
-        let from = self.char_to_byte(char_from);
-        let to = self.char_to_byte(char_to);
-        debug_assert!(from < to, "invalid byte range: from={from} > to={to}");
-        self.move_gap_to(from);
-
-        let mut n_bytes = to - from;
-        let mut n_chars = count_chars(&self.data[from..to]);
-
-        self.gap_end += n_bytes;
-        self.meta.n_chars -= n_chars;
-
-        match (
-            to.cmp(&self.meta.gap_line_end()),
-            self.current_line_is_last_line(),
-        ) {
-            (Ordering::Less, _) | (Ordering::Equal, true) => {
-                let ls = self.meta.gap_line_mut();
-                ls.n_chars -= n_chars;
-                ls.n_bytes -= n_bytes;
+        for ls in self.meta.lines.iter() {
+            let next_boundary = n + ls.n_chars;
+            if char_idx > next_boundary {
+                n = next_boundary;
+                continue;
             }
 
-            (Ordering::Equal, false) => {
-                let ls = self.meta.gap_line_mut();
-                ls.n_chars -= n_chars;
-                ls.n_bytes -= n_bytes;
+            let mut count = char_idx - n;
+            let Slice { left, right, .. } = ls.as_slice(self);
 
-                let idx = self.meta.gap_line + 1;
-                let next_ls = self.meta.lines.remove(idx);
-                let ls = self.meta.gap_line_mut();
-                ls.n_bytes += next_ls.n_bytes;
-                ls.n_chars += next_ls.n_chars;
-            }
-
-            (Ordering::Greater, false) => {
-                while n_bytes > 0 {
-                    let offset = self.meta.gap_line_offset();
-                    let end = self.meta.gap_line_end();
-
-                    if to > end && from > offset {
-                        let ls = self.meta.gap_line_mut();
-                        n_bytes -= end - from;
-                        ls.n_bytes = from - ls.offset;
-                        ls.n_chars = count_chars(&self.data[from..end]);
-                        n_chars -= ls.n_chars;
-                        self.meta.gap_line += 1;
-                    } else if from < offset && to > end {
-                        let ls = self.meta.lines.remove(self.meta.gap_line);
-                        n_bytes -= ls.n_bytes;
-                        n_chars -= ls.n_chars;
-                    } else {
-                        let ls_last = self.meta.lines.remove(self.meta.gap_line);
-                        self.meta.gap_line -= 1;
-                        let ls = self.meta.gap_line_mut();
-                        ls.n_bytes += ls_last.n_bytes - n_bytes;
-                        ls.n_chars += ls_last.n_chars - n_chars;
-                        break;
-                    }
+            for (n_bytes, b) in left.iter().chain(right.iter()).enumerate() {
+                if count == 0 {
+                    return ls.offset + n_bytes;
+                } else if is_char_boundary(*b) {
+                    count -= 1;
                 }
             }
 
-            (Ordering::Greater, true) => panic!("remove_range out of bounds"),
+            if count == 0 {
+                return ls.end();
+            }
         }
+
+        panic!("out of bounds: {char_idx} > {}", self.len());
     }
 }
 
@@ -547,6 +625,11 @@ impl Meta {
         self.lines[self.gap_line].end()
     }
 
+    #[inline]
+    fn gap_line_is_last_line(&self) -> bool {
+        self.gap_line == self.lines.len() - 1
+    }
+
     fn mark_newline(&mut self, idx: usize, data: &[u8]) {
         let LineMeta {
             offset,
@@ -574,16 +657,6 @@ struct LineMeta {
     n_bytes: usize,
 }
 
-// #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-// struct ByteSlice<'a> {
-//     left: &'a[u8],
-//     right: &'a[u8],
-//     cur: usize,
-// }
-
-// #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-// struct CharSlice<'a>(ByteSlice<'a>);
-
 impl LineMeta {
     fn new(offset: usize, n_chars: usize, n_bytes: usize) -> Self {
         Self {
@@ -599,26 +672,87 @@ impl LineMeta {
     }
 
     #[inline]
-    fn bytes<'a>(&self, gb: &'a GapBuffer) -> (&'a [u8], &'a [u8]) {
-        let mut end = self.offset + self.n_bytes;
+    fn as_slice<'a>(&self, gb: &'a GapBuffer) -> Slice<'a> {
+        let end = self.offset + self.n_bytes;
         if end <= gb.gap_start || self.offset >= gb.gap_end {
-            return (&gb.data[self.offset..end], &[]);
+            return Slice {
+                left: &gb.data[self.offset..end],
+                right: &[],
+                cur: 0,
+            };
         }
 
-        end += gb.gap_end - gb.gap_start;
-        (
-            &gb.data[self.offset..gb.gap_start],
-            &gb.data[gb.gap_end..end],
-        )
+        Slice {
+            left: &gb.data[self.offset..gb.gap_start],
+            right: &gb.data[gb.gap_end..end + gb.gap()],
+            cur: 0,
+        }
     }
+}
 
-    fn as_string(&self, gb: &GapBuffer) -> String {
-        let (b1, b2) = self.bytes(gb);
-        let mut v = Vec::with_capacity(b1.len() + b2.len());
-        v.extend_from_slice(b1);
-        v.extend_from_slice(b2);
+/// A view on a region of the GapBuffer.
+///
+/// Slices will become invalidated if the gap is moved from the position they were created with
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Slice<'a> {
+    left: &'a [u8],
+    right: &'a [u8],
+    cur: usize,
+}
+
+impl<'a> Slice<'a> {
+    pub fn as_strs(&self) -> (&str, &str) {
+        // SAFTEY: we know that we have valid utf8 data internally
+        unsafe {
+            (
+                std::str::from_utf8_unchecked(self.left),
+                std::str::from_utf8_unchecked(self.right),
+            )
+        }
+    }
+}
+
+impl<'a> ToString for Slice<'a> {
+    fn to_string(&self) -> String {
+        let mut v = Vec::with_capacity(self.left.len() + self.right.len());
+        v.extend_from_slice(self.left);
+        v.extend_from_slice(self.right);
 
         String::from_utf8(v).expect("valid utf8")
+    }
+}
+
+impl<'a> Iterator for Slice<'a> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur >= self.left.len() + self.right.len() {
+            return None;
+        }
+
+        let (cur, data) = if self.cur < self.left.len() {
+            (self.cur, self.left)
+        } else {
+            (self.cur - self.left.len(), self.right)
+        };
+
+        let mut len = 1;
+
+        for n in 0.. {
+            if is_char_boundary(data[cur + n]) {
+                // SAFTEY: we know that we have valid utf8 data internally
+                unsafe {
+                    let ch = std::str::from_utf8_unchecked(&data[cur..cur + len])
+                        .chars()
+                        .next();
+                    self.cur += 1;
+                    return ch;
+                };
+            }
+            len += 1;
+        }
+
+        panic!("invalid utf8 character data");
     }
 }
 
@@ -682,9 +816,9 @@ mod tests {
             gb.move_gap_to(idx);
             assert_eq!(gb.len_lines(), 3);
 
-            assert_eq!(gb.line_string(0), "hello, world!\n", "idx={idx}");
-            assert_eq!(gb.line_string(1), "how are you?\n", "idx={idx}");
-            assert_eq!(gb.line_string(2), "this is a test", "idx={idx}");
+            assert_eq!(gb.line(0).to_string(), "hello, world!\n", "idx={idx}");
+            assert_eq!(gb.line(1).to_string(), "how are you?\n", "idx={idx}");
+            assert_eq!(gb.line(2).to_string(), "this is a test", "idx={idx}");
         }
     }
 
@@ -716,8 +850,7 @@ mod tests {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
         gb.move_gap_to(cur);
 
-        let s = gb.line_string(line);
-        assert_eq!(s, expected);
+        assert_eq!(gb.line(line).to_string(), expected);
     }
 
     #[test_case(&[(0, 'h')], "hello world"; "insert front")]
@@ -749,17 +882,17 @@ mod tests {
         println!("insert:  {:?}", raw_debug_buffer_content(&gb));
 
         assert_eq!(gb.len_lines(), 3);
-        assert_eq!(gb.line_string(0), "hello,\n");
-        assert_eq!(gb.line_string(1), " world!\n");
-        assert_eq!(gb.line_string(2), "how are you?");
+        assert_eq!(gb.line(0).to_string(), "hello,\n");
+        assert_eq!(gb.line(1).to_string(), " world!\n");
+        assert_eq!(gb.line(2).to_string(), "how are you?");
 
         for idx in 0..=gb.len_chars() {
             gb.move_gap_to(idx);
             assert_eq!(gb.len_lines(), 3);
 
-            assert_eq!(gb.line_string(0), "hello,\n", "idx={idx}");
-            assert_eq!(gb.line_string(1), " world!\n", "idx={idx}");
-            assert_eq!(gb.line_string(2), "how are you?", "idx={idx}");
+            assert_eq!(gb.line(0).to_string(), "hello,\n", "idx={idx}");
+            assert_eq!(gb.line(1).to_string(), " world!\n", "idx={idx}");
+            assert_eq!(gb.line(2).to_string(), "how are you?", "idx={idx}");
         }
     }
 
@@ -791,11 +924,11 @@ mod tests {
             gb.move_gap_to(idx);
             assert_eq!(gb.len_lines(), 5);
 
-            assert_eq!(gb.line_string(0), "hello, sailor\n", "idx={idx}");
-            assert_eq!(gb.line_string(1), "isn't this fun?\n", "idx={idx}");
-            assert_eq!(gb.line_string(2), "what a wonderful\n", "idx={idx}");
-            assert_eq!(gb.line_string(3), " world!\n", "idx={idx}");
-            assert_eq!(gb.line_string(4), "how are you?", "idx={idx}");
+            assert_eq!(gb.line(0).to_string(), "hello, sailor\n", "idx={idx}");
+            assert_eq!(gb.line(1).to_string(), "isn't this fun?\n", "idx={idx}");
+            assert_eq!(gb.line(2).to_string(), "what a wonderful\n", "idx={idx}");
+            assert_eq!(gb.line(3).to_string(), " world!\n", "idx={idx}");
+            assert_eq!(gb.line(4).to_string(), "how are you?", "idx={idx}");
         }
     }
 
@@ -821,7 +954,7 @@ mod tests {
         gb.remove_char(13);
 
         assert_eq!(gb.len_lines(), 1);
-        assert_eq!(gb.line_string(0), "hello, world!how are you?");
+        assert_eq!(gb.line(0).to_string(), "hello, world!how are you?");
     }
 
     #[test_case(6, 9, "hello,rld!"; "at gap start")]
@@ -850,7 +983,7 @@ mod tests {
         gb.remove_range(10, 15);
 
         assert_eq!(gb.len_lines(), 1);
-        assert_eq!(gb.line_string(0), "hello, worow are you?");
+        assert_eq!(gb.line(0).to_string(), "hello, worow are you?");
     }
 
     #[test]
@@ -873,22 +1006,53 @@ mod tests {
 
         println!("initial: {:?}", raw_debug_buffer_content(&gb));
         for n in 0..gb.len_lines() {
-            println!("{:?}", gb.line_string(n));
+            println!("{:?}", gb.line(n).to_string());
         }
 
         gb.insert_str(6, edit);
         assert_eq!(gb.len_lines(), expected_lines);
         println!("insert:  {:?}", raw_debug_buffer_content(&gb));
         for n in 0..gb.len_lines() {
-            println!("{:?}", gb.line_string(n));
+            println!("{:?}", gb.line(n).to_string());
         }
 
         gb.remove_range(6, 6 + edit.len());
         println!("remove:  {:?}", raw_debug_buffer_content(&gb));
         for n in 0..gb.len_lines() {
-            println!("{:?}", gb.line_string(n));
+            println!("{:?}", gb.line(n).to_string());
         }
 
         assert_eq!(gb.to_string(), s);
+    }
+
+    #[test]
+    fn line_chars_work() {
+        let s1 = "hello, world!\n";
+        let s2 = "how are you?";
+        let gb = GapBuffer::from(format!("{s1}{s2}"));
+
+        let l1_chars: String = gb.line(0).collect();
+        assert_eq!(l1_chars, s1);
+
+        let l2_chars: String = gb.line(1).collect();
+        assert_eq!(l2_chars, s2);
+    }
+
+    #[test]
+    fn slice_work() {
+        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
+
+        let slice = gb.slice(6, 17);
+        let (s1, s2) = slice.as_strs();
+        assert_eq!(s1, " world!\nhow");
+        assert_eq!(s2, "");
+
+        gb.move_gap_to(12);
+        println!("after move:  {:?}", raw_debug_buffer_content(&gb));
+
+        let slice = gb.slice(6, 17);
+        let (s1, s2) = slice.as_strs();
+        assert_eq!(s1, " world");
+        assert_eq!(s2, "!\nhow");
     }
 }
