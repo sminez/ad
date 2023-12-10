@@ -1,13 +1,12 @@
 //! A transient buffer for handling interactive input from the user without
 //! modifying the current buffer state.
 use crate::{
-    buffer::{Buffer, TextObject},
+    buffer::{Buffer, GapBuffer, TextObject},
     config,
     editor::Editor,
     key::{Arrow, Key},
     util::run_command,
 };
-use ropey::Rope;
 use std::{cmp::min, ffi::OsStr, path::Path};
 
 #[derive(Debug, Default)]
@@ -60,7 +59,7 @@ impl MiniBuffer {
     /// Force the cursor to be a single Cur and ensure that its y offset is in bounds
     fn handle_on_change<F: Fn(&str) -> Option<Vec<String>>>(&mut self, input: &str, on_change: F) {
         if let Some(lines) = (on_change)(input) {
-            self.b.txt = Rope::from_str(&lines.join("\n"));
+            self.b.txt = GapBuffer::from(lines.join("\n"));
             self.b.dot.clamp_idx(self.b.txt.len_chars());
         };
     }
@@ -84,7 +83,7 @@ impl MiniBuffer {
 
         loop {
             mb.prompt = format!("{prompt}{input}");
-            mb.b.txt.remove(..);
+            mb.b.txt.clear();
             line_indices.clear();
             let input_fragments: Vec<&str> = input.split_whitespace().collect();
             let mut visible_lines = vec![];
@@ -104,7 +103,7 @@ impl MiniBuffer {
                 }
             }
 
-            mb.b.txt = Rope::from_str(&visible_lines.join("\n"));
+            mb.b.txt = GapBuffer::from(visible_lines.join("\n"));
             mb.b.dot.clamp_idx(mb.b.txt.len_chars());
 
             let n_visible_lines = min(visible_lines.len(), mb.max_height);
@@ -151,7 +150,7 @@ impl MiniBuffer {
                         }
                         Some(l) => MiniBufferSelection::Line {
                             cy: line_indices[y],
-                            line: l.chars().collect(),
+                            line: l.to_string(),
                             input,
                         },
                         None => MiniBufferSelection::UserInput { input },

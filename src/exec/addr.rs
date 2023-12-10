@@ -324,8 +324,10 @@ pub trait Address: IterBoundedChars {
             Regex(re) => {
                 let from = cur_dot.last_cur().idx;
                 let to = self.len_chars();
+                println!("IN {from} {to}");
                 let m = re.match_iter(&mut self.iter_between(from, to), from)?;
                 let (from, to) = m.loc();
+                println!("OUT {from} {to}");
                 Dot::from_char_indices(from, to)
             }
 
@@ -401,24 +403,24 @@ impl Address for Buffer {
     }
 
     fn len_chars(&self) -> usize {
-        Rope::len_chars(&self.txt)
+        self.txt.len_chars()
     }
 
     fn line_to_char(&self, line_idx: usize) -> Option<usize> {
-        self.txt.try_line_to_char(line_idx).ok()
+        self.txt.try_line_to_char(line_idx)
     }
 
     fn char_to_line(&self, char_idx: usize) -> Option<usize> {
-        self.txt.try_char_to_line(char_idx).ok()
+        self.txt.try_char_to_line(char_idx)
     }
 
     fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
-        let line_idx = self.txt.try_char_to_line(char_idx).ok()?;
-        Some(self.txt.line_to_char(line_idx) + self.txt.line(line_idx).len_chars())
+        let line_idx = self.txt.try_char_to_line(char_idx)?;
+        Some(self.txt.line_to_char(line_idx) + self.txt.line(line_idx).chars().count())
     }
 
     fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
-        let line_idx = self.txt.try_char_to_line(char_idx).ok()?;
+        let line_idx = self.txt.try_char_to_line(char_idx)?;
         Some(self.txt.line_to_char(line_idx))
     }
 }

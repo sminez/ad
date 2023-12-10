@@ -1,5 +1,8 @@
 use super::vm::Regex;
-use crate::util::IdxRopeChars;
+use crate::{
+    buffer::{GapBuffer, IdxChars},
+    util::IdxRopeChars,
+};
 use ropey::{Rope, RopeSlice};
 use std::{
     iter::{Enumerate, Skip},
@@ -110,6 +113,21 @@ impl<'a> IndexedChars for &'a Rope {
             None
         } else {
             Some(IdxRopeChars::new(self, from, self.len_chars()))
+        }
+    }
+}
+
+impl<'a> IndexedChars for &'a GapBuffer {
+    type I = IdxChars<'a>;
+
+    fn iter_from(&self, from: usize) -> Option<Self::I> {
+        if from >= self.len_chars() {
+            None
+        } else {
+            Some(
+                self.slice(from, self.len_chars())
+                    .indexed_chars(from, false),
+            )
         }
     }
 }

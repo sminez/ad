@@ -1,7 +1,7 @@
 //! A helper trait for bounded iteration over characters in an arbitrary
 //! piece of text.
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, IdxChars},
     exec::cached_stdin::{CachedStdin, CachedStdinIter},
     util::IdxRopeChars,
 };
@@ -36,17 +36,18 @@ impl IterBoundedChars for Rope {
 
 impl IterBoundedChars for Buffer {
     fn iter_between(&self, from: usize, to: usize) -> CharIter {
-        CharIter::Rope(IdxRopeChars::new(&self.txt, from, to))
+        CharIter::Slice(self.txt.slice(from, to).indexed_chars(from, false))
     }
 
     fn rev_iter_between(&self, from: usize, to: usize) -> CharIter {
-        CharIter::Rope(IdxRopeChars::new_reversed(&self.txt, from, to))
+        CharIter::Slice(self.txt.slice(to, from).indexed_chars(to, true))
     }
 }
 
 /// Supported iterator types that can be returned by an InterBoundedChars
 pub enum CharIter<'a> {
     Rope(IdxRopeChars<'a>),
+    Slice(IdxChars<'a>),
     StdIn(CachedStdinIter<'a>),
 }
 
@@ -56,6 +57,7 @@ impl<'a> Iterator for CharIter<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             Self::Rope(it) => it.next(),
+            Self::Slice(it) => it.next(),
             Self::StdIn(it) => it.next(),
         }
     }

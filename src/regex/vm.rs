@@ -14,7 +14,7 @@ use super::{
     matches::{Match, MatchIter},
     Error,
 };
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, GapBuffer};
 use ropey::Rope;
 use std::mem::swap;
 
@@ -133,7 +133,7 @@ impl Regex {
     }
 
     /// Iterate over all non-overlapping matches of this Regex for a given `Buffer` input.
-    pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b Rope> {
+    pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b GapBuffer> {
         self.track_submatches = true;
         MatchIter {
             it: &b.txt,

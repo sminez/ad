@@ -108,8 +108,8 @@ impl Address for CachedStdin {
 }
 
 impl Edit for CachedStdin {
-    fn contents(&self) -> Rope {
-        self.r.borrow().clone()
+    fn contents(&self) -> String {
+        self.r.borrow().to_string()
     }
 
     fn insert(&mut self, ix: usize, s: &str) {

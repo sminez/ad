@@ -8,7 +8,6 @@ use crate::{
     util::relative_path_from,
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
-use ropey::{Rope, RopeSlice};
 use std::{
     cmp::min,
     fs,
@@ -23,8 +22,7 @@ mod internal;
 mod minibuffer;
 
 use edit::{Edit, EditLog, Kind, Txt};
-
-pub use internal::GapBuffer;
+pub use internal::{Chars, GapBuffer, IdxChars, Slice};
 
 pub(crate) use buffers::Buffers;
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
@@ -68,7 +66,7 @@ pub struct Buffer {
     pub(crate) kind: BufferKind,
     pub(crate) dot: Dot,
     pub(crate) xdot: Dot,
-    pub(crate) txt: Rope,
+    pub(crate) txt: GapBuffer,
     pub(crate) rx: usize,
     pub(crate) row_off: usize,
     pub(crate) col_off: usize,
@@ -95,7 +93,7 @@ impl Buffer {
             kind: BufferKind::File(path),
             dot: Dot::default(),
             xdot: Dot::default(),
-            txt: Rope::from_str(&raw),
+            txt: GapBuffer::from(raw),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -165,12 +163,12 @@ impl Buffer {
             raw.pop();
         }
 
-        self.txt = Rope::from_str(&raw);
+        let n_bytes = raw.len();
+        self.txt = GapBuffer::from(raw);
         self.edit_log.clear();
         self.dirty = false;
         self.last_save = SystemTime::now();
 
-        let n_bytes = raw.len();
         let n_lines = self.txt.len_lines();
         let display_path = match path.canonicalize() {
             Ok(cp) => cp.display().to_string(),
@@ -186,7 +184,7 @@ impl Buffer {
             kind: BufferKind::MiniBuffer,
             dot: Default::default(),
             xdot: Default::default(),
-            txt: Rope::new(),
+            txt: GapBuffer::from(""),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -202,7 +200,7 @@ impl Buffer {
             kind: BufferKind::Unnamed,
             dot: Dot::default(),
             xdot: Dot::default(),
-            txt: Rope::from_str(content),
+            txt: GapBuffer::from(content),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -222,7 +220,7 @@ impl Buffer {
             kind: BufferKind::Virtual(name),
             dot: Dot::default(),
             xdot: Dot::default(),
-            txt: Rope::from_str(&content),
+            txt: GapBuffer::from(content),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -261,7 +259,7 @@ impl Buffer {
     }
 
     pub fn contents(&self) -> Vec<u8> {
-        let mut contents: Vec<u8> = self.txt.bytes().collect();
+        let mut contents: Vec<u8> = self.txt.bytes();
         contents.push(b'\n');
         contents
     }
@@ -274,8 +272,14 @@ impl Buffer {
 
     pub(crate) fn string_lines(&self) -> Vec<String> {
         self.txt
-            .lines()
-            .map(|l| l.to_string().trim_end_matches('\n').to_string())
+            .iter_lines()
+            .map(|l| {
+                let mut s = l.to_string();
+                if s.ends_with('\n') {
+                    s.pop();
+                }
+                s
+            })
             .collect()
     }
 
@@ -388,7 +392,7 @@ impl Buffer {
         cx
     }
 
-    pub fn line(&self, y: usize) -> Option<RopeSlice> {
+    pub fn line(&self, y: usize) -> Option<Slice> {
         if y >= self.len_lines() {
             None
         } else {
@@ -414,7 +418,8 @@ impl Buffer {
         let tabstop = config!().tabstop;
         let mut rline = Vec::with_capacity(max_chars);
         // Iterating over characters not bytes as we need to account for multi-byte utf8
-        let mut it = self.txt.line(y).chars().skip(self.col_off);
+        let line = self.txt.line(y);
+        let mut it = line.chars().skip(self.col_off);
 
         let mut update_dot = dot_range.is_some();
         let (mut start, mut end) = dot_range.unwrap_or_default();
@@ -752,7 +757,7 @@ impl Buffer {
         if !s.is_empty() {
             let idx = cur.idx;
             let len = s.chars().count();
-            self.txt.insert(idx, &s);
+            self.txt.insert_str(idx, &s);
             self.edit_log.insert_string(cur, s);
             cur.idx += len;
         }
@@ -773,7 +778,7 @@ impl Buffer {
         let idx = cur.idx;
         if idx < self.txt.len_chars() {
             let ch = self.txt.char(idx);
-            self.txt.remove(idx..(idx + 1));
+            self.txt.remove_char(idx);
             self.edit_log.delete_char(cur, ch);
             self.dirty = true;
         }
@@ -782,14 +787,19 @@ impl Buffer {
     }
 
     fn delete_range(&mut self, r: Range) -> (Cur, Option<String>) {
-        let rng = if r.start.idx != r.end.idx {
-            r.start.idx..=min(r.end.idx, self.txt.len_chars().saturating_sub(1))
+        let (from, to) = if r.start.idx != r.end.idx {
+            (
+                r.start.idx,
+                // FIXME: is this right to no longer sub 1?
+                // min(r.end.idx, self.txt.len_chars().saturating_sub(1)),
+                min(r.end.idx + 1, self.txt.len_chars()),
+            )
         } else {
             return (r.start, None);
         };
 
-        let s = self.txt.slice(rng.clone()).to_string();
-        self.txt.remove(rng);
+        let s = self.txt.slice(from, to).to_string();
+        self.txt.remove_range(from, to);
         self.edit_log.delete_string(r.start, s.clone());
         self.dirty = true;
 
@@ -876,17 +886,42 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn insert_with_moving_dot_works() {
+        let mut b = Buffer::new_unnamed(0, "");
+
+        // Insert from the start of the buffer
+        for c in "hello w".chars() {
+            b.handle_action(Action::InsertChar { c });
+        }
+
+        // move back to insert a character inside of the text we already have
+        b.handle_action(Action::DotSet(TextObject::Arr(Arrow::Left), 2));
+        b.handle_action(Action::InsertChar { c: ',' });
+
+        // move forward to the end of the line to finish inserting
+        b.handle_action(Action::DotSet(TextObject::LineEnd, 1));
+        for c in "orld!".chars() {
+            b.handle_action(Action::InsertChar { c });
+        }
+
+        // inserted characters should be in the correct positions
+        assert_eq!(b.txt.to_string(), "hello, world!");
+    }
+
+    #[test]
     fn insert_char_w_range_dot_works() {
         let mut b = simple_initial_buffer();
         b.handle_action(Action::DotSet(TextObject::Line, 1));
         b.handle_action(Action::InsertChar { c: 'x' });
-        let c = Cur::from_yx(1, 1, &b);
-        let lines = b.string_lines();
 
+        let lines = b.string_lines();
         assert_eq!(lines.len(), 2);
+
+        let c = Cur::from_yx(1, 1, &b);
+        assert_eq!(b.dot, Dot::Cur { c });
+
         assert_eq!(lines[0], LINE_1);
         assert_eq!(lines[1], "x");
-        assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(
             b.edit_log.edits,
             vec![vec![
@@ -937,6 +972,28 @@ pub(crate) mod tests {
             vec![vec![
                 in_s(0, &format!("{LINE_1}\n{LINE_2}")),
                 del_c(LINE_1.len() + 24, 's')
+            ]]
+        );
+    }
+
+    #[test]
+    fn delete_range_works() {
+        let mut b = simple_initial_buffer();
+        b.handle_action(Action::DotSet(TextObject::Line, 1));
+        b.handle_action(Action::Delete);
+
+        let c = Cur::from_yx(0, LINE_1.len() + 2, &b);
+        let lines = b.string_lines();
+
+        assert_eq!(b.dot, Dot::Cur { c });
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], LINE_1);
+        assert_eq!(lines[1], "");
+        assert_eq!(
+            b.edit_log.edits,
+            vec![vec![
+                in_s(0, &format!("{LINE_1}\n{LINE_2}")),
+                del_s(LINE_1.len() + 1, "involving multiple lines")
             ]]
         );
     }

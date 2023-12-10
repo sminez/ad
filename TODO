@@ -1,5 +1,17 @@
 :: TODO
 
+-- Tests to check --
+- [ ] buffer
+  - [x] edit
+  - [x] internal
+  - [ ] mod
+    - 5 failing
+- [ ] exec
+  - [x] addr
+  - [x] expr
+  - [ ] mod
+    - at least 10 failing but also hanging
+
 -- BUGS --
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.

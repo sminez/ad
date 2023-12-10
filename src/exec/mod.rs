@@ -48,7 +48,7 @@ impl From<regex::Error> for Error {
 
 /// Something that can be edited by a Program
 pub trait Edit: Address {
-    fn contents(&self) -> Rope;
+    fn contents(&self) -> String;
     fn insert(&mut self, ix: usize, s: &str);
     fn remove(&mut self, from: usize, to: usize);
 
@@ -57,8 +57,8 @@ pub trait Edit: Address {
 }
 
 impl Edit for Rope {
-    fn contents(&self) -> Rope {
-        self.clone()
+    fn contents(&self) -> String {
+        self.to_string()
     }
 
     fn insert(&mut self, ix: usize, s: &str) {
@@ -71,8 +71,8 @@ impl Edit for Rope {
 }
 
 impl Edit for Buffer {
-    fn contents(&self) -> Rope {
-        self.txt.clone()
+    fn contents(&self) -> String {
+        self.txt.to_string()
     }
 
     fn insert(&mut self, idx: usize, s: &str) {
@@ -407,7 +407,7 @@ fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
 
 // FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
 // then we end up attempting to template THAT in a later iteration of the loop.
-fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Error> {
+fn template_match(s: &str, m: Match, content: String, fname: &str) -> Result<String, Error> {
     let mut output = if s.contains(FNAME_VAR) {
         s.replace(FNAME_VAR, fname)
     } else {
@@ -422,7 +422,7 @@ fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Err
         if !s.contains(var) {
             continue;
         }
-        match m.rope_submatch_text(n, &r) {
+        match m.str_submatch_text(n, &content) {
             Some(sm) => output = output.replace(var, &sm.to_string()),
             None => return Err(Error::InvalidSubstitution(n)),
         }
@@ -435,7 +435,6 @@ fn template_match(s: &str, m: Match, r: Rope, fname: &str) -> Result<String, Err
 mod tests {
     use super::*;
     use crate::{buffer::Buffer, editor::Action, regex::Regex};
-    use ropey::Rope;
     use simple_test_case::test_case;
     use Expr::*;
 
@@ -479,12 +478,12 @@ mod tests {
             initial_dot: Addr::full(),
             exprs: vec![expr, Delete],
         };
-        let mut r = Rope::from_str("foo foo foo");
+        let mut b = Buffer::new_unnamed(0, "foo foo foo");
         let dot = prog
-            .step(&mut r, Match::synthetic(0, 11), 0, "test", &mut vec![])
+            .step(&mut b, Match::synthetic(0, 11), 0, "test", &mut vec![])
             .unwrap();
 
-        assert_eq!(&r.to_string(), expected);
+        assert_eq!(&b.txt.to_string(), expected);
         assert_eq!(dot.as_char_indices(), expected_dot);
     }
 
@@ -495,9 +494,9 @@ mod tests {
     fn substitution_of_submatches_works(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
 
-        let mut r = Rope::from_str("this is a test string");
-        prog.execute(&mut r, "test", &mut vec![]).unwrap();
-        assert_eq!(&r.to_string(), expected);
+        let mut b = Buffer::new_unnamed(0, "this is a test string");
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        assert_eq!(&b.txt.to_string(), expected);
     }
 
     #[test_case("/oo.fo/ d", "fo│foo"; "regex dot delete")]
@@ -521,34 +520,29 @@ mod tests {
     #[test]
     fn execute_produces_the_correct_string(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
-
-        let mut r = Rope::from_str("foo│foo│foo");
-        prog.execute(&mut r, "test", &mut vec![]).unwrap();
-        assert_eq!(&r.to_string(), expected, "rope");
-
         let mut b = Buffer::new_unnamed(0, "foo│foo│foo");
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
+
         assert_eq!(&b.txt.to_string(), expected, "buffer");
     }
 
     #[test]
     fn multiline_file_dot_star_works() {
         let mut prog = Program::try_parse(", x/.*/ c/foo/").unwrap();
-
-        let mut r = Rope::from_str("this is\na multiline\nfile");
-        prog.execute(&mut r, "test", &mut vec![]).unwrap();
+        let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile");
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
         // '.*' will match the null string at the end of lines containing a newline as well
-        assert_eq!(&r.to_string(), "foofoo\nfoofoo\nfoo");
+        assert_eq!(&b.txt.to_string(), "foofoo\nfoofoo\nfoo");
     }
 
     #[test]
     fn multiline_file_dot_plus_works() {
         let mut prog = Program::try_parse(", x/.+/ c/foo/").unwrap();
+        let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile");
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
-        let mut r = Rope::from_str("this is\na multiline\nfile");
-        prog.execute(&mut r, "test", &mut vec![]).unwrap();
-        assert_eq!(&r.to_string(), "foo\nfoo\nfoo");
+        assert_eq!(&b.txt.to_string(), "foo\nfoo\nfoo");
     }
 
     #[test_case(", d"; "delete buffer")]

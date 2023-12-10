@@ -86,7 +86,7 @@ impl Dot {
         }
 
         let (from, to) = self.as_char_indices();
-        b.txt.slice(from..min(to, len_chars)).to_string()
+        b.txt.slice(from, min(to, len_chars)).to_string()
     }
 
     #[inline]
