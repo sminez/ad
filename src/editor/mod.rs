@@ -69,6 +69,7 @@ impl Editor {
         panic::set_hook(Box::new(|panic_info| {
             let mut stdout = io::stdout();
             restore_terminal_state(&mut stdout);
+            _ = stdout.flush();
             println!("{panic_info}");
             _ = stdout.flush();
         }));

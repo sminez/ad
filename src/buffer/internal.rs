@@ -511,7 +511,7 @@ impl GapBuffer {
     where
         F: FnMut(usize) -> usize,
     {
-        let all = Slice::from_raw_offsets(0, self.cap - 1, self);
+        let all = Slice::from_raw_offsets(0, usize::MAX, self);
         let mut chars = all.chars();
         for _ in 0..char_idx {
             chars.next();
@@ -534,6 +534,8 @@ pub struct Slice<'a> {
 impl<'a> Slice<'a> {
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
+        let to = min(to, gb.data.len() - 1);
+
         if to <= gb.gap_start || from >= gb.gap_end {
             return Slice {
                 from,
@@ -790,17 +792,6 @@ mod tests {
         assert_eq!(gb.to_string(), s);
     }
 
-    // #[test_case(0, &[lm(64, 14, 14), lm(64+14, 12, 12)]; "BOF")]
-    // #[test_case(26, &[lm(0, 14, 14), lm(14, 12, 12)]; "EOF")]
-    // #[test]
-    // fn move_gap_to_cur_maintains_line_offsets(cur: usize, expected: &[LineMeta]) {
-    //     let s = "hello, world!\nhow are you?";
-    //     let mut gb = GapBuffer::from(s);
-    //     assert_eq!(s.len(), 26, "EOF case is not 0..s.len()");
-    //     gb.move_gap_to(cur);
-    //     assert_eq!(&gb.meta.lines, expected);
-    // }
-
     #[test]
     fn move_gap_to_maintains_line_content() {
         let s = "hello, world!\nhow are you?\nthis is a test";
@@ -1034,7 +1025,7 @@ mod tests {
     #[test_case(0, 5, ", world!"; "before gap")]
     #[test_case(0, 13, ""; "remove all")]
     #[test]
-    fn remove_str(from: usize, to: usize, expected: &str) {
+    fn remove_range_works(from: usize, to: usize, expected: &str) {
         let s = "hello, world!";
         assert_eq!(s.len(), 13, "remove all case is not 0..s.len()");
 
@@ -1043,6 +1034,15 @@ mod tests {
         gb.remove_range(from, to);
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
+    }
+
+    #[test]
+    fn delete_range_for_last_line_works() {
+        let s = "hello, world!\nthis is the last line";
+        let mut gb = GapBuffer::from(s);
+        gb.remove_range(14, s.len());
+        assert_eq!(gb.to_string(), "hello, world!\n");
+        assert_eq!(gb.len_lines(), 2);
     }
 
     #[test]

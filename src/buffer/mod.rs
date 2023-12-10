@@ -556,16 +556,19 @@ impl Buffer {
             Action::Delete => {
                 let (c, deleted) = self.delete_dot(self.dot);
                 self.dot = Dot::Cur { c };
+                self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
                 let (c, deleted) = self.insert_char(self.dot, c);
                 self.dot = Dot::Cur { c };
+                self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertString { s } => {
                 let (c, deleted) = self.insert_string(self.dot, s);
                 self.dot = Dot::Cur { c };
+                self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
 
@@ -982,7 +985,7 @@ pub(crate) mod tests {
         b.handle_action(Action::DotSet(TextObject::Line, 1));
         b.handle_action(Action::Delete);
 
-        let c = Cur::from_yx(0, LINE_1.len() + 2, &b);
+        let c = Cur::from_yx(1, 0, &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
