@@ -27,10 +27,10 @@ fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
 // This is bit magic equivalent to: b < 128 || b >= 192
 // -> taken from the impl of is_utf8_char_boundary in
 //    https://doc.rust-lang.org/src/core/num/mod.rs.html
-#[inline]
-fn is_char_boundary(b: u8) -> bool {
-    (b as i8) >= -0x40
-}
+// #[inline]
+// fn is_char_boundary(b: u8) -> bool {
+//     (b as i8) >= -0x40
+// }
 
 #[inline]
 fn count_chars(bytes: &[u8]) -> usize {
@@ -38,10 +38,6 @@ fn count_chars(bytes: &[u8]) -> usize {
         return 0;
     }
 
-    debug_assert!(
-        is_char_boundary(bytes[bytes.len() - 1]),
-        "count_chars called on invalid utf8 byte slice"
-    );
     let mut n_chars = 0;
     let mut cur = 0;
 
@@ -857,14 +853,36 @@ mod tests {
         assert_eq!(gb.to_string(), s);
     }
 
+    #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
+    #[test_case("hello, 世界!"; "blocks of multibyte and ascii")]
+    #[test_case("hello, world!"; "just ascii")]
+    #[test]
+    fn move_gap_to_maintains_content(s: &str) {
+        let mut gb = GapBuffer::from(s);
+
+        for i in 0..gb.len_chars() {
+            let idx = gb.char_to_byte(i);
+            gb.move_gap_to(idx);
+
+            // Splitting into the two sections like this allows us to verify that
+            // we have valid utf-8 encoded text on either side of the gap.
+            let (s1, s2) = (
+                std::str::from_utf8(&gb.data[..gb.gap_start]).unwrap(),
+                std::str::from_utf8(&gb.data[gb.gap_end..]).unwrap(),
+            );
+
+            assert_eq!(format!("{s1}{s2}"), s, "idx={idx}");
+        }
+    }
+
     #[test]
     fn move_gap_to_maintains_line_content() {
         let s = "hello, world!\nhow are you?\nthis is a test";
-        assert_eq!(s.len(), 41, "EOF case is not 0..s.len()");
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 3);
 
-        for idx in 0..=s.len() {
+        for i in 0..gb.len_chars() {
+            let idx = gb.char_to_byte(i);
             gb.move_gap_to(idx);
             assert_eq!(gb.len_lines(), 3);
 
@@ -1177,28 +1195,42 @@ mod tests {
     }
 
     #[test_case(
-        false,
-        &[
-            (0, 'h'), (1, 'e'), (2, 'l'), (3, 'l'), (4, 'o'),
-            (5, ','), (6, ' '), (7, '世'), (8, '界'), (9, '!'),
-        ];
-        "forward"
+        "hello, 世界!", false,
+        &[(0, 'h'), (1, 'e'), (2, 'l'), (3, 'l'), (4, 'o'),
+          (5, ','), (6, ' '), (7, '世'), (8, '界'), (9, '!')];
+        "multi-byte block forward"
     )]
     #[test_case(
-        true,
-        &[
-            (9, '!'), (8, '界'), (7, '世'), (6, ' '), (5, ','),
-            (4, 'o'), (3, 'l'), (2, 'l'), (1, 'e'), (0, 'h')
-        ];
-        "reversed"
+        "hello, 世界!", true,
+        &[(9, '!'), (8, '界'), (7, '世'), (6, ' '), (5, ','),
+          (4, 'o'), (3, 'l'), (2, 'l'), (1, 'e'), (0, 'h')];
+        "multi-byte block reversed"
+    )]
+    #[test_case(
+        "foo│foo│foo", false,
+        &[(0, 'f'), (1, 'o'), (2, 'o'), (3, '│'), (4, 'f'), (5, 'o'),
+          (6, 'o'), (7, '│'), (8, 'f'), (9, 'o'), (10, 'o')];
+        "interleaved forward"
+    )]
+    #[test_case(
+        "foo│foo│foo", true,
+        &[(10, 'o'), (9, 'o'), (8, 'f'), (7, '│'), (6, 'o'), (5, 'o'),
+          (4, 'f'), (3, '│'), (2, 'o'), (1, 'o'), (0, 'f')];
+        "interleaved reversed"
     )]
     #[test]
-    fn indexed_chars_works(rev: bool, expected: &[(usize, char)]) {
-        let s = "hello, 世界!";
-        let gb = GapBuffer::from(s);
-
+    fn indexed_chars_works(s: &str, rev: bool, expected: &[(usize, char)]) {
+        let mut gb = GapBuffer::from(s);
         let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
         assert_eq!(&v, expected);
+
+        for i in 0..gb.len_chars() {
+            let idx = gb.char_to_byte(i);
+            gb.move_gap_to(idx);
+
+            let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
+            assert_eq!(&v, expected, "idx={idx}");
+        }
     }
 
     #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
