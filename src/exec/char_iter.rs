@@ -3,9 +3,7 @@
 use crate::{
     buffer::{Buffer, IdxChars},
     exec::cached_stdin::{CachedStdin, CachedStdinIter},
-    util::IdxRopeChars,
 };
-use ropey::Rope;
 
 /// Something that can yield characters between two offsets from within
 /// a piece of text.
@@ -24,16 +22,6 @@ pub trait IterBoundedChars {
     fn rev_iter_between(&self, from: usize, to: usize) -> CharIter<'_>;
 }
 
-impl IterBoundedChars for Rope {
-    fn iter_between(&self, from: usize, to: usize) -> CharIter {
-        CharIter::Rope(IdxRopeChars::new(self, from, to))
-    }
-
-    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter {
-        CharIter::Rope(IdxRopeChars::new_reversed(self, from, to))
-    }
-}
-
 impl IterBoundedChars for Buffer {
     fn iter_between(&self, from: usize, to: usize) -> CharIter {
         CharIter::Slice(self.txt.slice(from, to).indexed_chars(from, false))
@@ -46,7 +34,6 @@ impl IterBoundedChars for Buffer {
 
 /// Supported iterator types that can be returned by an InterBoundedChars
 pub enum CharIter<'a> {
-    Rope(IdxRopeChars<'a>),
     Slice(IdxChars<'a>),
     StdIn(CachedStdinIter<'a>),
 }
@@ -56,7 +43,6 @@ impl<'a> Iterator for CharIter<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            Self::Rope(it) => it.next(),
             Self::Slice(it) => it.next(),
             Self::StdIn(it) => it.next(),
         }

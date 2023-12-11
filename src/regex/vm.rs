@@ -15,7 +15,6 @@ use super::{
     Error,
 };
 use crate::buffer::{Buffer, GapBuffer};
-use ropey::Rope;
 use std::mem::swap;
 
 /// A regular expression engine designed for use within the ad text editor.
@@ -115,23 +114,6 @@ impl Regex {
         }
     }
 
-    /// Attempt to match this Regex against a given `Rope` input, returning the position
-    /// of the match and all submatches if successful.
-    pub fn match_rope(&mut self, r: &Rope) -> Option<Match> {
-        self.track_submatches = true;
-        self.match_iter(&mut r.chars().enumerate(), 0)
-    }
-
-    /// Iterate over all non-overlapping matches of this Regex for a given `Rope` input.
-    pub fn match_rope_all<'a, 'b>(&'a mut self, r: &'b Rope) -> MatchIter<'a, &'b Rope> {
-        self.track_submatches = true;
-        MatchIter {
-            it: r,
-            r: self,
-            from: 0,
-        }
-    }
-
     /// Iterate over all non-overlapping matches of this Regex for a given `Buffer` input.
     pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b GapBuffer> {
         self.track_submatches = true;
@@ -157,13 +139,6 @@ impl Regex {
     pub fn matches_str(&mut self, input: &str) -> bool {
         self.track_submatches = false;
         self.matches_iter(&mut input.chars().enumerate(), 0)
-    }
-
-    /// Determine whether or not this Regex matches the input `Rope` without searching for
-    /// the leftmost-longest match and associated submatch boundaries.
-    pub fn matches_rope(&mut self, r: &Rope) -> bool {
-        self.track_submatches = false;
-        self.matches_iter(&mut r.chars().enumerate(), 0)
     }
 
     /// Determine whether or not this Regex matches the input iterator without searching
@@ -509,11 +484,11 @@ mod tests {
         use crate::exec::IterBoundedChars;
 
         let mut r = Regex::compile_reverse(re).unwrap();
-        let rope = Rope::from(s);
-        let mut it = rope.rev_iter_between(s.len(), 0);
+        let b = Buffer::new_unnamed(0, s);
+        let mut it = b.rev_iter_between(s.len(), 0);
         let m = r
             .match_iter(&mut it, s.len())
-            .map(|m| m.rope_match_text(&rope).to_string());
+            .map(|m| m.str_match_text(&b.txt.to_string()).to_string());
 
         assert_eq!(m.as_deref(), expected);
     }

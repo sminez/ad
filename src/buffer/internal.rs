@@ -224,6 +224,15 @@ impl GapBuffer {
     }
 
     #[inline]
+    pub fn get_char(&self, char_idx: usize) -> Option<char> {
+        if char_idx < self.n_chars {
+            Some(self.char(char_idx))
+        } else {
+            None
+        }
+    }
+
+    #[inline]
     fn char_len(&self, byte_idx: usize) -> usize {
         // SAFTEY: we know that we have valid utf8 data internally
         unsafe { decode_char_at(byte_idx, &self.data) }.len_utf8()

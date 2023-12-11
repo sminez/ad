@@ -1,8 +1,8 @@
 use crate::{
+    buffer::GapBuffer,
     dot::Dot,
     exec::{addr::Address, Edit},
 };
-use ropey::Rope;
 use std::{
     cell::RefCell,
     io::{stdin, Stdin},
@@ -16,7 +16,7 @@ const LINE_BUF_LEN: usize = 100;
 pub struct CachedStdin {
     inner: RefCell<CachedStdinInner>,
     buf: RefCell<String>,
-    r: RefCell<Rope>,
+    gb: RefCell<GapBuffer>,
 }
 
 struct CachedStdinInner {
@@ -38,7 +38,7 @@ impl CachedStdin {
                 closed: false,
             }),
             buf: RefCell::new(String::with_capacity(LINE_BUF_LEN)),
-            r: RefCell::new(Rope::new()),
+            gb: RefCell::new(GapBuffer::from("")),
         }
     }
 
@@ -47,7 +47,7 @@ impl CachedStdin {
     }
 
     fn get_char(&self, ix: usize) -> Option<char> {
-        self.r.borrow().get_char(ix)
+        self.gb.borrow().get_char(ix)
     }
 
     fn try_read_next_line(&self) {
@@ -57,8 +57,8 @@ impl CachedStdin {
 
         match inner.stdin.read_line(&mut buf) {
             Ok(n) => {
-                let len = self.r.borrow().len_chars();
-                self.r.borrow_mut().insert(len, &buf);
+                let len = self.gb.borrow().len_chars();
+                self.gb.borrow_mut().insert_str(len, &buf);
                 inner.closed = n == 0;
             }
             Err(_) => inner.closed = true,
@@ -72,11 +72,11 @@ impl Address for CachedStdin {
     }
 
     fn len_chars(&self) -> usize {
-        self.r.borrow().len_chars()
+        self.gb.borrow().len_chars()
     }
 
     fn line_to_char(&self, line_idx: usize) -> Option<usize> {
-        let r = self.r.borrow();
+        let r = self.gb.borrow();
         let cur_len = r.len_lines();
         if line_idx > cur_len {
             for _ in cur_len..=line_idx {
@@ -87,37 +87,37 @@ impl Address for CachedStdin {
             }
         }
 
-        r.try_line_to_char(line_idx).ok()
+        r.try_line_to_char(line_idx)
     }
 
     fn char_to_line(&self, char_idx: usize) -> Option<usize> {
-        self.r.borrow().try_char_to_line(char_idx).ok()
+        self.gb.borrow().try_char_to_line(char_idx)
     }
 
     fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
-        let r = self.r.borrow();
-        let line_idx = r.try_char_to_line(char_idx).ok()?;
-        Some(r.line_to_char(line_idx) + r.line(line_idx).len_chars())
+        let gb = self.gb.borrow();
+        let line_idx = gb.try_char_to_line(char_idx)?;
+        Some(gb.line_to_char(line_idx) + gb.line(line_idx).chars().count())
     }
 
     fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
-        let r = self.r.borrow();
-        let line_idx = r.try_char_to_line(char_idx).ok()?;
-        Some(r.line_to_char(line_idx))
+        let gb = self.gb.borrow();
+        let line_idx = gb.try_char_to_line(char_idx)?;
+        Some(gb.line_to_char(line_idx))
     }
 }
 
 impl Edit for CachedStdin {
     fn contents(&self) -> String {
-        self.r.borrow().to_string()
+        self.gb.borrow().to_string()
     }
 
     fn insert(&mut self, ix: usize, s: &str) {
-        self.r.borrow_mut().insert(ix, s)
+        self.gb.borrow_mut().insert_str(ix, s)
     }
 
     fn remove(&mut self, from: usize, to: usize) {
-        self.r.borrow_mut().remove(from..to)
+        self.gb.borrow_mut().remove_range(from, to)
     }
 }
 

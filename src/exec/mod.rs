@@ -5,7 +5,6 @@ use crate::{
     editor::Action,
     regex::{self, Match},
 };
-use ropey::Rope;
 use std::{cmp::min, io::Write, iter::Peekable, str::Chars};
 
 mod addr;
@@ -54,20 +53,6 @@ pub trait Edit: Address {
 
     fn begin_edit_transaction(&mut self) {}
     fn end_edit_transaction(&mut self) {}
-}
-
-impl Edit for Rope {
-    fn contents(&self) -> String {
-        self.to_string()
-    }
-
-    fn insert(&mut self, ix: usize, s: &str) {
-        self.insert(ix, s)
-    }
-
-    fn remove(&mut self, from: usize, to: usize) {
-        self.remove(from..to)
-    }
 }
 
 impl Edit for Buffer {

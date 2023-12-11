@@ -24,7 +24,6 @@ use crate::{
     regex::{self, Regex},
     util::parse_num,
 };
-use ropey::Rope;
 use std::{iter::Peekable, str::Chars};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,34 +363,6 @@ pub trait Address: IterBoundedChars {
         let c2 = self.map_simple_addr(to, d)?.last_cur();
 
         Some(Range::from_cursors(c1, c2, false).into())
-    }
-}
-
-impl Address for Rope {
-    fn current_dot(&self) -> Dot {
-        Dot::default()
-    }
-
-    fn len_chars(&self) -> usize {
-        Rope::len_chars(self)
-    }
-
-    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
-        self.try_line_to_char(line_idx).ok()
-    }
-
-    fn char_to_line(&self, char_idx: usize) -> Option<usize> {
-        self.try_char_to_line(char_idx).ok()
-    }
-
-    fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
-        let line_idx = self.try_char_to_line(char_idx).ok()?;
-        Some(self.line_to_char(line_idx) + self.line(line_idx).len_chars())
-    }
-
-    fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
-        let line_idx = self.try_char_to_line(char_idx).ok()?;
-        Some(self.line_to_char(line_idx))
     }
 }
 

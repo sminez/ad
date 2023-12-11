@@ -1,9 +1,5 @@
 use super::vm::Regex;
-use crate::{
-    buffer::{GapBuffer, IdxChars},
-    util::IdxRopeChars,
-};
-use ropey::{Rope, RopeSlice};
+use crate::buffer::{GapBuffer, IdxChars};
 use std::{
     iter::{Enumerate, Skip},
     str::Chars,
@@ -42,16 +38,6 @@ impl Match {
     pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
         let (a, b) = self.sub_loc(n)?;
         Some(s.chars().skip(a).take(b - a).collect())
-    }
-
-    pub fn rope_match_text<'a>(&self, r: &'a Rope) -> RopeSlice<'a> {
-        let (a, b) = self.loc();
-        r.slice(a..b)
-    }
-
-    pub fn rope_submatch_text<'a>(&self, n: usize, r: &'a Rope) -> Option<RopeSlice<'a>> {
-        let (a, b) = self.sub_loc(n)?;
-        Some(r.slice(a..b))
     }
 
     pub fn loc(&self) -> (usize, usize) {
@@ -101,18 +87,6 @@ impl<'a> IndexedChars for &'a str {
             None
         } else {
             Some(self.chars().enumerate().skip(from))
-        }
-    }
-}
-
-impl<'a> IndexedChars for &'a Rope {
-    type I = IdxRopeChars<'a>;
-
-    fn iter_from(&self, from: usize) -> Option<Self::I> {
-        if from >= self.len_chars() {
-            None
-        } else {
-            Some(IdxRopeChars::new(self, from, self.len_chars()))
         }
     }
 }
