@@ -405,7 +405,11 @@ impl GapBuffer {
         self.move_gap_to(from);
 
         let n_bytes = to - from;
-        let n_chars = count_chars(&self.data[from..to]);
+        // let n_chars = count_chars(&self.data[from..to]);
+        let n_chars = self.chars_in_raw_range(
+            self.char_to_raw_byte(char_from),
+            self.char_to_raw_byte(char_to),
+        );
 
         self.gap_end += n_bytes;
         self.n_chars -= n_chars;
@@ -1117,6 +1121,24 @@ mod tests {
         gb.remove_range(from, to);
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
+    }
+
+    #[test]
+    fn remove_range_w_multibyte_chars_works() {
+        let s = "foo│foo│foo";
+        let mut gb = GapBuffer::from(s);
+
+        gb.remove_range(0, 3);
+        assert_eq!(gb.to_string(), "│foo│foo");
+        assert_eq!(gb.len_chars(), 8);
+
+        gb.remove_range(1, 4);
+        assert_eq!(gb.to_string(), "││foo");
+        assert_eq!(gb.len_chars(), 5);
+
+        gb.remove_range(2, 5);
+        assert_eq!(gb.to_string(), "││");
+        assert_eq!(gb.len_chars(), 2);
     }
 
     #[test]
