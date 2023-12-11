@@ -324,10 +324,8 @@ pub trait Address: IterBoundedChars {
             Regex(re) => {
                 let from = cur_dot.last_cur().idx;
                 let to = self.len_chars();
-                println!("IN {from} {to}");
                 let m = re.match_iter(&mut self.iter_between(from, to), from)?;
                 let (from, to) = m.loc();
-                println!("OUT {from} {to}");
                 Dot::from_char_indices(from, to)
             }
 

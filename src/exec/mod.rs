@@ -1,7 +1,7 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
     buffer::Buffer,
-    dot::{Cur, Dot, Range},
+    dot::{Cur, Dot},
     editor::Action,
     regex::{self, Match},
 };
@@ -81,16 +81,8 @@ impl Edit for Buffer {
     }
 
     fn remove(&mut self, from: usize, to: usize) {
-        self.dot = Dot::Range {
-            r: Range::from_cursors(
-                Cur { idx: from },
-                Cur {
-                    idx: to.saturating_sub(1),
-                },
-                true,
-            ),
-        }
-        .collapse_null_range();
+        self.dot = Dot::from_char_indices(from, to.saturating_sub(1)).collapse_null_range();
+        // self.dot = Dot::from_char_indices(from, to).collapse_null_range();
         self.handle_action(Action::Delete);
     }
 
@@ -505,11 +497,13 @@ mod tests {
     #[test_case(", x/foo/ i/X/", "Xfoo│Xfoo│Xfoo"; "x insert")]
     #[test_case(", x/foo/ a/X/", "fooX│fooX│fooX"; "x append")]
     #[test_case(", x/foo/ c/X/", "X│X│X"; "x change")]
+    #[test_case(", x/foo/ d", "││"; "x delete")]
     #[test_case(", x/foo/ s/o/X/", "fXo│fXo│fXo"; "x substitute")]
     #[test_case(", y/foo/ p/>$0</", "foo│foo│foo"; "y print")]
     #[test_case(", y/foo/ i/X/", "fooX│fooX│foo"; "y insert")]
     #[test_case(", y/foo/ a/X/", "foo│Xfoo│Xfoo"; "y append")]
     #[test_case(", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
+    #[test_case(", y/foo/ d", "foofoofoo"; "y delete")]
     #[test_case(", s/oo/X/", "fX│foo│foo"; "sub single")]
     #[test_case(", s/\\w+/X/", "X│foo│foo"; "sub word single")]
     #[test_case(", s/oo/X/g", "fX│fX│fX"; "sub all")]

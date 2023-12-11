@@ -379,7 +379,6 @@ impl Editor {
             Ok(prog) => prog,
             Err(e) => {
                 self.set_status_message(&format!("Invalid edit command: {e:?}"));
-                self.modes.remove(0);
                 return;
             }
         };

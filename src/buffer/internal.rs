@@ -218,7 +218,7 @@ impl GapBuffer {
 
     #[inline]
     pub fn char(&self, char_idx: usize) -> char {
-        let byte_idx = self.char_to_byte(char_idx);
+        let byte_idx = self.char_to_raw_byte(char_idx);
 
         // SAFTEY: we know that we have valid utf8 data internally
         unsafe { decode_char_at(byte_idx, &self.data) }
@@ -445,13 +445,19 @@ impl GapBuffer {
         self.cap = cap;
     }
 
-    /// The byte_idx passed here must be an absolute position within the data buffer.
+    /// The byte_idx argument here is an absolute position within the buffer. This needs to be
+    /// calculated such that `byte_idx - 1` is a character boundary
     fn move_gap_to(&mut self, byte_idx: usize) {
         // we need space to fit the current gap size
         assert!(
             byte_idx <= self.len(),
             "index out of bounds: {byte_idx} > {}",
             self.len()
+        );
+
+        debug_assert!(
+            is_char_boundary(self.data[byte_idx.saturating_sub(1)]),
+            "gap moved to within a multibyte char"
         );
 
         let gap = self.gap();
@@ -786,9 +792,64 @@ mod tests {
     }
 
     #[test]
-    fn to_string() {
+    fn to_string_works() {
         let s = "this is a test";
         let gb = GapBuffer::from(s.to_string());
+        assert_eq!(gb.to_string(), s);
+    }
+
+    #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
+    #[test_case("hello, 世界!"; "blocks of multibyte and ascii")]
+    #[test_case("hello, world!"; "just ascii")]
+    #[test]
+    fn len_chars_works(s: &str) {
+        let mut gb = GapBuffer::from(s);
+        let len_s = s.chars().count();
+        assert_eq!(gb.len_chars(), len_s);
+        assert_eq!(
+            gb.len_chars(),
+            gb.to_string().chars().count(),
+            "char iter len != len_chars"
+        );
+        println!("initial:          {:?}", raw_debug_buffer_content(&gb));
+
+        gb.insert_char(5, 'X');
+        assert_eq!(gb.len_chars(), len_s + 1);
+        assert_eq!(
+            gb.len_chars(),
+            gb.to_string().chars().count(),
+            "char iter len != len_chars"
+        );
+        println!("after insert X:   {:?}", raw_debug_buffer_content(&gb));
+
+        gb.insert_char(3, '界');
+        assert_eq!(gb.len_chars(), len_s + 2);
+        assert_eq!(
+            gb.len_chars(),
+            gb.to_string().chars().count(),
+            "char iter len != len_chars"
+        );
+        println!("after insert 界:  {:?}", raw_debug_buffer_content(&gb));
+
+        assert_eq!(gb.char(3), '界');
+        gb.remove_char(3);
+        assert_eq!(gb.len_chars(), len_s + 1);
+        assert_eq!(
+            gb.len_chars(),
+            gb.to_string().chars().count(),
+            "char iter len != len_chars"
+        );
+        println!("after remove 界:  {:?}", raw_debug_buffer_content(&gb));
+
+        assert_eq!(gb.char(5), 'X');
+        gb.remove_char(5);
+        assert_eq!(gb.len_chars(), len_s);
+        assert_eq!(
+            gb.len_chars(),
+            gb.to_string().chars().count(),
+            "char iter len != len_chars"
+        );
+        println!("after remove X:   {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.to_string(), s);
     }
 
@@ -1057,11 +1118,13 @@ mod tests {
         assert_eq!(gb.line(0).to_string(), "hello, worow are you?");
     }
 
+    #[test_case('X'; "ascii")]
+    #[test_case('界'; "multi-byte")]
     #[test]
-    fn insert_remove_char_is_idempotent() {
+    fn insert_remove_char_is_idempotent(ch: char) {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
-        gb.insert_char(6, 'X');
+        gb.insert_char(6, ch);
         gb.remove_char(6);
 
         assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
@@ -1134,14 +1197,21 @@ mod tests {
         assert_eq!(&v, expected);
     }
 
+    #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
+    #[test_case("hello, 世界!"; "blocks of multibyte and ascii")]
     #[test]
-    fn chars_works() {
-        let s = "hello, 世界!";
+    fn chars_works(s: &str) {
         let mut gb = GapBuffer::from(s);
-        gb.move_gap_to(4);
-
         let chars: String = gb.line(0).chars().collect();
         assert_eq!(chars, s);
+
+        for i in 0..gb.len_chars() {
+            let idx = gb.char_to_byte(i);
+            gb.move_gap_to(idx);
+
+            let chars: String = gb.line(0).chars().collect();
+            assert_eq!(chars, s, "idx={idx}");
+        }
     }
 
     #[test]
