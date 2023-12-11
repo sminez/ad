@@ -791,12 +791,7 @@ impl Buffer {
 
     fn delete_range(&mut self, r: Range) -> (Cur, Option<String>) {
         let (from, to) = if r.start.idx != r.end.idx {
-            (
-                r.start.idx,
-                // FIXME: is this right to no longer sub 1?
-                // min(r.end.idx, self.txt.len_chars().saturating_sub(1)),
-                min(r.end.idx + 1, self.txt.len_chars()),
-            )
+            (r.start.idx, min(r.end.idx + 1, self.txt.len_chars()))
         } else {
             return (r.start, None);
         };

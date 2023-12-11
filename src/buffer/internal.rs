@@ -405,7 +405,6 @@ impl GapBuffer {
         self.move_gap_to(from);
 
         let n_bytes = to - from;
-        // let n_chars = count_chars(&self.data[from..to]);
         let n_chars = self.chars_in_raw_range(
             self.char_to_raw_byte(char_from),
             self.char_to_raw_byte(char_to),

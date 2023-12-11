@@ -81,8 +81,10 @@ impl Edit for Buffer {
     }
 
     fn remove(&mut self, from: usize, to: usize) {
+        if from == to {
+            return;
+        }
         self.dot = Dot::from_char_indices(from, to.saturating_sub(1)).collapse_null_range();
-        // self.dot = Dot::from_char_indices(from, to).collapse_null_range();
         self.handle_action(Action::Delete);
     }
 
