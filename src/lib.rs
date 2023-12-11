@@ -19,7 +19,7 @@ pub mod term;
 pub mod trie;
 pub mod util;
 
-pub use buffer::Buffer;
+pub use buffer::GapBuffer;
 pub use config::Config;
 pub use editor::Editor;
 pub use exec::{CachedStdin, Edit, Program};

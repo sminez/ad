@@ -1,4 +1,4 @@
-use ad::{Buffer, CachedStdin, Config, Editor, Program};
+use ad::{CachedStdin, Config, Editor, GapBuffer, Program};
 use std::{
     env, fs,
     io::{self, Write},
@@ -129,7 +129,7 @@ fn run_script(script: &str, files: Vec<String>) {
             }
         };
 
-        if let Err(e) = prog.execute(&mut Buffer::new_unnamed(0, &s), path, &mut buf) {
+        if let Err(e) = prog.execute(&mut GapBuffer::from(s), path, &mut buf) {
             eprintln!("error running script: {e:?}");
             exit(1);
         }

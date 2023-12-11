@@ -1,6 +1,6 @@
 //! Sam style language for running edit commands using structural regular expressions
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot},
     editor::Action,
     regex::{self, Match},
@@ -53,6 +53,20 @@ pub trait Edit: Address {
 
     fn begin_edit_transaction(&mut self) {}
     fn end_edit_transaction(&mut self) {}
+}
+
+impl Edit for GapBuffer {
+    fn contents(&self) -> String {
+        self.to_string()
+    }
+
+    fn insert(&mut self, idx: usize, s: &str) {
+        self.insert_str(idx, s)
+    }
+
+    fn remove(&mut self, from: usize, to: usize) {
+        self.remove_range(from, to);
+    }
 }
 
 impl Edit for Buffer {

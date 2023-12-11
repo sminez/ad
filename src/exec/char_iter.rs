@@ -1,7 +1,7 @@
 //! A helper trait for bounded iteration over characters in an arbitrary
 //! piece of text.
 use crate::{
-    buffer::{Buffer, IdxChars},
+    buffer::{Buffer, GapBuffer, IdxChars},
     exec::cached_stdin::{CachedStdin, CachedStdinIter},
 };
 
@@ -20,6 +20,16 @@ pub trait IterBoundedChars {
     ///
     /// This should be an inclusive range from..=to
     fn rev_iter_between(&self, from: usize, to: usize) -> CharIter<'_>;
+}
+
+impl IterBoundedChars for GapBuffer {
+    fn iter_between(&self, from: usize, to: usize) -> CharIter {
+        CharIter::Slice(self.slice(from, to).indexed_chars(from, false))
+    }
+
+    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter {
+        CharIter::Slice(self.slice(to, from).indexed_chars(to, true))
+    }
 }
 
 impl IterBoundedChars for Buffer {

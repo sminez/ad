@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot, Range},
     exec::char_iter::IterBoundedChars,
     regex::{self, Regex},
@@ -363,6 +363,34 @@ pub trait Address: IterBoundedChars {
         let c2 = self.map_simple_addr(to, d)?.last_cur();
 
         Some(Range::from_cursors(c1, c2, false).into())
+    }
+}
+
+impl Address for GapBuffer {
+    fn current_dot(&self) -> Dot {
+        Dot::default()
+    }
+
+    fn len_chars(&self) -> usize {
+        self.len_chars()
+    }
+
+    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+        self.try_line_to_char(line_idx)
+    }
+
+    fn char_to_line(&self, char_idx: usize) -> Option<usize> {
+        self.try_char_to_line(char_idx)
+    }
+
+    fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
+        let line_idx = self.try_char_to_line(char_idx)?;
+        Some(self.line_to_char(line_idx) + self.line(line_idx).chars().count())
+    }
+
+    fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
+        let line_idx = self.try_char_to_line(char_idx)?;
+        Some(self.line_to_char(line_idx))
     }
 }
 
