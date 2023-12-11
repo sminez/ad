@@ -38,7 +38,10 @@ fn count_chars(bytes: &[u8]) -> usize {
         return 0;
     }
 
-    debug_assert!(is_char_boundary(bytes[bytes.len() - 1]), "invalid utf8");
+    debug_assert!(
+        is_char_boundary(bytes[bytes.len() - 1]),
+        "count_chars called on invalid utf8 byte slice"
+    );
     let mut n_chars = 0;
     let mut cur = 0;
 
@@ -240,13 +243,14 @@ impl GapBuffer {
         }
 
         let to = match self.line_endings.iter().nth(line_idx) {
-            Some(&idx) => idx,
-            None => self.cap - 1,
+            Some(&idx) => idx + self.char_len(idx),
+            None => self.cap,
         };
         let from = if line_idx == 0 {
             0
         } else {
-            *self.line_endings.iter().nth(line_idx - 1).unwrap() + 1
+            let idx = *self.line_endings.iter().nth(line_idx - 1).unwrap();
+            idx + self.char_len(idx)
         };
 
         Slice::from_raw_offsets(from, to, self)
@@ -255,7 +259,7 @@ impl GapBuffer {
     /// An exclusive range of characters from the buffer
     pub fn slice(&self, char_from: usize, char_to: usize) -> Slice {
         let from = self.char_to_raw_byte(char_from);
-        let to = self.char_to_raw_byte(char_to - 1);
+        let to = self.char_to_raw_byte(char_to);
 
         Slice::from_raw_offsets(from, to, self)
     }
@@ -374,7 +378,7 @@ impl GapBuffer {
     /// Remove the requested character index from the visible region of the buffer
     pub fn remove_char(&mut self, char_idx: usize) {
         let idx = self.char_to_byte(char_idx);
-        let len = self.char_len(idx);
+        let len = self.char_len(self.char_to_raw_byte(char_idx));
 
         if idx != self.gap_start {
             self.move_gap_to(idx);
@@ -445,19 +449,18 @@ impl GapBuffer {
         self.cap = cap;
     }
 
-    /// The byte_idx argument here is an absolute position within the buffer. This needs to be
-    /// calculated such that `byte_idx - 1` is a character boundary
+    /// The byte_idx argument here is an absolute position within the "live" buffer which will mark
+    /// the first byte of the gap region following the move.
+    ///
+    /// We do not require that the data within the gap region is valid utf-8 so it is fine for this
+    /// offset to land in the middle of existing multi-byte characters so long as the regions
+    /// outside of the gap stay valid utf-8.
     fn move_gap_to(&mut self, byte_idx: usize) {
         // we need space to fit the current gap size
         assert!(
             byte_idx <= self.len(),
             "index out of bounds: {byte_idx} > {}",
             self.len()
-        );
-
-        debug_assert!(
-            is_char_boundary(self.data[byte_idx.saturating_sub(1)]),
-            "gap moved to within a multibyte char"
         );
 
         let gap = self.gap();
@@ -540,12 +543,12 @@ pub struct Slice<'a> {
 impl<'a> Slice<'a> {
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
-        let to = min(to, gb.data.len() - 1);
+        let to = min(to, gb.data.len());
 
         if to <= gb.gap_start || from >= gb.gap_end {
             return Slice {
                 from,
-                left: &gb.data[from..=to],
+                left: &gb.data[from..to],
                 right: &[],
             };
         }
@@ -555,7 +558,7 @@ impl<'a> Slice<'a> {
         Slice {
             from,
             left: &gb.data[from..gb.gap_start],
-            right: &gb.data[gb.gap_end..=to],
+            right: &gb.data[gb.gap_end..to],
         }
     }
 
@@ -805,51 +808,52 @@ mod tests {
     fn len_chars_works(s: &str) {
         let mut gb = GapBuffer::from(s);
         let len_s = s.chars().count();
+
+        println!("initial:          {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s);
         assert_eq!(
             gb.len_chars(),
             gb.to_string().chars().count(),
             "char iter len != len_chars"
         );
-        println!("initial:          {:?}", raw_debug_buffer_content(&gb));
 
         gb.insert_char(5, 'X');
+        println!("after insert X:   {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 1);
         assert_eq!(
             gb.len_chars(),
             gb.to_string().chars().count(),
             "char iter len != len_chars"
         );
-        println!("after insert X:   {:?}", raw_debug_buffer_content(&gb));
 
         gb.insert_char(3, '界');
+        println!("after insert 界:  {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 2);
         assert_eq!(
             gb.len_chars(),
             gb.to_string().chars().count(),
             "char iter len != len_chars"
         );
-        println!("after insert 界:  {:?}", raw_debug_buffer_content(&gb));
 
         assert_eq!(gb.char(3), '界');
         gb.remove_char(3);
+        println!("after remove 界:  {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 1);
         assert_eq!(
             gb.len_chars(),
             gb.to_string().chars().count(),
             "char iter len != len_chars"
         );
-        println!("after remove 界:  {:?}", raw_debug_buffer_content(&gb));
 
         assert_eq!(gb.char(5), 'X');
         gb.remove_char(5);
+        println!("after remove X:   {:?}", debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s);
         assert_eq!(
             gb.len_chars(),
             gb.to_string().chars().count(),
             "char iter len != len_chars"
         );
-        println!("after remove X:   {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.to_string(), s);
     }
 
@@ -1217,7 +1221,7 @@ mod tests {
     #[test]
     fn slice_works() {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        let slice = Slice::from_raw_offsets(0, gb.cap - 1, &gb);
+        let slice = Slice::from_raw_offsets(0, gb.cap, &gb);
         let (s1, s2) = slice.as_strs();
         assert_eq!(s1, "");
         assert_eq!(s2, "hello, world!\nhow are you?");
