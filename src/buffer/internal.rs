@@ -24,14 +24,6 @@ fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
     min(max(len / 20, min_gap), MAX_GAP)
 }
 
-// This is bit magic equivalent to: b < 128 || b >= 192
-// -> taken from the impl of is_utf8_char_boundary in
-//    https://doc.rust-lang.org/src/core/num/mod.rs.html
-// #[inline]
-// fn is_char_boundary(b: u8) -> bool {
-//     (b as i8) >= -0x40
-// }
-
 #[inline]
 fn count_chars(bytes: &[u8]) -> usize {
     if bytes.is_empty() {
@@ -142,6 +134,41 @@ impl ToString for GapBuffer {
     }
 }
 
+#[cfg(test)]
+macro_rules! assert_line_endings {
+    ($self:expr) => {{
+        let true_endings: Vec<usize> = $self
+            .data
+            .iter()
+            .enumerate()
+            .filter(|&(i, &b)| b == b'\n' && (i < $self.gap_start || i >= $self.gap_end))
+            .map(|(i, _)| i)
+            .collect();
+        let tracked_line_endings: Vec<usize> = $self.line_endings.keys().copied().collect();
+
+        assert_eq!(
+            tracked_line_endings, true_endings,
+            "incorrect byte positions for line endings with gap_start={} gap_end={}",
+            $self.gap_start, $self.gap_end
+        );
+
+        let true_endings: Vec<usize> = $self
+            .to_string()
+            .chars()
+            .enumerate()
+            .filter(|&(_, c)| c == '\n')
+            .map(|(i, _)| i)
+            .collect();
+        let tracked_line_endings: Vec<usize> = $self.line_endings.values().copied().collect();
+
+        assert_eq!(
+            tracked_line_endings, true_endings,
+            "incorrect character positions for line endings with gap_start={} gap_end={}",
+            $self.gap_start, $self.gap_end
+        );
+    }};
+}
+
 impl GapBuffer {
     /// Number of bytes in the gap
     #[inline]
@@ -214,6 +241,9 @@ impl GapBuffer {
         self.gap_end = self.cap;
         self.line_endings.clear();
         self.n_chars = 0;
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
     #[inline]
@@ -294,22 +324,21 @@ impl GapBuffer {
     }
 
     pub fn try_char_to_line(&self, char_idx: usize) -> Option<usize> {
-        // We allow setting the cursor to the end of the buffer for inserts
-        if char_idx == self.len_chars() {
-            return Some(self.len_lines() - 1);
-        }
-
-        let mut n = 0;
-
-        for i in 0..self.len_lines() {
-            let next_boundary = n + self.line(i).chars().count();
-            if char_idx < next_boundary {
-                return Some(i);
+        match char_idx.cmp(&self.n_chars) {
+            Ordering::Less => {
+                for (i, &char_offset) in self.line_endings.values().enumerate() {
+                    if char_idx <= char_offset {
+                        return Some(i);
+                    }
+                }
+                Some(self.len_lines() - 1)
             }
-            n = next_boundary;
-        }
 
-        None
+            // We allow setting the cursor to the end of the buffer for inserts
+            Ordering::Equal => Some(self.len_lines() - 1),
+
+            Ordering::Greater => None,
+        }
     }
 
     pub fn line_to_char(&self, line_idx: usize) -> usize {
@@ -355,6 +384,17 @@ impl GapBuffer {
         if ch == '\n' {
             self.line_endings.insert(idx, char_idx);
         }
+
+        self.update_line_endings(|(&bidx, &cidx)| {
+            if bidx > idx {
+                (bidx, cidx + 1)
+            } else {
+                (bidx, cidx)
+            }
+        });
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
     /// Insert a string at the specifified byte index.
@@ -379,6 +419,17 @@ impl GapBuffer {
                 self.line_endings.insert(idx + offset, char_idx + i);
             }
         }
+
+        self.update_line_endings(|(&bidx, &cidx)| {
+            if bidx >= idx + len {
+                (bidx, cidx + len)
+            } else {
+                (bidx, cidx)
+            }
+        });
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
     /// Remove the requested character index from the visible region of the buffer
@@ -402,6 +453,9 @@ impl GapBuffer {
                 *count -= 1;
             }
         }
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
     /// Remove the requested range (from..to) from the visible region of the buffer
@@ -439,19 +493,18 @@ impl GapBuffer {
                 *count = char_from;
             }
         }
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
-    /// BTreeSet doesn't support iter_mut so we need to map over the existing line
-    /// endings and collect into a new set.
+    /// BTreeMap doesn't support iter_mut with mutable keys so we need to map over the existing
+    /// line endings and collect into a new map.
     fn update_line_endings<F>(&mut self, f: F)
     where
-        F: Fn(usize) -> usize,
+        F: Fn((&usize, &usize)) -> (usize, usize),
     {
-        self.line_endings = self
-            .line_endings
-            .iter()
-            .map(|(&k, &v)| ((f)(k), v))
-            .collect();
+        self.line_endings = self.line_endings.iter().map(f).collect();
     }
 
     fn grow_gap(&mut self, n: usize) {
@@ -468,12 +521,21 @@ impl GapBuffer {
         buf.extend_from_slice(&self.data[self.gap_end..]); // data after gap
 
         let start = self.gap_start;
-        self.update_line_endings(|idx| if idx > start { idx + gap_increase } else { idx });
+        self.update_line_endings(|(&bidx, &cidx)| {
+            if bidx > start {
+                (bidx + gap_increase, cidx)
+            } else {
+                (bidx, cidx)
+            }
+        });
 
         self.next_gap = clamp_gap_size(self.len(), self.next_gap * 2);
         self.data = buf.into_boxed_slice();
         self.gap_end += gap_increase;
         self.cap = cap;
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
     /// The byte_idx argument here is an absolute position within the "live" buffer which will mark
@@ -498,11 +560,11 @@ impl GapBuffer {
             // Gap moving left
             Ordering::Less => {
                 let start = self.gap_start;
-                self.update_line_endings(|idx| {
-                    if idx >= byte_idx && idx <= start {
-                        idx + gap
+                self.update_line_endings(|(&bidx, &cidx)| {
+                    if bidx >= byte_idx && bidx <= start {
+                        (bidx + gap, cidx)
                     } else {
-                        idx
+                        (bidx, cidx)
                     }
                 });
 
@@ -512,11 +574,11 @@ impl GapBuffer {
             // Gap moving right
             Ordering::Greater => {
                 let end = self.gap_end;
-                self.update_line_endings(|idx| {
-                    if idx >= end && idx < byte_idx + gap {
-                        idx - gap
+                self.update_line_endings(|(&bidx, &cidx)| {
+                    if bidx >= end && bidx < byte_idx + gap {
+                        (bidx - gap, cidx)
                     } else {
-                        idx
+                        (bidx, cidx)
                     }
                 });
 
@@ -527,6 +589,9 @@ impl GapBuffer {
         self.data.copy_within(src, dest);
         self.gap_end = byte_idx + gap;
         self.gap_start = byte_idx;
+
+        #[cfg(test)]
+        assert_line_endings!(self);
     }
 
     fn char_to_byte(&self, char_idx: usize) -> usize {
@@ -543,51 +608,38 @@ impl GapBuffer {
         self.char_to_byte_impl(char_idx, |raw| raw)
     }
 
-    // FIXME: needs to not just iterate through all of the characters in the buffer
     fn char_to_byte_impl<F>(&self, char_idx: usize, mut map_raw: F) -> usize
     where
         F: FnMut(usize) -> usize,
     {
-        // old woring impl
-        let all = Slice::from_raw_offsets(0, usize::MAX, self);
-        let mut chars = all.chars();
-        for _ in 0..char_idx {
-            chars.next();
+        let mut byte_offset = 0;
+        let mut char_offset = 0;
+        let mut to = usize::MAX;
+
+        for (&b, &c) in self.line_endings.iter() {
+            match c.cmp(&char_idx) {
+                Ordering::Less => (byte_offset, char_offset) = (b, c),
+                Ordering::Equal => return (map_raw)(b),
+                Ordering::Greater => {
+                    to = b;
+                    break;
+                }
+            }
         }
 
-        let cur = if chars.cur > self.gap_start {
-            chars.cur + self.gap()
+        let slice = Slice::from_raw_offsets(byte_offset, to, self);
+        let mut chars = slice.chars();
+        let mut cur = byte_offset;
+        for _ in 0..(char_idx - char_offset) {
+            chars.next();
+            cur = chars.cur + byte_offset;
+        }
+
+        if cur > self.gap_start && cur < self.gap_end {
+            (map_raw)(cur + self.gap())
         } else {
-            chars.cur
-        };
-
-        (map_raw)(cur)
-
-        // new impl that skips to the line containing char_idx
-        // let mut byte_offset = 0;
-        // let mut char_offset = 0;
-
-        // for (&b, &c) in self.line_endings.iter() {
-        //     match c.cmp(&char_idx) {
-        //         Ordering::Less => (byte_offset, char_offset) = (b, c),
-        //         Ordering::Equal => return (map_raw)(b),
-        //         Ordering::Greater => break,
-        //     }
-        // }
-
-        // let slice = Slice::from_raw_offsets(byte_offset, usize::MAX, self);
-        // let mut chars = slice.chars();
-        // let mut cur = byte_offset;
-        // for _ in 0..(char_idx - char_offset) {
-        //     chars.next();
-        //     cur = chars.cur + byte_offset;
-        // }
-
-        // if cur > self.gap_start && cur <= self.gap_end {
-        //     (map_raw)(cur + self.gap())
-        // } else {
-        //     (map_raw)(cur)
-        // }
+            (map_raw)(cur)
+        }
     }
 }
 
