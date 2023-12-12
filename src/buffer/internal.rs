@@ -530,70 +530,64 @@ impl GapBuffer {
     }
 
     fn char_to_byte(&self, char_idx: usize) -> usize {
-        self.char_to_byte_impl(char_idx, |raw| raw)
-    }
-
-    fn char_to_raw_byte(&self, char_idx: usize) -> usize {
         self.char_to_byte_impl(char_idx, |raw| {
             if raw > self.gap_start {
-                raw + self.gap()
+                raw - self.gap()
             } else {
                 raw
             }
         })
     }
 
-    // TODO: find a proper impl for this that doesn't just iterate through the entire buffer...!
+    fn char_to_raw_byte(&self, char_idx: usize) -> usize {
+        self.char_to_byte_impl(char_idx, |raw| raw)
+    }
+
+    // FIXME: needs to not just iterate through all of the characters in the buffer
     fn char_to_byte_impl<F>(&self, char_idx: usize, mut map_raw: F) -> usize
     where
         F: FnMut(usize) -> usize,
     {
+        // old woring impl
         let all = Slice::from_raw_offsets(0, usize::MAX, self);
         let mut chars = all.chars();
         for _ in 0..char_idx {
             chars.next();
         }
 
-        (map_raw)(chars.cur)
+        let cur = if chars.cur > self.gap_start {
+            chars.cur + self.gap()
+        } else {
+            chars.cur
+        };
 
-        // FIXME: this isn't working yet
-        //
+        (map_raw)(cur)
+
+        // new impl that skips to the line containing char_idx
         // let mut byte_offset = 0;
         // let mut char_offset = 0;
 
         // for (&b, &c) in self.line_endings.iter() {
         //     match c.cmp(&char_idx) {
-        //         // This line ends before our target
-        //         Ordering::Less => {
-        //             byte_offset = b;
-        //             char_offset = c;
-        //         }
-        //         // Target is a line ending so map it directly
+        //         Ordering::Less => (byte_offset, char_offset) = (b, c),
         //         Ordering::Equal => return (map_raw)(b),
-        //         // This line ends after the target so the one before is
-        //         // what we need to use as our starting point
         //         Ordering::Greater => break,
         //     }
         // }
 
-        // // from_raw_offsets needs an index that is aware of the gap so we need to
-        // // account for that
-        // let start = if byte_offset > self.gap_start {
-        //     byte_offset + self.gap()
-        // } else {
-        //     byte_offset
-        // };
-
-        // println!("before taking slice");
-        // let slice = Slice::from_raw_offsets(start, usize::MAX, self);
+        // let slice = Slice::from_raw_offsets(byte_offset, usize::MAX, self);
         // let mut chars = slice.chars();
-
-        // println!("counting {} chars", char_idx - char_offset);
+        // let mut cur = byte_offset;
         // for _ in 0..(char_idx - char_offset) {
         //     chars.next();
+        //     cur = chars.cur + byte_offset;
         // }
 
-        // (map_raw)(chars.cur + byte_offset)
+        // if cur > self.gap_start && cur <= self.gap_end {
+        //     (map_raw)(cur + self.gap())
+        // } else {
+        //     (map_raw)(cur)
+        // }
     }
 }
 
@@ -1209,7 +1203,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_range_for_last_line_works() {
+    fn remove_range_for_last_line_works() {
         let s = "hello, world!\nthis is the last line";
         let mut gb = GapBuffer::from(s);
         gb.remove_range(14, s.len());
@@ -1217,16 +1211,20 @@ mod tests {
         assert_eq!(gb.len_lines(), 2);
     }
 
+    #[test_case(10, 15, "hello, worow are you?"; "spanning newline")]
+    #[test_case(7, 14, "hello, how are you?"; "ending on newline")]
+    #[test_case(13, 26, "hello, world!"; "starting on newline")]
     #[test]
-    fn remove_newline_in_str_is_tracked_correctly() {
+    fn remove_newline_in_str_is_tracked_correctly(from: usize, to: usize, expected: &str) {
         let s = "hello, world!\nhow are you?";
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 2);
 
-        gb.remove_range(10, 15);
+        gb.remove_range(from, to);
 
         assert_eq!(gb.len_lines(), 1);
-        assert_eq!(gb.line(0).to_string(), "hello, worow are you?");
+        assert_eq!(gb.to_string(), expected);
+        assert_eq!(gb.line(0).to_string(), expected);
     }
 
     #[test_case('X'; "ascii")]
