@@ -385,7 +385,10 @@ impl Address for GapBuffer {
 
     fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
         let line_idx = self.try_char_to_line(char_idx)?;
-        Some(self.line_to_char(line_idx) + self.line(line_idx).chars().count())
+        match self.try_line_to_char(line_idx + 1) {
+            None => Some(self.len_lines() - 1),
+            Some(idx) => Some(idx),
+        }
     }
 
     fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
@@ -413,7 +416,10 @@ impl Address for Buffer {
 
     fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
         let line_idx = self.txt.try_char_to_line(char_idx)?;
-        Some(self.txt.line_to_char(line_idx) + self.txt.line(line_idx).chars().count())
+        match self.txt.try_line_to_char(line_idx + 1) {
+            None => Some(self.txt.len_lines() - 1),
+            Some(idx) => Some(idx),
+        }
     }
 
     fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
