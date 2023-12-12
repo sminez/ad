@@ -10,7 +10,7 @@
 //! - https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation
 use std::{
     cmp::{max, min, Ordering},
-    collections::BTreeSet,
+    collections::BTreeMap,
 };
 
 // The internal data is [u8] so the values here are in terms of bytes
@@ -50,38 +50,49 @@ fn count_chars(bytes: &[u8]) -> usize {
     n_chars
 }
 
+type ByteOffset = usize;
+type CharOffset = usize;
+
 /// An implementation of a gap buffer that tracks internal meta-data to help with accessing
 /// sub-regions of the text such as character ranges and lines.
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct GapBuffer {
+    /// the raw data being stored (both buffer content and the gap)
     data: Box<[u8]>,
+    /// current size of the allocation for data
     cap: usize,
+    /// byte offset to the first character in the gap
     gap_start: usize,
+    /// byte offset to the last character in the gap
     gap_end: usize,
+    /// size in bytes for the next gap when re-allocating
     next_gap: usize,
-    line_endings: BTreeSet<usize>,
+    /// line ending byte offset -> char offset
+    line_endings: BTreeMap<ByteOffset, CharOffset>,
+    /// total number of characters in the buffer
+    /// this is != line_endings.last() if there is no trailing newline
     n_chars: usize,
+}
+
+fn compute_line_endings(s: &str) -> (usize, BTreeMap<ByteOffset, CharOffset>) {
+    let mut n_chars = 0;
+    let mut line_endings = BTreeMap::new();
+
+    for (line_chars, (idx, ch)) in s.char_indices().enumerate() {
+        n_chars += 1;
+        if ch == '\n' {
+            line_endings.insert(idx, line_chars);
+        }
+    }
+
+    (n_chars, line_endings)
 }
 
 impl From<String> for GapBuffer {
     fn from(s: String) -> Self {
         let gap_start = s.len();
         let cap = s.capacity();
-
-        if cap == gap_start {
-            return Self::from(s.as_str());
-        }
-
-        let mut n_chars = 0;
-        let mut line_endings = BTreeSet::new();
-
-        for (idx, ch) in s.char_indices() {
-            n_chars += 1;
-            if ch == '\n' {
-                line_endings.insert(idx);
-            }
-        }
-
+        let (n_chars, line_endings) = compute_line_endings(&s);
         let mut v = s.into_bytes();
         v.resize(cap, 0);
 
@@ -105,17 +116,7 @@ impl From<&str> for GapBuffer {
         let gap_start = s.len();
         let next_gap = clamp_gap_size(gap_start, MIN_GAP);
         let cap = gap_start + next_gap;
-
-        let mut n_chars = 0;
-        let mut line_endings = BTreeSet::new();
-
-        for (idx, ch) in s.char_indices() {
-            n_chars += 1;
-            if ch == '\n' {
-                line_endings.insert(idx);
-            }
-        }
-
+        let (n_chars, line_endings) = compute_line_endings(s);
         let mut v = Vec::with_capacity(cap);
         v.extend_from_slice(s.as_bytes());
         v.resize(cap, 0);
@@ -184,8 +185,8 @@ impl GapBuffer {
 
     #[inline]
     pub fn len_lines(&self) -> usize {
-        match self.line_endings.last() {
-            Some(&raw_idx) => {
+        match self.line_endings.last_key_value() {
+            Some((&raw_idx, _)) => {
                 let n = self.line_endings.len();
                 let byte_idx = if raw_idx > self.gap_start {
                     raw_idx - self.gap_end
@@ -248,14 +249,14 @@ impl GapBuffer {
         }
 
         let to = match self.line_endings.iter().nth(line_idx) {
-            Some(&idx) => idx + self.char_len(idx),
+            Some((&idx, _)) => idx + self.char_len(idx),
             None => self.cap,
         };
         let from = if line_idx == 0 {
             0
         } else {
-            let idx = *self.line_endings.iter().nth(line_idx - 1).unwrap();
-            idx + self.char_len(idx)
+            let idx = *self.line_endings.iter().nth(line_idx - 1).unwrap().0;
+            idx + 1
         };
 
         Slice::from_raw_offsets(from, to, self)
@@ -329,8 +330,8 @@ impl GapBuffer {
         if line_idx == 0 {
             Some(0)
         } else {
-            let k = *self.line_endings.iter().nth(line_idx - 1).unwrap();
-            Some(self.byte_to_char(k) + 1)
+            let k = *self.line_endings.iter().nth(line_idx - 1).unwrap().1;
+            Some(k + 1)
         }
     }
 
@@ -352,7 +353,7 @@ impl GapBuffer {
         self.n_chars += 1;
 
         if ch == '\n' {
-            self.line_endings.insert(char_idx);
+            self.line_endings.insert(idx, char_idx);
         }
     }
 
@@ -373,9 +374,9 @@ impl GapBuffer {
         self.gap_start += len;
         self.n_chars += s.chars().count();
 
-        for (i, b) in s.bytes().enumerate() {
-            if b == b'\n' {
-                self.line_endings.insert(idx + i);
+        for (i, (offset, ch)) in s.char_indices().enumerate() {
+            if ch == '\n' {
+                self.line_endings.insert(idx + offset, char_idx + i);
             }
         }
     }
@@ -394,6 +395,12 @@ impl GapBuffer {
 
         if self.data[self.gap_end - 1] == b'\n' {
             self.line_endings.remove(&(self.gap_end - 1));
+        }
+
+        for (_, count) in self.line_endings.iter_mut() {
+            if *count >= char_idx {
+                *count -= 1;
+            }
         }
     }
 
@@ -423,16 +430,28 @@ impl GapBuffer {
         self.n_chars -= n_chars;
 
         self.line_endings
-            .retain(|idx| !((self.gap_end - n_bytes)..(self.gap_end)).contains(idx));
+            .retain(|idx, _| !((self.gap_end - n_bytes)..(self.gap_end)).contains(idx));
+
+        for (_, count) in self.line_endings.iter_mut() {
+            if *count >= char_to {
+                *count -= n_chars;
+            } else if *count > char_from {
+                *count = char_from;
+            }
+        }
     }
 
     /// BTreeSet doesn't support iter_mut so we need to map over the existing line
     /// endings and collect into a new set.
     fn update_line_endings<F>(&mut self, f: F)
     where
-        F: Fn(&usize) -> usize,
+        F: Fn(usize) -> usize,
     {
-        self.line_endings = self.line_endings.iter().map(f).collect();
+        self.line_endings = self
+            .line_endings
+            .iter()
+            .map(|(&k, &v)| ((f)(k), v))
+            .collect();
     }
 
     fn grow_gap(&mut self, n: usize) {
@@ -449,7 +468,7 @@ impl GapBuffer {
         buf.extend_from_slice(&self.data[self.gap_end..]); // data after gap
 
         let start = self.gap_start;
-        self.update_line_endings(|&idx| if idx > start { idx + gap_increase } else { idx });
+        self.update_line_endings(|idx| if idx > start { idx + gap_increase } else { idx });
 
         self.next_gap = clamp_gap_size(self.len(), self.next_gap * 2);
         self.data = buf.into_boxed_slice();
@@ -479,7 +498,7 @@ impl GapBuffer {
             // Gap moving left
             Ordering::Less => {
                 let start = self.gap_start;
-                self.update_line_endings(|&idx| {
+                self.update_line_endings(|idx| {
                     if idx >= byte_idx && idx <= start {
                         idx + gap
                     } else {
@@ -493,7 +512,7 @@ impl GapBuffer {
             // Gap moving right
             Ordering::Greater => {
                 let end = self.gap_end;
-                self.update_line_endings(|&idx| {
+                self.update_line_endings(|idx| {
                     if idx >= end && idx < byte_idx + gap {
                         idx - gap
                     } else {
@@ -524,6 +543,7 @@ impl GapBuffer {
         })
     }
 
+    // TODO: find a proper impl for this that doesn't just iterate through the entire buffer...!
     fn char_to_byte_impl<F>(&self, char_idx: usize, mut map_raw: F) -> usize
     where
         F: FnMut(usize) -> usize,
@@ -535,6 +555,45 @@ impl GapBuffer {
         }
 
         (map_raw)(chars.cur)
+
+        // FIXME: this isn't working yet
+        //
+        // let mut byte_offset = 0;
+        // let mut char_offset = 0;
+
+        // for (&b, &c) in self.line_endings.iter() {
+        //     match c.cmp(&char_idx) {
+        //         // This line ends before our target
+        //         Ordering::Less => {
+        //             byte_offset = b;
+        //             char_offset = c;
+        //         }
+        //         // Target is a line ending so map it directly
+        //         Ordering::Equal => return (map_raw)(b),
+        //         // This line ends after the target so the one before is
+        //         // what we need to use as our starting point
+        //         Ordering::Greater => break,
+        //     }
+        // }
+
+        // // from_raw_offsets needs an index that is aware of the gap so we need to
+        // // account for that
+        // let start = if byte_offset > self.gap_start {
+        //     byte_offset + self.gap()
+        // } else {
+        //     byte_offset
+        // };
+
+        // println!("before taking slice");
+        // let slice = Slice::from_raw_offsets(start, usize::MAX, self);
+        // let mut chars = slice.chars();
+
+        // println!("counting {} chars", char_idx - char_offset);
+        // for _ in 0..(char_idx - char_offset) {
+        //     chars.next();
+        // }
+
+        // (map_raw)(chars.cur + byte_offset)
     }
 }
 
