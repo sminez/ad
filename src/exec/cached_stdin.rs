@@ -97,7 +97,10 @@ impl Address for CachedStdin {
     fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
         let gb = self.gb.borrow();
         let line_idx = gb.try_char_to_line(char_idx)?;
-        Some(gb.line_to_char(line_idx) + gb.line(line_idx).chars().count())
+        match gb.try_line_to_char(line_idx + 1) {
+            None => Some(gb.len_chars() - 1),
+            Some(idx) => Some(idx),
+        }
     }
 
     fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {

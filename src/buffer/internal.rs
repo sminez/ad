@@ -292,6 +292,30 @@ impl GapBuffer {
         Slice::from_raw_offsets(from, to, self)
     }
 
+    #[inline]
+    pub fn line_len_chars(&self, line_idx: usize) -> usize {
+        if line_idx >= self.len_lines() {
+            panic!(
+                "line index was {line_idx} but buffer has {} lines",
+                self.len_lines()
+            )
+        }
+
+        let chars_to = match self.line_endings.iter().nth(line_idx) {
+            Some((_, &char_idx)) => char_idx + 1,
+            None if line_idx == 0 => return self.n_chars,
+            None => self.n_chars,
+        };
+
+        let chars_from = if line_idx == 0 {
+            0
+        } else {
+            *self.line_endings.iter().nth(line_idx - 1).unwrap().1 + 1
+        };
+
+        chars_to - chars_from
+    }
+
     /// An exclusive range of characters from the buffer
     pub fn slice(&self, char_from: usize, char_to: usize) -> Slice {
         let from = self.char_to_raw_byte(char_from);
@@ -928,6 +952,11 @@ mod tests {
             gb.len_chars(),
             gb.to_string().chars().count(),
             "char iter len != len_chars"
+        );
+        assert_eq!(
+            gb.line(0).chars().count(),
+            gb.line_len_chars(0),
+            "line_len_chars != len_chars"
         );
 
         gb.insert_char(5, 'X');

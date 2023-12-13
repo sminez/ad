@@ -35,7 +35,7 @@ impl Cur {
 
     pub(crate) fn from_yx(y_idx: usize, x_idx: usize, b: &Buffer) -> Self {
         let line_start = b.txt.line_to_char(y_idx);
-        let mut x_max = b.txt.line(y_idx).chars().count();
+        let mut x_max = b.txt.line_len_chars(y_idx);
         if y_idx < b.len_lines() - 1 {
             x_max -= 1;
         }
@@ -95,7 +95,7 @@ impl Cur {
     #[must_use]
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         let y = b.txt.char_to_line(self.idx);
-        self.idx = b.txt.line_to_char(y) + b.txt.line(y).chars().count();
+        self.idx = b.txt.line_to_char(y) + b.txt.line_len_chars(y);
 
         // On the last line of the file we don't have a trailing newline
         // so we really do want the final character

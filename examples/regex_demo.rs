@@ -11,12 +11,6 @@
 //! Submatch $1: Some("123")
 //! Submatch $2: Some("456")
 //! Match ($0):  "123-456"
-//!
-//! :: matching against a Rope
-//! match time (micro seconds): 2
-//! Submatch $1: Some(["123"])
-//! Submatch $2: Some(["456"])
-//! Match ($0):  ["123-456"]
 
 use ad::regex::Regex;
 use std::time::Instant;

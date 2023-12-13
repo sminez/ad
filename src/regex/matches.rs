@@ -81,8 +81,8 @@ impl<'a> IndexedChars for &'a str {
 
     fn iter_from(&self, from: usize) -> Option<Self::I> {
         // This is not at all efficient but we only really make use of strings in test cases where
-        // the length of the string is small. For the "real" impls using Ropes, checking the number
-        // of chars in the rope is O(1).
+        // the length of the string is small. For the "real" impls using GapBuffers, checking the number
+        // of chars in the buffer is O(1) as we cache it.
         if from >= self.chars().count() {
             None
         } else {

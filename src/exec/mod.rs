@@ -182,9 +182,10 @@ impl Program {
         ed.end_edit_transaction();
 
         // In the case of running against a lazy stream our initial `to` will be a sential value of
-        // usize::MAX which needs to be clamped to the size of the input. For Buffers and Ropes
+        // usize::MAX which needs to be clamped to the size of the input. For Buffers and GapBuffers
         // where we know that we should already be in bounds this is not required but the overhead
-        // of always doing it is fairly minimal.
+        // of always doing it is minimal as checking the number of chars in the buffer is O(1) due
+        // to us caching the value.
         let ix_max = ed.len_chars();
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
