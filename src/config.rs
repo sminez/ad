@@ -20,8 +20,8 @@ impl Default for Config {
             tabstop: 4,
             expand_tab: true,
             match_indent: true,
-            status_timeout: 5,
-            minibuffer_lines: 10,
+            status_timeout: 3,
+            minibuffer_lines: 15,
             find_command: "fd -t f".to_string(),
             colorscheme: ColorScheme::default(),
             bindings: BTreeMap::new(),
@@ -227,9 +227,6 @@ map G G => my-prog
                 .collect();
 
         let expected = Config {
-            tabstop: 4,
-            expand_tab: true,
-            match_indent: true,
             bindings,
             ..Default::default()
         };
