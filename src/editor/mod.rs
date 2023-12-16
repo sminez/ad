@@ -166,6 +166,7 @@ impl Editor {
             }
         }
     }
+
     fn handle_buffer_mutation<F: FnOnce(&mut Buffer, String)>(
         &mut self,
         id: usize,
@@ -277,6 +278,12 @@ impl Editor {
             FindFile => self.find_file(),
             FindRepoFile => self.find_repo_file(),
             FocusBuffer { id } => self.focus_buffer(id),
+            JumpListForward => self
+                .buffers
+                .jump_list_forward(self.screen_rows, self.screen_cols),
+            JumpListBack => self
+                .buffers
+                .jump_list_backward(self.screen_rows, self.screen_cols),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();

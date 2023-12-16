@@ -102,6 +102,9 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('u') ] => [ Undo ],
         [ Char('U') ] => [ Redo ],
 
+        [ Ctrl('o') ] => [ JumpListBack ],
+        [ Tab ] => [ JumpListForward ], // ctrl-i
+
         [ Return ] => [ LoadDot ],
 
     };

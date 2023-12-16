@@ -54,6 +54,8 @@ pub enum Action {
     FocusBuffer { id: usize },
     InsertChar { c: char },
     InsertString { s: String },
+    JumpListForward,
+    JumpListBack,
     LoadDot,
     NewEditLogTransaction,
     NextBuffer,

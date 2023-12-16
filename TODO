@@ -9,11 +9,6 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
-- [ ] FEATURE: jump list
-  - Probably not exactly the same as vim's but the plan is to track positions:
-    - When moving between buffers
-    - When setting dot via mouse
-    - When setting dot via addr / Edit
 - [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
 - [ ] FEATURE: mini-buffer tab complete
 - [ ] FEATURE: completion of command mode commands
