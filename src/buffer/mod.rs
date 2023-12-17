@@ -544,7 +544,7 @@ impl Buffer {
     }
 
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
-        self.clear_render_cache_past_index(self.dot.first_cur().idx);
+        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
@@ -557,7 +557,7 @@ impl Buffer {
     }
 
     pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
-        self.clear_render_cache_past_index(self.dot.first_cur().idx);
+        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
@@ -620,11 +620,17 @@ impl Buffer {
             Action::Undo => return self.undo(),
 
             Action::DotCollapseFirst => {
-                self.clear_render_cache_past_index(self.dot.first_cur().idx);
+                self.clear_render_cache_between_indices(
+                    self.dot.first_cur().idx,
+                    self.dot.last_cur().idx,
+                );
                 self.dot = self.dot.collapse_to_first_cur();
             }
             Action::DotCollapseLast => {
-                self.clear_render_cache_past_index(self.dot.first_cur().idx);
+                self.clear_render_cache_between_indices(
+                    self.dot.first_cur().idx,
+                    self.dot.last_cur().idx,
+                );
                 self.dot = self.dot.collapse_to_last_cur();
             }
             Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
@@ -703,7 +709,7 @@ impl Buffer {
 
     /// Set dot and clamp to ensure it is within bounds
     fn set_dot(&mut self, t: TextObject, n: usize) {
-        self.clear_render_cache_past_index(self.dot.first_cur().idx);
+        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.set_dot(self);
         }
@@ -712,7 +718,7 @@ impl Buffer {
 
     /// Extend dot foward and clamp to ensure it is within bounds
     fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
-        self.clear_render_cache_past_index(self.dot.first_cur().idx);
+        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.extend_dot_forward(self);
         }
@@ -721,7 +727,7 @@ impl Buffer {
 
     /// Extend dot backward and clamp to ensure it is within bounds
     fn extend_dot_backward(&mut self, t: TextObject, n: usize) {
-        self.clear_render_cache_past_index(self.dot.first_cur().idx);
+        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.extend_dot_backward(self);
         }
@@ -787,9 +793,10 @@ impl Buffer {
         self.dot = Dot::Cur { c: new_cur };
     }
 
-    fn clear_render_cache_past_index(&mut self, idx: usize) {
-        let lnum = self.txt.char_to_line(idx);
-        self.rendered_line_cache.split_off(&lnum);
+    fn clear_render_cache_between_indices(&mut self, char_from: usize, char_to: usize) {
+        let from = self.txt.char_to_line(char_from);
+        let to = self.txt.char_to_line(char_to);
+        self.rendered_line_cache.retain(|&k, _| k < from && k > to);
     }
 
     fn insert_char(&mut self, dot: Dot, ch: char) -> (Cur, Option<String>) {
@@ -799,7 +806,7 @@ impl Buffer {
         };
 
         let idx = cur.idx;
-        self.clear_render_cache_past_index(idx);
+        self.clear_render_cache_between_indices(idx, idx);
         self.txt.insert_char(idx, ch);
         self.edit_log.insert_char(cur, ch);
         self.dirty = true;
@@ -813,7 +820,8 @@ impl Buffer {
             Dot::Range { r } => self.delete_range(r),
         };
 
-        self.clear_render_cache_past_index(cur.idx);
+        let idx = cur.idx;
+        let len = s.len();
 
         // Inserting an empty string should not be recorded as an edit (and is
         // a no-op for the content of self.txt) but we support it as inserting
@@ -827,17 +835,17 @@ impl Buffer {
         }
 
         self.dirty = true;
+        self.clear_render_cache_between_indices(idx, idx + len);
 
         (cur, deleted)
     }
 
     fn delete_dot(&mut self, dot: Dot) -> (Cur, Option<String>) {
+        self.clear_render_cache_between_indices(dot.first_cur().idx, dot.last_cur().idx);
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (self.delete_cur(c), None),
             Dot::Range { r } => self.delete_range(r),
         };
-
-        self.clear_render_cache_past_index(cur.idx);
 
         (cur, deleted)
     }

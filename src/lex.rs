@@ -9,8 +9,10 @@ pub const RUST_SPEC: LangSpec = LangSpec {
     keywords: &[
         "pub", "return", "crate", "super", "use", "mod", "where", "mut", "self",
     ],
-    control_flow: &["if", "else", "for", "in", "loop", "match"],
-    definitions: &["let", "enum", "struct", "trait", "impl", "fn"],
+    control_flow: &[
+        "if", "else", "for", "in", "loop", "match", "break", "continue",
+    ],
+    definitions: &["let", "enum", "struct", "trait", "impl", "fn", "type"],
     punctuation: &[
         "::", "&", "%", "||", "|", "->", "=>", "==", ">>", "<<", "=", "?", "^", "..", "+", "-",
         "*", "/", "<", ">", "+=", "-=", "*=", "/=", "%=", ">=", "<=", "&=", "|=", "^=",
@@ -417,6 +419,34 @@ mod tests {
                 ty: TokenType::Default,
                 s: line
             })
+        );
+    }
+
+    #[test]
+    fn tokenize_works() {
+        let tokenizer = Tokenizer::new(RUST_SPEC);
+        let tks = tokenizer.regex_tokenize("impl Default for Foo {");
+
+        assert_eq!(
+            tks,
+            Tokens::Multi(vec![
+                Token {
+                    ty: Definition,
+                    s: "impl"
+                },
+                Token {
+                    ty: Default,
+                    s: " Default "
+                },
+                Token {
+                    ty: ControlFlow,
+                    s: "for"
+                },
+                Token {
+                    ty: Default,
+                    s: " Foo {"
+                },
+            ])
         );
     }
 }

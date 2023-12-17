@@ -457,8 +457,10 @@ mod tests {
     #[test_case("\\b\\w+\\b", "foo", Some("foo"); "word boundary at end of input")]
     #[test_case("\\bfor\\b", "forward", None; "word boundary for match at start of word")]
     #[test_case("\\bfor\\b", "for ward", Some("for"); "word boundary for match not inside word")]
+    #[test_case("\\bfor\\b", "bob for", Some("for"); "word boundary match not at BOF")]
     #[test_case("\\bin\\b", "min", None; "word boundary for match at end of word")]
     #[test_case("\\b(in|for)\\b", "min", None; "word boundary for alt match at end of word")]
+    #[test_case("\\b(in|for)\\b", "bob for", Some("for"); "word boundary for alt match not at BOF")]
     #[test]
     fn match_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = Regex::compile(re).unwrap();
@@ -501,6 +503,10 @@ mod tests {
     #[test_case("[0-9]+", " 42 3 127 9991", &["42", "3", "127", "9991"]; "integers to EOF")]
     #[test_case("[0-9]+", "42 3 127 9991 ", &["42", "3", "127", "9991"]; "integers from BOF")]
     #[test_case("[0-9]+", "42 3 127 9991", &["42", "3", "127", "9991"]; "integers full input")]
+    #[test_case("foo|bar|baz", "baz bar foo bar", &["baz", "bar", "foo", "bar"]; "alts spaced in s")]
+    #[test_case("foo|bar|baz", "bazbarfoobar", &["baz", "bar", "foo", "bar"]; "alts back to back in s")]
+    #[test_case("(foo|bar|baz)", "foo foobar barfoo baz", &["foo", "foo", "bar", "bar", "foo", "baz"]; "alts in parens")]
+    #[test_case("\\b(foo|bar|baz)\\b", "foo foobar barfoo baz", &["foo", "baz"]; "alts with word boundaries")]
     #[test]
     fn match_all_works(re: &str, s: &str, expected: &[&str]) {
         let mut r = Regex::compile(re).unwrap();

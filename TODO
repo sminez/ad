@@ -1,6 +1,10 @@
 :: TODO
 
 -- BUGS --
+- [!] The regex engine "WordBoundary" assertion doesn't work correctly around alts
+  - See the failing test cases in lex::tests and regex::vm::tests for details of the behaviour
+  - It looks as though the assertion after _might_ be working? But the one before definitely isn't
+    behaving correctly
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
