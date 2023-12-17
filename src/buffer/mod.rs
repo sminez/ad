@@ -3,6 +3,10 @@ use crate::{
     config::ColorScheme,
     dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
+    ftype::{
+        lex::{Tokenizer, Tokens},
+        RUST_SPEC,
+    },
     key::Key,
     term::Style,
     util::relative_path_from,
@@ -74,8 +78,7 @@ pub struct Buffer {
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     edit_log: EditLog,
-    // FIXME: tidy up imports once this is working
-    tokenizer: crate::lex::Tokenizer,
+    tokenizer: Tokenizer,
     rendered_line_cache: BTreeMap<usize, String>,
 }
 
@@ -105,7 +108,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            tokenizer: Tokenizer::new(RUST_SPEC),
             rendered_line_cache: BTreeMap::new(),
         })
     }
@@ -199,7 +202,7 @@ impl Buffer {
             dirty: false,
             edit_log: Default::default(),
             // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            tokenizer: Tokenizer::new(RUST_SPEC),
             rendered_line_cache: BTreeMap::new(),
         }
     }
@@ -218,7 +221,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            tokenizer: Tokenizer::new(RUST_SPEC),
             rendered_line_cache: BTreeMap::new(),
         }
     }
@@ -241,7 +244,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            tokenizer: Tokenizer::new(RUST_SPEC),
             rendered_line_cache: BTreeMap::new(),
         }
     }
@@ -519,8 +522,8 @@ impl Buffer {
         let tks = match dot_range {
             Some((start, end)) => raw_tks.with_highlighted_dot(start, end),
             None => match raw_tks {
-                crate::lex::Tokens::Single(tk) => vec![tk],
-                crate::lex::Tokens::Multi(tks) => tks,
+                Tokens::Single(tk) => vec![tk],
+                Tokens::Multi(tks) => tks,
             },
         };
 

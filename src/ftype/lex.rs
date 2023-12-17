@@ -2,23 +2,6 @@
 use crate::{config::ColorScheme, regex::Regex, term::Style};
 use std::{cell::RefCell, cmp::min};
 
-pub const RUST_SPEC: LangSpec = LangSpec {
-    single_line_comment: Some("//"),
-    multi_line_comment: Some(("/*", "*/")),
-    string_delimiters: StringDelims::Both,
-    keywords: &[
-        "pub", "return", "crate", "super", "use", "mod", "where", "mut", "self",
-    ],
-    control_flow: &[
-        "if", "else", "for", "in", "loop", "match", "break", "continue",
-    ],
-    definitions: &["let", "enum", "struct", "trait", "impl", "fn", "type"],
-    punctuation: &[
-        "::", "&", "%", "||", "|", "->", "=>", "==", ">>", "<<", "=", "?", "^", "..", "+", "-",
-        "*", "/", "<", ">", "+=", "-=", "*=", "/=", "%=", ">=", "<=", "&=", "|=", "^=",
-    ],
-};
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenType {
     Dot,
@@ -163,8 +146,8 @@ pub enum StringDelims {
 }
 
 impl StringDelims {
-    const RE_DOUBLE: &'static str = r#""(\\.|[^\"\\])*?""#;
-    const RE_SINGLE: &'static str = r#"'(\\.|[^\'\\])*?'"#;
+    const RE_DOUBLE: &'static str = r#""(\\.|[^\"\\])*"?"#;
+    const RE_SINGLE: &'static str = r#"'(\\.|[^\'\\])*'?"#;
 
     fn as_re_string(&self) -> String {
         match self {
@@ -345,6 +328,7 @@ impl Tokenizer {
 mod tests {
     use super::TokenType::*;
     use super::*;
+    use crate::ftype::RUST_SPEC;
     use simple_test_case::test_case;
 
     #[test]
