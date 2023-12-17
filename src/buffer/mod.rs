@@ -10,6 +10,7 @@ use crate::{
 };
 use std::{
     cmp::min,
+    collections::BTreeMap,
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -75,6 +76,7 @@ pub struct Buffer {
     edit_log: EditLog,
     // FIXME: tidy up imports once this is working
     tokenizer: crate::lex::Tokenizer,
+    rendered_line_cache: BTreeMap<usize, String>,
 }
 
 impl Buffer {
@@ -104,6 +106,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             // FIXME: this is a hack for testing - need to detect filetype
             tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            rendered_line_cache: BTreeMap::new(),
         })
     }
 
@@ -197,6 +200,7 @@ impl Buffer {
             edit_log: Default::default(),
             // FIXME: this is a hack for testing - need to detect filetype
             tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -215,6 +219,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             // FIXME: this is a hack for testing - need to detect filetype
             tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -237,6 +242,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             // FIXME: this is a hack for testing - need to detect filetype
             tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
+            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -474,7 +480,24 @@ impl Buffer {
     /// available screen space.
     /// This includes tab expansion and any styling that might be applied but not
     /// trailing \r\n or screen clearing escape codes.
-    pub(crate) fn styled_rline_unchecked(
+    pub(crate) fn styled_rline_unchecked<'a>(
+        &'a mut self,
+        y: usize,
+        lpad: usize,
+        screen_cols: usize,
+        cs: &ColorScheme,
+    ) -> &'a str {
+        // we need a mutable ref to self for computing the new line
+        #[allow(clippy::map_entry)]
+        if !self.rendered_line_cache.contains_key(&y) {
+            let line = self.compute_styled_rline_unchecked(y, lpad, screen_cols, cs);
+            self.rendered_line_cache.insert(y, line);
+        }
+
+        self.rendered_line_cache.get(&y).unwrap()
+    }
+
+    fn compute_styled_rline_unchecked(
         &self,
         y: usize,
         lpad: usize,
@@ -503,7 +526,6 @@ impl Buffer {
 
         let mut buf = String::new();
         for tk in tks.into_iter() {
-            // FIXME: these rendered lines should be cached
             buf.push_str(&tk.render(cs));
         }
 
@@ -522,6 +544,7 @@ impl Buffer {
     }
 
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+        self.clear_render_cache_past_index(self.dot.first_cur().idx);
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
@@ -534,6 +557,7 @@ impl Buffer {
     }
 
     pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+        self.clear_render_cache_past_index(self.dot.first_cur().idx);
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
@@ -595,8 +619,14 @@ impl Buffer {
             Action::Redo => return self.redo(),
             Action::Undo => return self.undo(),
 
-            Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
-            Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
+            Action::DotCollapseFirst => {
+                self.clear_render_cache_past_index(self.dot.first_cur().idx);
+                self.dot = self.dot.collapse_to_first_cur();
+            }
+            Action::DotCollapseLast => {
+                self.clear_render_cache_past_index(self.dot.first_cur().idx);
+                self.dot = self.dot.collapse_to_last_cur();
+            }
             Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
             Action::DotExtendForward(tobj, count) => self.extend_dot_forward(tobj, count),
             Action::DotFlip => self.dot.flip(),
@@ -673,6 +703,7 @@ impl Buffer {
 
     /// Set dot and clamp to ensure it is within bounds
     fn set_dot(&mut self, t: TextObject, n: usize) {
+        self.clear_render_cache_past_index(self.dot.first_cur().idx);
         for _ in 0..n {
             t.set_dot(self);
         }
@@ -681,6 +712,7 @@ impl Buffer {
 
     /// Extend dot foward and clamp to ensure it is within bounds
     fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
+        self.clear_render_cache_past_index(self.dot.first_cur().idx);
         for _ in 0..n {
             t.extend_dot_forward(self);
         }
@@ -689,6 +721,7 @@ impl Buffer {
 
     /// Extend dot backward and clamp to ensure it is within bounds
     fn extend_dot_backward(&mut self, t: TextObject, n: usize) {
+        self.clear_render_cache_past_index(self.dot.first_cur().idx);
         for _ in 0..n {
             t.extend_dot_backward(self);
         }
@@ -754,6 +787,11 @@ impl Buffer {
         self.dot = Dot::Cur { c: new_cur };
     }
 
+    fn clear_render_cache_past_index(&mut self, idx: usize) {
+        let lnum = self.txt.char_to_line(idx);
+        self.rendered_line_cache.split_off(&lnum);
+    }
+
     fn insert_char(&mut self, dot: Dot, ch: char) -> (Cur, Option<String>) {
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
@@ -761,6 +799,7 @@ impl Buffer {
         };
 
         let idx = cur.idx;
+        self.clear_render_cache_past_index(idx);
         self.txt.insert_char(idx, ch);
         self.edit_log.insert_char(cur, ch);
         self.dirty = true;
@@ -773,6 +812,8 @@ impl Buffer {
             Dot::Cur { c } => (c, None),
             Dot::Range { r } => self.delete_range(r),
         };
+
+        self.clear_render_cache_past_index(cur.idx);
 
         // Inserting an empty string should not be recorded as an edit (and is
         // a no-op for the content of self.txt) but we support it as inserting
@@ -791,10 +832,14 @@ impl Buffer {
     }
 
     fn delete_dot(&mut self, dot: Dot) -> (Cur, Option<String>) {
-        match dot {
+        let (cur, deleted) = match dot {
             Dot::Cur { c } => (self.delete_cur(c), None),
             Dot::Range { r } => self.delete_range(r),
-        }
+        };
+
+        self.clear_render_cache_past_index(cur.idx);
+
+        (cur, deleted)
     }
 
     fn delete_cur(&mut self, cur: Cur) -> Cur {

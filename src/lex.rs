@@ -5,15 +5,15 @@ use std::{cell::RefCell, cmp::min};
 pub const RUST_SPEC: LangSpec = LangSpec {
     single_line_comment: Some("//"),
     multi_line_comment: Some(("/*", "*/")),
-    string_delimiters: StringDelims::Double,
+    string_delimiters: StringDelims::Both,
     keywords: &[
         "pub", "return", "crate", "super", "use", "mod", "where", "mut", "self",
     ],
     control_flow: &["if", "else", "for", "in", "loop", "match"],
     definitions: &["let", "enum", "struct", "trait", "impl", "fn"],
     punctuation: &[
-        "::", "&", "->", "=>", "==", "=", "?", "..", "+", "-", "*", "<", ">", "+=", "-=", "*=",
-        ">=", "<=",
+        "::", "&", "%", "||", "|", "->", "=>", "==", ">>", "<<", "=", "?", "^", "..", "+", "-",
+        "*", "/", "<", ">", "+=", "-=", "*=", "/=", "%=", ">=", "<=", "&=", "|=", "^=",
     ],
 };
 
@@ -66,7 +66,14 @@ impl<'a> Token<'a> {
                 Style::NoBold,
             ),
             TokenType::Definition => {
-                format!("{}{}{}", Style::Bg(cs.bg), Style::Fg(cs.definition), self.s)
+                format!(
+                    "{}{}{}{}{}",
+                    Style::Italic,
+                    Style::Bg(cs.bg),
+                    Style::Fg(cs.definition),
+                    self.s,
+                    Style::NoItalic
+                )
             }
             TokenType::Punctuation => format!(
                 "{}{}{}",
@@ -153,6 +160,19 @@ pub enum StringDelims {
     Both,
 }
 
+impl StringDelims {
+    const RE_DOUBLE: &'static str = r#""(\\.|[^\"\\])*?""#;
+    const RE_SINGLE: &'static str = r#"'(\\.|[^\'\\])*?'"#;
+
+    fn as_re_string(&self) -> String {
+        match self {
+            Self::Double => Self::RE_DOUBLE.to_string(),
+            Self::Single => Self::RE_SINGLE.to_string(),
+            Self::Both => format!("{}|{}", Self::RE_DOUBLE, Self::RE_SINGLE),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LangSpec {
     pub single_line_comment: Option<&'static str>,
@@ -168,7 +188,7 @@ pub struct LangSpec {
 fn push_escaped(buf: &mut String, s: &str) {
     for ch in s.chars() {
         match ch {
-            '.' | '@' | '?' | '+' | '*' | '{' | '}' | '[' | ']' | '(' | ')' | '^' | '$' => {
+            '.' | '@' | '?' | '+' | '*' | '{' | '}' | '[' | ']' | '(' | ')' | '^' | '$' | '|' => {
                 buf.push('\\');
             }
             _ => (),
@@ -205,13 +225,18 @@ impl LangSpec {
 pub struct Tokenizer {
     ls: LangSpec,
     re: RefCell<Regex>,
+    re_str: RefCell<Regex>,
 }
 
 impl Tokenizer {
     pub fn new(ls: LangSpec) -> Self {
         let re = RefCell::new(ls.re_from_all_literals());
+        let re_str = RefCell::new(
+            Regex::compile(&ls.string_delimiters.as_re_string())
+                .expect("valid regex to be build from string_delimiters"),
+        );
 
-        Self { ls, re }
+        Self { ls, re, re_str }
     }
 
     /// FIXME: doing this by line with no way to look ahead or back won't work for multiline constructs
@@ -245,8 +270,35 @@ impl Tokenizer {
         (line, None)
     }
 
-    // FIXME: this is horrifyingly inefficient right now
     fn regex_tokenize<'a>(&self, line: &'a str) -> Tokens<'a> {
+        let mut tks = Vec::new();
+        let mut offset = 0;
+
+        for m in self.re_str.borrow_mut().match_str_all(line) {
+            let (start, end) = m.loc();
+            let s = m.str_match_text_ref(line);
+            if start > offset {
+                tks.extend_from_slice(&self.regex_tokenize_literals(&line[offset..start]));
+            }
+            tks.push(Token {
+                ty: TokenType::String,
+                s,
+            });
+            offset = end;
+        }
+
+        if offset < line.len() {
+            tks.extend_from_slice(&self.regex_tokenize_literals(&line[offset..]));
+        }
+
+        if tks.len() == 1 {
+            Tokens::Single(tks[0])
+        } else {
+            Tokens::Multi(tks)
+        }
+    }
+
+    fn regex_tokenize_literals<'a>(&self, line: &'a str) -> Vec<Token<'a>> {
         let mut tks = Vec::new();
         let mut offset = 0;
 
@@ -283,11 +335,7 @@ impl Tokenizer {
             });
         }
 
-        if tks.len() == 1 {
-            Tokens::Single(tks[0])
-        } else {
-            Tokens::Multi(tks)
-        }
+        tks
     }
 }
 

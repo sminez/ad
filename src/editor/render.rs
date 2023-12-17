@@ -81,8 +81,9 @@ impl Editor {
     }
 
     /// Returns the width of the sign column
-    fn render_rows(&self, buf: &mut String, screen_rows: usize, cs: &ColorScheme) -> usize {
-        let b = self.buffers.active();
+    fn render_rows(&mut self, buf: &mut String, screen_rows: usize, cs: &ColorScheme) -> usize {
+        let is_empty_scratch = self.buffers.is_empty_scratch();
+        let b = self.buffers.active_mut();
 
         // Sort out dimensions of the sign/number column
         let (w_lnum, w_sgncol) = b.sign_col_dims(screen_rows);
@@ -99,7 +100,7 @@ impl Editor {
                     width = w_lnum
                 ));
 
-                if self.buffers.is_empty_scratch() && y == self.screen_rows / 3 && y < screen_rows {
+                if is_empty_scratch && y == self.screen_rows / 3 && y < screen_rows {
                     let mut banner = format!("ad editor :: version {VERSION}");
                     banner.truncate(self.screen_cols - w_sgncol);
                     let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;

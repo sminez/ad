@@ -63,7 +63,7 @@ impl Default for ColorScheme {
             control_flow: "#7E9CD8".try_into().unwrap(),
             definition: "#957FB8".try_into().unwrap(),
             punctuation: "#DCA561".try_into().unwrap(),
-            string: "#A7C080".try_into().unwrap(),
+            string: "#A6CC70".try_into().unwrap(),
         }
     }
 }
