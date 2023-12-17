@@ -455,6 +455,10 @@ mod tests {
     #[test_case("a{3,5}", "aa", None; "counted repetition less")]
     #[test_case("^a{3,5}$", "aaaaaa", None; "counted repetition more")]
     #[test_case("\\b\\w+\\b", "foo", Some("foo"); "word boundary at end of input")]
+    #[test_case("\\bfor\\b", "forward", None; "word boundary for match at start of word")]
+    #[test_case("\\bfor\\b", "for ward", Some("for"); "word boundary for match not inside word")]
+    #[test_case("\\bin\\b", "min", None; "word boundary for match at end of word")]
+    #[test_case("\\b(in|for)\\b", "min", None; "word boundary for alt match at end of word")]
     #[test]
     fn match_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = Regex::compile(re).unwrap();
@@ -567,10 +571,16 @@ mod tests {
         assert_eq!(m1.str_match_text(s), "this is");
 
         let m2 = it.next().unwrap();
-        assert_eq!(m2.str_match_text(s), "a multiline");
+        assert_eq!(m2.str_match_text(s), "");
 
         let m3 = it.next().unwrap();
-        assert_eq!(m3.str_match_text(s), "file");
+        assert_eq!(m3.str_match_text(s), "a multiline");
+
+        let m4 = it.next().unwrap();
+        assert_eq!(m4.str_match_text(s), "");
+
+        let m5 = it.next().unwrap();
+        assert_eq!(m5.str_match_text(s), "file");
         assert_eq!(it.next(), None);
     }
 

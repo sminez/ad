@@ -35,6 +35,15 @@ impl Match {
         s.chars().skip(a).take(b - a).collect()
     }
 
+    pub fn str_match_text_ref<'a>(&self, s: &'a str) -> &'a str {
+        let (a, b) = self.loc();
+        let mut it = s.char_indices().skip(a);
+        let (first, _) = it.next().unwrap();
+        let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
+
+        &s[first..=last]
+    }
+
     pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
         let (a, b) = self.sub_loc(n)?;
         Some(s.chars().skip(a).take(b - a).collect())
@@ -127,8 +136,13 @@ where
         let m = self
             .r
             .match_iter(&mut self.it.iter_from(self.from)?, self.from)?;
-        (_, self.from) = m.loc();
-        self.from += 1;
+
+        let (_, from) = m.loc();
+        if from == self.from {
+            self.from += 1;
+        } else {
+            self.from = from;
+        }
 
         Some(m)
     }

@@ -31,23 +31,39 @@ impl Default for Config {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorScheme {
+    // ui
     pub(crate) bg: Color,
     pub(crate) fg: Color,
     pub(crate) dot_bg: Color,
     pub(crate) bar_bg: Color,
     pub(crate) signcol_fg: Color,
     pub(crate) minibuffer_hl: Color,
+    // syntax
+    pub(crate) comment: Color,
+    pub(crate) keyword: Color,
+    pub(crate) control_flow: Color,
+    pub(crate) definition: Color,
+    pub(crate) punctuation: Color,
+    pub(crate) string: Color,
 }
 
 impl Default for ColorScheme {
     fn default() -> Self {
         Self {
+            // ui
             bg: "#1B1720".try_into().unwrap(),
             fg: "#EBDBB2".try_into().unwrap(),
             dot_bg: "#336677".try_into().unwrap(),
             bar_bg: "#4E415C".try_into().unwrap(),
             signcol_fg: "#544863".try_into().unwrap(),
             minibuffer_hl: "#3E3549".try_into().unwrap(),
+            // syntax
+            comment: "#624354".try_into().unwrap(),
+            keyword: "#Bf616A".try_into().unwrap(),
+            control_flow: "#7E9CD8".try_into().unwrap(),
+            definition: "#957FB8".try_into().unwrap(),
+            punctuation: "#DCA561".try_into().unwrap(),
+            string: "#A7C080".try_into().unwrap(),
         }
     }
 }

@@ -73,6 +73,8 @@ pub struct Buffer {
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     edit_log: EditLog,
+    // FIXME: tidy up imports once this is working
+    tokenizer: crate::lex::Tokenizer,
 }
 
 impl Buffer {
@@ -100,6 +102,8 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
+            // FIXME: this is a hack for testing - need to detect filetype
+            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
         })
     }
 
@@ -191,6 +195,8 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: Default::default(),
+            // FIXME: this is a hack for testing - need to detect filetype
+            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
         }
     }
 
@@ -207,6 +213,8 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
+            // FIXME: this is a hack for testing - need to detect filetype
+            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
         }
     }
 
@@ -227,6 +235,8 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
+            // FIXME: this is a hack for testing - need to detect filetype
+            tokenizer: crate::lex::Tokenizer::new(crate::lex::RUST_SPEC),
         }
     }
 
@@ -480,16 +490,26 @@ impl Buffer {
             LineRange::Full { .. } => (0, usize::MAX),
         });
 
-        let (mut rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
+        let (rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
 
-        // Apply highlight if included in current Dot
-        if let Some((start, end)) = dot_range {
-            // rline.insert_str(end, &Style::Reset.to_string());
-            rline.insert_str(end, &format!("{}{}", Style::Bg(cs.bg), Style::Fg(cs.fg)));
-            rline.insert_str(start, &Style::Bg(cs.dot_bg).to_string());
+        let raw_tks = self.tokenizer.tokenize(&rline);
+        let tks = match dot_range {
+            Some((start, end)) => raw_tks.with_highlighted_dot(start, end),
+            None => match raw_tks {
+                crate::lex::Tokens::Single(tk) => vec![tk],
+                crate::lex::Tokens::Multi(tks) => tks,
+            },
+        };
+
+        let mut buf = String::new();
+        for tk in tks.into_iter() {
+            // FIXME: these rendered lines should be cached
+            buf.push_str(&tk.render(cs));
         }
 
-        rline
+        buf.push_str(&Style::Bg(cs.bg).to_string());
+
+        buf
     }
 
     pub(crate) fn sign_col_dims(&self, screen_rows: usize) -> (usize, usize) {
