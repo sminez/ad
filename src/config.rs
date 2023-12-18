@@ -52,7 +52,7 @@ impl Default for ColorScheme {
         Self {
             // ui
             bg: "#1B1720".try_into().unwrap(),
-            fg: "#EBDBB2".try_into().unwrap(),
+            fg: "#E6D29E".try_into().unwrap(),
             dot_bg: "#336677".try_into().unwrap(),
             bar_bg: "#4E415C".try_into().unwrap(),
             signcol_fg: "#544863".try_into().unwrap(),
@@ -65,7 +65,9 @@ impl Default for ColorScheme {
             punctuation: "#DCA561".try_into().unwrap(),
             // string: "#A6CC70".try_into().unwrap(),
             // string: "#87C87C".try_into().unwrap(),
-            string: "#7ECC70".try_into().unwrap(),
+            // string: "#C9D87A".try_into().unwrap(),
+            // string: "#9CD87E".try_into().unwrap(),
+            string: "#61DCA5".try_into().unwrap(),
         }
     }
 }

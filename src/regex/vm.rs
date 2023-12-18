@@ -173,7 +173,10 @@ impl Regex {
         // We bump the generation to ensure we don't collide with anything from
         // a previous run while initialising the VM.
         self.gen += 1;
-        self.add_thread(Thread::default(), sp, true);
+        // When setting up the initial threads we have our prelude which uses "@" so we provide a
+        // null byte for the initial character as it is not needed and it avoids us having to make
+        // the "ch" param of add_thread optional.
+        self.add_thread(Thread::default(), sp, '\0', true);
         swap(&mut self.clist, &mut self.nlist);
         self.gen += 1;
 
@@ -248,11 +251,11 @@ impl Regex {
         match &self.prog[t.pc].op {
             // If comparisons and their assertions hold then queue the resulting threads
             Op::Comp(comp) if comp.matches(ch) => match t.assertion {
-                Some(a) if !a.holds_for(self.prev, self.next) => {
+                Some(a) if !a.holds_for(self.prev, ch, self.next) => {
                     self.sm_dec_ref(t.sm);
                     return None;
                 }
-                _ => self.add_thread(thread(t.pc + 1, t.sm), sp, false),
+                _ => self.add_thread(thread(t.pc + 1, t.sm), sp, ch, false),
             },
 
             Op::Match => return Some(t.sm),
@@ -266,7 +269,7 @@ impl Regex {
     }
 
     #[inline]
-    fn add_thread(&mut self, t: Thread, sp: usize, initial: bool) {
+    fn add_thread(&mut self, t: Thread, sp: usize, ch: char, initial: bool) {
         if self.prog[t.pc].gen == self.gen {
             self.sm_dec_ref(t.sm);
             return; // already on the list we are currently building
@@ -278,32 +281,48 @@ impl Regex {
         // to Clone as Op::Class does not implement Copy.
         // > This is faster than cloning the op and matching
         if let Op::Jump(l1) = self.prog[t.pc].op {
-            self.add_thread(thread(l1, t.sm), sp, initial);
+            let th = match t.assertion {
+                Some(a) => assert_thread(l1, t.sm, a),
+                None => thread(l1, t.sm),
+            };
+            self.add_thread(th, sp, ch, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
             self.sms[t.sm].refs += 1;
-            self.add_thread(thread(l1, t.sm), sp, initial);
-            self.add_thread(thread(l2, t.sm), sp, initial);
+            let (t1, t2) = match t.assertion {
+                Some(a) => (assert_thread(l1, t.sm, a), assert_thread(l2, t.sm, a)),
+                None => (thread(l1, t.sm), thread(l2, t.sm)),
+            };
+            self.add_thread(t1, sp, ch, initial);
+            self.add_thread(t2, sp, ch, initial);
         } else if let Op::Assertion(a) = self.prog[t.pc].op {
-            self.add_thread(assert_thread(t.pc + 1, t.sm, a), sp, initial);
+            self.add_thread(assert_thread(t.pc + 1, t.sm, a), sp, ch, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
-            match t.assertion {
-                Some(a) if !a.holds_for(self.prev, self.next) => self.sm_dec_ref(t.sm),
-                _ => {
-                    let sm = self.sm_update(t.sm, s, sp, initial, false);
-                    self.add_thread(thread(t.pc + 1, sm), sp, initial);
-                }
-            }
+            self.handle_save(t, s, sp, ch, initial, false)
         } else if let Op::RSave(s) = self.prog[t.pc].op {
-            match t.assertion {
-                Some(a) if !a.holds_for(self.prev, self.next) => self.sm_dec_ref(t.sm),
-                _ => {
-                    let sm = self.sm_update(t.sm, s, sp, initial, true);
-                    self.add_thread(thread(t.pc + 1, sm), sp, initial);
-                }
-            }
+            self.handle_save(t, s, sp, ch, initial, true)
         } else {
             self.nlist[self.p] = t;
             self.p += 1;
+        }
+    }
+
+    #[inline]
+    fn handle_save(&mut self, t: Thread, s: usize, sp: usize, ch: char, initial: bool, rev: bool) {
+        if (!rev && s % 2 == 0) || (rev && s % 2 == 1) {
+            let sm = self.sm_update(t.sm, s, sp, initial, rev);
+            let th = match t.assertion {
+                Some(a) => assert_thread(t.pc + 1, sm, a),
+                None => thread(t.pc + 1, sm),
+            };
+            self.add_thread(th, sp, ch, initial);
+        } else {
+            match t.assertion {
+                Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
+                _ => {
+                    let sm = self.sm_update(t.sm, s, sp, initial, rev);
+                    self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
+                }
+            }
         }
     }
 
@@ -458,7 +477,9 @@ mod tests {
     #[test_case("\\bfor\\b", "forward", None; "word boundary for match at start of word")]
     #[test_case("\\bfor\\b", "for ward", Some("for"); "word boundary for match not inside word")]
     #[test_case("\\bfor\\b", "bob for", Some("for"); "word boundary match not at BOF")]
+    #[test_case("\\bfor\\b", "bob for bob", Some("for"); "word boundary match not at BOF or EOF")]
     #[test_case("\\bin\\b", "min", None; "word boundary for match at end of word")]
+    #[test_case("\\b(in)\\b", "min", None; "word boundary for sub expression match at end of word")]
     #[test_case("\\b(in|for)\\b", "min", None; "word boundary for alt match at end of word")]
     #[test_case("\\b(in|for)\\b", "bob for", Some("for"); "word boundary for alt match not at BOF")]
     #[test]

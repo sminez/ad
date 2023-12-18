@@ -187,18 +187,51 @@ pub(super) enum Assertion {
 
 impl Assertion {
     #[inline]
-    pub(super) fn holds_for(&self, prev: Option<char>, next: Option<char>) -> bool {
+    pub(super) fn holds_for(&self, prev: Option<char>, ch: char, next: Option<char>) -> bool {
         match self {
             Assertion::LineStart => matches!(prev, Some('\n') | None),
             Assertion::LineEnd => matches!(next, Some('\n') | None),
+
             Assertion::WordBoundary => match (prev, next) {
                 (_, None) | (None, _) => true,
-                (Some(p), Some(n)) => p.is_alphanumeric() != n.is_alphanumeric(),
+                (Some(p), Some(n)) => is_word_boundary(p, ch) || is_word_boundary(ch, n),
             },
+
             Assertion::NonWordBoundary => match (prev, next) {
                 (_, None) | (None, _) => false,
-                (Some(p), Some(n)) => p.is_alphanumeric() == n.is_alphanumeric(),
+                (Some(p), Some(n)) => !is_word_boundary(p, ch) && !is_word_boundary(ch, n),
             },
+        }
+    }
+}
+
+fn is_word_boundary(prev: char, ch: char) -> bool {
+    use CharKind::*;
+
+    matches!(
+        (CharKind::from(prev), CharKind::from(ch)),
+        (Word, Punctuation)
+            | (Punctuation, Word)
+            | (Word | Punctuation, Whitespace)
+            | (Whitespace, Word | Punctuation)
+    )
+}
+
+#[derive(Clone, Copy)]
+enum CharKind {
+    Word,
+    Punctuation,
+    Whitespace,
+}
+
+impl From<char> for CharKind {
+    fn from(ch: char) -> Self {
+        if ch.is_alphanumeric() || ch == '_' {
+            CharKind::Word
+        } else if ch.is_whitespace() {
+            CharKind::Whitespace
+        } else {
+            CharKind::Punctuation
         }
     }
 }

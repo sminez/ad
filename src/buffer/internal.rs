@@ -394,7 +394,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_char(&mut self, char_idx: usize, ch: char) {
         let len = ch.len_utf8();
-        if len >= self.gap() {
+        if len >= self.gap() - 1 {
             self.grow_gap(len);
         }
 
@@ -427,7 +427,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_str(&mut self, char_idx: usize, s: &str) {
         let len = s.len();
-        if len >= self.gap() {
+        if len >= self.gap() - 1 {
             self.grow_gap(len);
         }
 
@@ -499,10 +499,9 @@ impl GapBuffer {
         self.move_gap_to(from);
 
         let n_bytes = to - from;
-        let n_chars = self.chars_in_raw_range(
-            self.char_to_raw_byte(char_from),
-            self.char_to_raw_byte(char_to),
-        );
+        let byte_from = self.char_to_raw_byte(char_from);
+        let byte_to = self.char_to_raw_byte(char_to);
+        let n_chars = self.chars_in_raw_range(byte_from, byte_to);
 
         self.gap_end += n_bytes;
         self.n_chars -= n_chars;
@@ -1438,5 +1437,25 @@ mod tests {
         let (s1, s2) = slice.as_strs();
         assert_eq!(s1, " world");
         assert_eq!(s2, "!\nhow");
+    }
+
+    #[test]
+    fn chars_in_raw_range_works() {
+        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
+        let char_from = 7;
+        let char_to = 12;
+
+        for i in 0..gb.len_chars() {
+            let idx = gb.char_to_byte(i);
+            gb.move_gap_to(idx);
+
+            let byte_from = gb.char_to_raw_byte(char_from);
+            let byte_to = gb.char_to_raw_byte(char_to);
+            let n_chars = gb.chars_in_raw_range(byte_from, byte_to);
+            assert_eq!(n_chars, char_to - char_from, "gap at {i}");
+
+            let n_chars = gb.chars_in_raw_range(0, gb.char_to_raw_byte(gb.n_chars));
+            assert_eq!(n_chars, gb.n_chars, "gap at {i}");
+        }
     }
 }
