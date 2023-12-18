@@ -33,7 +33,9 @@ impl Drop for Socket {
 
 fn unix_socket(name: &str) -> Socket {
     let uname = env::var("USER").unwrap();
-    let path = format!("/tmp/ns.{uname}.:0/{name}");
+    let socket_dir = format!("/tmp/ns.{uname}.:0");
+    let _ = fs::create_dir_all(&socket_dir);
+    let path = format!("{socket_dir}/{name}");
 
     // FIXME: really we should be handling this on exit but we'll need to catch
     // ctrl-c to do that properly. For now this works but it means that if you
