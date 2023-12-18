@@ -9,7 +9,6 @@ format!("foo bar {}", baz);
 
 &mut Bar, &mut Baz
 
-impl Default  for Foo {
 impl Default for Foo {
     fn default() -> Self {
         Foo { life: 42 }

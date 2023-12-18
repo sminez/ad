@@ -1,15 +1,6 @@
 :: TODO
 
 -- BUGS --
-- [!] The regex engine "WordBoundary" assertion doesn't work correctly around ~alts~ sub expressions
-  - See the failing test cases in lex::tests and regex::vm::tests for details of the behaviour
-  - It looks as though the assertion after _might_ be working? But the one before definitely isn't
-    behaving correctly
-  -> I think this is actually around the behaviour of assertions at the start of input when iterating
-     through all matches and being able to distinguish "start of match input" from "start of text"
-     - This only really matters for iteration where we need to offset into the input to find the next
-       match of the regex, so it might be better to have a way of handling this just for that case
-       rather than complicating the main matching API.
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
