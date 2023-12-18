@@ -297,43 +297,32 @@ impl Regex {
         } else if let Op::Assertion(a) = self.prog[t.pc].op {
             self.add_thread(assert_thread(t.pc + 1, t.sm, a), sp, ch, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
-            // FIXME: factor this out
-            if s % 2 == 0 {
-                let sm = self.sm_update(t.sm, s, sp, initial, false);
-                let th = match t.assertion {
-                    Some(a) => assert_thread(t.pc + 1, sm, a),
-                    None => thread(t.pc + 1, sm),
-                };
-                self.add_thread(th, sp, ch, initial);
-            } else {
-                match t.assertion {
-                    Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
-                    _ => {
-                        let sm = self.sm_update(t.sm, s, sp, initial, false);
-                        self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
-                    }
-                }
-            }
+            self.handle_save(t, s, sp, ch, initial, false)
         } else if let Op::RSave(s) = self.prog[t.pc].op {
-            if s % 2 == 1 {
-                let sm = self.sm_update(t.sm, s, sp, initial, true);
-                let th = match t.assertion {
-                    Some(a) => assert_thread(t.pc + 1, sm, a),
-                    None => thread(t.pc + 1, sm),
-                };
-                self.add_thread(th, sp, ch, initial);
-            } else {
-                match t.assertion {
-                    Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
-                    _ => {
-                        let sm = self.sm_update(t.sm, s, sp, initial, true);
-                        self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
-                    }
-                }
-            }
+            self.handle_save(t, s, sp, ch, initial, true)
         } else {
             self.nlist[self.p] = t;
             self.p += 1;
+        }
+    }
+
+    #[inline]
+    fn handle_save(&mut self, t: Thread, s: usize, sp: usize, ch: char, initial: bool, rev: bool) {
+        if (!rev && s % 2 == 0) || (rev && s % 2 == 1) {
+            let sm = self.sm_update(t.sm, s, sp, initial, rev);
+            let th = match t.assertion {
+                Some(a) => assert_thread(t.pc + 1, sm, a),
+                None => thread(t.pc + 1, sm),
+            };
+            self.add_thread(th, sp, ch, initial);
+        } else {
+            match t.assertion {
+                Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
+                _ => {
+                    let sm = self.sm_update(t.sm, s, sp, initial, rev);
+                    self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
+                }
+            }
         }
     }
 

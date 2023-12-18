@@ -394,7 +394,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_char(&mut self, char_idx: usize, ch: char) {
         let len = ch.len_utf8();
-        if len >= self.gap() {
+        if len >= self.gap() - 1 {
             self.grow_gap(len);
         }
 
@@ -427,7 +427,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_str(&mut self, char_idx: usize, s: &str) {
         let len = s.len();
-        if len >= self.gap() {
+        if len >= self.gap() - 1 {
             self.grow_gap(len);
         }
 
