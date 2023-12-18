@@ -281,27 +281,54 @@ impl Regex {
         // to Clone as Op::Class does not implement Copy.
         // > This is faster than cloning the op and matching
         if let Op::Jump(l1) = self.prog[t.pc].op {
-            self.add_thread(thread(l1, t.sm), sp, ch, initial);
+            let th = match t.assertion {
+                Some(a) => assert_thread(l1, t.sm, a),
+                None => thread(l1, t.sm),
+            };
+            self.add_thread(th, sp, ch, initial);
         } else if let Op::Split(l1, l2) = self.prog[t.pc].op {
             self.sms[t.sm].refs += 1;
-            self.add_thread(thread(l1, t.sm), sp, ch, initial);
-            self.add_thread(thread(l2, t.sm), sp, ch, initial);
+            let (t1, t2) = match t.assertion {
+                Some(a) => (assert_thread(l1, t.sm, a), assert_thread(l2, t.sm, a)),
+                None => (thread(l1, t.sm), thread(l2, t.sm)),
+            };
+            self.add_thread(t1, sp, ch, initial);
+            self.add_thread(t2, sp, ch, initial);
         } else if let Op::Assertion(a) = self.prog[t.pc].op {
             self.add_thread(assert_thread(t.pc + 1, t.sm, a), sp, ch, initial);
         } else if let Op::Save(s) = self.prog[t.pc].op {
-            match t.assertion {
-                Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
-                _ => {
-                    let sm = self.sm_update(t.sm, s, sp, initial, false);
-                    self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
+            // FIXME: factor this out
+            if s % 2 == 0 {
+                let sm = self.sm_update(t.sm, s, sp, initial, false);
+                let th = match t.assertion {
+                    Some(a) => assert_thread(t.pc + 1, sm, a),
+                    None => thread(t.pc + 1, sm),
+                };
+                self.add_thread(th, sp, ch, initial);
+            } else {
+                match t.assertion {
+                    Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
+                    _ => {
+                        let sm = self.sm_update(t.sm, s, sp, initial, false);
+                        self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
+                    }
                 }
             }
         } else if let Op::RSave(s) = self.prog[t.pc].op {
-            match t.assertion {
-                Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
-                _ => {
-                    let sm = self.sm_update(t.sm, s, sp, initial, true);
-                    self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
+            if s % 2 == 1 {
+                let sm = self.sm_update(t.sm, s, sp, initial, true);
+                let th = match t.assertion {
+                    Some(a) => assert_thread(t.pc + 1, sm, a),
+                    None => thread(t.pc + 1, sm),
+                };
+                self.add_thread(th, sp, ch, initial);
+            } else {
+                match t.assertion {
+                    Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
+                    _ => {
+                        let sm = self.sm_update(t.sm, s, sp, initial, true);
+                        self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
+                    }
                 }
             }
         } else {
@@ -461,7 +488,9 @@ mod tests {
     #[test_case("\\bfor\\b", "forward", None; "word boundary for match at start of word")]
     #[test_case("\\bfor\\b", "for ward", Some("for"); "word boundary for match not inside word")]
     #[test_case("\\bfor\\b", "bob for", Some("for"); "word boundary match not at BOF")]
+    #[test_case("\\bfor\\b", "bob for bob", Some("for"); "word boundary match not at BOF or EOF")]
     #[test_case("\\bin\\b", "min", None; "word boundary for match at end of word")]
+    #[test_case("\\b(in)\\b", "min", None; "word boundary for sub expression match at end of word")]
     #[test_case("\\b(in|for)\\b", "min", None; "word boundary for alt match at end of word")]
     #[test_case("\\b(in|for)\\b", "bob for", Some("for"); "word boundary for alt match not at BOF")]
     #[test]

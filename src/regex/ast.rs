@@ -192,11 +192,6 @@ impl Assertion {
             Assertion::LineStart => matches!(prev, Some('\n') | None),
             Assertion::LineEnd => matches!(next, Some('\n') | None),
 
-            // FIXME: work out the correct check for a word boundary / non word boundary.
-            // The Find impl for Word does this currently by classifying the character and checking
-            // that we are moving from one state to the next so we should probably re-use that? But
-            // if feels a little odd to bring the char classification stuff in from the dot module
-            // so it'll probably need to be moved here and then referenced from here in "dot"?
             Assertion::WordBoundary => match (prev, next) {
                 (_, None) | (None, _) => true,
                 (Some(p), Some(n)) => is_word_boundary(p, ch) || is_word_boundary(ch, n),
