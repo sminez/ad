@@ -260,8 +260,7 @@ impl Tokenizer {
         let mut offset = 0;
 
         for m in self.re_str.borrow_mut().match_str_all(line) {
-            let (start, end) = m.loc();
-            let s = m.str_match_text_ref(line);
+            let (start, end, s) = m.str_match_text_ref_with_byte_offsets(line);
             if start > offset {
                 tks.extend_from_slice(&self.regex_tokenize_literals(&line[offset..start]));
             }
@@ -269,7 +268,7 @@ impl Tokenizer {
                 ty: TokenType::String,
                 s,
             });
-            offset = end;
+            offset = end + 1;
         }
 
         if offset < line.len() {
@@ -288,8 +287,7 @@ impl Tokenizer {
         let mut offset = 0;
 
         for m in self.re.borrow_mut().match_str_all(line) {
-            let (start, end) = m.loc();
-            let s = m.str_match_text_ref(line);
+            let (start, end, s) = m.str_match_text_ref_with_byte_offsets(line);
             if start > offset {
                 tks.push(Token {
                     ty: TokenType::Default,
@@ -310,7 +308,7 @@ impl Tokenizer {
             };
 
             tks.push(Token { ty, s });
-            offset = end;
+            offset = end + 1;
         }
 
         if offset < line.len() {
@@ -331,60 +329,50 @@ mod tests {
     use crate::ftype::RUST_SPEC;
     use simple_test_case::test_case;
 
+    fn t_def(s: &str) -> Token {
+        Token { ty: Default, s }
+    }
+
+    fn t_com(s: &str) -> Token {
+        Token { ty: Comment, s }
+    }
+
+    fn t_dot(s: &str) -> Token {
+        Token { ty: Dot, s }
+    }
+
+    fn t_dfn(s: &str) -> Token {
+        Token { ty: Definition, s }
+    }
+
+    fn t_cfl(s: &str) -> Token {
+        Token { ty: ControlFlow, s }
+    }
+
+    fn t_str(s: &str) -> Token {
+        Token { ty: String, s }
+    }
+
     #[test]
     fn with_highlighted_dot_works_for_single_token() {
-        let tk = Token {
-            ty: TokenType::Default,
-            s: "hello, world!",
-        };
+        let tk = t_def("hello, world!");
         let tks = tk.with_highlighted_dot(2, 5);
 
-        assert_eq!(
-            tks,
-            vec![
-                Token {
-                    ty: Default,
-                    s: "he"
-                },
-                Token { ty: Dot, s: "llo" },
-                Token {
-                    ty: Default,
-                    s: ", world!"
-                }
-            ]
-        );
+        assert_eq!(tks, vec![t_def("he"), t_dot("llo"), t_def(", world!"),]);
     }
 
     #[test]
     fn with_highlighted_dot_works_for_tokens() {
-        let tks = vec![
-            Token {
-                ty: TokenType::Default,
-                s: "hello, world!",
-            },
-            Token {
-                ty: TokenType::Comment,
-                s: " // this is a comment",
-            },
-        ];
+        let tks = vec![t_def("hello, world!"), t_com(" // this is a comment")];
         let tks = Tokens::Multi(tks).with_highlighted_dot(9, 21);
 
         assert_eq!(
             tks,
             vec![
-                Token {
-                    ty: Default,
-                    s: "hello, wo"
-                },
-                Token { ty: Dot, s: "rld!" },
-                Token {
-                    ty: Dot,
-                    s: " // this"
-                },
-                Token {
-                    ty: Comment,
-                    s: " is a comment"
-                }
+                t_def("hello, wo"),
+                t_dot("rld!"),
+                t_dot(" // this"),
+                t_com(" is a comment"),
             ]
         );
     }
@@ -397,40 +385,27 @@ mod tests {
         let tokenizer = Tokenizer::new(RUST_SPEC);
         let tks = tokenizer.regex_tokenize(line);
 
-        assert_eq!(
-            tks,
-            Tokens::Single(Token {
-                ty: TokenType::Default,
-                s: line
-            })
-        );
+        assert_eq!(tks, Tokens::Single(t_def(line)));
     }
 
+    #[test_case(
+        "impl Default for Foo {",
+        vec![t_dfn("impl"), t_def(" Default "), t_cfl("for"), t_def(" Foo {")];
+        "ascii with keywords and punctuation"
+    )]
+    #[test_case(
+        r#"#[test_case("/oo.fo/ d", "fo│foo"; "regex dot delete")]"#,
+        vec![
+            t_def("#[test_case("), t_str("\"/oo.fo/ d\""), t_def(", "), t_str("\"fo│foo\""),
+            t_def("; "), t_str("\"regex dot delete\""), t_def(")]")
+        ];
+        "utf8"
+    )]
     #[test]
-    fn tokenize_works() {
+    fn tokenize_works(s: &'static str, expected: Vec<Token<'static>>) {
         let tokenizer = Tokenizer::new(RUST_SPEC);
-        let tks = tokenizer.regex_tokenize("impl Default for Foo {");
+        let tks = tokenizer.regex_tokenize(s);
 
-        assert_eq!(
-            tks,
-            Tokens::Multi(vec![
-                Token {
-                    ty: Definition,
-                    s: "impl"
-                },
-                Token {
-                    ty: Default,
-                    s: " Default "
-                },
-                Token {
-                    ty: ControlFlow,
-                    s: "for"
-                },
-                Token {
-                    ty: Default,
-                    s: " Foo {"
-                },
-            ])
-        );
+        assert_eq!(tks, Tokens::Multi(expected));
     }
 }

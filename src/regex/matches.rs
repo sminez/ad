@@ -35,13 +35,32 @@ impl Match {
         s.chars().skip(a).take(b - a).collect()
     }
 
-    pub fn str_match_text_ref<'a>(&self, s: &'a str) -> &'a str {
+    /// The start and end of this match in terms of byte offsets
+    ///
+    /// use loc for character offsets
+    #[inline]
+    pub fn str_loc_bytes(&self, s: &str) -> (usize, usize) {
         let (a, b) = self.loc();
         let mut it = s.char_indices().skip(a);
         let (first, _) = it.next().unwrap();
         let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
 
+        (first, last)
+    }
+
+    pub fn str_match_text_ref<'a>(&self, s: &'a str) -> &'a str {
+        let (first, last) = self.str_loc_bytes(s);
+
         &s[first..=last]
+    }
+
+    pub(crate) fn str_match_text_ref_with_byte_offsets<'a>(
+        &self,
+        s: &'a str,
+    ) -> (usize, usize, &'a str) {
+        let (first, last) = self.str_loc_bytes(s);
+
+        (first, last, &s[first..=last])
     }
 
     pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
@@ -49,6 +68,9 @@ impl Match {
         Some(s.chars().skip(a).take(b - a).collect())
     }
 
+    /// The start and end of this match in terms of character offsets
+    ///
+    /// use str_loc_bytes for byte offsets
     pub fn loc(&self) -> (usize, usize) {
         let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
 
