@@ -276,6 +276,10 @@ pub trait Address: IterBoundedChars {
     fn char_to_line_end(&self, char_idx: usize) -> Option<usize>;
     fn char_to_line_start(&self, char_idx: usize) -> Option<usize>;
 
+    fn max_iter(&self) -> usize {
+        self.len_chars()
+    }
+
     fn map_addr(&self, a: &mut Addr) -> Dot {
         let dot = match a {
             Addr::Explicit(d) => Some(*d),
@@ -299,7 +303,7 @@ pub trait Address: IterBoundedChars {
         let mut dot = match &mut addr.base {
             Current => cur_dot,
             Bof => Cur { idx: 0 }.into(),
-            Eof => Cur::new(self.len_chars()).into(),
+            Eof => Cur::new(self.max_iter()).into(),
 
             Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
@@ -322,7 +326,7 @@ pub trait Address: IterBoundedChars {
 
             Regex(re) => {
                 let from = cur_dot.last_cur().idx;
-                let to = self.len_chars();
+                let to = self.max_iter();
                 let m = re.match_iter(&mut self.iter_between(from, to), from)?;
                 let (from, to) = m.loc();
                 Dot::from_char_indices(from, to)

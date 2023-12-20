@@ -234,7 +234,7 @@ impl Program {
                     }
                     from = new_from;
 
-                    if from >= to {
+                    if from >= to || from >= ed.max_iter() {
                         break;
                     }
                 }
@@ -251,7 +251,7 @@ impl Program {
                         initial_matches.push(Match::synthetic(from, new_from));
                     }
                     from = new_to;
-                    if from > to {
+                    if from > to || from >= ed.max_iter() {
                         break;
                     }
                 }

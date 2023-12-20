@@ -9,14 +9,16 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
-- [ ] FEATURE: store "desired x" or an "x is at EOL" flag?
-- [ ] FEATURE: mini-buffer tab complete
-- [ ] FEATURE: completion of command mode commands
+- [ ] regex engine: support non-caputuring groups
+- [ ] regex engine: support named capture groups
+- [ ] store "desired x" or an "x is at EOL" flag?
+- [ ] mini-buffer tab complete
+- [ ] completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
-- [ ] FEATURE: support opening and navigating directories
-- [ ] FEATURE: support using the minibuffer as a dmenu-like feature exposed through the
-               filesystem interface
+- [ ] support opening and navigating directories
+- [ ] support using the minibuffer as a dmenu-like feature exposed through the
+      filesystem interface
 
 -- Fsys --
 - [ ] sed edit in place doesn't seem to work because it needs to be able to create temp
@@ -33,8 +35,8 @@
       vim's quickfix list (possibly need a top level one as well then?)
 
 -- Structural regular expressions --
-- [ ] FEATURE: Piping through a shell command
-- [ ] FEATURE: Replace without output from a shell command
+- [ ] Piping through a shell command
+- [ ] Replace without output from a shell command
 - [ ] Look at running grouped expressions in parallel a-la Sam
       - This should be doable by pre-computing the match positions and tracking any edit
         offsets that have built up

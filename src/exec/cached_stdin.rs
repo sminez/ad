@@ -68,16 +68,24 @@ impl CachedStdin {
 
 impl Address for CachedStdin {
     fn current_dot(&self) -> Dot {
-        Dot::default()
+        Dot::from_char_indices(0, usize::MAX)
     }
 
     fn len_chars(&self) -> usize {
         self.gb.borrow().len_chars()
     }
 
+    fn max_iter(&self) -> usize {
+        if self.is_closed() {
+            self.gb.borrow().len_chars()
+        } else {
+            usize::MAX
+        }
+    }
+
     fn line_to_char(&self, line_idx: usize) -> Option<usize> {
-        let r = self.gb.borrow();
-        let cur_len = r.len_lines();
+        let cur_len = self.gb.borrow().len_lines();
+
         if line_idx > cur_len {
             for _ in cur_len..=line_idx {
                 self.try_read_next_line();
@@ -87,7 +95,7 @@ impl Address for CachedStdin {
             }
         }
 
-        r.try_line_to_char(line_idx)
+        self.gb.borrow().try_line_to_char(line_idx)
     }
 
     fn char_to_line(&self, char_idx: usize) -> Option<usize> {
@@ -141,17 +149,13 @@ impl<'a> Iterator for CachedStdinIter<'a> {
         }
 
         loop {
-            if self.inner.is_closed() {
-                return None;
-            }
-
             match self.inner.get_char(self.from) {
                 Some(ch) => {
                     let res = (self.from, ch);
                     self.from += 1;
-
                     return Some(res);
                 }
+                None if self.inner.is_closed() => return None,
                 None => self.inner.try_read_next_line(),
             }
         }
