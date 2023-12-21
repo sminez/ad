@@ -19,6 +19,9 @@ editor to work.
 You have been warned!
 
 
+![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
+
+
 ## Why?
 
 I've used [vim][0] for years now (more recently [neovim][1] and [kakoune][2]) and I really love the
