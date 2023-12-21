@@ -394,7 +394,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_char(&mut self, char_idx: usize, ch: char) {
         let len = ch.len_utf8();
-        if len >= self.gap() - 1 {
+        if len >= self.gap().saturating_sub(1) {
             self.grow_gap(len);
         }
 
@@ -427,7 +427,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_str(&mut self, char_idx: usize, s: &str) {
         let len = s.len();
-        if len >= self.gap() - 1 {
+        if len >= self.gap().saturating_sub(1) {
             self.grow_gap(len);
         }
 
@@ -935,6 +935,13 @@ mod tests {
         let s = "this is a test";
         let gb = GapBuffer::from(s.to_string());
         assert_eq!(gb.to_string(), s);
+    }
+
+    #[test]
+    fn insert_into_empty_string_initial_gb_works() {
+        let mut gb = GapBuffer::from(String::new());
+        gb.insert_char(0, 'a');
+        assert_eq!(gb.to_string(), "a");
     }
 
     #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
