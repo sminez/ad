@@ -10,7 +10,7 @@
 //! up from not having to allocate and free inside of the main loop.
 use super::{
     ast::{parse, Assertion},
-    compile::{compile_ast, optimise, Inst, Op, Prog},
+    compile::{compile_ast, optimise, CompiledOps, Inst, Op, Prog},
     matches::{Match, MatchIter},
     Error,
 };
@@ -27,6 +27,8 @@ use std::mem::swap;
 pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
+    /// Names to be used for extracting named submatches
+    submatch_names: Vec<String>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
     clist: Box<[Thread]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
@@ -55,8 +57,12 @@ impl Regex {
     pub fn compile(re: &str) -> Result<Self, Error> {
         let mut ast = parse(re)?;
         ast.optimise();
+        let CompiledOps {
+            ops,
+            submatch_names,
+        } = compile_ast(ast, false);
 
-        Ok(Self::new(compile_ast(ast, false)))
+        Ok(Self::new(ops, submatch_names))
     }
 
     /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
@@ -67,11 +73,15 @@ impl Regex {
     pub fn compile_reverse(re: &str) -> Result<Self, Error> {
         let mut ast = parse(re)?;
         ast.optimise();
+        let CompiledOps {
+            ops,
+            submatch_names,
+        } = compile_ast(ast, true);
 
-        Ok(Self::new(compile_ast(ast, true)))
+        Ok(Self::new(ops, submatch_names))
     }
 
-    fn new(ops: Vec<Op>) -> Self {
+    fn new(ops: Vec<Op>, submatch_names: Vec<String>) -> Self {
         let prog: Prog = optimise(ops)
             .into_iter()
             .map(|op| Inst { op, gen: 0 })
@@ -84,6 +94,7 @@ impl Regex {
 
         Self {
             prog,
+            submatch_names,
             clist,
             nlist,
             gen: 0,

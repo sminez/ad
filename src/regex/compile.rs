@@ -1,5 +1,5 @@
 //! The op-code compiler and optimised for the regex VM
-use super::ast::{Assertion,SmKind, Ast, Comp, Greed, Rep};
+use super::ast::{Assertion, Ast, Comp, Greed, Rep, SmKind};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -33,6 +33,7 @@ enum Ops {
 }
 
 impl Ops {
+    #[inline]
     fn len(&self) -> usize {
         match self {
             Ops::One(_) => 1,
@@ -40,15 +41,24 @@ impl Ops {
         }
     }
 
+    #[inline]
     fn add_to(self, buf: &mut Vec<Op>) {
         match self {
             Ops::One(op) => buf.push(op),
             Ops::Many(ops) => buf.extend(ops),
         }
     }
+
+    #[inline]
+    fn into_vec(self) -> Vec<Op> {
+        match self {
+            Ops::One(op) => vec![op],
+            Ops::Many(ops) => ops,
+        }
+    }
 }
 
-fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
+fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut SmDetails, reverse: bool) -> Vec<Op> {
     // Each node other than the last has an additional split and jump op
     let alt_len = nodes.iter().map(|n| n.op_len()).sum::<usize>() + (nodes.len() - 1) * 2;
     let mut buf = Vec::with_capacity(alt_len);
@@ -68,7 +78,7 @@ fn alt_ops(mut nodes: Vec<Ast>, offset: usize, saves: &mut usize, reverse: bool)
     buf
 }
 
-fn concat_ops(nodes: Vec<Ast>, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
+fn concat_ops(nodes: Vec<Ast>, offset: usize, saves: &mut SmDetails, reverse: bool) -> Vec<Op> {
     let concat_len = nodes.iter().map(|n| n.op_len()).sum();
     let mut buf = Vec::with_capacity(concat_len);
     for node in nodes.into_iter() {
@@ -79,9 +89,21 @@ fn concat_ops(nodes: Vec<Ast>, offset: usize, saves: &mut usize, reverse: bool) 
     buf
 }
 
-fn submatch_ops(node: Ast, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
-    *saves += 1;
-    let s = *saves * 2;
+fn submatch_ops(
+    kind: SmKind,
+    node: Ast,
+    offset: usize,
+    saves: &mut SmDetails,
+    reverse: bool,
+) -> Vec<Op> {
+    match kind {
+        SmKind::NonCapturing => return node.into_ops(offset + 1, saves, reverse).into_vec(),
+        SmKind::Named(name) => saves.names.push(name),
+        SmKind::Normal => (),
+    }
+
+    saves.n += 1;
+    let s = saves.n * 2;
     let ops = node.into_ops(offset + 1, saves, reverse);
     let mut buf = Vec::with_capacity(ops.len() + 2);
 
@@ -102,7 +124,7 @@ fn submatch_ops(node: Ast, offset: usize, saves: &mut usize, reverse: bool) -> V
     buf
 }
 
-fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize, reverse: bool) -> Vec<Op> {
+fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut SmDetails, reverse: bool) -> Vec<Op> {
     match r {
         Rep::Quest(greed) => {
             let (mut l1, mut l2) = (offset + 1, offset + 1 + node.op_len());
@@ -144,25 +166,46 @@ fn rep_ops(r: Rep, node: Ast, offset: usize, saves: &mut usize, reverse: bool) -
 impl Ast {
     /// Each AST node returns split and jump offsets as if it were zero indexed.
     /// Wrapper nodes (alts, reps, cats, subexprs) update those offsets as needed
-    fn into_ops(self, offset: usize, saves: &mut usize, reverse: bool) -> Ops {
+    fn into_ops(self, offset: usize, saves: &mut SmDetails, reverse: bool) -> Ops {
         match self {
             Ast::Comp(comp) => Ops::One(Op::Comp(comp)),
             Ast::Assertion(a) => Ops::One(Op::Assertion(a)),
             Ast::Alt(nodes) => Ops::Many(alt_ops(nodes, offset, saves, reverse)),
             Ast::Concat(nodes) => Ops::Many(concat_ops(nodes, offset, saves, reverse)),
             Ast::Rep(r, node) => Ops::Many(rep_ops(r, *node, offset, saves, reverse)),
-            Ast::SubMatch(SmKind::Normal, node) => Ops::Many(submatch_ops(*node, offset, saves, reverse)),
-            _ => todo!("implement compile for new capture groups"),
+            Ast::SubMatch(kind, node) => {
+                Ops::Many(submatch_ops(kind, *node, offset, saves, reverse))
+            }
         }
     }
 }
 
-pub(super) fn compile_ast(mut ast: Ast, reverse: bool) -> Vec<Op> {
+/// While we compile the AST into our VM opcodes we need to track how many saves we have
+/// encountered so far so that we can insert the correct save instructions around sub-matches.
+///
+/// Assumptions:
+/// In the case of named sub-matches we do not support mixing and matching the named/unnamed
+/// so position with the names vector is sufficient for tracking the names of each match.
+struct SmDetails {
+    n: usize,
+    names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct CompiledOps {
+    pub(super) ops: Vec<Op>,
+    pub(super) submatch_names: Vec<String>,
+}
+
+pub(super) fn compile_ast(mut ast: Ast, reverse: bool) -> CompiledOps {
     if reverse {
         ast.reverse();
     }
 
-    let mut saves = 0;
+    let mut saves = SmDetails {
+        n: 0,
+        names: Vec::new(),
+    };
     let prog = match ast.into_ops(0, &mut saves, reverse) {
         Ops::One(op) => vec![op],
         Ops::Many(prog) => prog,
@@ -192,7 +235,10 @@ pub(super) fn compile_ast(mut ast: Ast, reverse: bool) -> Vec<Op> {
     }));
     full.extend([second_save, Op::Match]);
 
-    full
+    CompiledOps {
+        ops: full,
+        submatch_names: saves.names,
+    }
 }
 
 pub(super) fn optimise(mut ops: Vec<Op>) -> Vec<Op> {
@@ -330,7 +376,7 @@ mod tests {
     #[test]
     fn ast_compile_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();
-        let prog = compile_ast(ast, false);
+        let prog = compile_ast(ast, false).ops;
 
         let mut full = vec![sp(3, 1), Op::Comp(Comp::TrueAny), sp(3, 1), sv(0)];
         full.extend(expected);
@@ -347,7 +393,7 @@ mod tests {
     #[test]
     fn opcode_optimise_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();
-        let prog = optimise(compile_ast(ast, false));
+        let prog = optimise(compile_ast(ast, false).ops);
         let mut full = vec![sp(3, 1), Op::Comp(Comp::TrueAny), sp(3, 1), sv(0)];
         full.extend(expected);
         full.extend([sv(1), Op::Match]);

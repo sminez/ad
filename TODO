@@ -1,6 +1,12 @@
 :: TODO
 
 -- BUGS --
+- [!] Running format through the 9p interface for larger files can sometimes (but not always)
+      result in a crash due to a recv size error? Not sure yet why this then seems to consistently
+      work when re-opening the file and retrying the format so it might be something to do with
+      cursor position
+      > panicked at src/fsys/message.rs:18:19::21:
+      > response from main thread: RecvErrorlength is 11942
 - [!] Dragging the cursor back over itself is broken in a way I don't fully understand
       yet.
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
@@ -11,6 +17,9 @@
 -- Misc / Editor features --
 - [ ] regex engine: support non-caputuring groups
 - [ ] regex engine: support named capture groups
+- [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
+      - The matcher can be reused if needed or used as a oneshot for the common case of
+        constructing a regex and then using it before throwing it away
 - [ ] jump via exec programs should be in the jump list
 - [ ] ending dot following exec "x/.../" should be the final match not from
       the end of the match to the end of the file
