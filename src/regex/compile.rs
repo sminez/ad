@@ -1,5 +1,5 @@
 //! The op-code compiler and optimised for the regex VM
-use super::ast::{Assertion, Ast, Comp, Greed, Rep};
+use super::ast::{Assertion,SmKind, Ast, Comp, Greed, Rep};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -150,8 +150,9 @@ impl Ast {
             Ast::Assertion(a) => Ops::One(Op::Assertion(a)),
             Ast::Alt(nodes) => Ops::Many(alt_ops(nodes, offset, saves, reverse)),
             Ast::Concat(nodes) => Ops::Many(concat_ops(nodes, offset, saves, reverse)),
-            Ast::SubMatch(node) => Ops::Many(submatch_ops(*node, offset, saves, reverse)),
             Ast::Rep(r, node) => Ops::Many(rep_ops(r, *node, offset, saves, reverse)),
+            Ast::SubMatch(SmKind::Normal, node) => Ops::Many(submatch_ops(*node, offset, saves, reverse)),
+            _ => todo!("implement compile for new capture groups"),
         }
     }
 }

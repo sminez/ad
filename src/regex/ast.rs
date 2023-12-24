@@ -10,7 +10,14 @@ pub(super) enum Ast {
     Alt(Vec<Ast>),
     Rep(Rep, Box<Ast>),
     Concat(Vec<Ast>),
-    SubMatch(Box<Ast>),
+    SubMatch(SmKind, Box<Ast>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) enum SmKind {
+    Normal,
+    Named(String),
+    NonCapturing,
 }
 
 impl Ast {
@@ -29,7 +36,8 @@ impl Ast {
             }
             Ast::Rep(r, node) => r.op_len(node.op_len()),
             Ast::Concat(nodes) => nodes.iter().map(|n| n.op_len()).sum(),
-            Ast::SubMatch(node) => node.op_len() + 2, // save start and end
+            Ast::SubMatch(SmKind::NonCapturing, node) => node.op_len() + 2, // save start and end
+            Ast::SubMatch(_, node) => node.op_len() + 2,                    // save start and end
         }
     }
 
@@ -47,7 +55,7 @@ impl Ast {
                 nodes.reverse();
                 nodes.iter_mut().for_each(|n| n.reverse());
             }
-            Self::SubMatch(node) => node.reverse(),
+            Self::SubMatch(_, node) => node.reverse(),
             _ => (),
         }
     }
@@ -62,6 +70,41 @@ impl Ast {
                 // TODO: extract common alt prefixes & dedup cases
                 _ => false,
             };
+        }
+    }
+
+    fn contains_named_submatch(&self) -> bool {
+        match self {
+            Ast::SubMatch(SmKind::Named(_), _) => true,
+            Ast::SubMatch(_, node) => node.contains_named_submatch(),
+            Ast::Rep(_, node) => node.contains_named_submatch(),
+            Ast::Alt(nodes) => nodes.iter().any(|n| n.contains_named_submatch()),
+            Ast::Concat(nodes) => nodes.iter().any(|n| n.contains_named_submatch()),
+            _ => false,
+        }
+    }
+
+    fn named_submatch_only(&mut self) {
+        let apply = |nodes: &mut Vec<Ast>| {
+            for node in nodes.iter_mut() {
+                node.named_submatch_only()
+            }
+        };
+
+        match self {
+            Ast::SubMatch(SmKind::Named(_) | SmKind::NonCapturing, node) => {
+                node.named_submatch_only()
+            }
+
+            Ast::SubMatch(k @ SmKind::Normal, node) => {
+                node.named_submatch_only();
+                *k = SmKind::NonCapturing;
+            }
+
+            Ast::Alt(nodes) => apply(nodes),
+            Ast::Concat(nodes) => apply(nodes),
+            Ast::Rep(_, node) => node.named_submatch_only(),
+            _ => (),
         }
     }
 }
@@ -315,16 +358,21 @@ impl Counted {
 }
 
 pub(super) fn parse(re: &str) -> Result<Ast, Error> {
-    let mut root = Vec::new();
+    let mut nodes = Vec::new();
     let mut it = re.chars().peekable();
 
-    parse_many(&mut it, &mut root)?;
+    parse_many(&mut it, &mut nodes)?;
 
-    match root.len() {
-        0 => Err(Error::EmptyRegex),
-        1 => Ok(root.remove(0)),
-        _ => Ok(Ast::Concat(root)),
+    let mut root = match nodes.len() {
+        0 => return Err(Error::EmptyRegex),
+        _ => Ast::concat_or_node(nodes),
+    };
+
+    if root.contains_named_submatch() {
+        root.named_submatch_only()
     }
+
+    Ok(root)
 }
 
 enum ParseEnd {
@@ -376,20 +424,57 @@ fn handle_char(
     Ok(None)
 }
 
+/// Three variants of submatch / group are supported by this engine:
+///   1) "(...)"
+///       Capturing: the position of this sub-expression will be extracted as submatch
+///       and made available through a numeric index based on it's position within the
+///       regular expression.
+///   2) "(?<name>...)"
+///       Named capturing: the position of this subexpression will be extracted as a submatch
+///       and made available through the provided name rather than an index. To avoid confusion
+///       with mixing and matching named capture groups and positional ones, the presence of a
+///       named capture group will mark all unnamed capture groups within that regex to be
+///       treated as non-capturing. If they are required, they will also need to be named.
+///   3) "(?:...)"
+///       Non-capturing: allows for grouping and application of repetition / alternation
+///       of compund expressions without contributing to the captured sub-expressions.
 fn handle_subexp(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Error> {
     let mut sub = Vec::new();
-    match parse_many(it, &mut sub)? {
-        ParseEnd::Eof => return Err(Error::UnbalancedParens),
-        ParseEnd::Rparen => {
-            let node = match sub.len() {
-                0 => return Err(Error::EmptyParens),
-                1 => sub.remove(0),
-                _ => Ast::Concat(sub),
-            };
-
-            root.push(Ast::SubMatch(Box::new(node)));
+    let kind = match it.peek() {
+        Some('?') => {
+            it.next();
+            match it.next() {
+                Some(':') => SmKind::NonCapturing,
+                Some('<') => {
+                    let mut name = String::new();
+                    for ch in it.by_ref() {
+                        if ch == '>' {
+                            break;
+                        }
+                        name.push(ch);
+                    }
+                    if it.peek().is_none() {
+                        return Err(Error::UnclosedGroupName(name));
+                    }
+                    SmKind::Named(name)
+                }
+                Some(ch) => return Err(Error::UnknownGroupQualifier(ch)),
+                None => return Err(Error::UnbalancedParens),
+            }
         }
-    }
+        _ => SmKind::Normal,
+    };
+
+    let node = match parse_many(it, &mut sub)? {
+        ParseEnd::Eof => return Err(Error::UnbalancedParens),
+        ParseEnd::Rparen => match sub.len() {
+            0 => return Err(Error::EmptyParens),
+            1 => sub.remove(0),
+            _ => Ast::Concat(sub),
+        },
+    };
+
+    root.push(Ast::SubMatch(kind, Box::new(node)));
 
     Ok(())
 }
@@ -504,7 +589,15 @@ mod tests {
     }
 
     fn sub(s: Ast) -> Ast {
-        Ast::SubMatch(Box::new(s))
+        Ast::SubMatch(SmKind::Normal, Box::new(s))
+    }
+
+    fn ncsub(s: Ast) -> Ast {
+        Ast::SubMatch(SmKind::NonCapturing, Box::new(s))
+    }
+
+    fn nsub(name: &str, s: Ast) -> Ast {
+        Ast::SubMatch(SmKind::Named(name.to_string()), Box::new(s))
     }
 
     fn ch(c: char) -> Ast {
@@ -534,6 +627,14 @@ mod tests {
         "ab(c|d)",
         cat(vec![ch('a'), ch('b'), sub(alt(vec![ch('c'), ch('d')]))]);
         "alt in sub"
+    )]
+    #[test_case("(foo)", sub(cat(vec![ch('f'), ch('o'), ch('o')])); "sub expression")]
+    #[test_case("(?:foo)", ncsub(cat(vec![ch('f'), ch('o'), ch('o')])); "non capturing sub expression")]
+    #[test_case("(?<bar>foo)", nsub("bar", cat(vec![ch('f'), ch('o'), ch('o')])); "named sub expression")]
+    #[test_case(
+        "(?<bar>foo)(a|b)",
+        cat(vec![nsub("bar", cat(vec![ch('f'), ch('o'), ch('o')])), ncsub(alt(vec![ch('a'), ch('b')]))]);
+        "named sub expression should demote non named to non capturing"
     )]
     #[test]
     fn parse_works(re: &str, expected: Ast) {

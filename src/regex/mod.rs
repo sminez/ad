@@ -24,6 +24,8 @@ pub enum Error {
     TooManyParens,
     UnbalancedAlt,
     UnbalancedParens,
+    UnclosedGroupName(String),
+    UnknownGroupQualifier(char),
 }
 
 /// Helper for converting characters to 0 based inicies for looking things up in caches.

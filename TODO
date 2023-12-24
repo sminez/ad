@@ -11,6 +11,9 @@
 -- Misc / Editor features --
 - [ ] regex engine: support non-caputuring groups
 - [ ] regex engine: support named capture groups
+- [ ] jump via exec programs should be in the jump list
+- [ ] ending dot following exec "x/.../" should be the final match not from
+      the end of the match to the end of the file
 - [ ] store "desired x" or an "x is at EOL" flag?
 - [ ] mini-buffer tab complete
 - [ ] completion of command mode commands
