@@ -36,8 +36,8 @@ impl Ast {
             }
             Ast::Rep(r, node) => r.op_len(node.op_len()),
             Ast::Concat(nodes) => nodes.iter().map(|n| n.op_len()).sum(),
-            Ast::SubMatch(SmKind::NonCapturing, node) => node.op_len() + 2, // save start and end
-            Ast::SubMatch(_, node) => node.op_len() + 2,                    // save start and end
+            Ast::SubMatch(SmKind::NonCapturing, node) => node.op_len(), // save start and end
+            Ast::SubMatch(_, node) => node.op_len() + 2,                // save start and end
         }
     }
 

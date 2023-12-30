@@ -97,7 +97,7 @@ fn submatch_ops(
     reverse: bool,
 ) -> Vec<Op> {
     match kind {
-        SmKind::NonCapturing => return node.into_ops(offset + 1, saves, reverse).into_vec(),
+        SmKind::NonCapturing => return node.into_ops(offset, saves, reverse).into_vec(),
         SmKind::Named(name) => saves.names.push(name),
         SmKind::Normal => (),
     }
@@ -373,6 +373,7 @@ mod tests {
     #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), jmp(6), sv(3), jmp(4)]; "star star")]
     #[test_case("^foo", vec![BOL, c('f'), c('o'), c('o')]; "BOL then literals")]
     #[test_case("foo$", vec![c('f'), c('o'), c('o'), EOL]; "literals then EOL")]
+    #[test_case("(?<xy>X|Y)(a|b)", vec![sv(2), sp(6, 8), c('X'), jmp(9), c('Y'), sv(3), sp(11, 13), c('a'), jmp(14), c('b')]; "named submatch demoting unnamed")]
     #[test]
     fn ast_compile_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();
@@ -390,6 +391,7 @@ mod tests {
     #[test_case("ab*a", vec![c('a'), sp(6, 8), c('b'), sp(6, 8), c('a')]; "star for single lit")]
     #[test_case("ba*", vec![c('b'), sp(6, 8), c('a'), sp(6, 8)]; "trailing star")]
     #[test_case("(a*)*", vec![sp(5, 11), sv(2), sp(7, 9), c('a'), sp(7, 9), sv(3), sp(5, 11)]; "star star")]
+    #[test_case("(?<xy>X|Y)(a|b)", vec![sv(2), sp(6, 8), c('X'), jmp(9), c('Y'), sv(3), sp(11, 13), c('a'), jmp(14), c('b')]; "named submatch demoting unnamed")]
     #[test]
     fn opcode_optimise_works(re: &str, expected: Vec<Op>) {
         let ast = parse(re).unwrap();

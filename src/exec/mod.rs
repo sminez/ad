@@ -175,7 +175,7 @@ impl Program {
         }
 
         let (from, to) = initial_dot.as_char_indices();
-        let initial = Match::synthetic(from, to);
+        let initial = &Match::synthetic(from, to);
 
         ed.begin_edit_transaction();
         let (from, to) = self.step(ed, initial, 0, fname, out)?.as_char_indices();
@@ -194,7 +194,7 @@ impl Program {
     fn step<E, W>(
         &mut self,
         ed: &mut E,
-        m: Match,
+        m: &Match,
         pc: usize,
         fname: &str,
         out: &mut W,
@@ -222,8 +222,6 @@ impl Program {
             Expr::LoopMatches(mut re) => {
                 let mut initial_matches = Vec::new();
                 while let Some(m) = re.match_iter(&mut ed.iter_between(from, to), from) {
-                    initial_matches.push(m);
-
                     // It's possible for the Regex we're using to match a 0-length string which
                     // would cause us to get stuck trying to advance to the next match position.
                     // If this happens we advance from by a character to ensure that we search
@@ -233,6 +231,8 @@ impl Program {
                         new_from += 1;
                     }
                     from = new_from;
+
+                    initial_matches.push(m);
 
                     if from >= to || from >= ed.max_iter() {
                         break;
@@ -312,7 +312,7 @@ impl Program {
             Expr::Sub(mut re, pat) => match re.match_iter(&mut ed.iter_between(from, to), from) {
                 Some(m) => {
                     let (mfrom, mto) = m.loc();
-                    let s = template_match(&pat, m, ed.contents(), fname)?;
+                    let s = template_match(&pat, &m, ed.contents(), fname)?;
                     ed.remove(mfrom, mto);
                     ed.insert(mfrom, &s);
                     Ok(Dot::from_char_indices(
@@ -332,7 +332,7 @@ impl Program {
         &mut self,
         initial_matches: Vec<Match>,
         ed: &mut E,
-        m: Match,
+        m: &Match,
         pc: usize,
         fname: &str,
         out: &mut W,
@@ -348,7 +348,7 @@ impl Program {
             m.apply_offset(offset);
 
             let cur_len = ed.len_chars();
-            from = self.step(ed, m, pc + 1, fname, out)?.last_cur().idx;
+            from = self.step(ed, &m, pc + 1, fname, out)?.last_cur().idx;
             let new_len = ed.len_chars();
 
             offset += new_len as isize - cur_len as isize;
@@ -401,7 +401,7 @@ fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
 
 // FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
 // then we end up attempting to template THAT in a later iteration of the loop.
-fn template_match(s: &str, m: Match, content: String, fname: &str) -> Result<String, Error> {
+fn template_match(s: &str, m: &Match, content: String, fname: &str) -> Result<String, Error> {
     let mut output = if s.contains(FNAME_VAR) {
         s.replace(FNAME_VAR, fname)
     } else {
@@ -474,7 +474,7 @@ mod tests {
         };
         let mut b = Buffer::new_unnamed(0, "foo foo foo");
         let dot = prog
-            .step(&mut b, Match::synthetic(0, 11), 0, "test", &mut vec![])
+            .step(&mut b, &Match::synthetic(0, 11), 0, "test", &mut vec![])
             .unwrap();
 
         assert_eq!(&b.txt.to_string(), expected);

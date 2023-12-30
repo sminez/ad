@@ -2,15 +2,17 @@ use super::vm::Regex;
 use crate::buffer::{GapBuffer, IdxChars};
 use std::{
     iter::{Enumerate, Skip},
+    rc::Rc,
     str::Chars,
 };
 
 /// The match location of a Regex against a given input.
 ///
 /// The sub-match indices are relative to the input used to run the original match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
     pub(super) sub_matches: [usize; 20],
+    pub(super) submatch_names: Rc<[String]>,
 }
 
 impl Match {
@@ -18,7 +20,10 @@ impl Match {
         let mut sub_matches = [0; 20];
         sub_matches[0] = from;
         sub_matches[1] = to;
-        Self { sub_matches }
+        Self {
+            sub_matches,
+            submatch_names: Rc::new([]),
+        }
     }
 
     pub(crate) fn apply_offset(&mut self, offset: isize) {
@@ -46,6 +51,46 @@ impl Match {
         let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
 
         (first, last)
+    }
+
+    /// The start and end of the nth submatch in terms of byte offsets
+    #[inline]
+    pub fn str_sub_loc_bytes(&self, n: usize, s: &str) -> Option<(usize, usize)> {
+        let (a, b) = self.sub_loc(n)?;
+        let mut it = s.char_indices().skip(a);
+        let (first, _) = it.next().unwrap();
+        let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
+
+        Some((first, last))
+    }
+
+    // FIXME: this is a terrible way to do this but used for testing at the moment
+    pub fn named_matches(&self) -> Vec<&str> {
+        let mut matches = Vec::new();
+        for name in self.submatch_names.iter() {
+            if self.sub_loc_by_name(name).is_some() {
+                matches.push(name.as_str());
+            }
+        }
+
+        matches
+    }
+
+    /// The start and end of a named submatch in terms of byte offsets
+    #[inline]
+    pub fn str_sub_loc_bytes_by_name(&self, name: &str, s: &str) -> Option<(usize, usize)> {
+        let (a, b) = self.sub_loc_by_name(name)?;
+        let mut it = s.char_indices().skip(a);
+        let (first, _) = it.next().unwrap();
+        let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
+
+        Some((first, last))
+    }
+
+    pub fn str_sub_loc_text_ref_by_name<'a>(&self, name: &str, s: &'a str) -> Option<&'a str> {
+        let (first, last) = self.str_sub_loc_bytes_by_name(name, s)?;
+
+        Some(&s[first..=last])
     }
 
     pub fn str_match_text_ref<'a>(&self, s: &'a str) -> &'a str {
@@ -81,6 +126,11 @@ impl Match {
         );
 
         (start, end)
+    }
+
+    pub fn sub_loc_by_name(&self, name: &str) -> Option<(usize, usize)> {
+        let n = self.submatch_names.iter().position(|s| s == name)?;
+        self.sub_loc(n + 1)
     }
 
     pub fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {

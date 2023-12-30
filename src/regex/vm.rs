@@ -15,7 +15,7 @@ use super::{
     Error,
 };
 use crate::buffer::{Buffer, GapBuffer};
-use std::mem::swap;
+use std::{mem::swap, rc::Rc};
 
 /// A regular expression engine designed for use within the ad text editor.
 ///
@@ -28,7 +28,7 @@ pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
     /// Names to be used for extracting named submatches
-    submatch_names: Vec<String>,
+    submatch_names: Rc<[String]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
     clist: Box<[Thread]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
@@ -94,7 +94,7 @@ impl Regex {
 
         Self {
             prog,
-            submatch_names,
+            submatch_names: Rc::from(submatch_names.into_boxed_slice()),
             clist,
             nlist,
             gen: 0,
@@ -253,7 +253,10 @@ impl Regex {
             return None;
         }
 
-        Some(Match { sub_matches })
+        Some(Match {
+            sub_matches,
+            submatch_names: self.submatch_names.clone(),
+        })
     }
 
     #[inline]
@@ -570,6 +573,20 @@ mod tests {
         assert_eq!(m.str_submatch_text(2, s).as_deref(), Some("456"));
         assert_eq!(m.str_submatch_text(3, s).as_deref(), Some("789"));
         assert_eq!(m.str_match_text(s), "123-456-789");
+    }
+
+    #[test_case("(?<xy>X|Y)", "xy", "X"; "named match on its own")]
+    #[test_case("(?<xy>X|Y)(a|b)", "xy", "X"; "named match before unnamed")]
+    #[test_case("(e| )(?<xy>X|Y)", "xy", "X"; "named match after unnamed")]
+    #[test_case("(e| )(?<xy>X|Y)(a|b)", "xy", "X"; "named match inbetween unnamed")]
+    #[test]
+    fn named_submatch_works(re: &str, name: &str, expected: &str) {
+        let mut r = Regex::compile(re).unwrap();
+        let s = "text before Xanadu";
+        let m = r.match_str(s).unwrap();
+
+        assert_eq!(m.named_matches(), vec![name]);
+        assert_eq!(m.str_sub_loc_text_ref_by_name(name, s), Some(expected));
     }
 
     #[test]
