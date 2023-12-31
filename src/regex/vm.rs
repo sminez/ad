@@ -17,6 +17,8 @@ use super::{
 use crate::buffer::{Buffer, GapBuffer};
 use std::{mem::swap, rc::Rc};
 
+pub(super) const N_SLOTS: usize = 30;
+
 /// A regular expression engine designed for use within the ad text editor.
 ///
 /// This is a relatively naive implementation though it does have some
@@ -174,11 +176,11 @@ impl Regex {
     where
         I: Iterator<Item = (usize, char)>,
     {
-        let mut sub_matches = [0; 20];
+        let mut sub_matches = [0; N_SLOTS];
         self.free_sms = (1..self.prog.len()).collect();
         self.sms[0] = SubMatches {
             refs: 1,
-            inner: [0; 20],
+            inner: [0; N_SLOTS],
         };
 
         // We bump the generation to ensure we don't collide with anything from
@@ -354,9 +356,9 @@ impl Regex {
 
     #[inline]
     fn sm_update(&mut self, i: usize, s: usize, sp: usize, initial: bool, reverse: bool) -> usize {
-        // We don't hard error on compiling a regex with more than 9 submatches
-        // but we don't track anything past the 9th
-        if !self.track_submatches || s >= 20 {
+        // We don't hard error on compiling a regex with more than out max submatches
+        // but we don't track anything past the last one
+        if !self.track_submatches || s >= N_SLOTS {
             return i;
         }
 
@@ -388,9 +390,9 @@ impl Regex {
 struct SubMatches {
     /// How many threads are currently pointing at this SubMatches
     refs: usize,
-    /// $0 -> $9 submatches with $0 being the full match
+    /// $0 -> $n submatches with $0 being the full match
     /// for submatch $k the start index is 2$k and the end is 2$k+1
-    inner: [usize; 20],
+    inner: [usize; N_SLOTS],
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

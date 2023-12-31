@@ -1,4 +1,4 @@
-use super::vm::Regex;
+use super::vm::{Regex, N_SLOTS};
 use crate::buffer::{GapBuffer, IdxChars};
 use std::{
     iter::{Enumerate, Skip},
@@ -11,13 +11,13 @@ use std::{
 /// The sub-match indices are relative to the input used to run the original match.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Match {
-    pub(super) sub_matches: [usize; 20],
+    pub(super) sub_matches: [usize; N_SLOTS],
     pub(super) submatch_names: Rc<[String]>,
 }
 
 impl Match {
     pub(crate) fn synthetic(from: usize, to: usize) -> Self {
-        let mut sub_matches = [0; 20];
+        let mut sub_matches = [0; N_SLOTS];
         sub_matches[0] = from;
         sub_matches[1] = to;
         Self {
@@ -27,7 +27,7 @@ impl Match {
     }
 
     pub(crate) fn apply_offset(&mut self, offset: isize) {
-        for i in 0..20 {
+        for i in 0..N_SLOTS {
             if i > 0 && self.sub_matches[i] == 0 {
                 continue;
             }
@@ -134,7 +134,7 @@ impl Match {
     }
 
     pub fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
-        if n > 9 {
+        if 2 * n + 1 >= N_SLOTS {
             return None;
         }
         let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
