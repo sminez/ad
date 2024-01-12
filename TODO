@@ -15,8 +15,6 @@
       - It _might_ be something to do with special handling around naming new files?
 
 -- Misc / Editor features --
-- [ ] regex engine: support non-caputuring groups
-- [ ] regex engine: support named capture groups
 - [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
       - The matcher can be reused if needed or used as a oneshot for the common case of
         constructing a regex and then using it before throwing it away

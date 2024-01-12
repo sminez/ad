@@ -22,6 +22,27 @@ You have been warned!
 ![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
 
 
+## Repo structure
+
+Given the (arguably questionable) goal of implementing everything from scratch, there is a fair amount
+of functionality included in `ad` which in turn is split out into a number of modules within the crate.
+For now, I'm not structuring things as individual crates but that may change in future.
+
+### Modules
+_This is a non-exhaustive list of some of the more interesting parts of the internals of `ad`_
+
+- **buffer/internal**: a [gap buffer](https://en.wikipedia.org/wiki/Gap_buffer) implementation for the
+  internal state of a Buffer.
+- **dot**: manipulation of the current selection in a given buffer (including vim-like motions)
+- **exec**: minimal implementation of the core of the [sam editing language](http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf)
+- **fsys**: virtual filesystem interface to the editor state in the style of [acme](http://acme.cat-v.org/)
+- **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
+- **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
+  the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexability in tinkering
+  with the exec command language.
+- **trie**: [trie](https://en.wikipedia.org/wiki/Trie) data structure for handling sequence based keybindings
+
+
 ## Why?
 
 I've used [vim][0] for years now (more recently [neovim][1] and [kakoune][2]) and I really love the
@@ -42,7 +63,11 @@ So...How hard could it be?
 ## Simplicity
 For things that are going to be core parts of the experience (bindings, per-filetype configuration)
 I'm just going to hard code stuff. I'll try to do it in a way that makes it easy to update / change
-but the whole thing will be a lot easier to write if there isn't really any config parsing.
+but the whole thing will be a lot easier to write if there isn't too much config parsing.
+
+That said, the more I work on this, the more I wonder if it might be interesting to structure `ad`
+in the same way as [penrose](https://github.com/sminez/penrose) and have it as a library for writing
+your own text editor? That would require some restructuring but might be interesting to explore...
 
 ## Goals
 - Simple modal editing to the extent that I use VIM
