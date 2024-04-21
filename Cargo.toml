@@ -2,6 +2,17 @@
 name = "ad"
 version = "0.1.0"
 edition = "2021"
+authors = ["sminez <innes.andersonmorrison@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/sminez/ad"
+# documentation = "https://docs.rs/ad"
+readme = "README.md"
+description = "An adaptable text editor"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md"
+]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

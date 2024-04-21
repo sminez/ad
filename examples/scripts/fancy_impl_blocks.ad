@@ -1,9 +1,9 @@
 # This version of the impl block script is conditionally extracting the
 # return type from functions that have one using nested expression groups
 # and guards.
-x/^impl.*? (\w+)@*?^\}/
+x/^(?:impl<.*?>|impl).*? (\w+)@*?^\}/
 # Skip anything that looks like "impl Foo for Bar {..."
-v/^impl.*? for @*?\{/
+v/^(?:impl<.*?>|impl).*? for @*?\{/
 {
 # We print the impl block and file name as before...
     p/\nimpl $1 ($FILENAME)/;

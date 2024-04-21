@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # A best effort line count of Rust source code using ad's structural
 # regular expressions.
 
