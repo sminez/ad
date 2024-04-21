@@ -372,7 +372,7 @@ fn consume_whitespace(it: &mut Peekable<Chars>) {
     }
 }
 
-fn validate(exprs: &Vec<Expr>) -> Result<(), Error> {
+fn validate(exprs: &[Expr]) -> Result<(), Error> {
     use Expr::*;
 
     if exprs.is_empty() {
