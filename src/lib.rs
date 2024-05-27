@@ -14,7 +14,6 @@ pub mod fsys;
 pub mod ftype;
 pub mod key;
 pub mod mode;
-pub mod ninep;
 pub mod regex;
 pub mod term;
 pub mod trie;
@@ -24,7 +23,6 @@ pub use buffer::GapBuffer;
 pub use config::Config;
 pub use editor::Editor;
 pub use exec::{CachedStdin, Edit, Program};
-pub use ninep::server::{Serve9p, Server};
 
 use term::{disable_alternate_screen, disable_mouse_support, set_termios};
 

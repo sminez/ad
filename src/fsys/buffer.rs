@@ -3,7 +3,8 @@ use super::{
     empty_dir_stat, empty_file_stat, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID,
     CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, QID_OFFSET,
 };
-use crate::{editor::InputEvent, ninep::fs::Stat};
+use crate::editor::InputEvent;
+use ninep::fs::Stat;
 use std::{
     collections::BTreeMap,
     sync::mpsc::{Receiver, Sender},

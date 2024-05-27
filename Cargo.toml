@@ -25,7 +25,7 @@ name = "bench_main"
 harness = false
 
 [dependencies]
-bitflags = "2.4.1"
+ninep = { version = "0.1", path = "../ninep" }
 libc = "0.2.148"
 
 [dev-dependencies]

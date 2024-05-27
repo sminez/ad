@@ -25,14 +25,11 @@
 //!       body
 //!       event
 //! ```
-use crate::{
-    editor::InputEvent,
-    ninep::{
-        fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-        server::{Result, Serve9p, Server, DEFAULT_SOCKET_NAME},
-    },
+use crate::editor::InputEvent;
+use ninep::{
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat},
+    server::{Result, Serve9p, Server},
 };
-
 use std::{
     env,
     fs::create_dir_all,
@@ -49,6 +46,7 @@ pub use message::{Message, Req};
 
 use buffer::BufferNodes;
 
+const DEFAULT_SOCKET_NAME: &str = "ad";
 const MOUNT_DIR: &str = ".ad/mnt";
 const IO_UNIT: u32 = 8168;
 

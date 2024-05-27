@@ -6,9 +6,9 @@ version = 3
 name = "ad"
 version = "0.1.0"
 dependencies = [
- "bitflags",
  "criterion",
  "libc",
+ "ninep",
  "simple_test_case",
 ]
 
@@ -278,6 +278,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a634b1c61a95585bd15607c6ab0c4e5b226e695ff2800ba0cdccddf208c406c"
 dependencies = [
  "autocfg",
+]
+
+[[package]]
+name = "ninep"
+version = "0.1.0"
+dependencies = [
+ "bitflags",
 ]
 
 [[package]]
