@@ -11,6 +11,7 @@
 use std::{
     cmp::{max, min, Ordering},
     collections::BTreeMap,
+    fmt,
 };
 
 // The internal data is [u8] so the values here are in terms of bytes
@@ -128,9 +129,12 @@ impl From<&str> for GapBuffer {
     }
 }
 
-impl ToString for GapBuffer {
-    fn to_string(&self) -> String {
-        String::from_utf8(self.bytes()).expect("valid utf8")
+impl fmt::Display for GapBuffer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match String::from_utf8(self.bytes()) {
+            Ok(s) => write!(f, "{s}"),
+            Err(_) => Err(fmt::Error),
+        }
     }
 }
 
@@ -739,13 +743,16 @@ impl<'a> Slice<'a> {
     }
 }
 
-impl<'a> ToString for Slice<'a> {
-    fn to_string(&self) -> String {
+impl<'a> fmt::Display for Slice<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut v = Vec::with_capacity(self.left.len() + self.right.len());
         v.extend_from_slice(self.left);
         v.extend_from_slice(self.right);
 
-        String::from_utf8(v).expect("valid utf8")
+        match String::from_utf8(v) {
+            Ok(s) => write!(f, "{s}"),
+            Err(_) => Err(fmt::Error),
+        }
     }
 }
 
