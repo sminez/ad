@@ -1,5 +1,5 @@
 //! A simple attempt at a generic tokenizer
-use ad::{regex::Regex, term::Color};
+use ad_editor::{regex::Regex, term::Color};
 use std::collections::HashMap;
 
 struct Face {
@@ -125,7 +125,10 @@ fn main() {
                 "^=",
             ],
         ),
-        Tag::new_from_literals("PUNCTUATION", &["[", "]", "(", ")", "{", "}", ",", ".", ";", ":"]),
+        Tag::new_from_literals(
+            "PUNCTUATION",
+            &["[", "]", "(", ")", "{", "}", ",", ".", ";", ":"],
+        ),
         Tag::new("IDENTIFIER", r"^[a-z_][a-z0-9_]+"),
         Tag::new("CONST", r"^[A-Z_][A-Z0-9_]+"),
         Tag::new("TYPE", r"^[A-Z][a-zA-Z0-9]+"),

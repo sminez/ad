@@ -3,7 +3,7 @@
 //! See the full benchmark tests in '/benches' for a trimmed down version of this test that
 //! runs under criterion. (Cut down because the ad engine is not fast enough currently to
 //! handle the full test in a reasonable time.)
-use ad::regex::Regex;
+use ad_editor::regex::Regex;
 use std::{fs, time::Instant};
 
 fn main() {

@@ -3,7 +3,7 @@
 //! Running this file will start the ad 9p server connected to a mock editor thread which
 //! responds with static data for a set of example buffers and ignores messages that would
 //! mutate the internal state of the editor.
-use ad::{
+use ad_editor::{
     editor::InputEvent,
     fsys::{AdFs, BufId, Message, Req},
 };

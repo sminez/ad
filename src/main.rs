@@ -1,4 +1,4 @@
-use ad::{CachedStdin, Config, Editor, GapBuffer, Program};
+use ad_editor::{CachedStdin, Config, Editor, GapBuffer, Program};
 use std::{
     env, fs,
     io::{self, Write},

@@ -12,7 +12,7 @@
 //! Submatch $2: Some("456")
 //! Match ($0):  "123-456"
 
-use ad::regex::Regex;
+use ad_editor::regex::Regex;
 use std::time::Instant;
 
 fn main() {

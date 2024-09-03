@@ -9,7 +9,7 @@
 // As I get the performance improved I'll take a look at ramping up the torture.
 //
 //  https://github.com/BurntSushi/rsc-regexp/blob/master/torture-test
-use ad::regex::Regex;
+use ad_editor::regex::Regex;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn burntsushi_inputs(n_alts: usize, n_reps: usize) -> (String, Regex) {

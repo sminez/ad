@@ -3,7 +3,7 @@
 //
 // The graph from the article can be found here:
 //   https://swtch.com/~rsc/regexp/grep1p.png
-use ad::regex::Regex;
+use ad_editor::regex::Regex;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn rsc_inputs(n: usize) -> (String, Regex) {

@@ -1,11 +1,11 @@
 [package]
-name = "ad"
+name = "ad-editor"
 version = "0.1.0"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/sminez/ad"
-# documentation = "https://docs.rs/ad"
+documentation = "https://docs.rs/ad-editor"
 readme = "README.md"
 description = "An adaptable text editor"
 include = [
@@ -13,8 +13,16 @@ include = [
     "Cargo.toml",
     "README.md"
 ]
+keywords = [ "terminal", "editor", "text-editor", ]
+categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+
+[[bin]]
+doc = false
+name = "ad"
+path = "src/main.rs"
 
 [profile.release]
 strip = true
