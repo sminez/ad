@@ -24,7 +24,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v1
+    - uses: hecrj/setup-rust-action@v2
       with:
         rust-version: ${{ matrix.rust }}
 
@@ -36,7 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v1
+    - uses: hecrj/setup-rust-action@v2
       with:
         components: rustfmt
     - run: cargo fmt --all -- --check
@@ -48,7 +48,7 @@ jobs:
     #   RUSTFLAGS: -Dwarnings
     steps:
     - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v1
+    - uses: hecrj/setup-rust-action@v2
       with:
         components: clippy
     - uses: actions-rs/clippy-check@v1
@@ -62,7 +62,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v1
+    - uses: hecrj/setup-rust-action@v2
       with:
         rust-version: nightly
     - run: cargo rustdoc --all-features
