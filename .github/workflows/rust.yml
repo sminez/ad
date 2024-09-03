@@ -23,7 +23,7 @@ jobs:
         rust: [stable, beta, nightly]
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - uses: hecrj/setup-rust-action@v1
       with:
         rust-version: ${{ matrix.rust }}
@@ -35,7 +35,7 @@ jobs:
     name: Ensure rustfmt is happy
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - uses: hecrj/setup-rust-action@v1
       with:
         components: rustfmt
@@ -47,7 +47,7 @@ jobs:
     # env:
     #   RUSTFLAGS: -Dwarnings
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - uses: hecrj/setup-rust-action@v1
       with:
         components: clippy
@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - uses: hecrj/setup-rust-action@v1
       with:
         rust-version: nightly
