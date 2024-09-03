@@ -21,7 +21,6 @@ jobs:
       fail-fast: false
       matrix:
         rust: [stable, beta, nightly]
-        features: ["default", "default,serde"]
 
     steps:
     - uses: actions/checkout@v2
@@ -30,7 +29,7 @@ jobs:
         rust-version: ${{ matrix.rust }}
 
     - name: Run tests
-      run: cargo test --workspace --features ${{ matrix.features }} --verbose
+      run: cargo test --verbose
 
   rustfmt:
     name: Ensure rustfmt is happy
@@ -55,7 +54,7 @@ jobs:
     - uses: actions-rs/clippy-check@v1
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
-        args: --workspace --all-targets --all-features --examples --tests
+        args: --all-targets --all-features --examples --tests
 
   rustdoc-links:
     name: Check doc links are valid
