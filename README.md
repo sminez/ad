@@ -1,5 +1,7 @@
 # ad :: an adaptable text editor
 
+[![Build](https://github.com/sminez/ad/workflows/Build/badge.svg?branch=develop)](https://github.com/sminez/ad/actions?query=workflow%3ABuild) [![crates.io version](https://img.shields.io/crates/v/ad-editor)](https://crates.io/crates/ad-editor) [![docs.rs](https://img.shields.io/docsrs/ad-editor?logo=rust)](https://docs.rs/ad-editor)
+
 `ad` (pronounced A.D.) is an attempt at combining a modal editing interface of likes of `vi`
 and `kakoune` with the approach to extensibility of Plan9's `Acme`. It is primarily intended
 as playground for experimenting with implementing various text editor features and currently
@@ -37,6 +39,7 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
 - **exec**: minimal implementation of the core of the [sam editing language](http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf)
 - **fsys**: virtual filesystem interface to the editor state in the style of [acme](http://acme.cat-v.org/)
 - **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
+  - Now moved out to its own crate with source code available [here](https://github.com/sminez/ninep).
 - **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
   the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexability in tinkering
   with the exec command language.
