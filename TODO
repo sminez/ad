@@ -7,8 +7,6 @@
       cursor position
       > panicked at src/fsys/message.rs:18:19::21:
       > response from main thread: RecvErrorlength is 11942
-- [!] Dragging the cursor back over itself is broken in a way I don't fully understand
-      yet.
 - [!] buffer details for the initial scratch file seem to cause errors when requesting
       the control file details through fsys?
       - Also seems to happen with a new file that is being created
@@ -18,7 +16,6 @@
 - [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
       - The matcher can be reused if needed or used as a oneshot for the common case of
         constructing a regex and then using it before throwing it away
-- [ ] jump via exec programs should be in the jump list
 - [ ] ending dot following exec "x/.../" should be the final match not from
       the end of the match to the end of the file
 - [ ] store "desired x" or an "x is at EOL" flag?
@@ -26,23 +23,12 @@
 - [ ] completion of command mode commands
       - To start with this should be simple enough for handling just what is built in
         but supporting listing external scripts and tools would be nice as well
-- [ ] support opening and navigating directories
-- [ ] support using the minibuffer as a dmenu-like feature exposed through the
-      filesystem interface
 
 -- Fsys --
 - [ ] sed edit in place doesn't seem to work because it needs to be able to create temp
       files right next to the file that is being edited.
       - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
         the file but this is normal behaviour for sed so not an issue with ad
-- [ ] decide on the event format for the events file and implement the events file
-- [ ] add top level logfile calling out:
-  - buffer open
-  - buffer close
-  - buffer save
-  - change of active buffer
-- [ ] need per buffer/directory '+errors' style buffer that can also operate something like
-      vim's quickfix list (possibly need a top level one as well then?)
 
 -- Structural regular expressions --
 - [ ] Piping through a shell command
