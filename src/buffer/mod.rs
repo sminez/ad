@@ -4,8 +4,8 @@ use crate::{
     dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
     ftype::{
-        lex::{Tokenizer, Tokens},
-        RUST_SPEC,
+        lex::{Token, TokenType, Tokenizer, Tokens},
+        try_tokenizer_for_path,
     },
     key::Key,
     term::Style,
@@ -78,7 +78,7 @@ pub struct Buffer {
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     edit_log: EditLog,
-    tokenizer: Tokenizer,
+    tokenizer: Option<Tokenizer>,
     rendered_line_cache: BTreeMap<usize, String>,
 }
 
@@ -95,6 +95,8 @@ impl Buffer {
             raw.pop();
         }
 
+        let tokenizer = try_tokenizer_for_path(&path);
+
         Ok(Self {
             id,
             kind: BufferKind::File(path),
@@ -107,8 +109,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
-            // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: Tokenizer::new(RUST_SPEC),
+            tokenizer,
             rendered_line_cache: BTreeMap::new(),
         })
     }
@@ -201,8 +202,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: Default::default(),
-            // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: Tokenizer::new(RUST_SPEC),
+            tokenizer: None,
             rendered_line_cache: BTreeMap::new(),
         }
     }
@@ -220,8 +220,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
-            // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: Tokenizer::new(RUST_SPEC),
+            tokenizer: None,
             rendered_line_cache: BTreeMap::new(),
         }
     }
@@ -243,8 +242,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
-            // FIXME: this is a hack for testing - need to detect filetype
-            tokenizer: Tokenizer::new(RUST_SPEC),
+            tokenizer: None,
             rendered_line_cache: BTreeMap::new(),
         }
     }
@@ -518,7 +516,14 @@ impl Buffer {
 
         let (rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
 
-        let raw_tks = self.tokenizer.tokenize(&rline);
+        let raw_tks = match &self.tokenizer {
+            Some(t) => t.tokenize(&rline),
+            None => Tokens::Single(Token {
+                ty: TokenType::Default,
+                s: &rline,
+            }),
+        };
+
         let tks = match dot_range {
             Some((start, end)) => raw_tks.with_highlighted_dot(start, end),
             None => match raw_tks {

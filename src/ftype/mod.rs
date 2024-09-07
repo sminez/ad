@@ -1,6 +1,8 @@
+use std::path::Path;
+
 pub mod lex;
 
-use lex::{LangSpec, StringDelims};
+use lex::{LangSpec, StringDelims, Tokenizer};
 
 pub const RUST_SPEC: LangSpec = LangSpec {
     single_line_comment: Some("//"),
@@ -21,3 +23,13 @@ pub const RUST_SPEC: LangSpec = LangSpec {
         "-", "*", "/", "<", ">", "+=", "-=", "*=", "/=", "%=", ">=", "<=", "&=", "|=", "^=",
     ],
 };
+
+/// Determine the appropriate [Tokenizer] for the provided [Path].
+///
+/// Returns None is no Tokenizer is available.
+pub fn try_tokenizer_for_path(path: &Path) -> Option<Tokenizer> {
+    match path.extension() {
+        Some(ext) if ext == "rs" => Some(Tokenizer::new(RUST_SPEC)),
+        _ => None,
+    }
+}
