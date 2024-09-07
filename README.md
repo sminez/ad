@@ -1,6 +1,6 @@
 # ad :: an adaptable text editor
 
-[![Build](https://github.com/sminez/ad/workflows/Build/badge.svg?branch=develop)](https://github.com/sminez/ad/actions?query=workflow%3ABuild) [![crates.io version](https://img.shields.io/crates/v/ad-editor)](https://crates.io/crates/ad-editor) [![docs.rs](https://img.shields.io/docsrs/ad-editor?logo=rust)](https://docs.rs/ad-editor)
+[![Build](https://github.com/sminez/ad/workflows/Build/badge.svg)](https://github.com/sminez/ad/actions?query=workflow%3ABuild) [![crates.io version](https://img.shields.io/crates/v/ad-editor)](https://crates.io/crates/ad-editor) [![docs.rs](https://img.shields.io/docsrs/ad-editor?logo=rust)](https://docs.rs/ad-editor)
 
 `ad` (pronounced A.D.) is an attempt at combining a modal editing interface of likes of `vi`
 and `kakoune` with the approach to extensibility of Plan9's `Acme`. It is primarily intended
@@ -22,6 +22,27 @@ You have been warned!
 
 
 ![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
+
+
+## The design of ad
+
+`ad` is aiming to be a hybrid of the pieces of various editors that I find most useful:
+  - vim style modal editing to allow for convenient key bindings
+  - convenient text navigation and selection from vim/kakoune
+  - mini-buffer based user defined minor modes from emacs
+  - vim/sam/acme style editing commands for larger editing actions
+  - acme style extension through exposing editor state and functionality for
+    external client programs (though not as the _only_ way to add functionality).
+  - support for mouse based navigation and selection but not requiring that as the main
+    way of using the editor like in acme. That's fine for desktop but most of the time
+    I'm working with a laptop which makes that far too clunky.
+
+`ad` is _not_ trying to replace vim (or kakoune, or emacs) in terms of being a massively
+hackable editor. Rather it is trying to follow the philosophy of acme in being an
+integrat**ing** development environment (rather than integrat**ed**). By which I mean
+that the aim is to provide a comfortable editing environment to work in that supports
+direct interaction with external tools and programs from the outside rather than pulling
+everything **in**.
 
 
 ## Repo structure
