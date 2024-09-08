@@ -32,6 +32,15 @@ pub use actions::{Action, Actions, ViewPort};
 use input::Input;
 pub use input::InputEvent;
 
+/// The mode that the [Editor] will run in following a call to [Editor::run].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorMode {
+    /// Run as a TUI
+    Terminal,
+    /// Run without a user interface
+    Headless,
+}
+
 pub struct Editor {
     screen_rows: usize,
     screen_cols: usize,
@@ -46,38 +55,24 @@ pub struct Editor {
     rx: Receiver<InputEvent>,
     btx: Sender<BufId>,
     fs_chans: Option<(Sender<InputEvent>, Receiver<BufId>)>,
+    mode: EditorMode,
 }
 
 impl Drop for Editor {
     fn drop(&mut self) {
-        restore_terminal_state(&mut self.stdout);
+        if self.mode == EditorMode::Terminal {
+            restore_terminal_state(&mut self.stdout);
+        }
     }
 }
 
 impl Editor {
-    #[allow(clippy::new_without_default)]
-    pub fn new(cfg: Config) -> Self {
-        let original_termios = get_termios();
+    pub fn new(cfg: Config, mode: EditorMode) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
         };
-
-        enable_raw_mode(original_termios);
-        _ = ORIGINAL_TERMIOS.set(original_termios);
-
-        panic::set_hook(Box::new(|panic_info| {
-            let mut stdout = io::stdout();
-            restore_terminal_state(&mut stdout);
-            _ = stdout.flush();
-            println!("{panic_info}");
-            _ = stdout.flush();
-        }));
-
-        let mut stdout = io::stdout();
-        enable_mouse_support(&mut stdout);
-        enable_alternate_screen(&mut stdout);
-
+        let stdout = io::stdout();
         let (tx, rx) = channel();
         let (btx, brx) = channel();
 
@@ -97,6 +92,7 @@ impl Editor {
             rx,
             btx,
             fs_chans: Some((tx, brx)),
+            mode,
         }
     }
 
@@ -108,7 +104,32 @@ impl Editor {
         self.screen_cols = screen_cols;
     }
 
+    /// Ensure that opening without any files initialises the fsys state correctly
+    fn ensure_correct_fsys_state(&self) {
+        if self.buffers.is_empty_scratch() {
+            self.btx.send(BufId::Add(0)).unwrap();
+            self.btx.send(BufId::Current(0)).unwrap();
+        }
+    }
+
     pub fn run(mut self) {
+        if self.mode == EditorMode::Terminal {
+            let original_termios = get_termios();
+            enable_raw_mode(original_termios);
+            _ = ORIGINAL_TERMIOS.set(original_termios);
+
+            panic::set_hook(Box::new(|panic_info| {
+                let mut stdout = io::stdout();
+                restore_terminal_state(&mut stdout);
+                _ = stdout.flush();
+                println!("{panic_info}");
+                _ = stdout.flush();
+            }));
+
+            enable_mouse_support(&mut self.stdout);
+            enable_alternate_screen(&mut self.stdout);
+        }
+
         register_signal_handler();
         self.update_window_size();
 
@@ -116,7 +137,9 @@ impl Editor {
         Input::new(tx.clone()).run_threaded();
         AdFs::new(tx, brx).run_threaded();
 
+        self.ensure_correct_fsys_state();
         self.run_event_loop();
+
         clear_screen(&mut self.stdout);
     }
 
@@ -374,6 +397,41 @@ impl Editor {
             }
 
             _ => (),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    #[test_case(&[], &[0]; "empty scratch")]
+    #[test_case(&["foo"], &[1]; "one file")]
+    #[test_case(&["foo", "bar"], &[1, 2]; "two files")]
+    #[test]
+    fn ensure_correct_fsys_state_works(files: &[&str], expected_ids: &[usize]) {
+        let mut ed = Editor::new(Config::default(), EditorMode::Headless);
+        let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
+
+        for file in files {
+            ed.open_file(file);
+        }
+
+        ed.ensure_correct_fsys_state();
+
+        for &expected in expected_ids {
+            match brx.try_recv() {
+                Ok(BufId::Add(id)) if id == expected => (),
+                Ok(msg) => panic!("expected Add({expected}) but got {msg:?}"),
+                Err(_) => panic!("recv add {expected}"),
+            }
+
+            match brx.try_recv() {
+                Ok(BufId::Current(id)) if id == expected => (),
+                Ok(msg) => panic!("expected Current({expected}) but got {msg:?}"),
+                Err(_) => panic!("recv current {expected}"),
+            }
         }
     }
 }

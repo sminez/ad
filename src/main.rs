@@ -1,4 +1,4 @@
-use ad_editor::{CachedStdin, Config, Editor, GapBuffer, Program};
+use ad_editor::{CachedStdin, Config, Editor, EditorMode, GapBuffer, Program};
 use std::{
     env, fs,
     io::{self, Write},
@@ -27,7 +27,7 @@ fn main() {
         Err(s) => fatal(&s),
     };
 
-    let mut e = Editor::new(config);
+    let mut e = Editor::new(config, EditorMode::Terminal);
     for fname in files.iter() {
         e.open_file(fname);
     }

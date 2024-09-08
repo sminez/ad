@@ -251,7 +251,7 @@ The third paragraph is even shorter.";
         "spanning a newline"
     )]
     #[test]
-    fn content_includes_expected_text(dot: Dot, expected: &str) {
+    fn dot_content_includes_expected_text(dot: Dot, expected: &str) {
         let mut b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());
         b.dot = dot;
         let content = b.dot_contents();

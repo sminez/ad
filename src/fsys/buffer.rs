@@ -41,6 +41,7 @@ fn parent_and_fname(qid: u64) -> (u64, &'static str) {
 
 /// A message sent by the main editor thread to notify the fs thread that
 /// the current buffer list has changed.
+#[derive(Debug)]
 pub enum BufId {
     Add(usize),
     Remove(usize),
