@@ -113,46 +113,60 @@ impl Editor {
     }
 
     pub fn run(mut self) {
-        if self.mode == EditorMode::Terminal {
-            let original_termios = get_termios();
-            enable_raw_mode(original_termios);
-            _ = ORIGINAL_TERMIOS.set(original_termios);
-
-            panic::set_hook(Box::new(|panic_info| {
-                let mut stdout = io::stdout();
-                restore_terminal_state(&mut stdout);
-                _ = stdout.flush();
-                println!("{panic_info}");
-                _ = stdout.flush();
-            }));
-
-            enable_mouse_support(&mut self.stdout);
-            enable_alternate_screen(&mut self.stdout);
-        }
-
-        register_signal_handler();
-        self.update_window_size();
-
         let (tx, brx) = self.fs_chans.take().expect("to have fsys channels");
-        Input::new(tx.clone()).run_threaded();
-        AdFs::new(tx, brx).run_threaded();
-
+        AdFs::new(tx.clone(), brx).run_threaded();
         self.ensure_correct_fsys_state();
-        self.run_event_loop();
 
-        clear_screen(&mut self.stdout);
+        match self.mode {
+            EditorMode::Terminal => self.run_event_loop_with_screen_refresh(tx),
+            EditorMode::Headless => self.run_event_loop(),
+        }
+    }
+
+    #[inline]
+    fn handle_input_event(&mut self) {
+        match self.rx.recv().unwrap() {
+            InputEvent::KeyPress(k) => self.handle_keypress(k),
+            InputEvent::Message(msg) => self.handle_message(msg),
+            InputEvent::WinsizeChanged => self.update_window_size(),
+        }
     }
 
     fn run_event_loop(&mut self) {
         while self.running {
-            self.refresh_screen();
-
-            match self.rx.recv().unwrap() {
-                InputEvent::KeyPress(k) => self.handle_keypress(k),
-                InputEvent::Message(msg) => self.handle_message(msg),
-                InputEvent::WinsizeChanged => self.update_window_size(),
-            }
+            self.handle_input_event();
         }
+    }
+
+    fn run_event_loop_with_screen_refresh(&mut self, tx: Sender<InputEvent>) {
+        self.init_tui(tx);
+
+        while self.running {
+            self.refresh_screen();
+            self.handle_input_event();
+        }
+
+        clear_screen(&mut self.stdout);
+    }
+
+    fn init_tui(&mut self, tx: Sender<InputEvent>) {
+        let original_termios = get_termios();
+        enable_raw_mode(original_termios);
+        _ = ORIGINAL_TERMIOS.set(original_termios);
+
+        panic::set_hook(Box::new(|panic_info| {
+            let mut stdout = io::stdout();
+            restore_terminal_state(&mut stdout);
+            _ = stdout.flush();
+            println!("{panic_info}");
+            _ = stdout.flush();
+        }));
+
+        enable_mouse_support(&mut self.stdout);
+        enable_alternate_screen(&mut self.stdout);
+        register_signal_handler();
+        self.update_window_size();
+        Input::new(tx).run_threaded();
     }
 
     pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
