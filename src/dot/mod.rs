@@ -57,7 +57,7 @@ impl Dot {
 
     pub fn as_char_indices(&self) -> (usize, usize) {
         match *self {
-            Self::Cur { c: Cur { idx } } => (idx, idx + 1),
+            Self::Cur { c: Cur { idx } } => (idx, idx),
             Self::Range {
                 r:
                     Range {
@@ -86,7 +86,7 @@ impl Dot {
         }
 
         let (from, to) = self.as_char_indices();
-        b.txt.slice(from, min(to, len_chars)).to_string()
+        b.txt.slice(from, min(to + 1, len_chars)).to_string()
     }
 
     #[inline]
@@ -241,5 +241,21 @@ The third paragraph is even shorter.";
         to.set_dot(&mut b);
 
         assert_eq!(b.dot, expected);
+    }
+
+    #[test_case(c(0, 0), "T"; "first character")]
+    #[test_case(r(0, 0, 0, 34), "This is the first line of the file."; "first sentence")]
+    #[test_case(
+        r(0, 0, 1, 18),
+        "This is the first line of the file. Followed\nby the second line.";
+        "spanning a newline"
+    )]
+    #[test]
+    fn content_includes_expected_text(dot: Dot, expected: &str) {
+        let mut b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());
+        b.dot = dot;
+        let content = b.dot_contents();
+
+        assert_eq!(content, expected);
     }
 }
