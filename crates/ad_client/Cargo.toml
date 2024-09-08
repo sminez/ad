@@ -1,0 +1,7 @@
+[package]
+name = "ad_client"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+ninep = { version = "0.1", path = "../ninep" }

@@ -1,18 +1,18 @@
 //! A simple 9p client for building out application specific client applications.
 use crate::{
-    fs::Stat,
-    protocol::{Data, Format9p, Rdata, Rmessage, Tdata, Tmessage},
+    fs::{Mode, Perm, Stat},
+    protocol::{Data, Format9p, RawStat, Rdata, Rmessage, Tdata, Tmessage},
 };
 use std::{
+    cmp::min,
     collections::HashMap,
-    env, io,
+    env,
+    io::{self, Cursor, ErrorKind},
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
 };
 
 // TODO:
-// - need to handle errors coming back from the server
-// - read vs read dir
 // - need a proper error enum rather than just using io::Error
 
 macro_rules! expect_rmessage {
@@ -101,11 +101,14 @@ impl Client {
         aname: impl Into<String>,
     ) -> io::Result<Self> {
         let socket = UnixStream::connect(path)?;
+        let mut fids = HashMap::new();
+        fids.insert(String::new(), 0);
+
         let mut client = Self {
             socket: Socket::Unix(socket),
             uname,
             msize: MSIZE,
-            fids: HashMap::default(),
+            fids,
             next_fid: 1,
         };
         client.connect(aname)?;
@@ -129,11 +132,14 @@ impl Client {
         T: ToSocketAddrs,
     {
         let socket = TcpStream::connect(addr)?;
+        let mut fids = HashMap::new();
+        fids.insert(String::new(), 0);
+
         let mut client = Self {
             socket: Socket::Tcp(socket),
             uname,
             msize: MSIZE,
-            fids: HashMap::default(),
+            fids,
             next_fid: 1,
         };
         client.connect(aname)?;
@@ -145,7 +151,13 @@ impl Client {
         let t = Tmessage { tag, content };
         t.write_to(&mut self.socket)?;
 
-        Rmessage::read_from(&mut self.socket)
+        match Rmessage::read_from(&mut self.socket)? {
+            Rmessage {
+                content: Rdata::Error { ename },
+                ..
+            } => err(ename),
+            msg => Ok(msg),
+        }
     }
 
     fn next_fid(&mut self) -> u32 {
@@ -184,7 +196,8 @@ impl Client {
         Ok(())
     }
 
-    fn walk(&mut self, path: impl Into<String>) -> io::Result<u32> {
+    /// Associate the given path with a new fid.
+    pub fn walk(&mut self, path: impl Into<String>) -> io::Result<u32> {
         let path = path.into();
         if let Some(fid) = self.fids.get(&path) {
             return Ok(*fid);
@@ -201,14 +214,29 @@ impl Client {
             },
         )?;
 
+        self.fids.insert(path, new_fid);
+
         Ok(new_fid)
     }
 
+    /// Free server side state for the given fid.
+    ///
+    /// Clunks of the root fid (0) will be ignored
     pub fn clunk(&mut self, fid: u32) -> io::Result<()> {
-        self.send(0, Tdata::Clunk { fid: 1 })?;
-        self.fids.retain(|_, v| *v != fid);
+        if fid != 0 {
+            self.send(0, Tdata::Clunk { fid })?;
+            self.fids.retain(|_, v| *v != fid);
+        }
 
         Ok(())
+    }
+
+    /// Free server side state for the given path.
+    pub fn clunk_path(&mut self, path: impl Into<String>) -> io::Result<()> {
+        match self.fids.get(&path.into()) {
+            Some(fid) => self.clunk(*fid),
+            None => Ok(()),
+        }
     }
 
     pub fn stat(&mut self, path: impl Into<String>) -> io::Result<Stat> {
@@ -216,25 +244,35 @@ impl Client {
         let resp = self.send(0, Tdata::Stat { fid })?;
         let raw_stat = expect_rmessage!(resp, Stat { stat, .. });
 
-        Ok(raw_stat.try_into().unwrap())
+        match raw_stat.try_into() {
+            Ok(s) => Ok(s),
+            Err(e) => err(e),
+        }
+    }
+
+    fn _read(&mut self, path: impl Into<String>, mode: Mode) -> io::Result<Vec<u8>> {
+        let fid = self.walk(path)?;
+        let mode = mode.bits();
+        self.send(0, Tdata::Open { fid, mode })?;
+
+        let count = self.msize;
+        let mut bytes = Vec::new();
+        let mut offset = 0;
+        loop {
+            let resp = self.send(0, Tdata::Read { fid, offset, count })?;
+            let Data(data) = expect_rmessage!(resp, Read { data });
+            if data.is_empty() {
+                break;
+            }
+            offset += data.len() as u64;
+            bytes.extend(data);
+        }
+
+        Ok(bytes)
     }
 
     pub fn read(&mut self, path: impl Into<String>) -> io::Result<Vec<u8>> {
-        let fid = self.walk(path)?;
-
-        self.send(0, Tdata::Open { fid, mode: 0 })?;
-        let resp = self.send(
-            0,
-            Tdata::Read {
-                fid,
-                offset: 0,
-                count: 8168,
-            },
-        )?;
-
-        let Data(bytes) = expect_rmessage!(resp, Read { data });
-
-        Ok(bytes)
+        self._read(path, Mode::FILE)
     }
 
     pub fn read_str(&mut self, path: impl Into<String>) -> io::Result<String> {
@@ -247,7 +285,96 @@ impl Client {
         Ok(s)
     }
 
-    // pub fn write(&mut self, path: impl AsRef<str>, content: impl AsRef<str>) -> io::Result<usize> {
-    //     todo!()
-    // }
+    pub fn read_dir(&mut self, path: impl Into<String>) -> io::Result<Vec<Stat>> {
+        let bytes = self._read(path, Mode::DIR)?;
+        let mut buf = Cursor::new(bytes);
+        let mut stats: Vec<Stat> = Vec::new();
+
+        loop {
+            match RawStat::read_from(&mut buf) {
+                Ok(rs) => match rs.try_into() {
+                    Ok(s) => stats.push(s),
+                    Err(e) => return err(e),
+                },
+                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
+                Err(e) => return Err(e),
+            }
+        }
+
+        Ok(stats)
+    }
+
+    pub fn write(
+        &mut self,
+        path: impl Into<String>,
+        mut offset: u64,
+        content: &[u8],
+    ) -> io::Result<usize> {
+        let fid = self.walk(path)?;
+        let len = content.len();
+        let mut cur = 0;
+        let header_size = 4 + 8 + 4; // fid + offset + data len
+        let chunk_size = (self.msize - header_size) as usize;
+
+        while cur <= len {
+            let end = min(cur + chunk_size, len);
+            let resp = self.send(
+                0,
+                Tdata::Write {
+                    fid,
+                    offset,
+                    data: Data(content[cur..end].to_vec()),
+                },
+            )?;
+            let n = expect_rmessage!(resp, Write { count });
+            if n == 0 {
+                break;
+            }
+            cur += n as usize;
+            offset += n as u64;
+        }
+
+        if cur != len {
+            return err(format!("partial write: {cur} < {len}"));
+        }
+
+        Ok(cur)
+    }
+
+    pub fn write_str(
+        &mut self,
+        path: impl Into<String>,
+        offset: u64,
+        content: &str,
+    ) -> io::Result<usize> {
+        self.write(path, offset, content.as_bytes())
+    }
+
+    pub fn create(
+        &mut self,
+        dir: impl Into<String>,
+        name: impl Into<String>,
+        perms: Perm,
+        mode: Mode,
+    ) -> io::Result<()> {
+        let fid = self.walk(dir)?;
+        self.send(
+            0,
+            Tdata::Create {
+                fid,
+                name: name.into(),
+                perm: perms.bits(),
+                mode: mode.bits(),
+            },
+        )?;
+
+        Ok(())
+    }
+
+    pub fn remove(&mut self, path: impl Into<String>) -> io::Result<()> {
+        let fid = self.walk(path)?;
+        self.send(0, Tdata::Remove { fid })?;
+
+        Ok(())
+    }
 }

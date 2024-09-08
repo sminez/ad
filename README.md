@@ -60,7 +60,7 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
 - **exec**: minimal implementation of the core of the [sam editing language](http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf)
 - **fsys**: virtual filesystem interface to the editor state in the style of [acme](http://acme.cat-v.org/)
 - **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
-  - Now moved out to its own crate with source code available [here](https://github.com/sminez/ninep).
+  - Now moved out to its own crate with source code available [here](https://github.com/sminez/ad/crates/ninep).
 - **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
   the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexability in tinkering
   with the exec command language.

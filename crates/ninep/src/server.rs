@@ -51,12 +51,14 @@ fn tcp_socket(port: u16) -> TcpListener {
 }
 
 // Error messages
+const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
 const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
 const E_DUPLICATE_FID: &str = "duplicate fid";
 const E_UNKNOWN_FID: &str = "unknown fid";
 const E_UNKNOWN_ROOT: &str = "unknown root directory";
 const E_WALK_NON_DIR: &str = "walk in non-directory";
 const E_CREATE_NON_DIR: &str = "create in non-directory";
+const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 
 const UNKNOWN_VERSION: &str = "unknown";
 const SUPPORTED_VERSION: &str = "9P2000";
@@ -223,8 +225,10 @@ where
 /// Marker trait for implementing a type state for Session
 trait SessionType {}
 
-#[derive(Debug)]
-struct Unattached;
+#[derive(Debug, Default)]
+struct Unattached {
+    seen_version: bool,
+}
 
 impl SessionType for Unattached {}
 
@@ -349,7 +353,7 @@ where
         stream: RW,
     ) -> Self {
         Self {
-            state: Unattached,
+            state: Unattached::default(),
             msize,
             roots,
             s,
@@ -383,8 +387,19 @@ where
             let Tmessage { tag, content } = t;
 
             let resp = match content {
-                Version { msize, version } => self.handle_version(msize, version),
-                Auth { afid, uname, aname } => self.handle_auth(afid, uname, aname),
+                Version { msize, version } => {
+                    self.state.seen_version = version == SUPPORTED_VERSION;
+                    self.handle_version(msize, version)
+                }
+
+                Auth { afid, uname, aname } => {
+                    if !self.state.seen_version {
+                        self.reply(tag, Err(E_NO_VERSION_MESSAGE.to_string()));
+                        continue;
+                    }
+
+                    self.handle_auth(afid, uname, aname)
+                }
 
                 Attach {
                     fid,
@@ -392,6 +407,11 @@ where
                     uname,
                     aname,
                 } => {
+                    if !self.state.seen_version {
+                        self.reply(tag, Err(E_NO_VERSION_MESSAGE.to_string()));
+                        continue;
+                    }
+
                     let (st, aqid) = match self.handle_attach(fid, afid, uname, aname) {
                         Err(e) => {
                             self.reply(tag, Err(e));
@@ -721,15 +741,12 @@ where
         Ok(Rdata::Read { data: Data(buf) })
     }
 
-    // TODO: need to handle offsets properly here. Having the Serve9p impl return all stats
-    // for a given dir and then storing the remainder for responding to future client calls
-    // would make implementing things simpler with the trade off of very large directories
-    // resulting in lots of pending state.
-    // The alternative is to pass the offset and count through to the Serve9p impl and have
-    // the impl care about maintaining things correctly.
     fn read_dir(&mut self, qid: u64, offset: usize, count: usize) -> Result<Vec<u8>> {
-        let mut buf = Vec::with_capacity(count);
         let stats = self.s.lock().unwrap().read_dir(qid, &self.state.uname)?;
+
+        let mut buf = Vec::with_capacity(count);
+        let mut to_skip = offset;
+
         for stat in stats.into_iter() {
             self.qids
                 .write()
@@ -738,11 +755,22 @@ where
                 .or_insert(stat.fm.clone());
 
             let rstat: RawStat = stat.into();
-            rstat.write_to(&mut buf).unwrap();
-        }
+            let mut tmp = Vec::new();
+            rstat.write_to(&mut tmp).unwrap();
 
-        if offset >= buf.len() {
-            buf.clear();
+            if to_skip != 0 {
+                if tmp.len() > to_skip {
+                    return Err(E_INVALID_OFFSET.to_string());
+                } else {
+                    to_skip -= tmp.len();
+                    continue;
+                }
+            }
+
+            if buf.len() + tmp.len() > count {
+                break;
+            }
+            buf.extend(tmp);
         }
 
         Ok(buf)
