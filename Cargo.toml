@@ -19,6 +19,9 @@ categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
+[workspace]
+members = [ "crates/*" ]
+
 [[bin]]
 doc = false
 name = "ad"
@@ -33,7 +36,7 @@ name = "bench_main"
 harness = false
 
 [dependencies]
-ninep = "0.1"
+ninep = { version = "0.1", path = "crates/ninep" }
 libc = "0.2.148"
 
 [dev-dependencies]

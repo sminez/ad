@@ -1,0 +1,20 @@
+[package]
+name = "ninep"
+version = "0.1.0"
+edition = "2021"
+authors = ["sminez <innes.andersonmorrison@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/sminez/ad/crates/ninep"
+readme = "README.md"
+description = "A bare bones 9p implementation"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md"
+]
+
+[dependencies]
+bitflags = "2.4"
+
+[dev-dependencies]
+simple_test_case = "1"

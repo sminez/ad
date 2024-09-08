@@ -283,10 +283,9 @@ dependencies = [
 [[package]]
 name = "ninep"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5b288408af3fa421c08e60bba7c805e213f889e191f9c8c8ae80bdebac25475"
 dependencies = [
  "bitflags",
+ "simple_test_case",
 ]
 
 [[package]]
