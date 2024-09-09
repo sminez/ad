@@ -55,7 +55,7 @@ impl Buffers {
         }
 
         // Remove an empty scratch buffer if the user has now opened a file
-        if self.inner.len() == 1 && self.inner[0].is_unnamed() && !self.inner[0].dirty {
+        if self.is_empty_scratch() {
             self.inner.remove(0);
         } else {
             self.record_jump_position();

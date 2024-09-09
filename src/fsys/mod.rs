@@ -59,8 +59,11 @@ const CONTROL_FILE: &str = "ctl";
 ///   2    /buffers/    -> parent directory for buffers
 const BUFFERS_QID: u64 = 2;
 const BUFFERS_DIR: &str = "buffers";
-//    3      /current   -> the fsys filename of the current buffer
-const CURRENT_BUFFER_QID: u64 = 3;
+//    3      /index     -> a listing of all of the currently open buffers
+const INDEX_BUFFER_QID: u64 = 3;
+const INDEX_BUFFER: &str = "index";
+//    4      /current   -> the fsys filename of the current buffer
+const CURRENT_BUFFER_QID: u64 = 4;
 const CURRENT_BUFFER: &str = "current";
 
 /// The number of qids required to serve both the directory and contents
@@ -238,7 +241,7 @@ impl Serve9p for AdFs {
                 }
             }
 
-            CURRENT_BUFFER_QID => Err(E_UNKNOWN_FILE.to_string()),
+            CURRENT_BUFFER_QID | INDEX_BUFFER_QID => Err(E_UNKNOWN_FILE.to_string()),
 
             qid => self.buffer_nodes.write(qid, s, offset),
         }

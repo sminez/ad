@@ -414,38 +414,3 @@ impl Editor {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use simple_test_case::test_case;
-
-    #[test_case(&[], &[0]; "empty scratch")]
-    #[test_case(&["foo"], &[1]; "one file")]
-    #[test_case(&["foo", "bar"], &[1, 2]; "two files")]
-    #[test]
-    fn ensure_correct_fsys_state_works(files: &[&str], expected_ids: &[usize]) {
-        let mut ed = Editor::new(Config::default(), EditorMode::Headless);
-        let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
-
-        for file in files {
-            ed.open_file(file);
-        }
-
-        ed.ensure_correct_fsys_state();
-
-        for &expected in expected_ids {
-            match brx.try_recv() {
-                Ok(BufId::Add(id)) if id == expected => (),
-                Ok(msg) => panic!("expected Add({expected}) but got {msg:?}"),
-                Err(_) => panic!("recv add {expected}"),
-            }
-
-            match brx.try_recv() {
-                Ok(BufId::Current(id)) if id == expected => (),
-                Ok(msg) => panic!("expected Current({expected}) but got {msg:?}"),
-                Err(_) => panic!("recv current {expected}"),
-            }
-        }
-    }
-}

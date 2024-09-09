@@ -1,7 +1,7 @@
 //! Buffer state for the fuse filesystem
 use super::{
     empty_dir_stat, empty_file_stat, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID,
-    CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, QID_OFFSET,
+    CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
 };
 use crate::editor::InputEvent;
 use ninep::fs::Stat;
@@ -43,8 +43,11 @@ fn parent_and_fname(qid: u64) -> (u64, &'static str) {
 /// the current buffer list has changed.
 #[derive(Debug)]
 pub enum BufId {
+    /// A newly created buffer
     Add(usize),
+    /// A buffer that has now been closed and needs removing from state
     Remove(usize),
+    /// A change to the currently active buffer
     Current(usize),
 }
 
@@ -55,6 +58,7 @@ pub(super) struct BufferNodes {
     current_buffid: usize,
     stat: Stat,
     current_buff_stat: Stat,
+    index_stat: Stat,
     tx: Sender<InputEvent>,
     brx: Receiver<BufId>,
 }
@@ -67,6 +71,7 @@ impl BufferNodes {
             current_buffid: 1,
             stat: empty_dir_stat(BUFFERS_QID, BUFFERS_DIR),
             current_buff_stat: empty_file_stat(CURRENT_BUFFER_QID, CURRENT_BUFFER),
+            index_stat: empty_file_stat(INDEX_BUFFER_QID, INDEX_BUFFER),
             tx,
             brx,
         }
@@ -79,6 +84,8 @@ impl BufferNodes {
     pub(super) fn top_level_stats(&self) -> Vec<Stat> {
         let mut stats: Vec<Stat> = self.known.values().map(|b| b.stat.clone()).collect();
         stats.push(self.current_buff_stat.clone());
+        stats.push(self.index_stat.clone());
+
         stats
     }
 
@@ -93,6 +100,7 @@ impl BufferNodes {
     pub(super) fn lookup_file_stat(&mut self, parent: u64, name: &str) -> Option<Stat> {
         match (parent, name) {
             (BUFFERS_QID, CURRENT_BUFFER) => Some(self.current_buff_stat.clone()),
+            (BUFFERS_QID, INDEX_BUFFER) => Some(self.index_stat.clone()),
             (BUFFERS_QID, _) => self
                 .known
                 .values()
@@ -112,6 +120,8 @@ impl BufferNodes {
             return Some(self.stat());
         } else if qid == CURRENT_BUFFER_QID {
             return Some(self.current_buff_stat.clone());
+        } else if qid == INDEX_BUFFER_QID {
+            return Some(self.index_stat.clone());
         } else if let Some(b) = self.known.get(&qid) {
             return Some(b.stat());
         }
@@ -126,6 +136,8 @@ impl BufferNodes {
     pub(super) fn get_file_content(&mut self, qid: u64) -> Option<String> {
         if qid == CURRENT_BUFFER_QID {
             return Some(self.current_buffid.to_string());
+        } else if qid == INDEX_BUFFER_QID {
+            return Some(self.index());
         }
 
         let (parent, fname) = parent_and_fname(qid);
@@ -134,8 +146,21 @@ impl BufferNodes {
             .current_file_content(fname, &self.tx)
     }
 
+    fn index(&mut self) -> String {
+        let mut entries = Vec::with_capacity(self.known.len());
+
+        for b in self.known.values_mut() {
+            let filename = b.current_file_content(FILENAME, &self.tx).unwrap();
+            let id = &b.str_id;
+
+            entries.push(format!("{id}\t{filename}\n"));
+        }
+
+        entries.join("")
+    }
+
     pub(super) fn truncate(&mut self, qid: u64) {
-        if qid == CURRENT_BUFFER_QID {
+        if qid == CURRENT_BUFFER_QID || qid == INDEX_BUFFER_QID {
             return;
         }
 
@@ -270,8 +295,8 @@ mod tests {
     use simple_test_case::test_case;
 
     #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
-    #[test_case(6, 4, DOT; "dot second buffer")]
-    #[test_case(18, 12, BODY; "body second buffer")]
+    #[test_case(7, 5, DOT; "dot second buffer")]
+    #[test_case(19, 13, BODY; "body second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);

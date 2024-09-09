@@ -118,10 +118,16 @@ impl Editor {
     }
 
     pub fn open_file(&mut self, path: &str) {
+        let was_empty_scratch = self.buffers.is_empty_scratch();
+        let current_id = self.buffers.active().id;
+
         match self.buffers.open_or_focus(self.cwd.join(path)) {
             Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
 
             Ok(Some(new_id)) => {
+                if was_empty_scratch {
+                    self.btx.send(BufId::Remove(current_id)).unwrap();
+                }
                 self.btx.send(BufId::Add(new_id)).unwrap();
                 self.btx.send(BufId::Current(new_id)).unwrap();
             }
@@ -482,4 +488,71 @@ impl Editor {
     }
 
     // TODO: sending to the shell and just running a command needs the read-only minibuffer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::editor::EditorMode;
+    use simple_test_case::test_case;
+
+    macro_rules! assert_recv {
+        ($brx:expr, $msg:ident, $expected:expr) => {
+            match $brx.try_recv() {
+                Ok(BufId::$msg(id)) if id == $expected => (),
+                Ok(msg) => panic!(
+                    "expected {}({}) but got {msg:?}",
+                    stringify!($msg),
+                    $expected
+                ),
+                Err(_) => panic!("recv {}({})", stringify!($msg), $expected),
+            }
+        };
+    }
+
+    #[test]
+    fn opening_a_file_sends_the_correct_fsys_messages() {
+        let mut ed = Editor::new(Config::default(), EditorMode::Headless);
+        let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
+
+        ed.open_file("foo");
+
+        // The first open should also close our scratch buffer
+        assert_recv!(brx, Remove, 0);
+        assert_recv!(brx, Add, 1);
+        assert_recv!(brx, Current, 1);
+
+        // Opening a second file should only notify for that file
+        ed.open_file("bar");
+        assert_recv!(brx, Add, 2);
+        assert_recv!(brx, Current, 2);
+
+        // Opening the first file again should just notify for the current file
+        ed.open_file("foo");
+        assert_recv!(brx, Current, 1);
+    }
+
+    #[test_case(&[], &[0]; "empty scratch")]
+    #[test_case(&["foo"], &[1]; "one file")]
+    #[test_case(&["foo", "bar"], &[1, 2]; "two files")]
+    #[test]
+    fn ensure_correct_fsys_state_works(files: &[&str], expected_ids: &[usize]) {
+        let mut ed = Editor::new(Config::default(), EditorMode::Headless);
+        let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
+
+        for file in files {
+            ed.open_file(file);
+        }
+
+        ed.ensure_correct_fsys_state();
+
+        if !files.is_empty() {
+            assert_recv!(brx, Remove, 0);
+        }
+
+        for &expected in expected_ids {
+            assert_recv!(brx, Add, expected);
+            assert_recv!(brx, Current, expected);
+        }
+    }
 }
