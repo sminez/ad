@@ -1,34 +1,9 @@
 :: TODO
 
--- BUGS --
-- [!] Running format through the 9p interface for larger files can sometimes (but not always)
-      result in a crash due to a recv size error? Not sure yet why this then seems to consistently
-      work when re-opening the file and retrying the format so it might be something to do with
-      cursor position
-      > panicked at src/fsys/message.rs:18:19::21:
-      > response from main thread: RecvErrorlength is 11942
-- [!] buffer details for the initial scratch file seem to cause errors when requesting
-      the control file details through fsys?
-      - Also seems to happen with a new file that is being created
-      - It _might_ be something to do with special handling around naming new files?
-
 -- Misc / Editor features --
 - [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
       - The matcher can be reused if needed or used as a oneshot for the common case of
         constructing a regex and then using it before throwing it away
-- [ ] ending dot following exec "x/.../" should be the final match not from
-      the end of the match to the end of the file
-- [ ] store "desired x" or an "x is at EOL" flag?
-- [ ] mini-buffer tab complete
-- [ ] completion of command mode commands
-      - To start with this should be simple enough for handling just what is built in
-        but supporting listing external scripts and tools would be nice as well
-
--- Fsys --
-- [ ] sed edit in place doesn't seem to work because it needs to be able to create temp
-      files right next to the file that is being edited.
-      - "cat mnt/buffers/1/body | sed 's/test/TEST/' >mnt/buffers/1/body" just truncates
-        the file but this is normal behaviour for sed so not an issue with ad
 
 -- Structural regular expressions --
 - [ ] Piping through a shell command
