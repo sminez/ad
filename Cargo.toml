@@ -1,6 +1,6 @@
 [package]
 name = "ad-editor"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
@@ -36,9 +36,9 @@ name = "bench_main"
 harness = false
 
 [dependencies]
-ninep = { version = "0.1", path = "crates/ninep" }
+ninep = { version = "0.2", path = "crates/ninep" }
 libc = "0.2.148"
 
 [dev-dependencies]
-simple_test_case = "1.1.0"
+simple_test_case = "1.2.0"
 criterion = "0.5"

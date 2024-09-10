@@ -3,16 +3,12 @@ use ninep::{client::Client, fs::FileType};
 use std::io;
 
 fn main() -> io::Result<()> {
-    let mut client = Client::new_unix("ad", "")?;
-
+    let mut client = Client::new_unix("ninep-server", "")?;
     tree(&mut client, "", 0)?;
 
-    let current_buffer = client.read_str("buffers/current")?;
-    client.write_str(format!("buffers/{current_buffer}/body"), 0, "hello, world!")?;
-    // println!(
-    //     ">> contents of current buffer:\n{}\n",
-    //     client.read_str(format!("buffers/{current_buffer}/body"))?
-    // );
+    for line in client.iter_lines("blocking")? {
+        print!("{line}");
+    }
 
     Ok(())
 }

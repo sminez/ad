@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "ad-editor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "criterion",
  "libc",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "ninep"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bitflags",
  "simple_test_case",

@@ -8,6 +8,7 @@ use std::{
     collections::HashMap,
     env,
     io::{self, Cursor, ErrorKind},
+    mem,
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
 };
@@ -250,7 +251,14 @@ impl Client {
         }
     }
 
-    fn _read(&mut self, path: impl Into<String>, mode: Mode) -> io::Result<Vec<u8>> {
+    fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> io::Result<Vec<u8>> {
+        let resp = self.send(0, Tdata::Read { fid, offset, count })?;
+        let Data(data) = expect_rmessage!(resp, Read { data });
+
+        Ok(data)
+    }
+
+    fn _read_all(&mut self, path: impl Into<String>, mode: Mode) -> io::Result<Vec<u8>> {
         let fid = self.walk(path)?;
         let mode = mode.bits();
         self.send(0, Tdata::Open { fid, mode })?;
@@ -259,8 +267,7 @@ impl Client {
         let mut bytes = Vec::new();
         let mut offset = 0;
         loop {
-            let resp = self.send(0, Tdata::Read { fid, offset, count })?;
-            let Data(data) = expect_rmessage!(resp, Read { data });
+            let data = self._read_count(fid, offset, count)?;
             if data.is_empty() {
                 break;
             }
@@ -272,11 +279,11 @@ impl Client {
     }
 
     pub fn read(&mut self, path: impl Into<String>) -> io::Result<Vec<u8>> {
-        self._read(path, Mode::FILE)
+        self._read_all(path, Mode::FILE)
     }
 
     pub fn read_str(&mut self, path: impl Into<String>) -> io::Result<String> {
-        let bytes = self.read(path)?;
+        let bytes = self._read_all(path, Mode::FILE)?;
         let s = match String::from_utf8(bytes) {
             Ok(s) => s,
             Err(_) => return err("invalid utf8"),
@@ -286,7 +293,7 @@ impl Client {
     }
 
     pub fn read_dir(&mut self, path: impl Into<String>) -> io::Result<Vec<Stat>> {
-        let bytes = self._read(path, Mode::DIR)?;
+        let bytes = self._read_all(path, Mode::DIR)?;
         let mut buf = Cursor::new(bytes);
         let mut stats: Vec<Stat> = Vec::new();
 
@@ -302,6 +309,36 @@ impl Client {
         }
 
         Ok(stats)
+    }
+
+    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter> {
+        let fid = self.walk(path)?;
+        let mode = Mode::FILE.bits();
+        let count = self.msize;
+        self.send(0, Tdata::Open { fid, mode })?;
+
+        Ok(ChunkIter {
+            client: self,
+            fid,
+            offset: 0,
+            count,
+        })
+    }
+
+    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter> {
+        let fid = self.walk(path)?;
+        let mode = Mode::FILE.bits();
+        let count = self.msize;
+        self.send(0, Tdata::Open { fid, mode })?;
+
+        Ok(ReadLineIter {
+            client: self,
+            buf: Vec::new(),
+            fid,
+            offset: 0,
+            count,
+            at_eof: false,
+        })
     }
 
     pub fn write(
@@ -376,5 +413,77 @@ impl Client {
         self.send(0, Tdata::Remove { fid })?;
 
         Ok(())
+    }
+}
+
+pub struct ChunkIter<'a> {
+    client: &'a mut Client,
+    fid: u32,
+    offset: u64,
+    count: u32,
+}
+
+impl<'a> Iterator for ChunkIter<'a> {
+    type Item = Vec<u8>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let data = self
+            .client
+            ._read_count(self.fid, self.offset, self.count)
+            .ok()?;
+
+        if data.is_empty() {
+            _ = self.client.clunk(self.fid);
+            return None;
+        }
+
+        self.offset += data.len() as u64;
+
+        Some(data)
+    }
+}
+
+pub struct ReadLineIter<'a> {
+    client: &'a mut Client,
+    buf: Vec<u8>,
+    fid: u32,
+    offset: u64,
+    count: u32,
+    at_eof: bool,
+}
+
+impl<'a> Iterator for ReadLineIter<'a> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.at_eof {
+            return None;
+        }
+
+        loop {
+            match self.buf.iter().position(|&b| b == b'\n') {
+                Some(pos) => {
+                    let (line, remaining) = self.buf.split_at(pos + 1);
+                    let s = String::from_utf8(line.to_vec()).ok();
+                    self.buf = remaining.to_vec();
+                    return s;
+                }
+
+                _ => {
+                    let data = self
+                        .client
+                        ._read_count(self.fid, self.offset, self.count)
+                        .ok()?;
+
+                    if data.is_empty() {
+                        self.at_eof = true;
+                        return String::from_utf8(mem::take(&mut self.buf)).ok();
+                    }
+
+                    self.offset += data.len() as u64;
+                    self.buf.extend(data);
+                }
+            }
+        }
     }
 }

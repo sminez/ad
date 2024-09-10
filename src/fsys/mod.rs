@@ -28,7 +28,7 @@
 use crate::editor::InputEvent;
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{Result, Serve9p, Server},
+    server::{ReadOutcome, Result, Serve9p, Server},
 };
 use std::{
     env,
@@ -187,24 +187,26 @@ impl Serve9p for AdFs {
         Ok(IO_UNIT)
     }
 
-    fn read(&mut self, qid: u64, offset: usize, count: usize, _uname: &str) -> Result<Vec<u8>> {
+    fn read(&mut self, qid: u64, offset: usize, count: usize, _uname: &str) -> Result<ReadOutcome> {
         self.buffer_nodes.update();
 
-        match qid {
-            CONTROL_FILE_QID => Ok(vec![]),
+        let data = match qid {
+            CONTROL_FILE_QID => Vec::new(),
 
             qid => match self.buffer_nodes.get_file_content(qid) {
-                Some(content) => Ok(content
+                Some(content) => content
                     .as_bytes()
                     .iter()
                     .copied()
                     .skip(offset)
                     .take(count)
-                    .collect()),
+                    .collect(),
 
-                None => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
+                None => return Err(format!("{E_UNKNOWN_FILE}: {qid}")),
             },
-        }
+        };
+
+        Ok(ReadOutcome::Immediate(data))
     }
 
     fn read_dir(&mut self, qid: u64, _uname: &str) -> Result<Vec<Stat>> {

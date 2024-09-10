@@ -9,13 +9,14 @@ use std::{
     env, fs,
     io::{Read, Write},
     mem::size_of,
-    net::TcpListener,
-    os::unix::net::UnixListener,
-    sync::{Arc, Mutex, RwLock},
+    net::{TcpListener, TcpStream},
+    os::unix::net::{UnixListener, UnixStream},
+    sync::{mpsc::Receiver, Arc, Mutex, RwLock},
     thread::{spawn, JoinHandle},
 };
 
-// const AFID_NO_AUTH: u32 = u32::MAX;
+/// Marker afid to denode that auth is not required for establishing connections
+pub const AFID_NO_AUTH: u32 = u32::MAX;
 
 #[derive(Debug)]
 struct Socket {
@@ -74,6 +75,15 @@ impl From<(u16, Result<Rdata>)> for Rmessage {
     }
 }
 
+/// The outcome of a client attempting to [read](Serve9p::read) a given file.
+#[derive(Debug)]
+pub enum ReadOutcome {
+    /// The data is immediately available.
+    Immediate(Vec<u8>),
+    /// No response should be sent until data is received on the provided channel
+    Blocked(Receiver<Vec<u8>>),
+}
+
 /// A type capable of handling [9p](http://9p.cat-v.org/) requests in order to implement a
 /// 9p virtual filesystem. The [Server] struct is used to handle the lower level protocal and
 /// underlying connection, allowing implementers of this trait to focus on the semantics of the
@@ -92,7 +102,7 @@ impl From<(u16, Result<Rdata>)> for Rmessage {
 /// as such, [Serve9p] only needs to worry about maintaining `qids` for resources.
 ///
 /// The source code of [Server] is a useful reference for those wanting to learn more.
-pub trait Serve9p {
+pub trait Serve9p: Send + 'static {
     // #[allow(unused_variables)]
     // fn auth(&mut self, afid: u32, uname: &str, aname: &str) -> Result<Qid> {
     //     Err("authentication not required".to_string())
@@ -126,7 +136,7 @@ pub trait Serve9p {
     ) -> Result<(FileMeta, IoUnit)>;
 
     /// Read `count` bytes from the requested file starting from the given `offset`.
-    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<Vec<u8>>;
+    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<ReadOutcome>;
 
     /// List the contents of the given directory.
     fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>>;
@@ -144,11 +154,34 @@ pub trait Serve9p {
     fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()>;
 }
 
+trait Stream: Read + Write + Send + Sized + 'static {
+    /// The underlying try_clone implementations for file descriptors can fail at the libc level so
+    /// we need to account for that here.
+    fn try_clone(&self) -> Result<Self>;
+
+    fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
+        let r: Rmessage = (tag, resp).into();
+        let _ = r.write_to(self);
+    }
+}
+
+impl Stream for UnixStream {
+    fn try_clone(&self) -> Result<Self> {
+        self.try_clone().map_err(|e| e.to_string())
+    }
+}
+
+impl Stream for TcpStream {
+    fn try_clone(&self) -> Result<Self> {
+        self.try_clone().map_err(|e| e.to_string())
+    }
+}
+
 /// A threaded `9p` server capable of listening on either a TCP socket or UNIX domain socket.
 #[derive(Debug)]
 pub struct Server<S>
 where
-    S: Serve9p + Send + 'static,
+    S: Serve9p,
 {
     s: Arc<Mutex<S>>,
     msize: u32,
@@ -158,7 +191,7 @@ where
 
 impl<S> Server<S>
 where
-    S: Serve9p + Send + 'static,
+    S: Serve9p,
 {
     /// Create a new file server with a single anonymous root (name will be "") and
     /// qid of [QID_ROOT].
@@ -223,7 +256,7 @@ where
 }
 
 /// Marker trait for implementing a type state for Session
-trait SessionType {}
+trait SessionType: Send {}
 
 #[derive(Debug, Default)]
 struct Unattached {
@@ -249,33 +282,32 @@ impl Attached {
 }
 
 #[derive(Debug)]
-struct Session<T, S, RW>
+struct Session<T, S, U>
 where
     T: SessionType,
-    S: Serve9p + Send + 'static,
-    RW: Read + Write,
+    S: Serve9p,
+    U: Stream,
 {
     state: T,
     msize: u32,
     roots: BTreeMap<String, u64>,
     s: Arc<Mutex<S>>,
     qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
-    stream: RW,
+    stream: U,
 }
 
-impl<T, S, RW> Session<T, S, RW>
+impl<T, S, U> Session<T, S, U>
 where
     T: SessionType,
-    S: Serve9p + Send + 'static,
-    RW: Read + Write,
+    S: Serve9p,
+    U: Stream,
 {
     fn qid(&self, qid: u64) -> Option<Qid> {
         self.qids.read().unwrap().get(&qid).map(|fm| fm.as_qid())
     }
 
     fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
-        let _ = r.write_to(&mut self.stream);
+        self.stream.reply(tag, resp);
     }
 
     /// The version request negotiates the protocol version and message size to be used on the
@@ -340,17 +372,17 @@ where
     }
 }
 
-impl<S, RW> Session<Unattached, S, RW>
+impl<S, U> Session<Unattached, S, U>
 where
-    S: Serve9p + Send + 'static,
-    RW: Read + Write,
+    S: Serve9p,
+    U: Stream,
 {
     fn new_unattached(
         msize: u32,
         roots: BTreeMap<String, u64>,
         s: Arc<Mutex<S>>,
         qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
-        stream: RW,
+        stream: U,
     ) -> Self {
         Self {
             state: Unattached::default(),
@@ -362,7 +394,7 @@ where
         }
     }
 
-    fn into_attached(self, ty: Attached) -> Session<Attached, S, RW> {
+    fn into_attached(self, ty: Attached) -> Session<Attached, S, U> {
         let Self {
             msize,
             roots,
@@ -473,10 +505,10 @@ macro_rules! file_meta {
     };
 }
 
-impl<S, RW> Session<Attached, S, RW>
+impl<S, U> Session<Attached, S, U>
 where
-    S: Serve9p + Send + 'static,
-    RW: Read + Write,
+    S: Serve9p,
+    U: Stream,
 {
     fn new_attached(
         state: Attached,
@@ -484,7 +516,7 @@ where
         roots: BTreeMap<String, u64>,
         s: Arc<Mutex<S>>,
         qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
-        stream: RW,
+        stream: U,
     ) -> Self {
         Self {
             state,
@@ -508,13 +540,14 @@ where
             let Tmessage { tag, content } = t;
 
             let resp = match content {
-                Version { msize, version } => match self.handle_version(msize, version) {
-                    Ok(res) => {
+                Version { msize, version } => {
+                    let res = self.handle_version(msize, version);
+                    if res.is_ok() {
                         self.state.fids.clear();
-                        Ok(res)
                     }
-                    Err(e) => Err(e),
-                },
+
+                    res
+                }
                 Auth { .. } | Attach { .. } => Err("session is already attached".into()),
                 Flush { .. } => Ok(Rdata::Flush {}),
 
@@ -532,7 +565,11 @@ where
                     perm,
                     mode,
                 } => self.handle_create(fid, name, Perm::new(perm), Mode::new(mode)),
-                Read { fid, offset, count } => self.handle_read(fid, offset, count),
+                Read { fid, offset, count } => match self.handle_read(tag, fid, offset, count) {
+                    Ok(Some(resp)) => Ok(resp),
+                    Err(err) => Err(err),
+                    Ok(None) => continue,
+                },
                 Write { fid, offset, data } => self.handle_write(fid, offset, data.0),
                 Remove { fid } => self.handle_remove(fid),
                 Wstat { fid, stat, .. } => self.handle_wstat(fid, stat),
@@ -716,7 +753,13 @@ where
     // offset equal to zero or the value of offset in the previous read on the directory, plus the
     // number of bytes returned in the previous read. In other words, seeking other than to the
     // beginning is illegal in a directory.
-    fn handle_read(&mut self, fid: u32, offset: u64, count: u32) -> Result<Rdata> {
+    fn handle_read(
+        &mut self,
+        tag: u16,
+        fid: u32,
+        offset: u64,
+        count: u32,
+    ) -> Result<Option<Rdata>> {
         use FileType::*;
 
         let fm = match file_meta!(self, fid) {
@@ -728,17 +771,37 @@ where
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
-        let buf = match fm.ty {
+        let data = match fm.ty {
             Directory => self.read_dir(fm.qid, offset as usize, count as usize)?,
-            Regular | AppendOnly | Exclusive => self.s.lock().unwrap().read(
-                fm.qid,
-                offset as usize,
-                count as usize,
-                &self.state.uname,
-            )?,
+            Regular | AppendOnly | Exclusive => {
+                let outcome = self.s.lock().unwrap().read(
+                    fm.qid,
+                    offset as usize,
+                    count as usize,
+                    &self.state.uname,
+                )?;
+
+                match outcome {
+                    ReadOutcome::Immediate(data) => data,
+                    ReadOutcome::Blocked(chan) => {
+                        // Cloning the stream can
+                        let mut stream = match self.stream.try_clone() {
+                            Ok(stream) => stream,
+                            Err(err) => return Err(err),
+                        };
+
+                        spawn(move || {
+                            let data = chan.recv().unwrap_or_default();
+                            stream.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                        });
+
+                        return Ok(None);
+                    }
+                }
+            }
         };
 
-        Ok(Rdata::Read { data: Data(buf) })
+        Ok(Some(Rdata::Read { data: Data(data) }))
     }
 
     fn read_dir(&mut self, qid: u64, offset: usize, count: usize) -> Result<Vec<u8>> {

@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ninep = { version = "0.1", path = "../ninep" }
+ninep = { version = "0.2", path = "../ninep" }

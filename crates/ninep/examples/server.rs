@@ -24,13 +24,19 @@
 //! ```
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{Result, Serve9p, Server},
+    server::{ReadOutcome, Result, Serve9p, Server},
 };
-use std::time::SystemTime;
+use std::{
+    sync::mpsc::channel,
+    thread::{sleep, spawn},
+    time::{Duration, SystemTime},
+};
 
 fn main() {
     let s = Server::new(EchoServer {
         rw: "initial".to_string(),
+        blocking: "0\n".to_string(),
+        n: 0,
     });
     println!("starting server");
     _ = s.serve_socket("ninep-server").join();
@@ -38,6 +44,8 @@ fn main() {
 
 struct EchoServer {
     rw: String,
+    blocking: String,
+    n: usize,
 }
 
 const ROOT: u64 = 0;
@@ -45,6 +53,7 @@ const BAR: u64 = 1;
 const FOO: u64 = 2;
 const BAZ: u64 = 3;
 const RW: u64 = 4;
+const BLOCKING: u64 = 5;
 
 impl Serve9p for EchoServer {
     fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize> {
@@ -81,18 +90,19 @@ impl Serve9p for EchoServer {
     }
 
     fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta> {
-        println!("handling walk request");
+        println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
             (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),
             (ROOT, "foo") => Ok(FileMeta::file("foo", FOO)),
             (ROOT, "rw") => Ok(FileMeta::file("rw", RW)),
+            (ROOT, "blocking") => Ok(FileMeta::file("blocking", BLOCKING)),
             (BAR, "baz") => Ok(FileMeta::file("baz", BAZ)),
             (qid, child) => Err(format!("unknown child: qid={qid}, child={child}")),
         }
     }
 
     fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat> {
-        println!("handling stat request");
+        println!("handling stat request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(Stat {
                 fm: FileMeta::dir("/", ROOT),
@@ -118,7 +128,7 @@ impl Serve9p for EchoServer {
 
             FOO => Ok(Stat {
                 fm: FileMeta::file("foo", FOO),
-                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                perms: Perm::OWNER_READ,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -129,7 +139,7 @@ impl Serve9p for EchoServer {
 
             BAZ => Ok(Stat {
                 fm: FileMeta::file("baz", BAZ),
-                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                perms: Perm::OWNER_READ,
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -141,7 +151,18 @@ impl Serve9p for EchoServer {
             RW => Ok(Stat {
                 fm: FileMeta::file("rw", BAZ),
                 perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
-                n_bytes: self.rw.len() as u64,
+                n_bytes: self.rw.as_bytes().len() as u64,
+                last_accesses: SystemTime::now(),
+                last_modified: SystemTime::now(),
+                owner: uname.into(),
+                group: uname.into(),
+                last_modified_by: uname.into(),
+            }),
+
+            BLOCKING => Ok(Stat {
+                fm: FileMeta::file("blocking", BLOCKING),
+                perms: Perm::OWNER_READ,
+                n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
                 owner: uname.into(),
@@ -153,30 +174,54 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn open(&mut self, qid: u64, mode: Mode, _uname: &str) -> Result<IoUnit> {
-        println!("handling open request");
+    fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+        println!("handling open request: qid={qid} mode={mode:?} uname={uname}");
         match (qid, mode) {
-            (ROOT | FOO | BAR | BAZ | RW, Mode::FILE) => Ok(8168),
+            (FOO | BAZ | RW | BLOCKING, Mode::FILE) => Ok(8168),
+            (ROOT | BAR, Mode::DIR) => Ok(8168),
             (RW, _) => Ok(8168),
             (qid, mode) => Err(format!("{qid} is not a known qid (mode={mode:?})")),
         }
     }
 
-    fn read(&mut self, qid: u64, offset: usize, _count: usize, _uname: &str) -> Result<Vec<u8>> {
-        println!("handling read request");
-        match (qid, offset) {
-            (FOO, 0) => Ok("foo contents\n".as_bytes().to_vec()),
-            (BAZ, 0) => Ok("contents of baz\n".as_bytes().to_vec()),
-            (RW, 0) => Ok(format!("server state is currently: '{}'", self.rw)
-                .as_bytes()
-                .to_vec()),
+    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<ReadOutcome> {
+        println!("handling read request: qid={qid} offset={offset} count={count} uname={uname}");
+        let chunk = |s: &str| {
+            s.as_bytes()
+                .iter()
+                .skip(offset)
+                .take(count)
+                .copied()
+                .collect::<Vec<u8>>()
+        };
 
-            _ => Ok(vec![]),
-        }
+        let data = match qid {
+            FOO => chunk("foo contents\n"),
+            BAZ => chunk("contents of baz\n"),
+            RW => chunk(&format!("server state is currently: '{}'", self.rw)),
+            BLOCKING => {
+                let (tx, rx) = channel();
+                let data = chunk(&self.blocking);
+                self.n += 1;
+                self.blocking.push_str(&self.n.to_string());
+                self.blocking.push('\n');
+
+                spawn(move || {
+                    sleep(Duration::from_secs(1));
+                    _ = tx.send(data);
+                });
+
+                return Ok(ReadOutcome::Blocked(rx));
+            }
+
+            _ => Vec::new(),
+        };
+
+        Ok(ReadOutcome::Immediate(data))
     }
 
     fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        println!("handling read_dir request");
+        println!("handling read_dir request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(vec![
                 Stat {
@@ -191,7 +236,7 @@ impl Serve9p for EchoServer {
                 },
                 Stat {
                     fm: FileMeta::file("foo", FOO),
-                    perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                    perms: Perm::OWNER_READ,
                     n_bytes: 42,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -200,9 +245,19 @@ impl Serve9p for EchoServer {
                     last_modified_by: uname.into(),
                 },
                 Stat {
-                    fm: FileMeta::file("rw", FOO),
+                    fm: FileMeta::file("rw", RW),
                     perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
-                    n_bytes: self.rw.len() as u64,
+                    n_bytes: self.rw.as_bytes().len() as u64,
+                    last_accesses: SystemTime::now(),
+                    last_modified: SystemTime::now(),
+                    owner: uname.into(),
+                    group: uname.into(),
+                    last_modified_by: uname.into(),
+                },
+                Stat {
+                    fm: FileMeta::file("blocking", BLOCKING),
+                    perms: Perm::OWNER_READ,
+                    n_bytes: 0,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
                     owner: uname.into(),
