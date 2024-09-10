@@ -5,6 +5,7 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+/// The default root qid for 9p server implementations
 pub const QID_ROOT: u64 = 0;
 
 bitflags::bitflags! {
@@ -19,18 +20,27 @@ bitflags::bitflags! {
     /// of the type for a plain file.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Mode: u8 {
+        /// Directory
         const DIR = 0x80;
+        /// Append only
         const APPEND = 0x40;
+        /// Exclusive access
         const EXCLUSIVE = 0x20;
+        /// Mount
         const MOUNT = 0x10;
+        /// Auth
         const AUTH = 0x08;
+        /// Temp
         const TMP = 0x04;
+        /// Symlink
         const SYMLINK = 0x02;
+        /// File
         const FILE = 0x00;
     }
 }
 
 impl Mode {
+    /// Create a new [Mode] from a u8 bitmask
     pub fn new(bits: u8) -> Self {
         Mode::from_bits_truncate(bits)
     }
@@ -54,35 +64,58 @@ bitflags::bitflags! {
     ///   - and the other permissions are in bits 2, 1, and 0.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Perm: u32 {
+        /// Directory
         const DIR = 0x80000000;
+        /// Append only
         const APPEND = 0x40000000;
+        /// Exclusive access
         const EXCLUSIVE = 0x20000000;
+        /// File
         const FILE = 0x00000000;
+        /// Mount
         const MOUNT = 0x10000000;
+        /// Auth
         const AUTH = 0x08000000;
+        /// Temp
         const TMP = 0x04000000;
+        /// Symlink
         const SYMLINK = 0x02000000;
+        /// Device
         const DEVICE = 0x00800000;
+        /// Named pipe
         const NAMED_PIPE = 0x00200000;
+        /// Socket
         const SOCKET = 0x00100000;
+        /// Set UID
         const SET_UID = 0x00080000;
+        /// Set GID
         const SET_GID = 0x00040000;
 
+        /// Readable by owner
         const OWNER_READ = 0o400;
+        /// Writable by owner
         const OWNER_WRITE = 0o200;
+        /// Executable by owner
         const OWNER_EXEC = 0o100;
 
+        /// Readable by group
         const GROUP_READ = 0o040;
+        /// Writable by group
         const GROUP_WRITE = 0o020;
+        /// Executable by group
         const GROUP_EXEC = 0o010;
 
+        /// Readable by other
         const OTHER_READ = 0o004;
+        /// Writable by other
         const OTHER_WRITE = 0o002;
+        /// Executable by other
         const OTHER_EXEC = 0o001;
     }
 }
 
 impl Perm {
+    /// Create a new [Perm] from a u32 bitmask
     pub fn new(bits: u32) -> Self {
         Perm::from_bits_truncate(bits)
     }
@@ -96,15 +129,24 @@ impl Perm {
 /// that may be read or written without breaking up the transfer.
 pub type IoUnit = u32;
 
+/// A machine independent directory entry
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stat {
+    /// File metadata
     pub fm: FileMeta,
+    /// Permissions
     pub perms: Perm,
+    /// Size in bytes
     pub n_bytes: u64,
+    /// Timestamp of last access
     pub last_accesses: SystemTime,
+    /// Timestamp of last modification
     pub last_modified: SystemTime,
+    /// Owner
     pub owner: String,
+    /// Group
     pub group: String,
+    /// User who last modified this entry
     pub last_modified_by: String,
 }
 
@@ -163,11 +205,16 @@ impl TryFrom<RawStat> for Stat {
     }
 }
 
+/// Supported filetypes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
+    /// Directory
     Directory,
+    /// Regular
     Regular,
+    /// Append only
     AppendOnly,
+    /// Exclusive access
     Exclusive,
 }
 
@@ -207,10 +254,14 @@ impl From<FileType> for Perm {
     }
 }
 
+/// File meta-data
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FileMeta {
+    /// The name of the file
     pub name: String,
+    /// The type of the file
     pub ty: FileType,
+    /// The server Qid for this file
     pub qid: u64,
 }
 
@@ -223,6 +274,7 @@ impl FileMeta {
         }
     }
 
+    /// Construct a new [FileMeta] for a directory.
     pub fn dir(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
@@ -231,6 +283,7 @@ impl FileMeta {
         }
     }
 
+    /// Construct a new [FileMeta] for a regular file.
     pub fn file(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
@@ -239,6 +292,7 @@ impl FileMeta {
         }
     }
 
+    /// Construct a new [FileMeta] for an append only file.
     pub fn append_only_file(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
@@ -247,6 +301,7 @@ impl FileMeta {
         }
     }
 
+    /// Construct a new [FileMeta] for an exclusive file.
     pub fn exclusive_file(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),

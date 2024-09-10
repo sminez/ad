@@ -47,9 +47,16 @@ where
     Err(io::Error::new(io::ErrorKind::Other, e))
 }
 
+/// A client that operates over an underlying [UnixStream].
 pub type UnixClient = Client<UnixStream>;
+
+/// A client that operates over an underlying [TcpStream].
 pub type TcpClient = Client<TcpStream>;
 
+/// A 9p client.
+///
+/// Support for each of the operations exposed by this client is determined by the server
+/// implementation that it is connected to.
 #[derive(Debug)]
 pub struct Client<S>
 where
@@ -75,6 +82,7 @@ where
 }
 
 impl Client<UnixStream> {
+    /// Create a new [Client] connected to a unix socket at the specified path.
     pub fn new_unix_with_explicit_path(
         uname: String,
         path: String,
@@ -96,6 +104,10 @@ impl Client<UnixStream> {
         Ok(client)
     }
 
+    /// Create a new [Client] connected to a unix socket at the given aname under the default
+    /// namespace.
+    ///
+    /// The default namespace is located in /tmp/ns.$USER.:0/
     pub fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> io::Result<Self> {
         let ns = ns.into();
         let uname = match env::var("USER") {
@@ -109,6 +121,7 @@ impl Client<UnixStream> {
 }
 
 impl Client<TcpStream> {
+    /// Create a new [Client] connected to a tcp socket at the specified address.
     pub fn new_tcp<T>(uname: String, addr: T, aname: impl Into<String>) -> io::Result<Self>
     where
         T: ToSocketAddrs,
@@ -226,6 +239,7 @@ where
         }
     }
 
+    /// Request the current [Stat] of the file or directory identified by the given path.
     pub fn stat(&mut self, path: impl Into<String>) -> io::Result<Stat> {
         let fid = self.walk(path)?;
         let resp = self.send(0, Tdata::Stat { fid })?;
@@ -264,10 +278,12 @@ where
         Ok(bytes)
     }
 
+    /// Read the full contents of the file at `path` as bytes.
     pub fn read(&mut self, path: impl Into<String>) -> io::Result<Vec<u8>> {
         self._read_all(path, Mode::FILE)
     }
 
+    /// Read the full contents of the file at `path` as utf-8 encoded text.
     pub fn read_str(&mut self, path: impl Into<String>) -> io::Result<String> {
         let bytes = self._read_all(path, Mode::FILE)?;
         let s = match String::from_utf8(bytes) {
@@ -278,6 +294,7 @@ where
         Ok(s)
     }
 
+    /// Read the directory listing of the directory at `path`.
     pub fn read_dir(&mut self, path: impl Into<String>) -> io::Result<Vec<Stat>> {
         let bytes = self._read_all(path, Mode::DIR)?;
         let mut buf = Cursor::new(bytes);
@@ -297,7 +314,11 @@ where
         Ok(stats)
     }
 
-    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter<S>> {
+    /// Iterate over Vec's of bytes from the file at `path`.
+    ///
+    /// The size of each chunk is determined by the supported message size of the server replying
+    /// to the requests.
+    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter<'_, S>> {
         let fid = self.walk(path)?;
         let mode = Mode::FILE.bits();
         let count = self.msize;
@@ -311,7 +332,8 @@ where
         })
     }
 
-    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter<S>> {
+    /// Iterate over newline delimited lines of utf-8 encoded text from the file at `path`.
+    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter<'_, S>> {
         let fid = self.walk(path)?;
         let mode = Mode::FILE.bits();
         let count = self.msize;
@@ -327,6 +349,7 @@ where
         })
     }
 
+    /// Write the provided data to the file at `path` at the given offset.
     pub fn write(
         &mut self,
         path: impl Into<String>,
@@ -364,6 +387,7 @@ where
         Ok(cur)
     }
 
+    /// Write the provided string data to the file at `path` at the given offset.
     pub fn write_str(
         &mut self,
         path: impl Into<String>,
@@ -373,6 +397,7 @@ where
         self.write(path, offset, content.as_bytes())
     }
 
+    /// Attempt to create a new file within the connected filesystem.
     pub fn create(
         &mut self,
         dir: impl Into<String>,
@@ -394,6 +419,7 @@ where
         Ok(())
     }
 
+    /// Attempt to remove a file from the connected filesystem.
     pub fn remove(&mut self, path: impl Into<String>) -> io::Result<()> {
         let fid = self.walk(path)?;
         self.send(0, Tdata::Remove { fid })?;
@@ -402,6 +428,8 @@ where
     }
 }
 
+/// An iterator of [Vec<u8>] chunks out of a given file.
+#[derive(Debug)]
 pub struct ChunkIter<'a, S>
 where
     S: Stream,
@@ -435,6 +463,8 @@ where
     }
 }
 
+/// An iterator of [String] lines out of a given file.
+#[derive(Debug)]
 pub struct ReadLineIter<'a, S>
 where
     S: Stream,

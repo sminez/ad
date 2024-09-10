@@ -1,7 +1,7 @@
 //! Traits for implementing a 9p fileserver
 use crate::{
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, QID_ROOT},
-    protocol::{Data, Format9p, Qid, RawStat, Rdata, Rmessage, Tdata, Tmessage, MAX_DATA_LEN},
+    protocol::{Data, Format9p, Qid, RawStat, Rdata, Tdata, Tmessage, MAX_DATA_LEN},
     Result, Stream,
 };
 use std::{
@@ -63,15 +63,6 @@ const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 
 const UNKNOWN_VERSION: &str = "unknown";
 const SUPPORTED_VERSION: &str = "9P2000";
-
-impl From<(u16, Result<Rdata>)> for Rmessage {
-    fn from((tag, content): (u16, Result<Rdata>)) -> Self {
-        Rmessage {
-            tag,
-            content: content.unwrap_or_else(|ename| Rdata::Error { ename }),
-        }
-    }
-}
 
 /// The outcome of a client attempting to [read](Serve9p::read) a given file.
 #[derive(Debug)]
@@ -189,6 +180,7 @@ where
         }
     }
 
+    /// Bind this server to the specified port and serve over a tcp socket.
     pub fn serve_tcp(self, port: u16) -> JoinHandle<()> {
         spawn(move || {
             let listener = tcp_socket(port);
@@ -208,6 +200,7 @@ where
         })
     }
 
+    /// Bind this server to the specified path and serve over a unix socket.
     pub fn serve_socket(self, socket_name: impl Into<String>) -> JoinHandle<()> {
         let socket_name = socket_name.into();
 

@@ -408,7 +408,10 @@ macro_rules! impl_tmessages {
     ($(
         $(#[$docs:meta])+
         $enum_variant:ident => $message_variant:ident {
-            $($field:ident: $ty:ty,)*
+            $(
+                $(#[$field_docs:meta])+
+                $field:ident: $ty:ty,
+            )*
         }
     )+) => {
         /// T-message data variants
@@ -417,7 +420,7 @@ macro_rules! impl_tmessages {
         /// See the individual message structs for docs on the format and semantics of each variant.
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum Tdata {
-            $( $(#[$docs])+ $enum_variant { $($field: $ty,)* }, )+
+            $( $(#[$docs])+ $enum_variant { $($(#[$field_docs])+ $field: $ty,)* }, )+
         }
 
         impl_message_format!(
@@ -435,7 +438,10 @@ macro_rules! impl_rmessages {
     ($(
         $(#[$docs:meta])+
         $enum_variant:ident => $message_variant:ident {
-            $($field:ident: $ty:ty,)*
+            $(
+                $(#[$field_docs:meta])+
+                $field:ident: $ty:ty,
+            )*
         }
     )+) => {
         /// R-message data variants
@@ -444,7 +450,7 @@ macro_rules! impl_rmessages {
         /// See the individual message structs for docs on the format and semantics of each variant.
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum Rdata {
-            $( $(#[$docs])+ $enum_variant { $($field: $ty,)* }, )+
+            $( $(#[$docs])+ $enum_variant { $($(#[$field_docs])+ $field: $ty,)* }, )+
         }
 
         impl_message_format!(
@@ -529,96 +535,127 @@ impl_tmessages! {
     /// http://man.cat-v.org/plan_9/5/version
     /// size[4] Tversion tag[2] | msize[4] version[s]
     Version => Tversion {
+        /// The requested message size
         msize: u32,
+        /// The requested protocol version
         version: String,
     }
 
     /// http://man.cat-v.org/plan_9/5/attach
     /// size[4] Tauth tag[2] | afid[4] uname[s] aname[s]
     Auth => Tauth {
+        /// The fid to authenticate against
         afid: u32,
+        /// The user authenticating
         uname: String,
+        /// The filetree to access
         aname: String,
     }
 
     /// http://man.cat-v.org/plan_9/5/attach
     /// size[4] Tattach tag[2] | fid[4] afid[4] uname[s] aname[s]
     Attach => Tattach {
+        /// The fid to attach to
         fid: u32,
+        /// The fid to authenticate against
         afid: u32,
+        /// The user attaching
         uname: String,
+        /// The filetree to access
         aname: String,
     }
 
     /// http://man.cat-v.org/plan_9/5/flush
     /// size[4] Tflush tag[2] | oldtag[2]
     Flush => Tflush {
+        /// The tag to flush
         old_tag: u16,
     }
 
     /// http://man.cat-v.org/plan_9/5/walk
     /// size[4] Twalk tag[2] | fid[4] newfid[4] nwname[2] nwname*(wname[s])
     Walk => Twalk {
+        /// The fid to walk from
         fid: u32,
+        /// The fid to associate with the end of the walk
         new_fid: u32,
+        /// Path segments to walk from fid to new_fid
         wnames: Vec<String>,
     }
 
     /// http://man.cat-v.org/plan_9/5/open
     /// size[4] Topen tag[2] | fid[4] mode[1]
     Open => Topen {
+        /// The fid to open
         fid: u32,
+        /// The mode to open the resource in
         mode: u8,
     }
 
     /// http://man.cat-v.org/plan_9/5/open
     /// size[4] Tcreate tag[2] | fid[4] name[s] perm[4] mode[1]
     Create => Tcreate {
+        /// The fid to associate with the directory where the file should be created
         fid: u32,
+        /// The name of the new file
         name: String,
+        /// The permissions to use
         perm: u32,
+        /// The mode to use
         mode: u8,
     }
 
     /// http://man.cat-v.org/plan_9/5/read
     /// size[4] Tread tag[2] | fid[4] offset[8] count[4]
     Read => Tread {
+        /// The fid to read
         fid: u32,
+        /// The offset in bytes to start reading at
         offset: u64,
+        /// The numbder of bytes to read
         count: u32,
     }
 
     /// http://man.cat-v.org/plan_9/5/read
     /// size[4] Twrite tag[2] | fid[4] offset[8] count[4] data[count]
     Write => Twrite {
+        /// The fid to write to
         fid: u32,
+        /// The offset in bytes to start writing at
         offset: u64,
+        /// The data to write
         data: Data,
     }
 
     /// http://man.cat-v.org/plan_9/5/clunk
     /// size[4] Tclunk tag[2] | fid[4]
     Clunk => Tclunk {
+        /// The fid to be closed
         fid: u32,
     }
 
     /// http://man.cat-v.org/plan_9/5/remove
     /// size[4] Tremove tag[2] | fid[4]
     Remove => Tremove {
+        /// The fid to be removed
         fid: u32,
     }
 
     /// http://man.cat-v.org/plan_9/5/stat
     /// size[4] Tstat tag[2] | fid[4]
     Stat => Tstat {
+        /// The fid to request a [Stat] for
         fid: u32,
     }
 
     /// http://man.cat-v.org/plan_9/5/stat
     /// size[4] Twstat tag[2] | fid[4] stat[n]
     Wstat => Twstat {
+        /// The fid to update the [Stat] for
         fid: u32,
+        /// The size of the following stat
         size: u16,
+        /// The stat data to be written
         stat: RawStat,
     }
 }
@@ -649,25 +686,30 @@ impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/version
     /// size[4] Rversion tag[2] | msize[4] version[s]
     Version => Rversion {
+        /// Supported message size
         msize: u32,
+        /// Supported protocol version
         version: String,
     }
 
     /// http://man.cat-v.org/plan_9/5/attach
     /// size[4] Rauth tag[2] | aqid[13]
     Auth => Rauth {
+        /// The authenticated Qid of the connected root
         aqid: Qid,
     }
 
     /// http://man.cat-v.org/plan_9/5/error
     /// size[4] Rerror tag[2] | ename[s]
     Error => Rerror {
+        /// The contents of the error being returned
         ename: String,
     }
 
     /// http://man.cat-v.org/plan_9/5/attach
     /// size[4] Rattach tag[2] | aquid[13]
     Attach => Rattach {
+        /// Qid corresponding to the Fid used to attach
         aqid: Qid,
     }
 
@@ -678,32 +720,39 @@ impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/walk
     /// size[4] Rwalk tag[2] | nwqid[2] nwqid*(wqid[13])
     Walk => Rwalk {
+        /// Qids for the path elements walked
         wqids: Vec<Qid>,
     }
 
     /// http://man.cat-v.org/plan_9/5/open
     /// size[4] Ropen tag[2] | qid[13] iounit[4]
     Open => Ropen {
+        /// Qid of the opened resource
         qid: Qid,
+        /// IO unit for subsequent read / write operations
         iounit: u32,
     }
 
     /// http://man.cat-v.org/plan_9/5/open
     /// size[4] Rcreate tag[2] | qid[13] iounit[4]
     Create => Rcreate {
+        /// Qid of the created resource
         qid: Qid,
+        /// IO unit for subsequent read / write operations
         iounit: u32,
     }
 
     /// http://man.cat-v.org/plan_9/5/read
     /// size[4] Rread tag[2] | count[4] data[count]
     Read => Rread {
+        /// The bytes read
         data: Data,
     }
 
     /// http://man.cat-v.org/plan_9/5/read
     /// size[4] Rwrite tag[2] | count[4]
     Write => Rwrite {
+        /// The number of bytes written
         count: u32,
     }
 
@@ -718,7 +767,9 @@ impl_rmessages! {
     /// http://man.cat-v.org/plan_9/5/stat
     /// size[4] Rstat tag[2] | stat[n]
     Stat => Rstat {
+        /// The size of the following stat
         size: u16,
+        /// The stat data for the requested fid
         stat: RawStat,
     }
 
