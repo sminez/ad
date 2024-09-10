@@ -1,4 +1,16 @@
 //! A simple 9p based client for interacting with ad
+#![warn(
+    clippy::complexity,
+    clippy::correctness,
+    clippy::style,
+    future_incompatible,
+    missing_debug_implementations,
+    missing_docs,
+    rust_2018_idioms,
+    rustdoc::all,
+    clippy::undocumented_unsafe_blocks
+)]
+
 use ninep::client::UnixClient;
 use std::io;
 
@@ -9,6 +21,7 @@ pub struct Client {
 }
 
 impl Client {
+    /// Create a new client connected to `ad` over its 9p unix socket
     pub fn new() -> io::Result<Self> {
         Ok(Self {
             inner: UnixClient::new_unix("ad", "")?,
@@ -24,26 +37,38 @@ impl Client {
         self.inner.read_str(format!("buffers/{buffer}/{file}"))
     }
 
+    /// Read the contents of the dot of the given buffer
     pub fn read_dot(&mut self, buffer: &str) -> io::Result<String> {
         self._read_buffer_file(buffer, "dot")
     }
 
+    /// Read the body of the given buffer.
     pub fn read_body(&mut self, buffer: &str) -> io::Result<String> {
         self._read_buffer_file(buffer, "body")
     }
 
+    /// Read the current dot address of the given buffer.
     pub fn read_addr(&mut self, buffer: &str) -> io::Result<String> {
         self._read_buffer_file(buffer, "addr")
     }
 
+    /// Read the filename of the given buffer
     pub fn read_filename(&mut self, buffer: &str) -> io::Result<String> {
         self._read_buffer_file(buffer, "filename")
     }
 
+    /// Read the x-address of the given buffer.
+    ///
+    /// This is only used by the filesystem interface of `ad` and will not affect the current
+    /// editor state.
     pub fn read_xaddr(&mut self, buffer: &str) -> io::Result<String> {
         self._read_buffer_file(buffer, "xaddr")
     }
 
+    /// Read the x-dot of the given buffer.
+    ///
+    /// This is only used by the filesystem interface of `ad` and will not affect the current
+    /// editor state.
     pub fn read_xdot(&mut self, buffer: &str) -> io::Result<String> {
         self._read_buffer_file(buffer, "xdot")
     }
@@ -59,24 +84,29 @@ impl Client {
             .write(format!("buffers/{buffer}/{file}"), offset, content)
     }
 
-    pub fn write_dot(&mut self, buffer: &str, offset: u64, content: &[u8]) -> io::Result<usize> {
-        self._write_buffer_file(buffer, "dot", offset, content)
+    /// Replace the dot of the given buffer with the provided string.
+    pub fn write_dot(&mut self, buffer: &str, content: &str) -> io::Result<usize> {
+        self._write_buffer_file(buffer, "dot", 0, content.as_bytes())
     }
 
-    pub fn write_body(&mut self, buffer: &str, offset: u64, content: &[u8]) -> io::Result<usize> {
-        self._write_buffer_file(buffer, "body", offset, content)
+    /// Write the provided string to the specified offset in the given buffer.
+    pub fn write_body(&mut self, buffer: &str, offset: u64, content: &str) -> io::Result<usize> {
+        self._write_buffer_file(buffer, "body", offset, content.as_bytes())
     }
 
-    pub fn write_addr(&mut self, buffer: &str, offset: u64, content: &[u8]) -> io::Result<usize> {
-        self._write_buffer_file(buffer, "addr", offset, content)
+    /// Set the addr of the given buffer.
+    pub fn write_addr(&mut self, buffer: &str, addr: &str) -> io::Result<usize> {
+        self._write_buffer_file(buffer, "addr", 0, addr.as_bytes())
     }
 
-    pub fn write_xaddr(&mut self, buffer: &str, offset: u64, content: &[u8]) -> io::Result<usize> {
-        self._write_buffer_file(buffer, "xaddr", offset, content)
+    /// Replace the xdot of the given buffer with the provided string.
+    pub fn write_xdot(&mut self, buffer: &str, offset: u64, content: &str) -> io::Result<usize> {
+        self._write_buffer_file(buffer, "xdot", offset, content.as_bytes())
     }
 
-    pub fn write_xdot(&mut self, buffer: &str, offset: u64, content: &[u8]) -> io::Result<usize> {
-        self._write_buffer_file(buffer, "xdot", offset, content)
+    /// Set the xaddr of the given buffer.
+    pub fn write_xaddr(&mut self, buffer: &str, content: &str) -> io::Result<usize> {
+        self._write_buffer_file(buffer, "xaddr", 0, content.as_bytes())
     }
 
     fn _ctl(&mut self, command: &str, args: &str) -> io::Result<()> {
