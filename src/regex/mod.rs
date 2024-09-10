@@ -63,7 +63,7 @@ struct CharClass {
 }
 
 impl CharClass {
-    fn try_parse(it: &mut Peekable<Chars>) -> Result<Self, Error> {
+    fn try_parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, Error> {
         let mut next = || next_char(it)?.ok_or(Error::InvalidClass);
         let (mut ch, _) = next()?;
 
@@ -117,7 +117,7 @@ impl CharClass {
     }
 }
 
-fn next_char(it: &mut Peekable<Chars>) -> Result<Option<(char, bool)>, Error> {
+fn next_char(it: &mut Peekable<Chars<'_>>) -> Result<Option<(char, bool)>, Error> {
     match it.next() {
         Some('\\') => (),
         Some(ch) => return Ok(Some((ch, false))),

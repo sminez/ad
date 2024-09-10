@@ -27,7 +27,7 @@ pub(super) enum ParseOutput {
 }
 
 impl Expr {
-    pub(super) fn try_parse(it: &mut Peekable<Chars>) -> Result<ParseOutput, Error> {
+    pub(super) fn try_parse(it: &mut Peekable<Chars<'_>>) -> Result<ParseOutput, Error> {
         use Expr::*;
         use ParseOutput::*;
 
@@ -70,17 +70,21 @@ impl Expr {
     }
 }
 
-fn parse_delimited_regex(it: &mut Peekable<Chars>, kind: &'static str) -> Result<Regex, Error> {
+fn parse_delimited_regex(it: &mut Peekable<Chars<'_>>, kind: &'static str) -> Result<Regex, Error> {
     let s = parse_delimited_str(it, kind)?;
     Ok(Regex::compile(&s)?)
 }
 
-fn parse_delimited_str(it: &mut Peekable<Chars>, kind: &'static str) -> Result<String, Error> {
+fn parse_delimited_str(it: &mut Peekable<Chars<'_>>, kind: &'static str) -> Result<String, Error> {
     let delim = it.next().ok_or(Error::MissingDelimiter(kind))?;
     read_until(delim, it, kind)
 }
 
-fn read_until(delim: char, it: &mut Peekable<Chars>, kind: &'static str) -> Result<String, Error> {
+fn read_until(
+    delim: char,
+    it: &mut Peekable<Chars<'_>>,
+    kind: &'static str,
+) -> Result<String, Error> {
     let mut s = String::new();
     let mut prev = delim;
 
@@ -95,7 +99,7 @@ fn read_until(delim: char, it: &mut Peekable<Chars>, kind: &'static str) -> Resu
     Err(Error::UnclosedDelimiter(kind, delim))
 }
 
-fn parse_sub(it: &mut Peekable<Chars>) -> Result<ParseOutput, Error> {
+fn parse_sub(it: &mut Peekable<Chars<'_>>) -> Result<ParseOutput, Error> {
     let delim = it.next().ok_or(Error::MissingDelimiter("s"))?;
     let re = Regex::compile(&read_until(delim, it, "s")?)?;
     let s = read_until(delim, it, "s")?;
@@ -107,7 +111,7 @@ fn parse_sub(it: &mut Peekable<Chars>) -> Result<ParseOutput, Error> {
     }
 }
 
-fn parse_group(it: &mut Peekable<Chars>) -> Result<Vec<Vec<Expr>>, Error> {
+fn parse_group(it: &mut Peekable<Chars<'_>>) -> Result<Vec<Vec<Expr>>, Error> {
     let mut group = Vec::new();
     let mut branch = Vec::new();
     loop {

@@ -361,7 +361,7 @@ impl Program {
     }
 }
 
-fn consume_whitespace(it: &mut Peekable<Chars>) {
+fn consume_whitespace(it: &mut Peekable<Chars<'_>>) {
     loop {
         match it.peek() {
             Some(ch) if ch.is_whitespace() => {

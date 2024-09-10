@@ -302,6 +302,7 @@ where
 pub type WildcardFn<K> = fn(&K) -> bool;
 
 /// A wildcard node in a key sequence that can conditionally match a single key element.
+#[derive(Debug)]
 pub enum WildCard<K> {
     Lit(K),
     Wild(WildcardFn<K>),

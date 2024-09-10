@@ -10,6 +10,7 @@ use std::{
     thread::{spawn, JoinHandle},
 };
 
+#[derive(Debug)]
 pub enum InputEvent {
     Message(Message),
     KeyPress(Key),

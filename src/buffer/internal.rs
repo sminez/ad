@@ -35,6 +35,7 @@ fn count_chars(bytes: &[u8]) -> usize {
     let mut cur = 0;
 
     while cur < bytes.len() {
+        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
         let ch = unsafe { decode_char_at(cur, bytes) };
         cur += ch.len_utf8();
         n_chars += 1;
@@ -201,7 +202,7 @@ impl GapBuffer {
         v
     }
 
-    pub fn iter_lines(&self) -> impl Iterator<Item = Slice> {
+    pub fn iter_lines(&self) -> impl Iterator<Item = Slice<'_>> {
         let mut line_idx = 0;
 
         std::iter::from_fn(move || {
@@ -254,7 +255,7 @@ impl GapBuffer {
     pub fn char(&self, char_idx: usize) -> char {
         let byte_idx = self.char_to_raw_byte(char_idx);
 
-        // SAFTEY: we know that we have valid utf8 data internally
+        // SAFETY: we know that we have valid utf8 data internally
         unsafe { decode_char_at(byte_idx, &self.data) }
     }
 
@@ -269,12 +270,12 @@ impl GapBuffer {
 
     #[inline]
     fn char_len(&self, byte_idx: usize) -> usize {
-        // SAFTEY: we know that we have valid utf8 data internally
+        // SAFETY: we know that we have valid utf8 data internally
         unsafe { decode_char_at(byte_idx, &self.data) }.len_utf8()
     }
 
     #[inline]
-    pub fn line(&self, line_idx: usize) -> Slice {
+    pub fn line(&self, line_idx: usize) -> Slice<'_> {
         if line_idx >= self.len_lines() {
             panic!(
                 "line index was {line_idx} but buffer has {} lines",
@@ -321,7 +322,7 @@ impl GapBuffer {
     }
 
     /// An exclusive range of characters from the buffer
-    pub fn slice(&self, char_from: usize, char_to: usize) -> Slice {
+    pub fn slice(&self, char_from: usize, char_to: usize) -> Slice<'_> {
         let from = self.char_to_raw_byte(char_from);
         let to = self.char_to_raw_byte(char_to);
 
@@ -703,7 +704,7 @@ impl<'a> Slice<'a> {
     }
 
     pub fn as_strs(&self) -> (&str, &str) {
-        // SAFTEY: we know that we have valid utf8 data internally
+        // SAFETY: we know that we have valid utf8 data internally
         unsafe {
             (
                 std::str::from_utf8_unchecked(self.left),
@@ -771,6 +772,7 @@ impl<'a> Iterator for Chars<'a> {
         }
 
         let (cur, data) = self.s.cur_and_data(self.cur);
+        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
         let ch = unsafe { decode_char_at(cur, data) };
         let len = ch.len_utf8();
         self.cur += len;
@@ -798,6 +800,7 @@ impl<'a> Iterator for IdxChars<'a> {
 
         if self.rev {
             let (cur, data) = self.s.cur_and_data(self.cur - 1);
+            // SAFETY: we know we are in bounds and that we contain valid utf-8 data
             let ch = unsafe { decode_char_ending_at(cur, data) };
             let len = ch.len_utf8();
             self.idx -= 1;
@@ -805,6 +808,7 @@ impl<'a> Iterator for IdxChars<'a> {
             Some((self.idx, ch))
         } else {
             let (cur, data) = self.s.cur_and_data(self.cur);
+            // SAFETY: we know we are in bounds and that we contain valid utf-8 data
             let ch = unsafe { decode_char_at(cur, data) };
             let len = ch.len_utf8();
             let res = Some((self.idx, ch));

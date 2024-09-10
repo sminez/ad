@@ -128,7 +128,7 @@ pub(crate) fn relative_path_from(base: &Path, p: &Path) -> PathBuf {
 
 // returns the parsed number and following character if there was one.
 // initial must be a valid ascii digit
-pub(crate) fn parse_num(initial: char, it: &mut Peekable<Chars>) -> usize {
+pub(crate) fn parse_num(initial: char, it: &mut Peekable<Chars<'_>>) -> usize {
     let mut s = String::from(initial);
     loop {
         match it.peek() {

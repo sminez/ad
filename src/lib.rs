@@ -1,4 +1,16 @@
 //! ad :: the adaptable editor
+#![warn(
+    clippy::complexity,
+    clippy::correctness,
+    clippy::style,
+    future_incompatible,
+    missing_debug_implementations,
+    // missing_docs,
+    rust_2018_idioms,
+    rustdoc::all,
+    clippy::undocumented_unsafe_blocks
+)]
+
 use libc::termios as Termios;
 use std::{
     io::Stdout,

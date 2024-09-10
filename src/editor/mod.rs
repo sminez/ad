@@ -41,6 +41,7 @@ pub enum EditorMode {
     Headless,
 }
 
+#[derive(Debug)]
 pub struct Editor {
     screen_rows: usize,
     screen_cols: usize,
@@ -164,7 +165,8 @@ impl Editor {
 
         enable_mouse_support(&mut self.stdout);
         enable_alternate_screen(&mut self.stdout);
-        register_signal_handler();
+        // SAFETY: we only register our signal handler once
+        unsafe { register_signal_handler() };
         self.update_window_size();
         Input::new(tx).run_threaded();
     }

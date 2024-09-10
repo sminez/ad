@@ -32,26 +32,26 @@ pub fn win_size_changed() -> bool {
     WIN_SIZE_CHANGED.swap(false, Ordering::Relaxed)
 }
 
-pub fn register_signal_handler() {
-    unsafe {
-        let mut maybe_sa = mem::MaybeUninit::<sigaction>::uninit();
-        if libc::sigemptyset(&mut (*maybe_sa.as_mut_ptr()).sa_mask) == -1 {
-            die!(
-                "Unable to register signal handler: {}",
-                io::Error::last_os_error()
-            )
-        }
+/// # Safety
+/// must only be called once
+pub unsafe fn register_signal_handler() {
+    let mut maybe_sa = mem::MaybeUninit::<sigaction>::uninit();
+    if libc::sigemptyset(&mut (*maybe_sa.as_mut_ptr()).sa_mask) == -1 {
+        die!(
+            "Unable to register signal handler: {}",
+            io::Error::last_os_error()
+        )
+    }
 
-        let mut sa_ptr = *maybe_sa.as_mut_ptr();
-        sa_ptr.sa_sigaction = handle_win_size_change as sighandler_t;
-        sa_ptr.sa_flags = SA_SIGINFO;
+    let mut sa_ptr = *maybe_sa.as_mut_ptr();
+    sa_ptr.sa_sigaction = handle_win_size_change as sighandler_t;
+    sa_ptr.sa_flags = SA_SIGINFO;
 
-        if libc::sigaction(SIGWINCH, &sa_ptr as *const _, ptr::null_mut()) == -1 {
-            die!(
-                "Unable to register signal handler: {}",
-                io::Error::last_os_error()
-            )
-        }
+    if libc::sigaction(SIGWINCH, &sa_ptr as *const _, ptr::null_mut()) == -1 {
+        die!(
+            "Unable to register signal handler: {}",
+            io::Error::last_os_error()
+        )
     }
 }
 
@@ -174,9 +174,9 @@ pub(crate) fn get_termsize() -> (usize, usize) {
         x: 0,
         y: 0,
     };
-    unsafe {
-        ioctl(STDOUT_FILENO, TIOCGWINSZ, &mut ts as *mut _);
-    }
+
+    // SAFETY: ts is a valid termsize struct to pass as a pointer here
+    unsafe { ioctl(STDOUT_FILENO, TIOCGWINSZ, &mut ts as *mut _) };
 
     (ts.r as usize, ts.c as usize)
 }
@@ -238,12 +238,14 @@ pub(crate) fn enable_raw_mode(mut t: Termios) {
 }
 
 pub(crate) fn set_termios(t: Termios) {
+    // SAFETY: t is a valid termios struct to use as a pointer here
     if unsafe { tcsetattr(STDOUT_FILENO, TCSAFLUSH, &t) } == -1 {
         die!("tcsetattr");
     }
 }
 
 pub(crate) fn get_termios() -> Termios {
+    // SAFETY: passing a null pointer here is valid
     unsafe {
         let mut t: Termios = mem::zeroed();
         if tcgetattr(STDOUT_FILENO, &mut t as *mut _) == -1 {

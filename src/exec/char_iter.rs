@@ -23,26 +23,27 @@ pub trait IterBoundedChars {
 }
 
 impl IterBoundedChars for GapBuffer {
-    fn iter_between(&self, from: usize, to: usize) -> CharIter {
+    fn iter_between(&self, from: usize, to: usize) -> CharIter<'_> {
         CharIter::Slice(self.slice(from, to).indexed_chars(from, false))
     }
 
-    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter {
+    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter<'_> {
         CharIter::Slice(self.slice(to, from).indexed_chars(to, true))
     }
 }
 
 impl IterBoundedChars for Buffer {
-    fn iter_between(&self, from: usize, to: usize) -> CharIter {
+    fn iter_between(&self, from: usize, to: usize) -> CharIter<'_> {
         CharIter::Slice(self.txt.slice(from, to).indexed_chars(from, false))
     }
 
-    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter {
+    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter<'_> {
         CharIter::Slice(self.txt.slice(to, from).indexed_chars(to, true))
     }
 }
 
 /// Supported iterator types that can be returned by an InterBoundedChars
+#[derive(Debug)]
 pub enum CharIter<'a> {
     Slice(IdxChars<'a>),
     StdIn(CachedStdinIter<'a>),
@@ -60,7 +61,7 @@ impl<'a> Iterator for CharIter<'a> {
 }
 
 impl IterBoundedChars for CachedStdin {
-    fn iter_between(&self, from: usize, to: usize) -> CharIter {
+    fn iter_between(&self, from: usize, to: usize) -> CharIter<'_> {
         CharIter::StdIn(CachedStdinIter {
             inner: self,
             from,
@@ -69,7 +70,7 @@ impl IterBoundedChars for CachedStdin {
     }
 
     /// This will always return None
-    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter {
+    fn rev_iter_between(&self, from: usize, to: usize) -> CharIter<'_> {
         CharIter::StdIn(CachedStdinIter {
             inner: self,
             from,

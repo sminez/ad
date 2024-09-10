@@ -189,6 +189,7 @@ impl<'a> IndexedChars for &'a GapBuffer {
 
 /// An iterator over sequential, non overlapping matches of a Regex
 /// against a given input
+#[derive(Debug)]
 pub struct MatchIter<'a, I>
 where
     I: IndexedChars,

@@ -52,7 +52,7 @@ impl Addr {
     }
 
     /// Attempt to parse a valid dot expression from a character stream
-    pub fn parse(it: &mut Peekable<Chars>) -> Result<Self, ParseError> {
+    pub fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
         let start = match SimpleAddr::parse(it) {
             Ok(exp) => Some(exp),
             // If the following char is a ',' we substitute BOF for a missing start
@@ -91,7 +91,7 @@ pub struct SimpleAddr {
 }
 
 impl SimpleAddr {
-    fn parse(it: &mut Peekable<Chars>) -> Result<Self, ParseError> {
+    fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
         let base = AddrBase::parse(it)?;
         let mut suffix = String::with_capacity(2);
 
@@ -159,7 +159,7 @@ enum Dir {
 }
 
 impl AddrBase {
-    pub(crate) fn parse(it: &mut Peekable<Chars>) -> Result<Self, ParseError> {
+    pub(crate) fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
         let dir = match it.peek() {
             Some('-') => {
                 it.next();
@@ -242,7 +242,7 @@ impl AddrBase {
     }
 }
 
-fn parse_delimited_regex(it: &mut Peekable<Chars>, dir: Dir) -> Result<AddrBase, ParseError> {
+fn parse_delimited_regex(it: &mut Peekable<Chars<'_>>, dir: Dir) -> Result<AddrBase, ParseError> {
     let mut s = String::new();
     let mut prev = '/';
 

@@ -409,7 +409,7 @@ impl Buffer {
         cx
     }
 
-    pub fn line(&self, y: usize) -> Option<Slice> {
+    pub fn line(&self, y: usize) -> Option<Slice<'_>> {
         if y >= self.len_lines() {
             None
         } else {

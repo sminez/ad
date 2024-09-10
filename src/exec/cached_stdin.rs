@@ -13,12 +13,14 @@ const LINE_BUF_LEN: usize = 100;
 
 /// A wrapper around stdin that buffers and caches input so that it can be manipulated
 /// like a Buffer
+#[derive(Debug)]
 pub struct CachedStdin {
     inner: RefCell<CachedStdinInner>,
     buf: RefCell<String>,
     gb: RefCell<GapBuffer>,
 }
 
+#[derive(Debug)]
 struct CachedStdinInner {
     stdin: Stdin,
     closed: bool,
@@ -132,6 +134,7 @@ impl Edit for CachedStdin {
     }
 }
 
+#[derive(Debug)]
 pub struct CachedStdinIter<'a> {
     pub(super) inner: &'a CachedStdin,
     pub(super) from: usize,

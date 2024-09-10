@@ -380,7 +380,7 @@ enum ParseEnd {
     Eof,
 }
 
-fn parse1(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<Option<ParseEnd>, Error> {
+fn parse1(it: &mut Peekable<Chars<'_>>, root: &mut Vec<Ast>) -> Result<Option<ParseEnd>, Error> {
     match next_char(it)? {
         Some((ch, true)) => handle_escaped(ch, root).map(|_| None),
         Some((ch, false)) => handle_char(ch, it, root),
@@ -388,7 +388,7 @@ fn parse1(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<Option<ParseE
     }
 }
 
-fn parse_many(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<ParseEnd, Error> {
+fn parse_many(it: &mut Peekable<Chars<'_>>, root: &mut Vec<Ast>) -> Result<ParseEnd, Error> {
     loop {
         match parse1(it, root)? {
             Some(p) => return Ok(p),
@@ -399,7 +399,7 @@ fn parse_many(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<ParseEnd,
 
 fn handle_char(
     ch: char,
-    it: &mut Peekable<Chars>,
+    it: &mut Peekable<Chars<'_>>,
     root: &mut Vec<Ast>,
 ) -> Result<Option<ParseEnd>, Error> {
     match ch {
@@ -438,7 +438,7 @@ fn handle_char(
 ///   3) "(?:...)"
 ///       Non-capturing: allows for grouping and application of repetition / alternation
 ///       of compund expressions without contributing to the captured sub-expressions.
-fn handle_subexp(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Error> {
+fn handle_subexp(it: &mut Peekable<Chars<'_>>, root: &mut Vec<Ast>) -> Result<(), Error> {
     let mut sub = Vec::new();
     let kind = match it.peek() {
         Some('?') => {
@@ -479,7 +479,7 @@ fn handle_subexp(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Er
     Ok(())
 }
 
-fn handle_alt(it: &mut Peekable<Chars>, root: &mut Vec<Ast>) -> Result<(), Error> {
+fn handle_alt(it: &mut Peekable<Chars<'_>>, root: &mut Vec<Ast>) -> Result<(), Error> {
     if root.is_empty() {
         return Err(Error::UnbalancedAlt);
     }
@@ -533,7 +533,7 @@ fn handle_escaped(ch: char, root: &mut Vec<Ast>) -> Result<(), Error> {
     Ok(())
 }
 
-fn try_parse_counted_repetition(it: &mut Peekable<Chars>) -> Result<Counted, Error> {
+fn try_parse_counted_repetition(it: &mut Peekable<Chars<'_>>) -> Result<Counted, Error> {
     let (mut ch, _) = next_char(it)?.ok_or(Error::InvalidRepetition)?;
 
     if !ch.is_ascii_digit() {

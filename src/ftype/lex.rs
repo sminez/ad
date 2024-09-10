@@ -329,27 +329,27 @@ mod tests {
     use crate::ftype::RUST_SPEC;
     use simple_test_case::test_case;
 
-    fn t_def(s: &str) -> Token {
+    fn t_def(s: &str) -> Token<'_> {
         Token { ty: Default, s }
     }
 
-    fn t_com(s: &str) -> Token {
+    fn t_com(s: &str) -> Token<'_> {
         Token { ty: Comment, s }
     }
 
-    fn t_dot(s: &str) -> Token {
+    fn t_dot(s: &str) -> Token<'_> {
         Token { ty: Dot, s }
     }
 
-    fn t_dfn(s: &str) -> Token {
+    fn t_dfn(s: &str) -> Token<'_> {
         Token { ty: Definition, s }
     }
 
-    fn t_cfl(s: &str) -> Token {
+    fn t_cfl(s: &str) -> Token<'_> {
         Token { ty: ControlFlow, s }
     }
 
-    fn t_str(s: &str) -> Token {
+    fn t_str(s: &str) -> Token<'_> {
         Token { ty: String, s }
     }
 
