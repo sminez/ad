@@ -2,6 +2,7 @@
 use crate::{
     fs::{Mode, Perm, Stat},
     protocol::{Data, Format9p, RawStat, Rdata, Rmessage, Tdata, Tmessage},
+    Stream,
 };
 use std::{
     cmp::min,
@@ -39,37 +40,6 @@ macro_rules! expect_rmessage {
 const MSIZE: u32 = u16::MAX as u32;
 const VERSION: &str = "9P2000";
 
-#[derive(Debug)]
-enum Socket {
-    Unix(UnixStream),
-    Tcp(TcpStream),
-}
-
-impl io::Write for Socket {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            Self::Unix(s) => s.write(buf),
-            Self::Tcp(s) => s.write(buf),
-        }
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            Self::Unix(s) => s.flush(),
-            Self::Tcp(s) => s.flush(),
-        }
-    }
-}
-
-impl io::Read for Socket {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            Self::Unix(s) => s.read(buf),
-            Self::Tcp(s) => s.read(buf),
-        }
-    }
-}
-
 fn err<T, E>(e: E) -> io::Result<T>
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
@@ -77,16 +47,25 @@ where
     Err(io::Error::new(io::ErrorKind::Other, e))
 }
 
+pub type UnixClient = Client<UnixStream>;
+pub type TcpClient = Client<TcpStream>;
+
 #[derive(Debug)]
-pub struct Client {
-    socket: Socket,
+pub struct Client<S>
+where
+    S: Stream,
+{
+    stream: S,
     uname: String,
     msize: u32,
     fids: HashMap<String, u32>,
     next_fid: u32,
 }
 
-impl Drop for Client {
+impl<S> Drop for Client<S>
+where
+    S: Stream,
+{
     fn drop(&mut self) {
         let fids = std::mem::take(&mut self.fids);
         for (_, fid) in fids.into_iter() {
@@ -95,18 +74,18 @@ impl Drop for Client {
     }
 }
 
-impl Client {
+impl Client<UnixStream> {
     pub fn new_unix_with_explicit_path(
         uname: String,
         path: String,
         aname: impl Into<String>,
     ) -> io::Result<Self> {
-        let socket = UnixStream::connect(path)?;
+        let stream = UnixStream::connect(path)?;
         let mut fids = HashMap::new();
         fids.insert(String::new(), 0);
 
         let mut client = Self {
-            socket: Socket::Unix(socket),
+            stream,
             uname,
             msize: MSIZE,
             fids,
@@ -127,17 +106,19 @@ impl Client {
 
         Self::new_unix_with_explicit_path(uname, path, aname)
     }
+}
 
+impl Client<TcpStream> {
     pub fn new_tcp<T>(uname: String, addr: T, aname: impl Into<String>) -> io::Result<Self>
     where
         T: ToSocketAddrs,
     {
-        let socket = TcpStream::connect(addr)?;
+        let stream = TcpStream::connect(addr)?;
         let mut fids = HashMap::new();
         fids.insert(String::new(), 0);
 
         let mut client = Self {
-            socket: Socket::Tcp(socket),
+            stream,
             uname,
             msize: MSIZE,
             fids,
@@ -147,12 +128,17 @@ impl Client {
 
         Ok(client)
     }
+}
 
+impl<S> Client<S>
+where
+    S: Stream,
+{
     fn send(&mut self, tag: u16, content: Tdata) -> io::Result<Rmessage> {
         let t = Tmessage { tag, content };
-        t.write_to(&mut self.socket)?;
+        t.write_to(&mut self.stream)?;
 
-        match Rmessage::read_from(&mut self.socket)? {
+        match Rmessage::read_from(&mut self.stream)? {
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
@@ -311,7 +297,7 @@ impl Client {
         Ok(stats)
     }
 
-    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter> {
+    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter<S>> {
         let fid = self.walk(path)?;
         let mode = Mode::FILE.bits();
         let count = self.msize;
@@ -325,7 +311,7 @@ impl Client {
         })
     }
 
-    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter> {
+    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter<S>> {
         let fid = self.walk(path)?;
         let mode = Mode::FILE.bits();
         let count = self.msize;
@@ -416,14 +402,20 @@ impl Client {
     }
 }
 
-pub struct ChunkIter<'a> {
-    client: &'a mut Client,
+pub struct ChunkIter<'a, S>
+where
+    S: Stream,
+{
+    client: &'a mut Client<S>,
     fid: u32,
     offset: u64,
     count: u32,
 }
 
-impl<'a> Iterator for ChunkIter<'a> {
+impl<'a, S> Iterator for ChunkIter<'a, S>
+where
+    S: Stream,
+{
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -443,8 +435,11 @@ impl<'a> Iterator for ChunkIter<'a> {
     }
 }
 
-pub struct ReadLineIter<'a> {
-    client: &'a mut Client,
+pub struct ReadLineIter<'a, S>
+where
+    S: Stream,
+{
+    client: &'a mut Client<S>,
     buf: Vec<u8>,
     fid: u32,
     offset: u64,
@@ -452,7 +447,10 @@ pub struct ReadLineIter<'a> {
     at_eof: bool,
 }
 
-impl<'a> Iterator for ReadLineIter<'a> {
+impl<'a, S> Iterator for ReadLineIter<'a, S>
+where
+    S: Stream,
+{
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {

@@ -24,7 +24,8 @@
 //! ```
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{ReadOutcome, Result, Serve9p, Server},
+    server::{ReadOutcome, Serve9p, Server},
+    Result,
 };
 use std::{
     sync::mpsc::channel,

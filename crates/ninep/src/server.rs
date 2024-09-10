@@ -2,15 +2,15 @@
 use crate::{
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, QID_ROOT},
     protocol::{Data, Format9p, Qid, RawStat, Rdata, Rmessage, Tdata, Tmessage, MAX_DATA_LEN},
+    Result, Stream,
 };
 use std::{
     cmp::min,
     collections::btree_map::{BTreeMap, Entry},
     env, fs,
-    io::{Read, Write},
     mem::size_of,
-    net::{TcpListener, TcpStream},
-    os::unix::net::{UnixListener, UnixStream},
+    net::TcpListener,
+    os::unix::net::UnixListener,
     sync::{mpsc::Receiver, Arc, Mutex, RwLock},
     thread::{spawn, JoinHandle},
 };
@@ -63,8 +63,6 @@ const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 
 const UNKNOWN_VERSION: &str = "unknown";
 const SUPPORTED_VERSION: &str = "9P2000";
-
-pub type Result<T> = std::result::Result<T, String>;
 
 impl From<(u16, Result<Rdata>)> for Rmessage {
     fn from((tag, content): (u16, Result<Rdata>)) -> Self {
@@ -152,29 +150,6 @@ pub trait Serve9p: Send + 'static {
 
     /// Attempt to set the machine independent "directory entry" for the given resource.
     fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()>;
-}
-
-trait Stream: Read + Write + Send + Sized + 'static {
-    /// The underlying try_clone implementations for file descriptors can fail at the libc level so
-    /// we need to account for that here.
-    fn try_clone(&self) -> Result<Self>;
-
-    fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
-        let _ = r.write_to(self);
-    }
-}
-
-impl Stream for UnixStream {
-    fn try_clone(&self) -> Result<Self> {
-        self.try_clone().map_err(|e| e.to_string())
-    }
-}
-
-impl Stream for TcpStream {
-    fn try_clone(&self) -> Result<Self> {
-        self.try_clone().map_err(|e| e.to_string())
-    }
 }
 
 /// A threaded `9p` server capable of listening on either a TCP socket or UNIX domain socket.
