@@ -42,8 +42,8 @@ use std::{
 mod buffer;
 mod message;
 
-pub use buffer::BufId;
-pub use message::{Message, Req};
+pub(crate) use buffer::BufId;
+pub(crate) use message::{Message, Req};
 
 use buffer::BufferNodes;
 
@@ -82,9 +82,9 @@ const QID_OFFSET: u64 = 8;
 
 const E_UNKNOWN_FILE: &str = "unknown file";
 
+/// The filesystem interface for ad
 #[derive(Debug)]
-pub struct AdFs {
-    mount_path: String,
+pub(crate) struct AdFs {
     tx: Sender<InputEvent>,
     buffer_nodes: BufferNodes,
     // Root level files and directories
@@ -92,16 +92,19 @@ pub struct AdFs {
     control_file_stat: Stat,
 }
 
+/// A join handle for the filesystem thread
 #[derive(Debug)]
 pub struct FsHandle(JoinHandle<()>);
 
 impl FsHandle {
+    /// Join on the filesystem thread
     pub fn join(self) {
         _ = self.0.join();
     }
 }
 
 impl AdFs {
+    /// Construct a new filesystem interface using channels held by the editor.
     pub fn new(tx: Sender<InputEvent>, brx: Receiver<BufId>) -> Self {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
@@ -110,16 +113,11 @@ impl AdFs {
         let buffer_nodes = BufferNodes::new(tx.clone(), brx);
 
         Self {
-            mount_path,
             tx,
             buffer_nodes,
             mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
             control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
         }
-    }
-
-    pub fn mount_path(&self) -> &str {
-        &self.mount_path
     }
 
     /// Spawn a thread for running this filesystem and return a handle to it

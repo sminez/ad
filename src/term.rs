@@ -1,3 +1,4 @@
+//! Terminal TUI support.
 use crate::die;
 use libc::{
     c_int, c_void, ioctl, sigaction, sighandler_t, siginfo_t, tcgetattr, tcsetattr,
@@ -28,7 +29,7 @@ extern "C" fn handle_win_size_change(_: c_int, _: *mut siginfo_t, _: *mut c_void
 }
 
 #[inline]
-pub fn win_size_changed() -> bool {
+pub(crate) fn win_size_changed() -> bool {
     WIN_SIZE_CHANGED.swap(false, Ordering::Relaxed)
 }
 
@@ -56,7 +57,7 @@ pub unsafe fn register_signal_handler() {
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Color {
+pub(crate) struct Color {
     r: u8,
     b: u8,
     g: u8,
@@ -75,8 +76,9 @@ impl TryFrom<&str> for Color {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Style {
+pub(crate) enum Style {
     Fg(Color),
     Bg(Color),
     Bold,
@@ -111,7 +113,7 @@ impl fmt::Display for Style {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Cursor {
+pub(crate) enum Cursor {
     To(usize, usize),
     ToStart,
     Hide,
@@ -133,8 +135,9 @@ impl fmt::Display for Cursor {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CurShape {
+pub(crate) enum CurShape {
     Block,
     Bar,
     Underline,

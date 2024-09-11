@@ -2,6 +2,7 @@
 use crate::{key::Key, mode::normal_mode, term::Color};
 use std::{collections::BTreeMap, env, fs, io};
 
+/// Editor level configuration
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     pub(crate) tabstop: usize,
@@ -29,6 +30,7 @@ impl Default for Config {
     }
 }
 
+/// A colorscheme for the terminal UI
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ColorScheme {
     // ui
@@ -73,6 +75,7 @@ impl Default for ColorScheme {
 }
 
 impl Config {
+    /// Attempt to load a config file from the default location
     pub fn try_load() -> Result<Self, String> {
         let home = env::var("HOME").unwrap();
 

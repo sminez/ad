@@ -2,8 +2,9 @@
 use crate::editor::InputEvent;
 use std::sync::mpsc::{channel, Sender};
 
+/// A wrapper around a [Req] that can be sent to the main editor event loop
 #[derive(Debug)]
-pub struct Message {
+pub(crate) struct Message {
     pub req: Req,
     pub tx: Sender<Result<String, String>>,
 }
@@ -20,7 +21,7 @@ impl Message {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Req {
+pub(crate) enum Req {
     ControlMessage { msg: String },
 
     ReadBufferName { id: usize },

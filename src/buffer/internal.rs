@@ -199,9 +199,11 @@ impl GapBuffer {
         let mut v = Vec::with_capacity(self.len());
         v.extend(&self.data[..self.gap_start]);
         v.extend(&self.data[self.gap_end..]);
+
         v
     }
 
+    /// Iterate over the lines of the buffer
     pub fn iter_lines(&self) -> impl Iterator<Item = Slice<'_>> {
         let mut line_idx = 0;
 
@@ -211,10 +213,12 @@ impl GapBuffer {
             }
             let slice = self.line(line_idx);
             line_idx += 1;
+
             Some(slice)
         })
     }
 
+    /// The number of lines within the buffer
     #[inline]
     pub fn len_lines(&self) -> usize {
         match self.line_endings.last_key_value() {
@@ -232,15 +236,23 @@ impl GapBuffer {
                     n
                 }
             }
+
             None => 1,
         }
     }
 
+    /// The number of characters in the buffer
     #[inline]
     pub fn len_chars(&self) -> usize {
         self.n_chars
     }
 
+    /// Clear the contents of the buffer.
+    ///
+    /// # Note
+    /// This does not actually zero out the data currently within the buffer or truncate the
+    /// allocation in any way. It simply resets internal state so that it behaves like an empty
+    /// initial buffer.
     pub fn clear(&mut self) {
         self.move_gap_to(0);
         self.gap_end = self.cap;
@@ -251,6 +263,10 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
+    /// The character at the specified character index.
+    ///
+    /// # Panics
+    /// This method will panic if the given character index is out of bounds
     #[inline]
     pub fn char(&self, char_idx: usize) -> char {
         let byte_idx = self.char_to_raw_byte(char_idx);
@@ -259,6 +275,7 @@ impl GapBuffer {
         unsafe { decode_char_at(byte_idx, &self.data) }
     }
 
+    /// The character at the specified character index.
     #[inline]
     pub fn get_char(&self, char_idx: usize) -> Option<char> {
         if char_idx < self.n_chars {
@@ -274,6 +291,10 @@ impl GapBuffer {
         unsafe { decode_char_at(byte_idx, &self.data) }.len_utf8()
     }
 
+    /// The requested line as a [Slice].
+    ///
+    /// # Panics
+    /// This method will panic if the given line index is out of bounds
     #[inline]
     pub fn line(&self, line_idx: usize) -> Slice<'_> {
         if line_idx >= self.len_lines() {
@@ -297,6 +318,10 @@ impl GapBuffer {
         Slice::from_raw_offsets(from, to, self)
     }
 
+    /// The number of characters in the requested line.
+    ///
+    /// # Panics
+    /// This method will panic if the given line index is out of bounds
     #[inline]
     pub fn line_len_chars(&self, line_idx: usize) -> usize {
         if line_idx >= self.len_lines() {
@@ -338,10 +363,15 @@ impl GapBuffer {
         }
     }
 
+    /// Convert a byte index to a character index
     pub fn byte_to_char(&self, byte_idx: usize) -> usize {
         self.chars_in_raw_range(0, byte_idx)
     }
 
+    /// Convert a character index to the index of the line containing it
+    ///
+    /// # Panics
+    /// This method will panic if the given char index is out of bounds
     pub fn char_to_line(&self, char_idx: usize) -> usize {
         match self.try_char_to_line(char_idx) {
             Some(line_idx) => line_idx,
@@ -352,6 +382,7 @@ impl GapBuffer {
         }
     }
 
+    /// Convert a character index to the index of the line containing it
     pub fn try_char_to_line(&self, char_idx: usize) -> Option<usize> {
         match char_idx.cmp(&self.n_chars) {
             Ordering::Less => {
@@ -370,6 +401,10 @@ impl GapBuffer {
         }
     }
 
+    /// Convert a line index to the character index of its first character
+    ///
+    /// # Panics
+    /// This method will panic if the given char index is out of bounds
     pub fn line_to_char(&self, line_idx: usize) -> usize {
         match self.try_line_to_char(line_idx) {
             Some(char_idx) => char_idx,
@@ -380,6 +415,7 @@ impl GapBuffer {
         }
     }
 
+    /// Convert a line index to the character index of its first character
     pub fn try_line_to_char(&self, line_idx: usize) -> Option<usize> {
         if line_idx > self.len_lines() - 1 {
             return None;
@@ -703,6 +739,7 @@ impl<'a> Slice<'a> {
         }
     }
 
+    /// The two sides of this slice as &str references
     pub fn as_strs(&self) -> (&str, &str) {
         // SAFETY: we know that we have valid utf8 data internally
         unsafe {
@@ -713,10 +750,12 @@ impl<'a> Slice<'a> {
         }
     }
 
+    /// Iterate over the characters in this slice
     pub fn chars(self) -> Chars<'a> {
         Chars { s: self, cur: 0 }
     }
 
+    /// Iterate over the characters in this slice with their corresponding character indices
     pub fn indexed_chars(self, from: usize, rev: bool) -> IdxChars<'a> {
         let (cur, idx) = if rev {
             (
@@ -757,6 +796,7 @@ impl<'a> fmt::Display for Slice<'a> {
     }
 }
 
+/// An iterator of characters from a [Slice]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Chars<'a> {
     s: Slice<'a>,
@@ -780,6 +820,7 @@ impl<'a> Iterator for Chars<'a> {
     }
 }
 
+/// An iterator of characters and their indices from a [Slice]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct IdxChars<'a> {
     s: Slice<'a>,

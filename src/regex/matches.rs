@@ -35,6 +35,7 @@ impl Match {
         }
     }
 
+    /// Extract this match from the given string
     pub fn str_match_text(&self, s: &str) -> String {
         let (a, b) = self.loc();
         s.chars().skip(a).take(b - a).collect()
@@ -65,6 +66,8 @@ impl Match {
     }
 
     // FIXME: this is a terrible way to do this but used for testing at the moment
+
+    /// The names of each submatch
     pub fn named_matches(&self) -> Vec<&str> {
         let mut matches = Vec::new();
         for name in self.submatch_names.iter() {
@@ -87,12 +90,14 @@ impl Match {
         Some((first, last))
     }
 
+    /// The contents of a named submatch
     pub fn str_sub_loc_text_ref_by_name<'a>(&self, name: &str, s: &'a str) -> Option<&'a str> {
         let (first, last) = self.str_sub_loc_bytes_by_name(name, s)?;
 
         Some(&s[first..=last])
     }
 
+    /// The full match as applied to s
     pub fn str_match_text_ref<'a>(&self, s: &'a str) -> &'a str {
         let (first, last) = self.str_loc_bytes(s);
 
@@ -108,6 +113,7 @@ impl Match {
         (first, last, &s[first..=last])
     }
 
+    /// The numbered submatch match as applied to s
     pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
         let (a, b) = self.sub_loc(n)?;
         Some(s.chars().skip(a).take(b - a).collect())
@@ -128,12 +134,12 @@ impl Match {
         (start, end)
     }
 
-    pub fn sub_loc_by_name(&self, name: &str) -> Option<(usize, usize)> {
+    fn sub_loc_by_name(&self, name: &str) -> Option<(usize, usize)> {
         let n = self.submatch_names.iter().position(|s| s == name)?;
         self.sub_loc(n + 1)
     }
 
-    pub fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
+    fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
         if 2 * n + 1 >= N_SLOTS {
             return None;
         }

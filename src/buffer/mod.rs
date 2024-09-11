@@ -1,3 +1,4 @@
+//! A [Buffer] represents a single file or in memory text buffer open within the editor.
 use crate::{
     config,
     config::ColorScheme,
@@ -65,6 +66,7 @@ impl BufferKind {
     }
 }
 
+/// Internal state for a text buffer backed by a file on disk
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Buffer {
     pub(crate) id: usize,
@@ -207,6 +209,7 @@ impl Buffer {
         }
     }
 
+    /// Create a new unnamed buffer with the given content
     pub fn new_unnamed(id: usize, content: &str) -> Self {
         Self {
             id,
@@ -225,6 +228,7 @@ impl Buffer {
         }
     }
 
+    /// Create a new virtual buffer with the given name and content
     pub fn new_virtual(id: usize, name: String, mut content: String) -> Self {
         if content.ends_with('\n') {
             content.pop();
@@ -264,6 +268,7 @@ impl Buffer {
         }
     }
 
+    /// The directory containing the file backing this buffer so long as it has kind `File`.
     pub fn dir(&self) -> Option<&Path> {
         match &self.kind {
             BufferKind::File(p) => p.parent(),
@@ -271,16 +276,20 @@ impl Buffer {
         }
     }
 
+    /// Check whether or not this is an unnamed buffer
     pub fn is_unnamed(&self) -> bool {
         self.kind == BufferKind::Unnamed
     }
 
+    /// The raw binary contents of this buffer
     pub fn contents(&self) -> Vec<u8> {
         let mut contents: Vec<u8> = self.txt.bytes();
         contents.push(b'\n');
+
         contents
     }
 
+    /// The utf-8 string contents of this buffer
     pub fn str_contents(&self) -> String {
         let mut s = self.txt.to_string();
         s.push('\n');
@@ -300,27 +309,41 @@ impl Buffer {
             .collect()
     }
 
+    /// The contents of the current [Dot].
     pub fn dot_contents(&self) -> String {
         self.dot.content(self)
     }
 
+    /// The address of the current [Dot].
     pub fn addr(&self) -> String {
         self.dot.addr(self)
     }
 
+    /// The contents of the current xdot.
+    ///
+    /// This is a virtual dot that is only made use of through the filesystem interface.
     pub fn xdot_contents(&self) -> String {
         self.xdot.content(self)
     }
 
+    /// The address of the current xdot.
+    ///
+    /// This is a virtual dot that is only made use of through the filesystem interface.
     pub fn xaddr(&self) -> String {
         self.xdot.addr(self)
     }
 
+    /// The number of lines currently held in the buffer.
     #[inline]
     pub fn len_lines(&self) -> usize {
         self.txt.len_lines()
     }
 
+    /// Whether or not the buffer is empty.
+    ///
+    /// # Note
+    /// This does not always imply that the underlying buffer is zero sized, only that the visible
+    /// contents are empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.txt.len_chars() == 0
@@ -330,6 +353,7 @@ impl Buffer {
         self.edit_log.debug_edits(self).into_iter().collect()
     }
 
+    /// Clamp the current viewport to include the [Dot].
     pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
         let (y, x) = self.dot.active_cur().as_yx(self);
         self.rx = self.rx_from_x(y, x);
@@ -351,7 +375,8 @@ impl Buffer {
         }
     }
 
-    pub fn view_port(&mut self, vp: ViewPort, screen_rows: usize, screen_cols: usize) {
+    /// Set the current [ViewPort] while accounting for screen size.
+    pub fn set_view_port(&mut self, vp: ViewPort, screen_rows: usize, screen_cols: usize) {
         let (y, _) = self.dot.active_cur().as_yx(self);
 
         self.row_off = match vp {
@@ -409,6 +434,7 @@ impl Buffer {
         cx
     }
 
+    /// The line at the requested index returned as a [Slice].
     pub fn line(&self, y: usize) -> Option<Slice<'_>> {
         if y >= self.len_lines() {
             None

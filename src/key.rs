@@ -1,5 +1,7 @@
+//! Keypresses and related user interactions.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Arrow {
+pub(crate) enum Arrow {
     Up,
     Down,
     Left,
@@ -19,7 +21,7 @@ impl Arrow {
 
 // using 'showkey -a' to view keycodes is useful for adding to this
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Key {
+pub(crate) enum Key {
     Char(char),
     Ctrl(char),
     Alt(char),
@@ -85,7 +87,7 @@ impl Key {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MouseButton {
+pub(crate) enum MouseButton {
     Left,
     Middle,
     Right,
@@ -94,7 +96,7 @@ pub enum MouseButton {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MouseEvent {
+pub(crate) enum MouseEvent {
     Press { b: MouseButton, x: usize, y: usize },
     Hold { x: usize, y: usize },
     Release { x: usize, y: usize },

@@ -127,7 +127,7 @@ impl Buffers {
         if let Some(idx) = self.inner.iter().position(|b| b.id == bufid) {
             self.inner.swap(0, idx);
             self.inner[0].dot = cur.into();
-            self.inner[0].view_port(ViewPort::Center, screen_rows, screen_cols);
+            self.inner[0].set_view_port(ViewPort::Center, screen_rows, screen_cols);
         }
     }
 

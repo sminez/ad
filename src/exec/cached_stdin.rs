@@ -33,6 +33,7 @@ impl Default for CachedStdin {
 }
 
 impl CachedStdin {
+    /// Construct a new, empty [CachedStdin] ready to process input.
     pub fn new() -> Self {
         Self {
             inner: RefCell::new(CachedStdinInner {

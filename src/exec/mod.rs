@@ -13,29 +13,43 @@ mod char_iter;
 mod expr;
 
 use addr::ParseError;
-pub use addr::{Addr, Address};
+pub(crate) use addr::{Addr, Address};
 pub use cached_stdin::CachedStdin;
-pub use char_iter::IterBoundedChars;
+pub(crate) use char_iter::IterBoundedChars;
 use expr::{Expr, ParseOutput};
 
 /// Variable usable in templates for injecting the current filename.
 /// (Following the naming convention used in Awk)
 const FNAME_VAR: &str = "$FILENAME";
 
+/// Errors that can be returned by the exec engine
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
+    /// Empty expression group
     EmptyExpressionGroup,
+    /// Empty branch for an expression group
     EmptyExpressionGroupBranch,
+    /// Empty program
     EmptyProgram,
+    /// Unexpected end of file
     Eof,
+    /// Invalid regex
     InvalidRegex(regex::Error),
+    /// Invalid substitution
     InvalidSubstitution(usize),
+    /// Invalid suffix
     InvalidSuffix,
+    /// Missing action
     MissingAction,
+    /// Missing delimiter
     MissingDelimiter(&'static str),
+    /// Unclosed delimiter
     UnclosedDelimiter(&'static str, char),
+    /// Unclosed expression group
     UnclosedExpressionGroup,
+    /// Unclosed expression group branch
     UnclosedExpressionGroupBranch,
+    /// Unexpected character
     UnexpectedCharacter(char),
 }
 
@@ -47,11 +61,19 @@ impl From<regex::Error> for Error {
 
 /// Something that can be edited by a Program
 pub trait Edit: Address {
+    /// The the full contents of the Edit
     fn contents(&self) -> String;
+
+    /// Insert a string at the specified index
     fn insert(&mut self, ix: usize, s: &str);
+
+    /// Remove all characters from (from..to)
     fn remove(&mut self, from: usize, to: usize);
 
+    /// Mark the start of an edit transaction
     fn begin_edit_transaction(&mut self) {}
+
+    /// Mark the end of an edit transaction
     fn end_edit_transaction(&mut self) {}
 }
 

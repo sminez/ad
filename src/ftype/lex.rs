@@ -3,7 +3,7 @@ use crate::{config::ColorScheme, regex::Regex, term::Style};
 use std::{cell::RefCell, cmp::min};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TokenType {
+pub(crate) enum TokenType {
     Dot,
     Default,
     Comment,
@@ -15,13 +15,13 @@ pub enum TokenType {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Token<'a> {
+pub(crate) struct Token<'a> {
     pub ty: TokenType,
     pub s: &'a str,
 }
 
 impl<'a> Token<'a> {
-    pub fn render(&self, cs: &ColorScheme) -> String {
+    pub(crate) fn render(&self, cs: &ColorScheme) -> String {
         match self.ty {
             TokenType::Dot => format!("{}{}", Style::Bg(cs.dot_bg), self.s),
             TokenType::Default => format!("{}{}{}", Style::Bg(cs.bg), Style::Fg(cs.fg), self.s),
@@ -97,7 +97,7 @@ impl<'a> Token<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Tokens<'a> {
+pub(crate) enum Tokens<'a> {
     Single(Token<'a>),
     Multi(Vec<Token<'a>>),
 }
@@ -138,8 +138,9 @@ impl<'a> Tokens<'a> {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum StringDelims {
+pub(crate) enum StringDelims {
     Single,
     Double,
     Both,
@@ -159,7 +160,7 @@ impl StringDelims {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LangSpec {
+pub(crate) struct LangSpec {
     pub single_line_comment: Option<&'static str>,
     pub multi_line_comment: Option<(&'static str, &'static str)>,
     pub string_delimiters: StringDelims,
@@ -207,14 +208,14 @@ impl LangSpec {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tokenizer {
+pub(crate) struct Tokenizer {
     ls: LangSpec,
     re: RefCell<Regex>,
     re_str: RefCell<Regex>,
 }
 
 impl Tokenizer {
-    pub fn new(ls: LangSpec) -> Self {
+    pub(crate) fn new(ls: LangSpec) -> Self {
         let re = RefCell::new(ls.re_from_all_literals());
         let re_str = RefCell::new(
             Regex::compile(&ls.string_delimiters.as_re_string())
@@ -225,7 +226,7 @@ impl Tokenizer {
     }
 
     /// FIXME: doing this by line with no way to look ahead or back won't work for multiline constructs
-    pub fn tokenize<'a>(&self, line: &'a str) -> Tokens<'a> {
+    pub(crate) fn tokenize<'a>(&self, line: &'a str) -> Tokens<'a> {
         match self.split_off_comments(line) {
             ("", Some(tk)) => Tokens::Single(tk),
             (s, None) => self.regex_tokenize(s),

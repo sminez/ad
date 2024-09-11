@@ -26,8 +26,16 @@ pub(crate) use text_object::TextObject;
 /// that the representation of the current Dot in the editing language is `.`
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Dot {
-    Cur { c: Cur },
-    Range { r: Range },
+    /// A single character [Cur]
+    Cur {
+        /// The cursor
+        c: Cur,
+    },
+    /// A [Range] between two cursors
+    Range {
+        /// The range
+        r: Range,
+    },
 }
 
 impl Default for Dot {
@@ -49,12 +57,19 @@ impl From<Range> for Dot {
 }
 
 impl Dot {
+    /// Construct a new [Range] dot from two cursor indices.
+    ///
+    /// `to` will be used as the active cursor position.
     pub fn from_char_indices(from: usize, to: usize) -> Self {
         Self::Range {
             r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, false),
         }
     }
 
+    /// Convert a [Dot] into character offsets within the buffer idendifying its start and end
+    /// positions.
+    ///
+    /// For a [Cur] dot the start and end are equal
     pub fn as_char_indices(&self) -> (usize, usize) {
         match *self {
             Self::Cur { c: Cur { idx } } => (idx, idx),
@@ -78,6 +93,7 @@ impl Dot {
         }
     }
 
+    /// Use this [Dot] to index in to a [Buffer] and extract the range of text it denotes.
     pub fn content(&self, b: &Buffer) -> String {
         let len_chars = b.txt.len_chars();
 
@@ -89,6 +105,7 @@ impl Dot {
         b.txt.slice(from, min(to + 1, len_chars)).to_string()
     }
 
+    /// The active cursor position for this [Dot] which will be manipulated by movement operations
     #[inline]
     pub fn active_cur(&self) -> Cur {
         match self {
@@ -97,6 +114,8 @@ impl Dot {
         }
     }
 
+    /// Set the active cursor position for this [Dot] directly, replacing the current active
+    /// cursor.
     pub fn set_active_cur(&mut self, cur: Cur) {
         match self {
             Self::Cur { c } => *c = cur,
@@ -104,6 +123,7 @@ impl Dot {
         }
     }
 
+    /// The cursor position closest to the start of the Buffer.
     #[inline]
     pub fn first_cur(&self) -> Cur {
         match self {
@@ -112,6 +132,7 @@ impl Dot {
         }
     }
 
+    /// The cursor position closest to the end of the Buffer.
     #[inline]
     pub fn last_cur(&self) -> Cur {
         match self {
@@ -120,6 +141,10 @@ impl Dot {
         }
     }
 
+    /// This [Dot] expressed as a [Range].
+    ///
+    /// For range dots the underlying range is returned directly. For cursor dots a new range is
+    /// constructed where `start` and `end` are equal and the `end` is the active cursor.
     #[inline]
     pub fn as_range(&self) -> Range {
         match self {
@@ -132,6 +157,7 @@ impl Dot {
         }
     }
 
+    /// The [Dot] equivalent of [Dot::first_cur].
     #[inline]
     pub fn collapse_to_first_cur(&self) -> Self {
         Dot::Cur {
@@ -139,11 +165,13 @@ impl Dot {
         }
     }
 
+    /// The [Dot] equivalent of [Dot::last_cur].
     #[inline]
     pub fn collapse_to_last_cur(&self) -> Self {
         Dot::Cur { c: self.last_cur() }
     }
 
+    /// Swap the active cursor between `start` and `end` of [Range] dots.
     #[inline]
     pub fn flip(&mut self) {
         if let Dot::Range { r } = self {

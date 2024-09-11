@@ -14,6 +14,7 @@ use std::{cmp::min, io::Write, time::Instant};
 const VLINE: char = '│';
 
 impl Editor {
+    /// Refresh the TUI state
     pub fn refresh_screen(&mut self) {
         self.refresh_screen_w_minibuffer(None);
     }

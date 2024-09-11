@@ -13,18 +13,30 @@ mod vm;
 pub use matches::{Match, MatchIter};
 pub use vm::Regex;
 
+/// Errors that can be returned by the regex engine
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
+    /// Empty parens
     EmptyParens,
+    /// Empty string used when creating a [Regex]
     EmptyRegex,
+    /// Invalid regex class
     InvalidClass,
+    /// Invalid escape sequence
     InvalidEscape(char),
+    /// Invalid repetition pattern
     InvalidRepetition,
+    /// The provided regex is too long
     ReTooLong,
+    /// Too many parens in the provided regex
     TooManyParens,
+    /// Alternation without a right hand side
     UnbalancedAlt,
+    /// Unbalanced parens
     UnbalancedParens,
+    /// Group name without a closing paren
     UnclosedGroupName(String),
+    /// Invalid group qualifier following (?...)
     UnknownGroupQualifier(char),
 }
 

@@ -1,3 +1,4 @@
+//! Utility functions
 use std::{
     env,
     ffi::OsStr,
@@ -9,6 +10,7 @@ use std::{
 };
 
 #[cfg(target_os = "linux")]
+/// Set the current system clipboard state using xclip.
 pub fn set_clipboard(s: &str) -> io::Result<()> {
     let mut child = Command::new("xclip")
         .args(["-selection", "clipboard", "-i"])
@@ -19,6 +21,7 @@ pub fn set_clipboard(s: &str) -> io::Result<()> {
 }
 
 #[cfg(target_os = "linux")]
+/// Read the current system clipboard state using xclip.
 pub fn read_clipboard() -> io::Result<String> {
     let output = Command::new("xclip")
         .args(["-selection", "clipboard", "-o"])
@@ -27,17 +30,20 @@ pub fn read_clipboard() -> io::Result<String> {
 }
 
 #[cfg(target_os = "macos")]
+/// Set the current system clipboard state using pbcopy.
 pub fn set_clipboard(s: &str) -> io::Result<()> {
     let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
     child.stdin.take().unwrap().write_all(s.as_bytes())
 }
 
 #[cfg(target_os = "macos")]
+/// Read the current system clipboard state using pbpaste.
 pub fn read_clipboard() -> io::Result<String> {
     let output = Command::new("pbpaste").output()?;
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
 }
 
+/// Run an external command and collect its standard out.
 pub fn run_command<I, S>(cmd: &str, args: I, cwd: &Path) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,
@@ -54,6 +60,7 @@ where
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
 }
 
+/// Run an external command ignoring its standard out.
 pub fn spawn_command<I, S>(cmd: &str, args: I, cwd: &Path) -> io::Result<()>
 where
     I: IntoIterator<Item = S>,
@@ -72,6 +79,7 @@ where
     Ok(())
 }
 
+/// Pipe input text through an external command, returning the output
 pub fn pipe_through_command<I, S>(cmd: &str, args: I, input: &str, cwd: &Path) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,

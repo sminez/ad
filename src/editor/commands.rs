@@ -79,6 +79,13 @@ impl Editor {
 
             "r" | "reload" => Some(Single(ReloadActiveBuffer)),
             "R" | "reload-config" => Some(Single(ReloadConfig)),
+            "reload-buffer" => match args.parse::<usize>() {
+                Ok(id) => Some(Single(ReloadBuffer { id })),
+                Err(_) => {
+                    self.set_status_message(&format!("'{args}' is not a valid buffer id"));
+                    None
+                }
+            },
 
             "set" => Some(Single(SetConfigProp {
                 input: args.to_string(),

@@ -5,7 +5,7 @@
     clippy::style,
     future_incompatible,
     missing_debug_implementations,
-    // missing_docs,
+    missing_docs,
     rust_2018_idioms,
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
@@ -38,9 +38,9 @@ pub use exec::{CachedStdin, Edit, Program};
 
 use term::{disable_alternate_screen, disable_mouse_support, set_termios};
 
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const UNNAMED_BUFFER: &str = "[No Name]";
-pub const MAX_NAME_LEN: usize = 20;
+pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
+pub(crate) const UNNAMED_BUFFER: &str = "[No Name]";
+pub(crate) const MAX_NAME_LEN: usize = 20;
 
 pub(crate) static ORIGINAL_TERMIOS: OnceLock<Termios> = OnceLock::new();
 

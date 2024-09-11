@@ -1,3 +1,4 @@
+//! Modal editing support.
 use crate::{
     editor::Actions,
     key::Key,
@@ -17,7 +18,7 @@ pub(crate) fn modes() -> Vec<Mode> {
 }
 
 #[derive(Debug)]
-pub struct Mode {
+pub(crate) struct Mode {
     pub(crate) name: String,
     pub(crate) cur_shape: CurShape,
     pub(crate) keymap: Trie<Key, Actions>,
@@ -57,6 +58,7 @@ impl Mode {
     }
 }
 
+/// Construct a new [Trie] based keymap
 #[macro_export]
 macro_rules! keymap {
     ($([$($k:expr),+] => [ $($v:expr),+ ]),+,) => {

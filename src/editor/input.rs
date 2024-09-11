@@ -10,10 +10,14 @@ use std::{
     thread::{spawn, JoinHandle},
 };
 
+/// An input event that can be processed by the editor event loop
 #[derive(Debug)]
-pub enum InputEvent {
+pub(crate) enum InputEvent {
+    /// A [Message] received from the virtual filesystem interface
     Message(Message),
+    /// A [Key] press from the user
     KeyPress(Key),
+    /// A signal that our window size has changed
     WinsizeChanged,
 }
 

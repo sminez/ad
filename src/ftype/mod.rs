@@ -1,10 +1,11 @@
+//! Filetype detection and behaviour.
 use std::path::Path;
 
 pub mod lex;
 
 use lex::{LangSpec, StringDelims, Tokenizer};
 
-pub const RUST_SPEC: LangSpec = LangSpec {
+pub(crate) const RUST_SPEC: LangSpec = LangSpec {
     single_line_comment: Some("//"),
     multi_line_comment: Some(("/*", "*/")),
     string_delimiters: StringDelims::Both,
@@ -27,7 +28,7 @@ pub const RUST_SPEC: LangSpec = LangSpec {
 /// Determine the appropriate [Tokenizer] for the provided [Path].
 ///
 /// Returns None is no Tokenizer is available.
-pub fn try_tokenizer_for_path(path: &Path) -> Option<Tokenizer> {
+pub(crate) fn try_tokenizer_for_path(path: &Path) -> Option<Tokenizer> {
     match path.extension() {
         Some(ext) if ext == "rs" => Some(Tokenizer::new(RUST_SPEC)),
         _ => None,

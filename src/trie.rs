@@ -116,6 +116,8 @@ where
         self.roots.is_empty()
     }
 
+    /// Wether the given key is present in this [Trie] either as a full key or a partial prefix to
+    /// multiple keys.
     pub fn contains_key_or_prefix(&self, key: &[K]) -> bool {
         !matches!(self.get(key), QueryResult::Missing)
     }
@@ -125,6 +127,7 @@ impl<V> Trie<char, V>
 where
     V: Clone,
 {
+    /// Construct a new [Trie] with char internal keys from the given string keys.
     pub fn from_str_keys(pairs: Vec<(&str, V)>) -> Self {
         let mut roots = Vec::new();
 
@@ -139,15 +142,21 @@ where
         }
     }
 
+    /// Query this [Trie] using a string key.
+    ///
+    /// Both full and partial matches are possible.
     pub fn get_str(&self, key: &str) -> QueryResult<V> {
-        // panic!("{:?}", self.true_key(&key.chars().collect::<Vec<_>>()));
         self.get(&key.chars().collect::<Vec<_>>())
     }
 
+    /// Query this [Trie] using a string key.
+    ///
+    /// Only fll matches will be returned.
     pub fn get_str_exact(&self, key: &str) -> Option<V> {
         self.get_exact(&key.chars().collect::<Vec<_>>())
     }
 
+    /// Show all partial and full matches for the given key.
     pub fn candidate_strings(&self, key: &str) -> Vec<String> {
         let raw = self.candidates(&key.chars().collect::<Vec<_>>());
         let mut strings: Vec<String> = raw.into_iter().map(|v| v.into_iter().collect()).collect();
@@ -166,8 +175,11 @@ pub type DefaultMapping<K, V> = fn(&K) -> Option<V>;
 /// The result of querying a [Try] for a particular Key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult<V> {
+    /// A leaf value associated with the key used in the query
     Val(V),
+    /// The key used to query is a prefix to multiple targets
     Partial,
+    /// The key does not exist within the [Trie]
     Missing,
 }
 
@@ -304,7 +316,9 @@ pub type WildcardFn<K> = fn(&K) -> bool;
 /// A wildcard node in a key sequence that can conditionally match a single key element.
 #[derive(Debug)]
 pub enum WildCard<K> {
+    /// A literal key
     Lit(K),
+    /// A predicate function for checking whether a key should be considered a match
     Wild(WildcardFn<K>),
 }
 

@@ -1,3 +1,4 @@
+//! The main control flow and functionality of the `ad` editor.
 use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
@@ -28,9 +29,9 @@ mod commands;
 mod input;
 mod render;
 
-pub use actions::{Action, Actions, ViewPort};
+pub(crate) use actions::{Action, Actions, ViewPort};
 use input::Input;
-pub use input::InputEvent;
+pub(crate) use input::InputEvent;
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +42,7 @@ pub enum EditorMode {
     Headless,
 }
 
+/// The main editor state.
 #[derive(Debug)]
 pub struct Editor {
     screen_rows: usize,
@@ -68,6 +70,7 @@ impl Drop for Editor {
 }
 
 impl Editor {
+    /// Construct a new [Editor] with the provided config.
     pub fn new(cfg: Config, mode: EditorMode) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
@@ -113,6 +116,7 @@ impl Editor {
         }
     }
 
+    /// Initialise any UI state required for our [EditorMode] and run the main event loop.
     pub fn run(mut self) {
         let (tx, brx) = self.fs_chans.take().expect("to have fsys channels");
         AdFs::new(tx.clone(), brx).run_threaded();
@@ -175,6 +179,7 @@ impl Editor {
         (self.screen_rows, self.screen_cols)
     }
 
+    /// Update the status line to contain the given message.
     pub fn set_status_message(&mut self, msg: &str) {
         self.status_message.clear();
         self.status_message.push_str(msg);
@@ -307,7 +312,7 @@ impl Editor {
             SetViewPort(vp) => {
                 self.buffers
                     .active_mut()
-                    .view_port(vp, self.screen_rows, self.screen_cols)
+                    .set_view_port(vp, self.screen_rows, self.screen_cols)
             }
             ChangeDirectory { path } => self.change_directory(path),
             CommandMode => self.command_mode(),
@@ -397,6 +402,13 @@ impl Editor {
                     .active_mut()
                     .set_dot_from_screen_coords(x, y, self.screen_rows);
                 self.buffers.active_mut().handle_action(Action::LoadDot);
+            }
+
+            MouseEvent::Press { b: Middle, x, y } => {
+                self.buffers
+                    .active_mut()
+                    .set_dot_from_screen_coords(x, y, self.screen_rows);
+                self.buffers.active_mut().handle_action(Action::ExecuteDot);
             }
 
             MouseEvent::Hold { x, y } => {

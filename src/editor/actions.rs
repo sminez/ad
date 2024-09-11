@@ -20,22 +20,25 @@ use std::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Actions {
+pub(crate) enum Actions {
     Single(Action),
     Multi(Vec<Action>),
 }
 
+/// How the current viewport should be set in relation to dot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewPort {
+    /// Dot at the bottom of the viewport
     Bottom,
+    /// Dot in the center of the viewport
     Center,
+    /// Dot at the top of the viewport
     Top,
 }
 
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Action {
-    Change,
+pub(crate) enum Action {
     ChangeDirectory { path: Option<String> },
     CommandMode,
     Delete,
@@ -88,7 +91,7 @@ pub enum Action {
 }
 
 impl Editor {
-    pub fn change_directory(&mut self, opt_path: Option<String>) {
+    pub(crate) fn change_directory(&mut self, opt_path: Option<String>) {
         let p = match opt_path {
             Some(p) => p,
             None => match env::var("HOME") {
@@ -117,6 +120,7 @@ impl Editor {
         self.set_status_message(&self.cwd.display().to_string());
     }
 
+    /// Open a file within the editor
     pub fn open_file(&mut self, path: &str) {
         let was_empty_scratch = self.buffers.is_empty_scratch();
         let current_id = self.buffers.active().id;
@@ -172,13 +176,13 @@ impl Editor {
     }
 
     /// This shells out to the fd command line program
-    pub fn find_file(&mut self) {
+    pub(crate) fn find_file(&mut self) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
         self.find_file_under_dir(&d);
     }
 
     /// This shells out to the git and fd command line programs
-    pub fn find_repo_file(&mut self) {
+    pub(crate) fn find_repo_file(&mut self) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
         let s = match run_command("git", ["rev-parse", "--show-toplevel"], &d) {
             Ok(s) => s,
@@ -192,7 +196,7 @@ impl Editor {
         self.find_file_under_dir(root);
     }
 
-    pub fn delete_current_buffer(&mut self, force: bool) {
+    pub(crate) fn delete_current_buffer(&mut self, force: bool) {
         let is_last_buffer = self.buffers.len() == 1;
 
         if self.buffers.active().dirty && !force {
