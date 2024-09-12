@@ -14,7 +14,7 @@ include = [
 ]
 
 [dependencies]
-bitflags = "2.4"
+bitflags = "2.6"
 
 [dev-dependencies]
 simple_test_case = "1"
