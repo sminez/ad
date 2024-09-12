@@ -11,7 +11,7 @@ use crate::{
     key::Key,
     mode::Mode,
     replace_config, update_config,
-    util::{pipe_through_command, read_clipboard, run_command, set_clipboard, spawn_command},
+    util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
 };
 use std::{
     env, fs,
@@ -481,17 +481,18 @@ impl Editor {
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => spawn_command(cmd, rest.split_whitespace(), d),
-            None => spawn_command(raw_cmd_str, std::iter::empty::<&str>(), d),
+            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d),
+            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d),
         };
 
         match res {
+            Ok(s) if !s.is_empty() && !s.chars().all(|c| c.is_whitespace()) => {
+                MiniBuffer::select_from("%>", s.lines().map(|l| l.to_string()).collect(), self);
+            }
             Ok(_) => (),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
     }
-
-    // TODO: sending to the shell and just running a command needs the read-only minibuffer
 }
 
 #[cfg(test)]

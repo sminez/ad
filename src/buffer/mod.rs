@@ -181,6 +181,7 @@ impl Buffer {
         self.edit_log.clear();
         self.dirty = false;
         self.last_save = SystemTime::now();
+        self.rendered_line_cache.clear();
 
         let n_lines = self.txt.len_lines();
         let display_path = match path.canonicalize() {
