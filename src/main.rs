@@ -1,9 +1,11 @@
-use ad_editor::{CachedStdin, Config, Editor, EditorMode, GapBuffer, Program};
+use ad_editor::{CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, Program};
 use std::{
     env, fs,
     io::{self, Write},
     process::exit,
 };
+use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
+use tracing_subscriber::FmtSubscriber;
 
 const USAGE: &str = "\
 usage:
@@ -16,6 +18,14 @@ usage:
 ";
 
 fn main() {
+    let writer = LogBuffer::default();
+    let builder = FmtSubscriber::builder()
+        .with_max_level(log_level_from_env())
+        .with_writer(writer.clone());
+
+    let subscriber = builder.finish();
+    set_global_default(subscriber).expect("unable to set a global tracing subscriber");
+
     let Args { script, files } = parse_args();
 
     if let Some(script) = script {
@@ -33,6 +43,15 @@ fn main() {
     }
 
     e.run()
+}
+
+fn log_level_from_env() -> LevelFilter {
+    let s = match env::var("AD_LOG") {
+        Ok(s) => s,
+        Err(_) => return LevelFilter::INFO,
+    };
+
+    s.parse().unwrap_or(LevelFilter::INFO)
 }
 
 struct Args {

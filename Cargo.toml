@@ -38,6 +38,8 @@ harness = false
 [dependencies]
 ninep = { version = "0.2", path = "crates/ninep" }
 libc = "0.2.148"
+tracing = "0.1.40"
+tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
 simple_test_case = "1.2.0"

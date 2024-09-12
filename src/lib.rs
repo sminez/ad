@@ -25,6 +25,7 @@ pub mod exec;
 pub mod fsys;
 pub mod ftype;
 pub mod key;
+pub mod log;
 pub mod mode;
 pub mod regex;
 pub mod term;
@@ -35,6 +36,7 @@ pub use buffer::GapBuffer;
 pub use config::Config;
 pub use editor::{Editor, EditorMode};
 pub use exec::{CachedStdin, Edit, Program};
+pub use log::LogBuffer;
 
 use term::{disable_alternate_screen, disable_mouse_support, set_termios};
 
