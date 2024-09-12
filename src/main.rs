@@ -18,6 +18,12 @@ usage:
 ";
 
 fn main() {
+    let Args { script, files } = parse_args();
+
+    if let Some(script) = script {
+        return run_script(&script, files);
+    }
+
     let writer = LogBuffer::default();
     let builder = FmtSubscriber::builder()
         .with_max_level(log_level_from_env())
@@ -25,12 +31,6 @@ fn main() {
 
     let subscriber = builder.finish();
     set_global_default(subscriber).expect("unable to set a global tracing subscriber");
-
-    let Args { script, files } = parse_args();
-
-    if let Some(script) = script {
-        return run_script(&script, files);
-    }
 
     let config = match Config::try_load() {
         Ok(config) => config,
@@ -46,12 +46,10 @@ fn main() {
 }
 
 fn log_level_from_env() -> LevelFilter {
-    let s = match env::var("AD_LOG") {
-        Ok(s) => s,
-        Err(_) => return LevelFilter::INFO,
-    };
-
-    s.parse().unwrap_or(LevelFilter::INFO)
+    match env::var("AD_LOG") {
+        Ok(s) => s.parse().unwrap_or(LevelFilter::INFO),
+        Err(_) => LevelFilter::INFO,
+    }
 }
 
 struct Args {
