@@ -29,6 +29,7 @@ pub(crate) fn normal_mode() -> Mode {
         // DEBUG
         [ Alt('?') ] => [ DebugBufferContents ],
         [ Alt('#') ] => [ DebugEditLog ],
+        [ Alt('-') ] => [ ViewLogs ],
 
         // Entering INSERT mode
         [ Char('i') ] => [ SetMode { m: "INSERT" }, NewEditLogTransaction ],

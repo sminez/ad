@@ -21,6 +21,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
+use tracing::{debug, info};
 
 mod buffers;
 mod edit;
@@ -41,11 +42,16 @@ pub(crate) enum ActionOutcome {
     SetStatusMessage(String),
 }
 
+/// Buffer kinds control how each buffer interacts with the rest of the editor functionality
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BufferKind {
+    /// A regular buffer that is backed by a file on disk.
     File(PathBuf),
+    /// An in-memory buffer that is not exposed through fsys
     Virtual(String),
+    /// A currently un-named buffer that can be converted to a File buffer when named
     Unnamed,
+    /// State for an active mini-buffer
     MiniBuffer,
 }
 
@@ -167,6 +173,7 @@ impl Buffer {
             _ => return "Buffer is not backed by a file on disk".to_string(),
         };
 
+        info!(id=%self.id, path=%path.as_os_str().to_string_lossy(), "reloading buffer state from disk");
         let mut raw = match fs::read_to_string(path) {
             Ok(contents) => contents,
             Err(e) => return format!("Error reloading file: {e}"),
@@ -177,6 +184,7 @@ impl Buffer {
         }
 
         let n_bytes = raw.len();
+        debug!(%n_bytes, "loaded buffer content");
         self.txt = GapBuffer::from(raw);
         self.edit_log.clear();
         self.dirty = false;

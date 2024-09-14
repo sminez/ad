@@ -162,8 +162,10 @@ impl Buffers {
         self.inner.rotate_left(1)
     }
 
-    pub fn close_active(&mut self) {
-        self.inner.remove(0);
+    pub fn close_buffer(&mut self, id: BufferId) {
+        self.inner.retain(|b| b.id != id);
+        self.jump_list.clear_for_buffer(id);
+
         if self.inner.is_empty() {
             self.inner.push_back(Buffer::new_unnamed(self.next_id, ""));
             self.next_id += 1;
@@ -222,5 +224,11 @@ impl JumpList {
 
         self.idx -= 1;
         self.jumps.get(self.idx).copied()
+    }
+
+    // FIXME: this needs to be smarter about modifying self.idx based on which entries are removed
+    fn clear_for_buffer(&mut self, id: BufferId) {
+        self.jumps.retain(|j| j.0 != id);
+        self.idx = self.jumps.len();
     }
 }

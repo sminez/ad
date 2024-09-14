@@ -1,11 +1,12 @@
-use ad_editor::{CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, Program};
+use ad_editor::{
+    CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, Program, LOG_LEVEL_ENV_VAR,
+};
 use std::{
     env, fs,
     io::{self, Write},
     process::exit,
 };
 use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
-use tracing_subscriber::FmtSubscriber;
 
 const USAGE: &str = "\
 usage:
@@ -24,10 +25,13 @@ fn main() {
         return run_script(&script, files);
     }
 
-    let writer = LogBuffer::default();
-    let builder = FmtSubscriber::builder()
-        .with_max_level(log_level_from_env())
-        .with_writer(writer.clone());
+    let log_buffer = LogBuffer::default();
+    let builder = tracing_subscriber::fmt()
+        .compact()
+        .with_ansi(false)
+        .with_target(false)
+        .with_writer(log_buffer.clone())
+        .with_max_level(log_level_from_env());
 
     let subscriber = builder.finish();
     set_global_default(subscriber).expect("unable to set a global tracing subscriber");
@@ -37,7 +41,7 @@ fn main() {
         Err(s) => fatal(&s),
     };
 
-    let mut e = Editor::new(config, EditorMode::Terminal);
+    let mut e = Editor::new(config, EditorMode::Terminal, log_buffer);
     for fname in files.iter() {
         e.open_file(fname);
     }
@@ -46,7 +50,7 @@ fn main() {
 }
 
 fn log_level_from_env() -> LevelFilter {
-    match env::var("AD_LOG") {
+    match env::var(LOG_LEVEL_ENV_VAR) {
         Ok(s) => s.parse().unwrap_or(LevelFilter::INFO),
         Err(_) => LevelFilter::INFO,
     }

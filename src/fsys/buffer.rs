@@ -10,6 +10,7 @@ use std::{
     sync::mpsc::{Receiver, Sender},
     time::SystemTime,
 };
+use tracing::{debug, trace};
 
 const FILENAME: &str = "filename";
 const DOT: &str = "dot";
@@ -209,13 +210,18 @@ impl BufferNodes {
         for bid in self.brx.try_iter() {
             match bid {
                 BufId::Add(id) => {
+                    debug!(%id, "adding buffer to fsys state");
                     let qid = self.next_qid;
                     self.next_qid += QID_OFFSET;
                     self.known.insert(qid, BufferNode::new(id, qid));
                 }
 
-                BufId::Remove(id) => self.known.retain(|_, v| v.id != id),
+                BufId::Remove(id) => {
+                    debug!(%id, "removing buffer from fsys state");
+                    self.known.retain(|_, v| v.id != id);
+                }
                 BufId::Current(id) => {
+                    debug!(%id, "setting current buffer in fsys state");
                     self.current_buffid = id;
                     self.current_buff_stat.n_bytes = id.to_string().len() as u64;
                 }
@@ -256,6 +262,7 @@ impl BufferNode {
     }
 
     fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<Stat> {
+        trace!(id=%self.id, %fname, "refreshing file stat");
         let content = self.current_file_content(fname, tx)?;
         let stat = self.file_stats.get_mut(fname)?;
         stat.n_bytes = content.as_bytes().len() as u64;

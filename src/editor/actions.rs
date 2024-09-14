@@ -18,6 +18,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
 };
+use tracing::{debug, error, info, trace, warn};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Actions {
@@ -84,6 +85,7 @@ pub(crate) enum Action {
     ShellRun { cmd: String },
     ShellSend { cmd: String },
     Undo,
+    ViewLogs,
     Yank,
 
     DebugBufferContents,
@@ -97,7 +99,9 @@ impl Editor {
             None => match env::var("HOME") {
                 Ok(p) => p,
                 Err(e) => {
-                    self.set_status_message(&format!("Unable to determine home directory: {e}"));
+                    let msg = format!("Unable to determine home directory: {e}");
+                    self.set_status_message(&msg);
+                    warn!("{msg}");
                     return;
                 }
             },
@@ -112,16 +116,20 @@ impl Editor {
         };
 
         if let Err(e) = env::set_current_dir(&new_cwd) {
-            self.set_status_message(&format!("Unable to set working directory: {e}"));
+            let msg = format!("Unable to set working directory: {e}");
+            self.set_status_message(&msg);
+            error!("{msg}");
             return;
         };
 
+        debug!(new_cwd=%new_cwd.as_os_str().to_string_lossy(), "setting working directory");
         self.cwd = new_cwd;
         self.set_status_message(&self.cwd.display().to_string());
     }
 
     /// Open a file within the editor
     pub fn open_file(&mut self, path: &str) {
+        debug!(%path, "opening file");
         let was_empty_scratch = self.buffers.is_empty_scratch();
         let current_id = self.buffers.active().id;
 
@@ -196,23 +204,21 @@ impl Editor {
         self.find_file_under_dir(root);
     }
 
-    pub(crate) fn delete_current_buffer(&mut self, force: bool) {
-        let is_last_buffer = self.buffers.len() == 1;
-
-        if self.buffers.active().dirty && !force {
-            self.set_status_message("No write since last change");
-        } else {
-            let id = self.buffers.active().id;
-            self.btx.send(BufId::Remove(id)).unwrap();
-
-            self.buffers.close_active();
-            if is_last_buffer {
-                self.running = false;
+    pub(crate) fn delete_buffer(&mut self, id: usize, force: bool) {
+        match self.buffers.with_id(id) {
+            Some(b) if b.dirty && !force => self.set_status_message("No write since last change"),
+            None => warn!("attempt to close unknown buffer, id={id}"),
+            _ => {
+                let is_last_buffer = self.buffers.len() == 1;
+                self.btx.send(BufId::Remove(id)).unwrap();
+                self.buffers.close_buffer(id);
+                self.running = !is_last_buffer;
             }
         }
     }
 
     pub(super) fn save_current_buffer(&mut self, fname: Option<String>, force: bool) {
+        trace!("attempting to save current buffer");
         let p = match self.get_buffer_save_path(fname) {
             Some(p) => p,
             None => return,
@@ -270,6 +276,7 @@ impl Editor {
     }
 
     pub(super) fn reload_config(&mut self) {
+        info!("reloading config");
         let msg = match Config::try_load() {
             Ok(config) => {
                 replace_config(config);
@@ -277,6 +284,7 @@ impl Editor {
             }
             Err(s) => s,
         };
+        info!("{msg}");
 
         self.set_status_message(&msg);
     }
@@ -287,6 +295,7 @@ impl Editor {
     }
 
     pub(super) fn set_config_prop(&mut self, input: &str) {
+        info!(%input, "setting config property");
         if let Err(msg) = update_config(input) {
             self.set_status_message(&msg);
         }
@@ -316,6 +325,7 @@ impl Editor {
     }
 
     pub(super) fn set_clipboard(&mut self, s: String) {
+        trace!("setting clipboard content");
         match set_clipboard(&s) {
             Ok(_) => self.set_status_message("Yanked selection to system clipboard"),
             Err(e) => self.set_status_message(&format!("Error setting system clipboard: {e}")),
@@ -323,6 +333,7 @@ impl Editor {
     }
 
     pub(super) fn paste_from_clipboard(&mut self) {
+        trace!("pasting from clipboard");
         match read_clipboard() {
             Ok(s) => self.handle_action(Action::InsertString { s }),
             Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
@@ -376,21 +387,36 @@ impl Editor {
         );
     }
 
+    pub(super) fn view_logs(&mut self) {
+        MiniBuffer::select_from(
+            "+Log ",
+            self.log_buffer
+                .content()
+                .lines()
+                .map(|s| s.to_string())
+                .collect(),
+            self,
+        );
+    }
+
     pub(super) fn debug_edit_log(&mut self) {
         MiniBuffer::select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log(), self);
     }
 
     pub(super) fn execute_command(&mut self, cmd: &str) {
+        debug!(%cmd, "executing command");
         if let Some(actions) = self.parse_command(cmd.trim_end()) {
             self.handle_actions(actions);
         }
     }
 
     pub(super) fn execute_edit_command(&mut self, cmd: &str) {
+        debug!(%cmd, "executing edit command");
         let mut prog = match Program::try_parse(cmd) {
             Ok(prog) => prog,
-            Err(e) => {
-                self.set_status_message(&format!("Invalid edit command: {e:?}"));
+            Err(error) => {
+                warn!(?error, "invalid edit command");
+                self.set_status_message(&format!("Invalid edit command: {error:?}"));
                 return;
             }
         };
@@ -498,7 +524,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::editor::EditorMode;
+    use crate::{editor::EditorMode, LogBuffer};
     use simple_test_case::test_case;
 
     macro_rules! assert_recv {
@@ -517,7 +543,11 @@ mod tests {
 
     #[test]
     fn opening_a_file_sends_the_correct_fsys_messages() {
-        let mut ed = Editor::new(Config::default(), EditorMode::Headless);
+        let mut ed = Editor::new(
+            Config::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+        );
         let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
 
         ed.open_file("foo");
@@ -542,7 +572,11 @@ mod tests {
     #[test_case(&["foo", "bar"], &[1, 2]; "two files")]
     #[test]
     fn ensure_correct_fsys_state_works(files: &[&str], expected_ids: &[usize]) {
-        let mut ed = Editor::new(Config::default(), EditorMode::Headless);
+        let mut ed = Editor::new(
+            Config::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+        );
         let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
 
         for file in files {

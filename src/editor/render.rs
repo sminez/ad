@@ -19,6 +19,8 @@ impl Editor {
         self.refresh_screen_w_minibuffer(None);
     }
 
+    // FIXME: This has an implicit "only one buffer is active at a time" assumption which needs to
+    // be reworked to support multiple buffers open at once.
     pub(crate) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
         let w_minibuffer = mb.is_some();
         let MiniBufferState {

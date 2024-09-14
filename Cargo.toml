@@ -39,7 +39,7 @@ harness = false
 ninep = { version = "0.2", path = "crates/ninep" }
 libc = "0.2.158"
 tracing = "0.1.40"
-tracing-subscriber = "0.3.18"
+tracing-subscriber = { version = "0.3.18", features = [ "fmt" ] }
 
 [dev-dependencies]
 simple_test_case = "1.2.0"

@@ -8,6 +8,7 @@ use crate::{
     util::run_command,
 };
 use std::{cmp::min, ffi::OsStr, path::Path};
+use tracing::trace;
 
 #[derive(Debug, Default)]
 pub(crate) struct MiniBufferState<'a> {
@@ -180,6 +181,7 @@ impl MiniBuffer {
     }
 
     pub fn prompt(prompt: &str, ed: &mut Editor) -> Option<String> {
+        trace!(%prompt, "opening mini-buffer");
         match MiniBuffer::prompt_w_callback(prompt, vec![], |_| None, ed) {
             MiniBufferSelection::UserInput { input } => Some(input),
             _ => None,

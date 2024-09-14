@@ -38,6 +38,7 @@ use std::{
     thread::JoinHandle,
     time::SystemTime,
 };
+use tracing::trace;
 
 mod buffer;
 mod message;
@@ -125,10 +126,23 @@ impl AdFs {
         let s = Server::new(self);
         FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()))
     }
+
+    fn is_known_qid(&self, qid: u64) -> bool {
+        [
+            MOUNT_ROOT_QID,
+            CONTROL_FILE_QID,
+            BUFFERS_QID,
+            INDEX_BUFFER_QID,
+            CURRENT_BUFFER_QID,
+        ]
+        .contains(&qid)
+            || self.buffer_nodes.is_known_buffer_qid(qid)
+    }
 }
 
 impl Serve9p for AdFs {
-    fn stat(&mut self, qid: u64, _uname: &str) -> Result<Stat> {
+    fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat> {
+        trace!(%qid, %uname, "handling stat request");
         self.buffer_nodes.update();
 
         match qid {
@@ -142,10 +156,12 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write_stat(&mut self, qid: u64, stat: Stat, _uname: &str) -> Result<()> {
+    fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+        trace!(%qid, %uname, "handling write stat request");
         self.buffer_nodes.update();
 
         if stat.n_bytes == 0 {
+            trace!(%qid, %uname, "stat n_bytes=0, truncating file");
             match qid {
                 MOUNT_ROOT_QID => self.mount_dir_stat.n_bytes = 0,
                 CONTROL_FILE_QID => self.control_file_stat.n_bytes = 0,
@@ -156,7 +172,8 @@ impl Serve9p for AdFs {
         Ok(())
     }
 
-    fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta> {
+    fn walk(&mut self, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta> {
+        trace!(%parent_qid, %child, %uname, "handling walk request");
         self.buffer_nodes.update();
 
         match parent_qid {
@@ -180,13 +197,19 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn open(&mut self, _qid: u64, _mode: Mode, _uname: &str) -> Result<IoUnit> {
+    fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+        trace!(%qid, %uname, ?mode, "handling open request");
         self.buffer_nodes.update();
 
-        Ok(IO_UNIT)
+        if self.is_known_qid(qid) {
+            Ok(IO_UNIT)
+        } else {
+            Err(format!("{E_UNKNOWN_FILE}: {qid}"))
+        }
     }
 
-    fn read(&mut self, qid: u64, offset: usize, count: usize, _uname: &str) -> Result<ReadOutcome> {
+    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<ReadOutcome> {
+        trace!(%qid, %offset, %count, %uname, "handling read request");
         self.buffer_nodes.update();
 
         let data = match qid {
@@ -208,7 +231,8 @@ impl Serve9p for AdFs {
         Ok(ReadOutcome::Immediate(data))
     }
 
-    fn read_dir(&mut self, qid: u64, _uname: &str) -> Result<Vec<Stat>> {
+    fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+        trace!(%qid, %uname, "handling read dir request");
         self.buffer_nodes.update();
 
         match qid {
@@ -224,7 +248,8 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize> {
+    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>, uname: &str) -> Result<usize> {
+        trace!(%qid, %offset, n_bytes=%data.len(), %uname, "handling write request");
         self.buffer_nodes.update();
 
         let n_bytes = data.len();
@@ -248,19 +273,21 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn remove(&mut self, _qid: u64, _uname: &str) -> Result<()> {
+    fn remove(&mut self, qid: u64, uname: &str) -> Result<()> {
+        trace!(%qid, %uname, "handling remove request");
         // TODO: allow remove of a buffer to close the buffer
         Err("remove not allowed".to_string())
     }
 
     fn create(
         &mut self,
-        _parent: u64,
-        _name: &str,
-        _perm: Perm,
-        _mode: Mode,
-        _uname: &str,
+        parent: u64,
+        name: &str,
+        perm: Perm,
+        mode: Mode,
+        uname: &str,
     ) -> Result<(FileMeta, IoUnit)> {
+        trace!(%parent, %name, ?perm, ?mode, %uname, "handling create request");
         Err("create not allowed".to_string())
     }
 }

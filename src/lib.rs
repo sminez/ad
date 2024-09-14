@@ -40,6 +40,9 @@ pub use log::LogBuffer;
 
 use term::{disable_alternate_screen, disable_mouse_support, set_termios};
 
+/// The environment variable to set to control logging within ad
+pub const LOG_LEVEL_ENV_VAR: &str = "AD_LOG";
+
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub(crate) const UNNAMED_BUFFER: &str = "[No Name]";
 pub(crate) const MAX_NAME_LEN: usize = 20;

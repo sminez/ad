@@ -13,7 +13,7 @@ use crate::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler,
     },
-    ORIGINAL_TERMIOS,
+    LogBuffer, ORIGINAL_TERMIOS,
 };
 use std::{
     env,
@@ -23,6 +23,7 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
 };
+use tracing::{debug, trace};
 
 mod actions;
 mod commands;
@@ -59,6 +60,7 @@ pub struct Editor {
     btx: Sender<BufId>,
     fs_chans: Option<(Sender<InputEvent>, Receiver<BufId>)>,
     mode: EditorMode,
+    log_buffer: LogBuffer,
 }
 
 impl Drop for Editor {
@@ -71,7 +73,7 @@ impl Drop for Editor {
 
 impl Editor {
     /// Construct a new [Editor] with the provided config.
-    pub fn new(cfg: Config, mode: EditorMode) -> Self {
+    pub fn new(cfg: Config, mode: EditorMode, log_buffer: LogBuffer) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
@@ -97,6 +99,7 @@ impl Editor {
             btx,
             fs_chans: Some((tx, brx)),
             mode,
+            log_buffer,
         }
     }
 
@@ -104,6 +107,8 @@ impl Editor {
     /// This will panic if the available screen rows are 0 or 1
     fn update_window_size(&mut self) {
         let (screen_rows, screen_cols) = get_termsize();
+        trace!("window size updated: rows={screen_rows} cols={screen_cols}");
+
         self.screen_rows = screen_rows - 2;
         self.screen_cols = screen_cols;
     }
@@ -234,6 +239,8 @@ impl Editor {
     fn handle_message(&mut self, Message { req, tx }: Message) {
         use Req::*;
 
+        debug!("received fys message: {req:?}");
+
         match req {
             ControlMessage { msg } => {
                 self.execute_command(&msg);
@@ -316,7 +323,7 @@ impl Editor {
             }
             ChangeDirectory { path } => self.change_directory(path),
             CommandMode => self.command_mode(),
-            DeleteBuffer { force } => self.delete_current_buffer(force),
+            DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
             Exit { force } => self.exit(force),
             FindFile => self.find_file(),
@@ -355,6 +362,7 @@ impl Editor {
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
+            ViewLogs => self.view_logs(),
             Yank => self.set_clipboard(self.buffers.active().dot_contents()),
 
             DebugBufferContents => self.debug_buffer_contents(),
