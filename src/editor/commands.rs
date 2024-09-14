@@ -138,7 +138,7 @@ impl Editor {
 }
 
 fn try_parse_single_char_command(input: &str) -> Option<Actions> {
-    return match input.chars().next() {
+    match input.chars().next() {
         Some('!') => Some(Single(ShellRun {
             cmd: input[1..].to_string(),
         })),
@@ -153,5 +153,5 @@ fn try_parse_single_char_command(input: &str) -> Option<Actions> {
         })),
 
         _ => None,
-    };
+    }
 }
