@@ -81,7 +81,7 @@ impl Cur {
         cur
     }
 
-    pub(super) fn clamp_idx(&mut self, max_idx: usize) {
+    pub(crate) fn clamp_idx(&mut self, max_idx: usize) {
         self.idx = min(self.idx, max_idx);
     }
 

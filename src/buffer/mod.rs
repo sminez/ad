@@ -597,27 +597,40 @@ impl Buffer {
         }
     }
 
-    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
-        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
+    pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
+        &mut self,
+        x: usize,
+        y: usize,
+        screen_rows: usize,
+    ) {
+        let mouse_cur = self.cur_from_screen_coords(x, y, screen_rows);
+        if !self.dot.contains(&mouse_cur) {
+            self.set_dot_from_screen_coords(x, y, screen_rows);
+        }
+    }
+
+    fn cur_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) -> Cur {
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x - 1 - w_sgncol;
         let y = min(y - 1 + self.row_off, self.len_lines() - 1);
+        let mut cur = Cur::from_yx(y, self.x_from_rx(y), self);
 
-        let mut dot = Dot::Cur {
-            c: Cur::from_yx(y, self.x_from_rx(y), self),
+        cur.clamp_idx(self.txt.len_chars());
+
+        cur
+    }
+
+    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
+        self.dot = Dot::Cur {
+            c: self.cur_from_screen_coords(x, y, screen_rows),
         };
-        dot.clamp_idx(self.txt.len_chars());
-        self.dot = dot;
     }
 
     pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
         self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
-        let (_, w_sgncol) = self.sign_col_dims(screen_rows);
-        self.rx = x - 1 - w_sgncol;
-        let y = min(y - 1 + self.row_off, self.len_lines() - 1);
-
         let mut r = self.dot.as_range();
-        let c = Cur::from_yx(y, self.x_from_rx(y), self);
+        let c = self.cur_from_screen_coords(x, y, screen_rows);
         r.set_active_cursor(c);
 
         let mut dot = Dot::Range { r };

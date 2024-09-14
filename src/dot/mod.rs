@@ -84,6 +84,24 @@ impl Dot {
         }
     }
 
+    /// Whether or not this dot is a [Cur].
+    pub fn is_cur(&self) -> bool {
+        matches!(self, Dot::Cur { .. })
+    }
+
+    /// Whether or not this dot is a [Range].
+    pub fn is_range(&self) -> bool {
+        matches!(self, Dot::Range { .. })
+    }
+
+    /// Whether or not this dot contains `cur` within it.
+    pub fn contains(&self, cur: &Cur) -> bool {
+        match self {
+            Dot::Cur { c } => cur == c,
+            Dot::Range { r } => r.contains(cur),
+        }
+    }
+
     /// The address representation of this dot in the form that is enterable by the user.
     /// Indices are 1-based rather than their internal 0-based representation.
     pub fn addr(&self, b: &Buffer) -> String {

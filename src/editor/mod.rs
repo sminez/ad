@@ -415,14 +415,14 @@ impl Editor {
             MouseEvent::Press { b: Right, x, y } => {
                 self.buffers
                     .active_mut()
-                    .set_dot_from_screen_coords(x, y, self.screen_rows);
+                    .set_dot_from_screen_coords_if_outside_current_range(x, y, self.screen_rows);
                 self.load_dot();
             }
 
             MouseEvent::Press { b: Middle, x, y } => {
                 self.buffers
                     .active_mut()
-                    .set_dot_from_screen_coords(x, y, self.screen_rows);
+                    .set_dot_from_screen_coords_if_outside_current_range(x, y, self.screen_rows);
                 self.execute_dot();
             }
 

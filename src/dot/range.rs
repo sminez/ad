@@ -32,6 +32,10 @@ impl Range {
         )
     }
 
+    pub(crate) fn contains(&self, cur: &Cur) -> bool {
+        cur.idx >= self.start.idx && cur.idx <= self.end.idx
+    }
+
     /// Extends the STARTING cursor to its line start
     #[must_use]
     pub(super) fn extend_to_line_start(mut self, b: &Buffer) -> Self {
