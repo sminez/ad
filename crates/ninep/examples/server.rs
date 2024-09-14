@@ -57,7 +57,7 @@ const RW: u64 = 4;
 const BLOCKING: u64 = 5;
 
 impl Serve9p for EchoServer {
-    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize> {
+    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>, _uname: &str) -> Result<usize> {
         if qid != RW {
             return Err(format!("write not supported for {qid} @ {offset}"));
         }
@@ -90,7 +90,7 @@ impl Serve9p for EchoServer {
         Err("write_stat not supported".to_string())
     }
 
-    fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta> {
+    fn walk(&mut self, parent_qid: u64, child: &str, _uname: &str) -> Result<FileMeta> {
         println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
             (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),

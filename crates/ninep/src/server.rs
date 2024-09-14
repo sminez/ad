@@ -105,7 +105,7 @@ pub trait Serve9p: Send + 'static {
     ///
     /// [Server] will ensure that this method is only called for known parents who have previously
     /// been identified has having [FileType::Directory].
-    fn walk(&mut self, parent_qid: u64, child: &str) -> Result<FileMeta>;
+    fn walk(&mut self, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta>;
 
     /// Open an existing file in the requested mode for subsequent I/O via [read](Serve9p::read) and
     /// [write](Serve9p::write) calls.
@@ -131,7 +131,7 @@ pub trait Serve9p: Send + 'static {
     fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>>;
 
     /// Write the given `data` to the requested file starting at `offset`
-    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>) -> Result<usize>;
+    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>, uname: &str) -> Result<usize>;
 
     /// Remove the requested file from the filesystem.
     fn remove(&mut self, qid: u64, uname: &str) -> Result<()>;
@@ -614,7 +614,7 @@ where
         let mut qid = fm.qid;
 
         for name in wnames.iter() {
-            let fm = s.walk(qid, name)?;
+            let fm = s.walk(qid, name, &self.state.uname)?;
             qid = fm.qid;
             wqids.push(fm.as_qid());
             qids.insert(qid, fm);
@@ -817,11 +817,11 @@ where
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
-        let count = self
-            .s
-            .lock()
-            .unwrap()
-            .write(fm.qid, offset as usize, data)? as u32;
+        let count =
+            self.s
+                .lock()
+                .unwrap()
+                .write(fm.qid, offset as usize, data, &self.state.uname)? as u32;
 
         Ok(Rdata::Write { count })
     }
