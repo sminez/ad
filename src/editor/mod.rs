@@ -330,6 +330,7 @@ impl Editor {
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
+            ExecuteDot => self.execute_dot(),
             Exit { force } => self.exit(force),
             FindFile => self.find_file(),
             FindRepoFile => self.find_repo_file(),
@@ -340,6 +341,7 @@ impl Editor {
             JumpListBack => self
                 .buffers
                 .jump_list_backward(self.screen_rows, self.screen_cols),
+            LoadDot => self.load_dot(),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();
@@ -414,14 +416,14 @@ impl Editor {
                 self.buffers
                     .active_mut()
                     .set_dot_from_screen_coords(x, y, self.screen_rows);
-                self.buffers.active_mut().handle_action(Action::LoadDot);
+                self.load_dot();
             }
 
             MouseEvent::Press { b: Middle, x, y } => {
                 self.buffers
                     .active_mut()
                     .set_dot_from_screen_coords(x, y, self.screen_rows);
-                self.buffers.active_mut().handle_action(Action::ExecuteDot);
+                self.execute_dot();
             }
 
             MouseEvent::Hold { x, y } => {

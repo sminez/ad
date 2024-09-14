@@ -105,8 +105,11 @@ pub(crate) fn normal_mode() -> Mode {
 
         [ Ctrl('o') ] => [ JumpListBack ],
         [ Tab ] => [ JumpListForward ], // ctrl-i
+        [ Alt('[') ] => [ JumpListBack ],
+        [ Alt(']') ] => [ JumpListForward ],
 
         [ Return ] => [ LoadDot ],
+        [ Char('@') ] => [ ExecuteDot ],
 
     };
 

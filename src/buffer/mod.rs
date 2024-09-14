@@ -589,6 +589,13 @@ impl Buffer {
         (w_lnum, w_sgncol)
     }
 
+    /// If the current dot is a cursor rather than a range, expand it to a sensible range.
+    pub(crate) fn expand_cur_dot(&mut self) {
+        if let Dot::Cur { .. } = self.dot {
+            self.set_dot(TextObject::Word, 1);
+        }
+    }
+
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
         self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
@@ -684,14 +691,6 @@ impl Buffer {
             Action::DotFlip => self.dot.flip(),
             Action::DotSet(t, count) => self.set_dot(t, count),
 
-            Action::LoadDot => {
-                if let Dot::Cur { .. } = self.dot {
-                    self.set_dot(TextObject::Word, 1);
-                }
-                let s = self.dot.content(self);
-                self.find_forward(&s);
-            }
-
             Action::RawKey { k } => return self.handle_raw_key(k),
 
             _ => (),
@@ -754,7 +753,7 @@ impl Buffer {
     }
 
     /// Set dot and clamp to ensure it is within bounds
-    fn set_dot(&mut self, t: TextObject, n: usize) {
+    pub(crate) fn set_dot(&mut self, t: TextObject, n: usize) {
         self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.set_dot(self);
@@ -923,7 +922,7 @@ impl Buffer {
         (r.start, Some(s))
     }
 
-    fn find_forward(&mut self, s: &str) {
+    pub(crate) fn find_forward(&mut self, s: &str) {
         if let Some(dot) = find_forward_wrapping(&s, self) {
             self.dot = dot;
         }

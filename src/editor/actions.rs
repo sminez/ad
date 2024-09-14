@@ -395,6 +395,25 @@ impl Editor {
         MiniBuffer::select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log(), self);
     }
 
+    pub(super) fn load_dot(&mut self) {
+        let b = self.buffers.active_mut();
+        b.expand_cur_dot();
+        let s = b.dot.content(b);
+
+        b.find_forward(&s);
+    }
+
+    pub(super) fn execute_dot(&mut self) {
+        let b = self.buffers.active_mut();
+        b.expand_cur_dot();
+        let cmd = b.dot.content(b);
+
+        match self.parse_command(cmd.trim_end()) {
+            Some(actions) => self.handle_actions(actions),
+            None => self.run_shell_cmd(&cmd),
+        }
+    }
+
     pub(super) fn execute_command(&mut self, cmd: &str) {
         debug!(%cmd, "executing command");
         if let Some(actions) = self.parse_command(cmd.trim_end()) {
