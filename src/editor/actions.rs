@@ -356,6 +356,7 @@ impl Editor {
                 c: Cur::from_yx(cy, 0, self.buffers.active()),
             };
             self.handle_action(Action::DotSet(TextObject::Line, 1));
+            self.handle_action(Action::SetViewPort(ViewPort::Center));
         }
     }
 
