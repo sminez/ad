@@ -2,7 +2,7 @@
 use crate::{
     buffer::Buffer,
     dot::{
-        find::{expand, find_backward_start, find_forward_end, Find},
+        find::{find_backward_start, find_forward_end, Find},
         Cur, Dot, Range,
     },
     key::Arrow,
@@ -35,7 +35,7 @@ impl TextObject {
             BufferStart => Cur::buffer_start().into(),
             Character => b.dot.active_cur().arr(Arrow::Right, b).into(),
             FindChar(ch) => find_forward_end(ch, b.dot.active_cur(), b).into(),
-            Delimited(l, r) => expand(&FindDelimited::new(*l, *r), b.dot, b),
+            Delimited(l, r) => FindDelimited::new(*l, *r).expand(b.dot, b),
             LineEnd => b.dot.active_cur().move_to_line_end(b).into(),
             LineStart => b.dot.active_cur().move_to_line_start(b).into(),
             Line => Dot::from(
@@ -45,8 +45,8 @@ impl TextObject {
                     .extend_to_line_end(b),
             )
             .collapse_null_range(),
-            Paragraph => expand(&FindParagraph::Fwd, b.dot, b),
-            Word => expand(&FindWord::Fwd, b.dot, b),
+            Paragraph => FindParagraph::Fwd.expand(b.dot, b),
+            Word => FindWord::Fwd.expand(b.dot, b),
         };
 
         b.dot = dot;
@@ -210,7 +210,6 @@ impl Find for FindParagraph {
     }
 }
 
-/// Searching forward targets the end of words and searching back targets the start
 enum FindWord {
     Fwd,
     Bck,
@@ -258,9 +257,59 @@ impl Find for FindWord {
 
         None
     }
+
+    fn expand(&self, dot: Dot, b: &Buffer) -> Dot {
+        use CharKind::*;
+
+        let Range {
+            mut start,
+            mut end,
+            start_active,
+        } = dot.as_range();
+        let max_idx = b.txt.len_chars() - 1;
+
+        if start.idx > 0 {
+            let current = CharKind::from(b.txt.char(start.idx));
+            let prev = CharKind::from(b.txt.char(start.idx - 1));
+
+            match (prev, current) {
+                // We're at the start of the current word so start.idx is correct
+                (Whitespace, Word | Punctuation) => (),
+
+                // We're in whitespace so advance until we hit a word or the end of the buffer
+                (_, Whitespace) if start.idx < max_idx => {
+                    while matches!(CharKind::from(b.txt.char(start.idx)), Whitespace) {
+                        start.idx += 1;
+                        if start.idx == max_idx {
+                            end.idx = max_idx;
+                            break;
+                        }
+                    }
+                }
+
+                // We're in a word so search back to find the start
+                _ => start = find_backward_start(self, start, b),
+            }
+        }
+
+        if end.idx < max_idx {
+            let current = CharKind::from(b.txt.char(end.idx));
+            let next = CharKind::from(b.txt.char(end.idx + 1));
+
+            match (current, next) {
+                // We're at the end of a word so end.idx is correct
+                (Word | Punctuation, Whitespace) => (),
+
+                // We're within a word or in whitespace so advance to find the end of the word
+                _ => end = find_forward_end(self, end, b),
+            }
+        }
+
+        Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
+    }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 enum CharKind {
     Word,
     Punctuation,
@@ -276,5 +325,40 @@ impl From<char> for CharKind {
         } else {
             CharKind::Punctuation
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    #[test_case(FindWord::Fwd, 0, "this"; "forward start of buffer")]
+    #[test_case(FindWord::Fwd, 3, "this"; "forward end of first word")]
+    #[test_case(FindWord::Fwd, 4, "is"; "forward after first word")]
+    #[test_case(FindWord::Fwd, 5, "is"; "forward start of second word")]
+    #[test_case(FindWord::Fwd, 6, "is"; "forward end of second word")]
+    #[test_case(FindWord::Fwd, 9, "test"; "forward before last word")]
+    #[test_case(FindWord::Fwd, 13, "test"; "forward end of buffer")]
+    #[test]
+    fn expand_word(fw: FindWord, idx: usize, expected: &str) {
+        let b = Buffer::new_virtual(0, "test", "this is a test");
+        let dot = Dot::Cur { c: Cur { idx } };
+        let expanded = fw.expand(dot, &b);
+        let content = expanded.content(&b);
+
+        assert_eq!(content, expected);
+    }
+
+    #[test]
+    fn expand_word_for_buffer_with_trailing_spaces() {
+        let b = Buffer::new_virtual(0, "test", "this is a test   ");
+        let dot = Dot::Cur { c: Cur { idx: 14 } };
+        let expanded = FindWord::Fwd.expand(dot, &b);
+        let content = expanded.content(&b);
+
+        // Should have advanced to the end of the buffer and selected that final space character
+        assert!(matches!(expanded, Dot::Cur { c: Cur { idx: 16 } }));
+        assert_eq!(content, " ");
     }
 }

@@ -241,14 +241,15 @@ impl Buffer {
     ///
     /// The buffer will not be included in the virtual filesystem and it will be removed when it
     /// loses focus.
-    pub fn new_virtual(id: usize, name: String, mut content: String) -> Self {
+    pub fn new_virtual(id: usize, name: impl Into<String>, content: impl Into<String>) -> Self {
+        let mut content = content.into();
         if content.ends_with('\n') {
             content.pop();
         }
 
         Self {
             id,
-            kind: BufferKind::Virtual(name),
+            kind: BufferKind::Virtual(name.into()),
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(content),

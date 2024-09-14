@@ -23,6 +23,22 @@ pub trait Find {
     fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
     where
         I: Iterator<Item = (usize, char)>;
+
+    fn expand(&self, dot: Dot, b: &Buffer) -> Dot
+    where
+        Self: Sized,
+    {
+        let Range {
+            mut start,
+            mut end,
+            start_active,
+        } = dot.as_range();
+
+        start = find_backward_start(self, start, b);
+        end = find_forward_end(self, end, b);
+
+        Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
+    }
 }
 
 pub fn find_forward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
@@ -52,19 +68,6 @@ pub fn find_backward_start<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
 //     rev_find_between(f, b.dot.first_cur().idx, 0, b)
 //         .or_else(|| rev_find_between(f, b.txt.len_chars(), b.dot.first_cur().idx, b))
 // }
-
-pub fn expand<F: Find>(f: &F, dot: Dot, b: &Buffer) -> Dot {
-    let Range {
-        mut start,
-        mut end,
-        start_active,
-    } = dot.as_range();
-
-    start = find_backward_start(f, start, b);
-    end = find_forward_end(f, end, b);
-
-    Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
-}
 
 fn match_to_dot(m: Option<(usize, usize)>) -> Option<Dot> {
     match m {
