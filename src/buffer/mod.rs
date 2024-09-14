@@ -237,7 +237,10 @@ impl Buffer {
         }
     }
 
-    /// Create a new virtual buffer with the given name and content
+    /// Create a new virtual buffer with the given name and content.
+    ///
+    /// The buffer will not be included in the virtual filesystem and it will be removed when it
+    /// loses focus.
     pub fn new_virtual(id: usize, name: String, mut content: String) -> Self {
         if content.ends_with('\n') {
             content.pop();
@@ -359,7 +362,7 @@ impl Buffer {
     }
 
     pub(crate) fn debug_edit_log(&self) -> Vec<String> {
-        self.edit_log.debug_edits(self).into_iter().collect()
+        self.edit_log.debug_edits(self)
     }
 
     /// Clamp the current viewport to include the [Dot].

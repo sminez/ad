@@ -388,15 +388,7 @@ impl Editor {
     }
 
     pub(super) fn view_logs(&mut self) {
-        MiniBuffer::select_from(
-            "+Log ",
-            self.log_buffer
-                .content()
-                .lines()
-                .map(|s| s.to_string())
-                .collect(),
-            self,
-        );
+        self.open_virtual("+logs", self.log_buffer.content())
     }
 
     pub(super) fn debug_edit_log(&mut self) {

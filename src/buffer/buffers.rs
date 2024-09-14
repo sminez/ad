@@ -5,8 +5,10 @@ use crate::{
 use std::{
     collections::VecDeque,
     io::{self, ErrorKind},
+    mem,
     path::Path,
 };
+use tracing::debug;
 
 const MAX_JUMPS: usize = 100;
 
@@ -54,19 +56,66 @@ impl Buffers {
             return Ok(None);
         }
 
-        // Remove an empty scratch buffer if the user has now opened a file
-        if self.is_empty_scratch() {
-            self.inner.remove(0);
-        } else {
-            self.record_jump_position();
-        }
-
         let id = self.next_id;
         self.next_id += 1;
-        let b = Buffer::new_from_canonical_file_path(id, path)?;
-        self.inner.insert(0, b);
+        let mut b = Buffer::new_from_canonical_file_path(id, path)?;
+
+        // Remove an empty scratch buffer if the user has now opened a file
+        if self.is_empty_scratch() {
+            mem::swap(&mut self.inner[0], &mut b);
+        } else {
+            self.record_jump_position();
+            self.push_buffer(b);
+        }
 
         Ok(Some(id))
+    }
+
+    pub fn next(&mut self) {
+        if !self.remove_head_buffer_if_virtual() {
+            self.inner.rotate_right(1);
+        }
+    }
+
+    pub fn previous(&mut self) {
+        self.remove_head_buffer_if_virtual();
+        self.inner.rotate_left(1)
+    }
+
+    pub fn close_buffer(&mut self, id: BufferId) {
+        self.inner.retain(|b| b.id != id);
+        self.jump_list.clear_for_buffer(id);
+
+        if self.inner.is_empty() {
+            self.inner.push_back(Buffer::new_unnamed(self.next_id, ""));
+            self.next_id += 1;
+        }
+    }
+
+    /// The bool returned here denotes wether we removed the head buffer or not
+    fn remove_head_buffer_if_virtual(&mut self) -> bool {
+        let is_virtual = matches!(self.inner[0].kind, BufferKind::Virtual(_));
+        if is_virtual {
+            debug!("removing virtual buffer");
+            let prev = self
+                .inner
+                .remove(0)
+                .expect("always have at least one buffer");
+            self.jump_list.clear_for_buffer(prev.id);
+        }
+
+        is_virtual
+    }
+
+    fn push_buffer(&mut self, buf: Buffer) {
+        self.remove_head_buffer_if_virtual();
+        self.inner.push_front(buf);
+    }
+
+    pub(crate) fn open_virtual(&mut self, name: String, content: String) {
+        let buf = Buffer::new_virtual(self.next_id, name, content);
+        self.push_buffer(buf);
+        self.next_id += 1;
     }
 
     /// Used to seed the buffer selection mini-buffer
@@ -124,6 +173,7 @@ impl Buffers {
     }
 
     fn jump(&mut self, bufid: BufferId, cur: Cur, screen_rows: usize, screen_cols: usize) {
+        self.remove_head_buffer_if_virtual();
         if let Some(idx) = self.inner.iter().position(|b| b.id == bufid) {
             self.inner.swap(0, idx);
             self.inner[0].dot = cur.into();
@@ -152,24 +202,6 @@ impl Buffers {
     #[inline]
     pub fn is_empty_scratch(&self) -> bool {
         self.inner.len() == 1 && self.inner[0].is_unnamed() && !self.inner[0].dirty
-    }
-
-    pub fn next(&mut self) {
-        self.inner.rotate_right(1)
-    }
-
-    pub fn previous(&mut self) {
-        self.inner.rotate_left(1)
-    }
-
-    pub fn close_buffer(&mut self, id: BufferId) {
-        self.inner.retain(|b| b.id != id);
-        self.jump_list.clear_for_buffer(id);
-
-        if self.inner.is_empty() {
-            self.inner.push_back(Buffer::new_unnamed(self.next_id, ""));
-            self.next_id += 1;
-        }
     }
 }
 

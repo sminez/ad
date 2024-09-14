@@ -201,6 +201,11 @@ impl Editor {
         }
     }
 
+    /// Open a new virtual buffer which will be removed from state when it loses focus.
+    pub(crate) fn open_virtual(&mut self, name: impl Into<String>, content: impl Into<String>) {
+        self.buffers.open_virtual(name.into(), content.into());
+    }
+
     fn send_buffer_resp(
         &self,
         id: usize,

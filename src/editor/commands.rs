@@ -91,6 +91,8 @@ impl Editor {
                 input: args.to_string(),
             })),
 
+            "vl" | "view-logs" => Some(Single(ViewLogs)),
+
             "w" | "write" => {
                 if args.is_empty() {
                     Some(Single(SaveBuffer { force: false }))
