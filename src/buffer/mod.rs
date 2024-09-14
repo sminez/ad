@@ -612,10 +612,7 @@ impl Buffer {
     fn cur_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) -> Cur {
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
         self.rx = x.saturating_sub(1).saturating_sub(w_sgncol);
-        let y = min(
-            y + self.row_off.saturating_sub(1),
-            self.len_lines().saturating_sub(1),
-        );
+        let y = min(y + self.row_off - 1, self.len_lines() - 1);
         let mut cur = Cur::from_yx(y, self.x_from_rx(y), self);
 
         cur.clamp_idx(self.txt.len_chars());
