@@ -65,10 +65,6 @@ impl Default for ColorScheme {
             control_flow: "#7E9CD8".try_into().unwrap(),
             definition: "#957FB8".try_into().unwrap(),
             punctuation: "#DCA561".try_into().unwrap(),
-            // string: "#A6CC70".try_into().unwrap(),
-            // string: "#87C87C".try_into().unwrap(),
-            // string: "#C9D87A".try_into().unwrap(),
-            // string: "#9CD87E".try_into().unwrap(),
             string: "#61DCA5".try_into().unwrap(),
         }
     }
@@ -162,6 +158,12 @@ impl Config {
             "bar-bg-color" => self.colorscheme.bar_bg = parse_color(prop, val)?,
             "signcol-fg-color" => self.colorscheme.signcol_fg = parse_color(prop, val)?,
             "minibuffer-hl-color" => self.colorscheme.minibuffer_hl = parse_color(prop, val)?,
+            "comment-color" => self.colorscheme.comment = parse_color(prop, val)?,
+            "keyword-color" => self.colorscheme.keyword = parse_color(prop, val)?,
+            "control-flow-color" => self.colorscheme.control_flow = parse_color(prop, val)?,
+            "definition-color" => self.colorscheme.definition = parse_color(prop, val)?,
+            "punctuation-color" => self.colorscheme.punctuation = parse_color(prop, val)?,
+            "string-color" => self.colorscheme.string = parse_color(prop, val)?,
 
             _ => return Err(format!("'{prop}' is not a known config property")),
         }

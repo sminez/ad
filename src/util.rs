@@ -113,6 +113,9 @@ pub(crate) fn run_command<I, S>(
         let mut content = String::from_utf8(output.stdout).unwrap_or_default();
         let stderr = String::from_utf8(output.stderr).unwrap_or_default();
         content.push_str(&stderr);
+        if content.is_empty() {
+            return;
+        }
         _ = tx.send(InputEvent::Action(Action::AppendToOutputBuffer {
             bufid,
             content,

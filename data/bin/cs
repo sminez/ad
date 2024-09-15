@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Set the colorscheme to either a light or dark theme
+set -eou pipefail
+
+function setColor() {
+  echo "set $1=#$2" | 9p write ad/ctl
+}
+
+[ -e "$HOME/.profile" ] && source ~/.profile
+
+if [ "$1" = "light" ]; then
+  setColor bg-color ebdbb2
+  setColor fg-color 282828
+  setColor dot-bg-color d5c4a1
+  setColor bar-bg-color 83a598
+  setColor signcol-fg-color 458488
+  setColor minibuffer-hl-color 458488
+  setColor comment-color 624354
+  setColor keyword-color Bf616A
+  setColor control-flow-color 7E9CD8
+  setColor definition-color 957FB8
+  setColor punctuation-color DCA561
+  setColor string-color 61DCA5
+else
+  setColor bg-color 1B1720
+  setColor fg-color E6D29E
+  setColor dot-bg-color 336677
+  setColor bar-bg-color 4E415C
+  setColor signcol-fg-color 544863
+  setColor minibuffer-hl-color 3E3549
+  setColor comment-color 624354
+  setColor keyword-color Bf616A
+  setColor control-flow-color 7E9CD8
+  setColor definition-color 957FB8
+  setColor punctuation-color DCA561
+  setColor string-color 61DCA5
+fi
