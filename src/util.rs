@@ -44,7 +44,12 @@ pub fn read_clipboard() -> io::Result<String> {
 }
 
 /// Run an external command and collect its standard out.
-pub fn run_command<I, S>(cmd: &str, args: I, cwd: &Path) -> io::Result<String>
+pub fn run_command<I, S>(
+    cmd: &str,
+    args: I,
+    cwd: &Path,
+    env: Vec<(String, String)>,
+) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -52,16 +57,26 @@ where
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
     let output = Command::new(cmd)
+        .envs(env)
         .env("PATH", format!("{home}/.ad/bin:{path}"))
         .current_dir(cwd)
         .args(args)
         .output()?;
 
-    Ok(String::from_utf8(output.stdout).unwrap_or_default())
+    let mut stdout = String::from_utf8(output.stdout).unwrap_or_default();
+    let stderr = String::from_utf8(output.stderr).unwrap_or_default();
+    stdout.push_str(&stderr);
+
+    Ok(stdout)
 }
 
 /// Run an external command ignoring its standard out.
-pub fn spawn_command<I, S>(cmd: &str, args: I, cwd: &Path) -> io::Result<()>
+pub fn spawn_command<I, S>(
+    cmd: &str,
+    args: I,
+    cwd: &Path,
+    env: Vec<(String, String)>,
+) -> io::Result<()>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -69,6 +84,7 @@ where
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
     Command::new(cmd)
+        .envs(env)
         .env("PATH", format!("{home}/.ad/bin:{path}"))
         .current_dir(cwd)
         .args(args)
@@ -80,7 +96,13 @@ where
 }
 
 /// Pipe input text through an external command, returning the output
-pub fn pipe_through_command<I, S>(cmd: &str, args: I, input: &str, cwd: &Path) -> io::Result<String>
+pub fn pipe_through_command<I, S>(
+    cmd: &str,
+    args: I,
+    input: &str,
+    cwd: &Path,
+    env: Vec<(String, String)>,
+) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
@@ -88,16 +110,20 @@ where
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
     let mut child = Command::new(cmd)
+        .envs(env)
         .env("PATH", format!("{home}/.ad/bin:{path}"))
         .current_dir(cwd)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()?;
 
     child.stdin.take().unwrap().write_all(input.as_bytes())?;
     let mut buf = String::new();
     child.stdout.take().unwrap().read_to_string(&mut buf)?;
+    child.stderr.take().unwrap().read_to_string(&mut buf)?;
+    _ = child.wait();
 
     Ok(buf)
 }

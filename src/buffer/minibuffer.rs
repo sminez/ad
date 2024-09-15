@@ -215,7 +215,7 @@ impl MiniBuffer {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let initial_lines = match run_command(cmd, args, dir) {
+        let initial_lines = match run_command(cmd, args, dir, ed.default_command_env()) {
             Ok(s) => s.lines().map(String::from).collect(),
             Err(e) => {
                 ed.set_status_message(&format!("unable to get minibuffer input: {e}"));

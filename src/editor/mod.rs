@@ -34,6 +34,8 @@ pub(crate) use actions::{Action, Actions, ViewPort};
 use input::Input;
 pub(crate) use input::InputEvent;
 
+const BUFID_VAR: &str = "bufid";
+
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
@@ -204,6 +206,13 @@ impl Editor {
     /// Open a new virtual buffer which will be removed from state when it loses focus.
     pub(crate) fn open_virtual(&mut self, name: impl Into<String>, content: impl Into<String>) {
         self.buffers.open_virtual(name.into(), content.into());
+    }
+
+    pub(crate) fn default_command_env(&self) -> Vec<(String, String)> {
+        vec![(
+            BUFID_VAR.to_string(),
+            format!("{}", self.buffers.active().id),
+        )]
     }
 
     fn send_buffer_resp(

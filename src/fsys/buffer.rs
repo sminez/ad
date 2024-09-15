@@ -95,7 +95,7 @@ impl BufferNodes {
     }
 
     pub(super) fn is_known_buffer_qid(&self, qid: u64) -> bool {
-        self.known.contains_key(&qid)
+        self.known.contains_key(&qid) || self.known.values().any(|bn| bn.contains_qid(qid))
     }
 
     pub(super) fn lookup_file_stat(&mut self, parent: u64, name: &str) -> Option<Stat> {
@@ -259,6 +259,10 @@ impl BufferNode {
 
     fn file_stats(&self) -> Vec<Stat> {
         self.file_stats.values().cloned().collect()
+    }
+
+    fn contains_qid(&self, qid: u64) -> bool {
+        self.file_stats.values().any(|s| s.fm.qid == qid)
     }
 
     fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<Stat> {

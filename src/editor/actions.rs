@@ -11,7 +11,7 @@ use crate::{
     key::Key,
     mode::Mode,
     replace_config, update_config,
-    util::{pipe_through_command, read_clipboard, run_command, set_clipboard},
+    util::{pipe_through_command, read_clipboard, run_command, set_clipboard, spawn_command},
 };
 use std::{
     env, fs,
@@ -192,7 +192,7 @@ impl Editor {
     /// This shells out to the git and fd command line programs
     pub(crate) fn find_repo_file(&mut self) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        let s = match run_command("git", ["rev-parse", "--show-toplevel"], &d) {
+        let s = match run_command("git", ["rev-parse", "--show-toplevel"], &d, Vec::new()) {
             Ok(s) => s,
             Err(e) => {
                 self.set_status_message(&format!("unable to find git root: {e}"));
@@ -469,8 +469,13 @@ impl Editor {
     pub(super) fn run_mode(&mut self) {
         self.modes.insert(0, Mode::ephemeral_mode("RUN"));
 
-        if let Some(input) = MiniBuffer::prompt("!", self) {
-            self.run_shell_cmd(&input);
+        if let Some(mut input) = MiniBuffer::prompt("!", self) {
+            if input.starts_with('!') {
+                input.remove(0);
+                self.spawn_shell_cmd(&input);
+            } else {
+                self.run_shell_cmd(&input);
+            }
         }
 
         self.modes.remove(0);
@@ -492,9 +497,10 @@ impl Editor {
             (b.dot_contents(), b.dir().unwrap_or(&self.cwd))
         };
 
+        let env = self.default_command_env();
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s, d),
-            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s, d),
+            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s, d, env),
+            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s, d, env),
         };
 
         match res {
@@ -505,9 +511,10 @@ impl Editor {
 
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
+        let env = self.default_command_env();
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d),
-            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d),
+            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d, env),
+            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d, env),
         };
 
         match res {
@@ -518,15 +525,30 @@ impl Editor {
 
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
+        let env = self.default_command_env();
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d),
-            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d),
+            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d, env),
+            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d, env),
         };
 
         match res {
             Ok(s) if !s.is_empty() && !s.chars().all(|c| c.is_whitespace()) => {
                 MiniBuffer::select_from("%>", s.lines().map(|l| l.to_string()).collect(), self);
             }
+            Ok(_) => (),
+            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+        }
+    }
+
+    pub(super) fn spawn_shell_cmd(&mut self, raw_cmd_str: &str) {
+        let d = self.buffers.active().dir().unwrap_or(&self.cwd);
+        let env = self.default_command_env();
+        let res = match raw_cmd_str.split_once(' ') {
+            Some((cmd, rest)) => spawn_command(cmd, rest.split_whitespace(), d, env),
+            None => spawn_command(raw_cmd_str, std::iter::empty::<&str>(), d, env),
+        };
+
+        match res {
             Ok(_) => (),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
