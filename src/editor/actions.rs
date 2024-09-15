@@ -1,12 +1,12 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
+    buffer::{BufferKind, Buffers, MiniBuffer, MiniBufferSelection},
     config,
     config::Config,
     die,
     dot::{Cur, Dot, TextObject},
     editor::Editor,
-    exec::Program,
+    exec::{Addr, Address, Program},
     fsys::BufId,
     key::Key,
     mode::Mode,
@@ -417,7 +417,7 @@ impl Editor {
     /// Default semantics for attempting to load the current dot:
     ///   - an absolute path -> open in ad
     ///   - a relative path from the directory of the containing file -> open in ad
-    ///     - TODO if either have a valid addr following a colon then set dot to that addr
+    ///     - if either have a valid addr following a colon then set dot to that addr
     ///   - search within the current buffer for the next occurance of dot and select it
     ///
     /// Loading and executing of dot is part of what makes ad an unsual editor. The semantics are
@@ -429,16 +429,38 @@ impl Editor {
         b.expand_cur_dot();
 
         let dot = b.dot.content(b);
-        let path = Path::new(&dot);
+
+        let (maybe_path, maybe_addr) = match dot.find(':') {
+            Some(idx) => {
+                let (s, addr) = dot.split_at(idx);
+                let (_, addr) = addr.split_at(1);
+                match Addr::parse(&mut addr.chars().peekable()) {
+                    Ok(expr) => (s, Some(expr)),
+                    Err(_) => (s, None),
+                }
+            }
+            None => (dot.as_str(), None),
+        };
+
+        let try_set_addr = |buffers: &mut Buffers| {
+            if let Some(mut addr) = maybe_addr {
+                let b = buffers.active_mut();
+                b.dot = b.map_addr(&mut addr);
+            }
+        };
+
+        let path = Path::new(&maybe_path);
 
         if path.exists() {
-            return self.open_file(path);
+            self.open_file(path);
+            return try_set_addr(&mut self.buffers);
         }
 
         if let Some(parent) = b.dir() {
             let full_path = parent.join(path);
             if full_path.exists() {
-                return self.open_file(full_path);
+                self.open_file(full_path);
+                return try_set_addr(&mut self.buffers);
             }
         }
 
