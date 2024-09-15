@@ -34,8 +34,6 @@ pub(crate) use actions::{Action, Actions, ViewPort};
 use input::Input;
 pub(crate) use input::InputEvent;
 
-const BUFID_VAR: &str = "bufid";
-
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
@@ -58,9 +56,10 @@ pub struct Editor {
     modes: Vec<Mode>,
     pending_keys: Vec<Key>,
     buffers: Buffers,
-    rx: Receiver<InputEvent>,
-    btx: Sender<BufId>,
-    fs_chans: Option<(Sender<InputEvent>, Receiver<BufId>)>,
+    tx_input_events: Sender<InputEvent>,
+    rx_input_events: Receiver<InputEvent>,
+    tx_fsys: Sender<BufId>,
+    rx_fsys: Option<Receiver<BufId>>,
     mode: EditorMode,
     log_buffer: LogBuffer,
 }
@@ -81,8 +80,8 @@ impl Editor {
             Err(e) => die!("Unable to determine working directory: {e}"),
         };
         let stdout = io::stdout();
-        let (tx, rx) = channel();
-        let (btx, brx) = channel();
+        let (tx_input_events, rx_input_events) = channel();
+        let (tx_fsys, rx_fsys) = channel();
 
         set_config(cfg);
 
@@ -97,12 +96,18 @@ impl Editor {
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
-            rx,
-            btx,
-            fs_chans: Some((tx, brx)),
+            tx_input_events,
+            rx_input_events,
+            tx_fsys,
+            rx_fsys: Some(rx_fsys),
             mode,
             log_buffer,
         }
+    }
+
+    /// The id of the currently active buffer
+    pub fn active_buffer_id(&self) -> usize {
+        self.buffers.active().id
     }
 
     /// Update the stored window size, accounting for the status and message bars
@@ -118,27 +123,30 @@ impl Editor {
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
         if self.buffers.is_empty_scratch() {
-            self.btx.send(BufId::Add(0)).unwrap();
-            self.btx.send(BufId::Current(0)).unwrap();
+            self.tx_fsys.send(BufId::Add(0)).unwrap();
+            self.tx_fsys.send(BufId::Current(0)).unwrap();
         }
     }
 
     /// Initialise any UI state required for our [EditorMode] and run the main event loop.
     pub fn run(mut self) {
-        let (tx, brx) = self.fs_chans.take().expect("to have fsys channels");
-        AdFs::new(tx.clone(), brx).run_threaded();
+        let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
+        AdFs::new(self.tx_input_events.clone(), rx_fsys).run_threaded();
         self.ensure_correct_fsys_state();
 
         match self.mode {
-            EditorMode::Terminal => self.run_event_loop_with_screen_refresh(tx),
+            EditorMode::Terminal => {
+                self.run_event_loop_with_screen_refresh(self.tx_input_events.clone())
+            }
             EditorMode::Headless => self.run_event_loop(),
         }
     }
 
     #[inline]
     fn handle_input_event(&mut self) {
-        match self.rx.recv().unwrap() {
+        match self.rx_input_events.recv().unwrap() {
             InputEvent::KeyPress(k) => self.handle_keypress(k),
+            InputEvent::Action(a) => self.handle_action(a),
             InputEvent::Message(msg) => self.handle_message(msg),
             InputEvent::WinsizeChanged => self.update_window_size(),
         }
@@ -195,8 +203,9 @@ impl Editor {
 
     pub(crate) fn block_for_key(&mut self) -> Key {
         loop {
-            match self.rx.recv().unwrap() {
+            match self.rx_input_events.recv().unwrap() {
                 InputEvent::KeyPress(k) => return k,
+                InputEvent::Action(a) => self.handle_action(a),
                 InputEvent::Message(msg) => self.handle_message(msg),
                 InputEvent::WinsizeChanged => self.update_window_size(),
             }
@@ -206,13 +215,6 @@ impl Editor {
     /// Open a new virtual buffer which will be removed from state when it loses focus.
     pub(crate) fn open_virtual(&mut self, name: impl Into<String>, content: impl Into<String>) {
         self.buffers.open_virtual(name.into(), content.into());
-    }
-
-    pub(crate) fn default_command_env(&self) -> Vec<(String, String)> {
-        vec![(
-            BUFID_VAR.to_string(),
-            format!("{}", self.buffers.active().id),
-        )]
     }
 
     fn send_buffer_resp(
@@ -225,7 +227,7 @@ impl Editor {
             Some(b) => tx.send(Ok((f)(b))).unwrap(),
             None => {
                 tx.send(Err("unknown buffer".to_string())).unwrap();
-                self.btx.send(BufId::Remove(id)).unwrap();
+                self.tx_fsys.send(BufId::Remove(id)).unwrap();
             }
         }
     }
@@ -245,7 +247,7 @@ impl Editor {
 
             None => {
                 tx.send(Err("unknown buffer".to_string())).unwrap();
-                self.btx.send(BufId::Remove(id)).unwrap();
+                self.tx_fsys.send(BufId::Remove(id)).unwrap();
             }
         }
     }
@@ -330,10 +332,8 @@ impl Editor {
         use Action::*;
 
         match action {
-            SetViewPort(vp) => {
-                self.buffers
-                    .active_mut()
-                    .set_view_port(vp, self.screen_rows, self.screen_cols)
+            AppendToOutputBuffer { bufid, content } => {
+                self.buffers.write_output_for_buffer(bufid, content)
             }
             ChangeDirectory { path } => self.change_directory(path),
             CommandMode => self.command_mode(),
@@ -355,14 +355,14 @@ impl Editor {
             NextBuffer => {
                 self.buffers.next();
                 let id = self.buffers.active().id;
-                self.btx.send(BufId::Current(id)).unwrap();
+                self.tx_fsys.send(BufId::Current(id)).unwrap();
             }
             OpenFile { path } => self.open_file(&path),
             Paste => self.paste_from_clipboard(),
             PreviousBuffer => {
                 self.buffers.previous();
                 let id = self.buffers.active().id;
-                self.btx.send(BufId::Current(id)).unwrap();
+                self.tx_fsys.send(BufId::Current(id)).unwrap();
             }
             ReloadActiveBuffer => self.reload_active_buffer(),
             ReloadBuffer { id } => self.reload_buffer(id),
@@ -375,6 +375,12 @@ impl Editor {
             SelectBuffer => self.select_buffer(),
             SetConfigProp { input } => self.set_config_prop(&input),
             SetMode { m } => self.set_mode(m),
+            SetStatusMessage { message } => self.set_status_message(&message),
+            SetViewPort(vp) => {
+                self.buffers
+                    .active_mut()
+                    .set_view_port(vp, self.screen_rows, self.screen_cols)
+            }
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),

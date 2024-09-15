@@ -11,7 +11,9 @@ use crate::{
     key::Key,
     mode::Mode,
     replace_config, update_config,
-    util::{pipe_through_command, read_clipboard, run_command, set_clipboard, spawn_command},
+    util::{
+        pipe_through_command, read_clipboard, run_command, run_command_blocking, set_clipboard,
+    },
 };
 use std::{
     env, fs,
@@ -40,6 +42,7 @@ pub enum ViewPort {
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Action {
+    AppendToOutputBuffer { bufid: usize, content: String },
     ChangeDirectory { path: Option<String> },
     CommandMode,
     Delete,
@@ -80,6 +83,7 @@ pub(crate) enum Action {
     SetConfigProp { input: String },
     SetViewPort(ViewPort),
     SetMode { m: &'static str },
+    SetStatusMessage { message: String },
     ShellPipe { cmd: String },
     ShellReplace { cmd: String },
     ShellRun { cmd: String },
@@ -138,10 +142,10 @@ impl Editor {
 
             Ok(Some(new_id)) => {
                 if was_empty_scratch {
-                    self.btx.send(BufId::Remove(current_id)).unwrap();
+                    self.tx_fsys.send(BufId::Remove(current_id)).unwrap();
                 }
-                self.btx.send(BufId::Add(new_id)).unwrap();
-                self.btx.send(BufId::Current(new_id)).unwrap();
+                self.tx_fsys.send(BufId::Add(new_id)).unwrap();
+                self.tx_fsys.send(BufId::Current(new_id)).unwrap();
             }
 
             Ok(None) => {
@@ -157,7 +161,7 @@ impl Editor {
                     Err(e) => self.set_status_message(&e),
                 }
                 let id = self.buffers.active().id;
-                self.btx.send(BufId::Current(id)).unwrap();
+                self.tx_fsys.send(BufId::Current(id)).unwrap();
             }
         };
     }
@@ -192,7 +196,12 @@ impl Editor {
     /// This shells out to the git and fd command line programs
     pub(crate) fn find_repo_file(&mut self) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        let s = match run_command("git", ["rev-parse", "--show-toplevel"], &d, Vec::new()) {
+        let s = match run_command_blocking(
+            "git",
+            ["rev-parse", "--show-toplevel"],
+            &d,
+            self.active_buffer_id(),
+        ) {
             Ok(s) => s,
             Err(e) => {
                 self.set_status_message(&format!("unable to find git root: {e}"));
@@ -210,7 +219,7 @@ impl Editor {
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 let is_last_buffer = self.buffers.len() == 1;
-                self.btx.send(BufId::Remove(id)).unwrap();
+                self.tx_fsys.send(BufId::Remove(id)).unwrap();
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
             }
@@ -244,7 +253,7 @@ impl Editor {
                 None => return None,
             },
             // virtual and minibuffer buffers don't support saving and have no save path
-            (_, Bk::Virtual(_) | Bk::MiniBuffer) => return None,
+            (_, Bk::Virtual(_) | Bk::Output(_) | Bk::MiniBuffer) => return None,
         };
 
         match desired_path.try_exists() {
@@ -372,7 +381,7 @@ impl Editor {
 
     pub(super) fn focus_buffer(&mut self, id: usize) {
         self.buffers.focus_id(id);
-        self.btx.send(BufId::Current(id)).unwrap();
+        self.tx_fsys.send(BufId::Current(id)).unwrap();
     }
 
     pub(super) fn debug_buffer_contents(&mut self) {
@@ -469,13 +478,8 @@ impl Editor {
     pub(super) fn run_mode(&mut self) {
         self.modes.insert(0, Mode::ephemeral_mode("RUN"));
 
-        if let Some(mut input) = MiniBuffer::prompt("!", self) {
-            if input.starts_with('!') {
-                input.remove(0);
-                self.spawn_shell_cmd(&input);
-            } else {
-                self.run_shell_cmd(&input);
-            }
+        if let Some(input) = MiniBuffer::prompt("!", self) {
+            self.run_shell_cmd(&input);
         }
 
         self.modes.remove(0);
@@ -497,10 +501,10 @@ impl Editor {
             (b.dot_contents(), b.dir().unwrap_or(&self.cwd))
         };
 
-        let env = self.default_command_env();
+        let id = self.active_buffer_id();
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s, d, env),
-            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s, d, env),
+            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s, d, id),
+            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s, d, id),
         };
 
         match res {
@@ -511,10 +515,10 @@ impl Editor {
 
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
-        let env = self.default_command_env();
+        let id = self.active_buffer_id();
         let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d, env),
-            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d, env),
+            Some((cmd, rest)) => run_command_blocking(cmd, rest.split_whitespace(), d, id),
+            None => run_command_blocking(raw_cmd_str, std::iter::empty::<&str>(), d, id),
         };
 
         match res {
@@ -525,32 +529,22 @@ impl Editor {
 
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
-        let env = self.default_command_env();
-        let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command(cmd, rest.split_whitespace(), d, env),
-            None => run_command(raw_cmd_str, std::iter::empty::<&str>(), d, env),
-        };
-
-        match res {
-            Ok(s) if !s.is_empty() && !s.chars().all(|c| c.is_whitespace()) => {
-                MiniBuffer::select_from("%>", s.lines().map(|l| l.to_string()).collect(), self);
-            }
-            Ok(_) => (),
-            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
-        }
-    }
-
-    pub(super) fn spawn_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let d = self.buffers.active().dir().unwrap_or(&self.cwd);
-        let env = self.default_command_env();
-        let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => spawn_command(cmd, rest.split_whitespace(), d, env),
-            None => spawn_command(raw_cmd_str, std::iter::empty::<&str>(), d, env),
-        };
-
-        match res {
-            Ok(_) => (),
-            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+        let id = self.active_buffer_id();
+        match raw_cmd_str.split_once(' ') {
+            Some((cmd, rest)) => run_command(
+                cmd,
+                rest.split_whitespace(),
+                d,
+                id,
+                self.tx_input_events.clone(),
+            ),
+            None => run_command(
+                raw_cmd_str,
+                std::iter::empty::<&str>(),
+                d,
+                id,
+                self.tx_input_events.clone(),
+            ),
         }
     }
 }
@@ -582,7 +576,7 @@ mod tests {
             EditorMode::Headless,
             LogBuffer::default(),
         );
-        let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
+        let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
         ed.open_file("foo");
 
@@ -611,7 +605,7 @@ mod tests {
             EditorMode::Headless,
             LogBuffer::default(),
         );
-        let (_, brx) = ed.fs_chans.take().expect("to have fsys channels");
+        let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
         for file in files {
             ed.open_file(file);

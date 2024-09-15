@@ -34,6 +34,8 @@ pub use internal::{Chars, GapBuffer, IdxChars, Slice};
 pub(crate) use buffers::Buffers;
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
+pub(crate) const DEFAULT_OUTPUT_BUFFER: &str = "+output";
+
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
 // finished processing a given Action.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -49,6 +51,8 @@ pub(crate) enum BufferKind {
     File(PathBuf),
     /// An in-memory buffer that is not exposed through fsys
     Virtual(String),
+    /// An in-memory buffer holding output from commands run within a given directory
+    Output(String),
     /// A currently un-named buffer that can be converted to a File buffer when named
     Unnamed,
     /// State for an active mini-buffer
@@ -66,8 +70,26 @@ impl BufferKind {
         match self {
             BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
             BufferKind::Virtual(s) => s.clone(),
+            BufferKind::Output(s) => s.clone(),
             BufferKind::Unnamed => UNNAMED_BUFFER.to_string(),
             BufferKind::MiniBuffer => "".to_string(),
+        }
+    }
+
+    /// The directory containing the file backing this buffer so long as it has kind `File`.
+    fn dir(&self) -> Option<&Path> {
+        match &self {
+            BufferKind::File(p) => p.parent(),
+            _ => None,
+        }
+    }
+
+    /// The key for the +output buffer that output from command run from this buffer should be
+    /// redirected to
+    pub fn output_file_key(&self) -> String {
+        match self.dir() {
+            Some(path) => format!("{}/{DEFAULT_OUTPUT_BUFFER}", path.display()),
+            None => DEFAULT_OUTPUT_BUFFER.to_string(),
         }
     }
 }
@@ -264,6 +286,26 @@ impl Buffer {
         }
     }
 
+    /// Construct a new +output buffer with the given name which must be a valid output buffer name
+    /// of the form '$dir/+output'.
+    pub(super) fn new_output(id: usize, name: String, content: String) -> Self {
+        Self {
+            id,
+            kind: BufferKind::Output(name),
+            dot: Dot::default(),
+            xdot: Dot::default(),
+            txt: GapBuffer::from(content),
+            rx: 0,
+            row_off: 0,
+            col_off: 0,
+            last_save: SystemTime::now(),
+            dirty: false,
+            edit_log: EditLog::default(),
+            tokenizer: None,
+            rendered_line_cache: BTreeMap::new(),
+        }
+    }
+
     /// Short name for displaying in the status line
     pub fn display_name(&self, cwd: &Path) -> String {
         let s = self.kind.display_name(cwd);
@@ -276,6 +318,7 @@ impl Buffer {
         match &self.kind {
             BufferKind::File(p) => p.to_str().expect("valid unicode"),
             BufferKind::Virtual(s) => s,
+            BufferKind::Output(s) => s,
             BufferKind::Unnamed => UNNAMED_BUFFER,
             BufferKind::MiniBuffer => "*mini-buffer*",
         }
@@ -283,10 +326,13 @@ impl Buffer {
 
     /// The directory containing the file backing this buffer so long as it has kind `File`.
     pub fn dir(&self) -> Option<&Path> {
-        match &self.kind {
-            BufferKind::File(p) => p.parent(),
-            _ => None,
-        }
+        self.kind.dir()
+    }
+
+    /// The key for the +output buffer that output from command run from this buffer should be
+    /// redirected to
+    pub fn output_file_key(&self) -> String {
+        self.kind.output_file_key()
     }
 
     /// Check whether or not this is an unnamed buffer
@@ -659,6 +705,13 @@ impl Buffer {
 
         // clamp scroll is called when we render so no need to run it here as well
         self.row_off += 1;
+    }
+
+    pub(crate) fn append(&mut self, s: String) {
+        let dot = self.dot;
+        self.set_dot(TextObject::BufferEnd, 1);
+        self.handle_action(Action::InsertString { s });
+        self.dot = dot;
     }
 
     /// The error result of this function is an error string that should be displayed to the user

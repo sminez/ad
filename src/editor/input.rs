@@ -1,5 +1,6 @@
 //! Fetching and parsing input from the user
 use crate::{
+    editor::Action,
     fsys::Message,
     key::{Key, MouseEvent},
     term::win_size_changed,
@@ -17,6 +18,8 @@ pub(crate) enum InputEvent {
     Message(Message),
     /// A [Key] press from the user
     KeyPress(Key),
+    /// An [Action] for the event loop to handle
+    Action(Action),
     /// A signal that our window size has changed
     WinsizeChanged,
 }

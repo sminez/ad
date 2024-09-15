@@ -5,7 +5,7 @@ use crate::{
     config,
     editor::Editor,
     key::{Arrow, Key},
-    util::run_command,
+    util::run_command_blocking,
 };
 use std::{cmp::min, ffi::OsStr, path::Path};
 use tracing::trace;
@@ -215,7 +215,7 @@ impl MiniBuffer {
         I: IntoIterator<Item = S>,
         S: AsRef<OsStr>,
     {
-        let initial_lines = match run_command(cmd, args, dir, ed.default_command_env()) {
+        let initial_lines = match run_command_blocking(cmd, args, dir, ed.active_buffer_id()) {
             Ok(s) => s.lines().map(String::from).collect(),
             Err(e) => {
                 ed.set_status_message(&format!("unable to get minibuffer input: {e}"));

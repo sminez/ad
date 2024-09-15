@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur},
+    buffer::{Buffer, BufferKind, Cur, DEFAULT_OUTPUT_BUFFER},
     editor::ViewPort,
 };
 use std::{
@@ -121,7 +121,8 @@ impl Buffers {
     /// Used to seed the buffer selection mini-buffer
     pub(crate) fn as_buf_list(&self) -> Vec<String> {
         let focused = self.inner[0].id;
-        self.inner
+        let mut entries: Vec<String> = self
+            .inner
             .iter()
             .map(|b| {
                 format!(
@@ -131,7 +132,10 @@ impl Buffers {
                     b.full_name()
                 )
             })
-            .collect()
+            .collect();
+        entries.sort();
+
+        entries
     }
 
     pub(crate) fn focus_id(&mut self, id: BufferId) {
@@ -202,6 +206,37 @@ impl Buffers {
     #[inline]
     pub fn is_empty_scratch(&self) -> bool {
         self.inner.len() == 1 && self.inner[0].is_unnamed() && !self.inner[0].dirty
+    }
+
+    /// Append to the +output buffer assigned to the buffer with provided id.
+    pub(crate) fn write_output_for_buffer(&mut self, id: usize, s: String) {
+        let key = match self.with_id(id) {
+            Some(b) => b.output_file_key(),
+            None => DEFAULT_OUTPUT_BUFFER.to_string(),
+        };
+
+        let id = match self
+            .inner
+            .iter_mut()
+            .find(|b| b.kind == BufferKind::Output(key.clone()))
+        {
+            Some(b) => {
+                b.append(s);
+
+                b.id
+            }
+
+            None => {
+                let id = self.next_id;
+                self.next_id += 1;
+                let b = Buffer::new_output(id, key, s);
+                self.inner.push_front(b);
+
+                id
+            }
+        };
+
+        self.focus_id(id);
     }
 }
 

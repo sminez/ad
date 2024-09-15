@@ -1,4 +1,5 @@
 //! Utility functions
+use crate::editor::{Action, InputEvent};
 use std::{
     env,
     ffi::OsStr,
@@ -7,6 +8,8 @@ use std::{
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     str::Chars,
+    sync::mpsc::Sender,
+    thread::spawn,
 };
 
 #[cfg(target_os = "linux")]
@@ -43,26 +46,35 @@ pub fn read_clipboard() -> io::Result<String> {
     Ok(String::from_utf8(output.stdout).unwrap_or_default())
 }
 
-/// Run an external command and collect its standard out.
-pub fn run_command<I, S>(
-    cmd: &str,
-    args: I,
-    cwd: &Path,
-    env: Vec<(String, String)>,
-) -> io::Result<String>
+fn prepare_command<I, S>(cmd: &str, args: I, cwd: &Path, bufid: usize) -> Command
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
-    let output = Command::new(cmd)
-        .envs(env)
+    let mut command = Command::new(cmd);
+    command
         .env("PATH", format!("{home}/.ad/bin:{path}"))
+        .env("bufid", bufid.to_string())
         .current_dir(cwd)
-        .args(args)
-        .output()?;
+        .args(args);
 
+    command
+}
+
+/// Run an external command and collect its output.
+pub fn run_command_blocking<I, S>(
+    cmd: &str,
+    args: I,
+    cwd: &Path,
+    bufid: usize,
+) -> io::Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = prepare_command(cmd, args, cwd, bufid).output()?;
     let mut stdout = String::from_utf8(output.stdout).unwrap_or_default();
     let stderr = String::from_utf8(output.stderr).unwrap_or_default();
     stdout.push_str(&stderr);
@@ -70,29 +82,42 @@ where
     Ok(stdout)
 }
 
-/// Run an external command ignoring its standard out.
-pub fn spawn_command<I, S>(
+/// Run an external command and append its output to the output buffer for `bufid` from a
+/// background thread.
+pub(crate) fn run_command<I, S>(
     cmd: &str,
     args: I,
     cwd: &Path,
-    env: Vec<(String, String)>,
-) -> io::Result<()>
-where
+    bufid: usize,
+    tx: Sender<InputEvent>,
+) where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let path = env::var("PATH").unwrap();
-    let home = env::var("HOME").unwrap();
-    Command::new(cmd)
-        .envs(env)
-        .env("PATH", format!("{home}/.ad/bin:{path}"))
-        .current_dir(cwd)
-        .args(args)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+    let mut command = prepare_command(cmd, args, cwd, bufid);
+    _ = tx.send(InputEvent::Action(Action::SetStatusMessage {
+        message: format!("running '{cmd}' ..."),
+    }));
 
-    Ok(())
+    spawn(move || {
+        let output = match command.output() {
+            Ok(output) => output,
+            Err(err) => {
+                _ = tx.send(InputEvent::Action(Action::SetStatusMessage {
+                    message: err.to_string(),
+                }));
+                return;
+            }
+        };
+
+        let mut content = String::from_utf8(output.stdout).unwrap_or_default();
+        let stderr = String::from_utf8(output.stderr).unwrap_or_default();
+        content.push_str(&stderr);
+        _ = tx.send(InputEvent::Action(Action::AppendToOutputBuffer {
+            bufid,
+            content,
+        }));
+    });
 }
 
 /// Pipe input text through an external command, returning the output
@@ -101,26 +126,20 @@ pub fn pipe_through_command<I, S>(
     args: I,
     input: &str,
     cwd: &Path,
-    env: Vec<(String, String)>,
+    bufid: usize,
 ) -> io::Result<String>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let path = env::var("PATH").unwrap();
-    let home = env::var("HOME").unwrap();
-    let mut child = Command::new(cmd)
-        .envs(env)
-        .env("PATH", format!("{home}/.ad/bin:{path}"))
-        .current_dir(cwd)
-        .args(args)
+    let mut child = prepare_command(cmd, args, cwd, bufid)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
 
-    child.stdin.take().unwrap().write_all(input.as_bytes())?;
     let mut buf = String::new();
+    child.stdin.take().unwrap().write_all(input.as_bytes())?;
     child.stdout.take().unwrap().read_to_string(&mut buf)?;
     child.stderr.take().unwrap().read_to_string(&mut buf)?;
     _ = child.wait();
