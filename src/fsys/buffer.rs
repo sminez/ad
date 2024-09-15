@@ -15,10 +15,11 @@ use tracing::{debug, trace};
 const FILENAME: &str = "filename";
 const DOT: &str = "dot";
 const ADDR: &str = "addr";
-const BODY: &str = "body";
-const EVENT: &str = "event";
 const XDOT: &str = "xdot";
 const XADDR: &str = "xaddr";
+const BODY: &str = "body";
+const EVENT: &str = "event";
+const OUTPUT: &str = "output";
 
 pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] = [
     (1, FILENAME),
@@ -28,6 +29,7 @@ pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] = [
     (5, XADDR),
     (6, BODY),
     (7, EVENT),
+    (8, OUTPUT),
 ];
 
 fn parent_and_fname(qid: u64) -> (u64, &'static str) {
@@ -195,6 +197,7 @@ impl BufferNodes {
             BODY => Req::InsertBufferBody { id, s, offset },
             XDOT => Req::SetBufferXDot { id, s },
             XADDR => Req::SetBufferXAddr { id, s },
+            OUTPUT => Req::AppendOutput { id, s },
             FILENAME | EVENT => return Err(E_UNKNOWN_FILE.to_string()),
             _ => return Err(E_UNKNOWN_FILE.to_string()),
         };
@@ -266,6 +269,10 @@ impl BufferNode {
     }
 
     fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<Stat> {
+        if fname == OUTPUT {
+            return self.file_stats.get(OUTPUT).cloned();
+        }
+
         trace!(id=%self.id, %fname, "refreshing file stat");
         let content = self.current_file_content(fname, tx)?;
         let stat = self.file_stats.get_mut(fname)?;
@@ -282,7 +289,7 @@ impl BufferNode {
             BODY => Req::ReadBufferBody { id: self.id },
             XDOT => Req::ReadBufferXDot { id: self.id },
             XADDR => Req::ReadBufferXAddr { id: self.id },
-            EVENT => return Some("".to_string()), // TODO: sort out the event file
+            EVENT | OUTPUT => return Some("".to_string()), // TODO: sort out the event file
             _ => return None,
         };
 

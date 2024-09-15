@@ -303,6 +303,11 @@ impl Editor {
                 b.dot = Dot::Cur { c: Cur { idx } };
                 b.handle_action(Action::InsertString { s });
             }),
+
+            AppendOutput { id, s } => {
+                self.buffers.write_output_for_buffer(id, s);
+                tx.send(Ok("handled".to_string())).unwrap()
+            }
         }
     }
 

@@ -79,7 +79,8 @@ const CURRENT_BUFFER: &str = "current";
 ///   6.   xaddr        -> The address value of xdot
 ///   7.   body         -> The full body of the buffer
 ///   8.   event        -> Contol file for intercepting input events for the buffer
-const QID_OFFSET: u64 = 8;
+///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
+const QID_OFFSET: u64 = 9;
 
 const E_UNKNOWN_FILE: &str = "unknown file";
 
