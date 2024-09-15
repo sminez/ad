@@ -131,13 +131,20 @@ impl Editor {
         self.set_status_message(&self.cwd.display().to_string());
     }
 
+    /// Open a file within the editor using a path that is relative to the current working
+    /// directory
+    pub fn open_file_relative_to_cwd(&mut self, path: &str) {
+        self.open_file(self.cwd.join(path));
+    }
+
     /// Open a file within the editor
-    pub fn open_file(&mut self, path: &str) {
-        debug!(%path, "opening file");
+    pub fn open_file<P: AsRef<Path>>(&mut self, path: P) {
+        let path = path.as_ref();
+        debug!(?path, "opening file");
         let was_empty_scratch = self.buffers.is_empty_scratch();
         let current_id = self.buffers.active().id;
 
-        match self.buffers.open_or_focus(self.cwd.join(path)) {
+        match self.buffers.open_or_focus(path) {
             Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
 
             Ok(Some(new_id)) => {
@@ -183,7 +190,7 @@ impl Editor {
         };
 
         if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file(&format!("{}/{}", d.display(), line.trim()));
+            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()));
         }
     }
 
@@ -405,15 +412,48 @@ impl Editor {
         MiniBuffer::select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log(), self);
     }
 
-    pub(super) fn load_dot(&mut self) {
+    // TODO: implement customisation of load and execute via the events file once that is in place.
+
+    /// Default semantics for attempting to load the current dot:
+    ///   - an absolute path -> open in ad
+    ///   - a relative path from the directory of the containing file -> open in ad
+    ///     - TODO if either have a valid addr following a colon then set dot to that addr
+    ///   - search within the current buffer for the next occurance of dot and select it
+    ///
+    /// Loading and executing of dot is part of what makes ad an unsual editor. The semantics are
+    /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
+    /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
+    /// such a system.
+    pub(super) fn default_load_dot(&mut self) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
-        let s = b.dot.content(b);
 
-        b.find_forward(&s);
+        let dot = b.dot.content(b);
+        let path = Path::new(&dot);
+
+        if path.exists() {
+            return self.open_file(path);
+        }
+
+        if let Some(parent) = b.dir() {
+            let full_path = parent.join(path);
+            if full_path.exists() {
+                return self.open_file(full_path);
+            }
+        }
+
+        b.find_forward(&dot);
     }
 
-    pub(super) fn execute_dot(&mut self) {
+    /// Default semantics for attempting to execute the current dot:
+    ///   - a valid ad command -> execute the command
+    ///   - attempt to run as a shell command with args
+    ///
+    /// Loading and executing of dot is part of what makes ad an unsual editor. The semantics are
+    /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
+    /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
+    /// such a system.
+    pub(super) fn default_execute_dot(&mut self) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
         let cmd = b.dot.content(b);
