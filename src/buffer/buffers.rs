@@ -156,7 +156,7 @@ impl Buffers {
     pub fn dirty_buffers(&self) -> Vec<String> {
         self.inner
             .iter()
-            .filter(|b| b.dirty)
+            .filter(|b| b.dirty && matches!(b.kind, BufferKind::File(_)))
             .map(|b| b.full_name().to_string())
             .collect()
     }
