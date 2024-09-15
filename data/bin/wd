@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Use the users warprc to navigate to files in known projects
 set -eou pipefail
 

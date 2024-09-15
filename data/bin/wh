@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Alias for running watch in a horizontal split, re-running on changes inside
 # of the current git repo
 

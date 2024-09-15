@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # mount the ad virtual filesystem using 9pfuse
 
 9pfuse /tmp/ns.$USER.:0/ad $HOME/.ad/mnt

@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Open a tmux split to run the given command under entr so that it is rerun when
 # the requested files change.
 #

@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Open a vertical tmux split to run fzf for selecting and echoing back a value
 # for use in another script.
 #

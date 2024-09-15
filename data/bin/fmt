@@ -1,12 +1,11 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Attempt to format the current buffer based on the filetype
 set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
-bufid=$(9p read "ad/buffers/current")
 fname=$(9p read "ad/buffers/$bufid/filename")
 addr=$(9p read "ad/buffers/$bufid/addr")
-maybext=$(echo ${fname##*.})
+maybext="${fname##*.}"
 
 case $maybext in
   json)

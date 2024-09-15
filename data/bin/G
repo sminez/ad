@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # "grep open"
 #
 # Run ripgrep to search for a pattern under the current file directory and open
@@ -15,7 +15,6 @@ if [[ -z "$TMUX" ]]; then
   exit 1
 fi
 
-bufid=$(9p read "ad/buffers/current")
 dirname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
 
 cd $dirname

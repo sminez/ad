@@ -1,9 +1,8 @@
-#! /usr/bin/env sh
+#!/usr/bin/env bash
 # Spell check with suggestions for the currently focused ad buffer
 set -eou pipefail
 
 [ -e "$HOME/.profile" ] && source ~/.profile
-bufid=$(9p read "ad/buffers/current")
 fname=$(basename $(9p read "ad/buffers/$bufid/filename"))
 body=$(9p read "ad/buffers/$bufid/body")
 errors="$(echo "$body" | aspell -a 2>&1 | grep -E '^&' | tr -d ':' | while read -r line ; do

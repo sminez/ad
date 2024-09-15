@@ -1,4 +1,4 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 # Run lint for the current project and show the results so errors can be jumped to
 set -eou pipefail
 
@@ -13,9 +13,9 @@ if [ -e "$root/Cargo.toml" ]; then
   if [ -z "$line" ]; then
     exit 0
   fi
-  fname="$(echo $line | cut -d':' -f1)"
-  lnum="$(echo $line | cut -d':' -f2)"
-  col="$(echo $line | cut -d':' -f3)"
+  fname="$(echo "$line" | cut -d':' -f1)"
+  lnum="$(echo "$line" | cut -d':' -f2)"
+  col="$(echo "$line" | cut -d':' -f3)"
   echo -n "open $root/$fname" | 9p write ad/ctl
   bufid=$(9p read "ad/buffers/current")
   echo -n "$lnum:$col" | 9p write "ad/buffers/$bufid/addr"
