@@ -314,7 +314,7 @@ mod tests {
 
     #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
     #[test_case(7, 5, DOT; "dot second buffer")]
-    #[test_case(19, 13, BODY; "body second buffer")]
+    #[test_case(20, 14, BODY; "body second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);
