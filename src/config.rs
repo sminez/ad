@@ -91,18 +91,22 @@ impl Config {
     /// error message for the user is returned for displaying in the status bar.
     pub fn parse(contents: &str) -> Result<Self, String> {
         let mut cfg = Config::default();
+        cfg.update_from(contents)?;
 
-        for line in contents.lines() {
+        Ok(cfg)
+    }
+
+    pub(crate) fn update_from(&mut self, input: &str) -> Result<(), String> {
+        for line in input.lines() {
             let line = line.trim_end();
-
             if line.starts_with('#') || line.is_empty() {
                 continue;
             }
 
             match line.strip_prefix("set ") {
-                Some(line) => cfg.try_set_prop(line)?,
+                Some(line) => self.try_set_prop(line)?,
                 None => match line.strip_prefix("map ") {
-                    Some(line) => cfg.try_add_mapping(line)?,
+                    Some(line) => self.try_add_mapping(line)?,
                     None => {
                         return Err(format!(
                             "'{line}' should be 'set prop=val' or 'map ... => prog'"
@@ -112,11 +116,11 @@ impl Config {
             }
         }
 
-        if !cfg.bindings.is_empty() {
+        if !self.bindings.is_empty() {
             // Make sure that none of the user provided bindings clash with Normal mode
             // bindings as that will mean they never get run
             let nm = normal_mode();
-            for keys in cfg.bindings.keys() {
+            for keys in self.bindings.keys() {
                 if nm.keymap.contains_key_or_prefix(keys) {
                     let mut s = String::new();
                     for k in keys {
@@ -130,7 +134,7 @@ impl Config {
             }
         }
 
-        Ok(cfg)
+        Ok(())
     }
 
     pub(crate) fn try_set_prop(&mut self, input: &str) -> Result<(), String> {

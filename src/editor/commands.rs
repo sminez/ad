@@ -87,8 +87,9 @@ impl Editor {
                 }
             },
 
-            "set" => Some(Single(SetConfigProp {
-                input: args.to_string(),
+            "set" => Some(Single(UpdateConfig {
+                // input: args.to_string(),
+                input: input.to_string(),
             })),
 
             "vl" | "view-logs" => Some(Single(ViewLogs)),

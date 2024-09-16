@@ -80,7 +80,6 @@ pub(crate) enum Action {
     SaveBufferAs { path: String, force: bool },
     SearchInCurrentBuffer,
     SelectBuffer,
-    SetConfigProp { input: String },
     SetViewPort(ViewPort),
     SetMode { m: &'static str },
     SetStatusMessage { message: String },
@@ -89,6 +88,7 @@ pub(crate) enum Action {
     ShellRun { cmd: String },
     ShellSend { cmd: String },
     Undo,
+    UpdateConfig { input: String },
     ViewLogs,
     Yank,
 
@@ -310,11 +310,12 @@ impl Editor {
         self.set_status_message(&msg);
     }
 
-    pub(super) fn set_config_prop(&mut self, input: &str) {
-        info!(%input, "setting config property");
+    pub(super) fn update_config(&mut self, input: &str) {
+        info!(%input, "updating config");
         if let Err(msg) = update_config(input) {
             self.set_status_message(&msg);
         }
+        self.buffers.active_mut().clear_render_cache();
     }
 
     pub(super) fn set_mode(&mut self, name: &str) {

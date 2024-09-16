@@ -72,7 +72,7 @@ pub(crate) fn update_config(input: &str) -> Result<(), String> {
         .write()
         .unwrap();
 
-    guard.try_set_prop(input)
+    guard.update_from(input)
 }
 
 /// Get a read-only handle to the global Config data

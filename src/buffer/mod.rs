@@ -340,6 +340,10 @@ impl Buffer {
         self.kind == BufferKind::Unnamed
     }
 
+    pub(crate) fn clear_render_cache(&mut self) {
+        self.rendered_line_cache.clear();
+    }
+
     /// The raw binary contents of this buffer
     pub fn contents(&self) -> Vec<u8> {
         let mut contents: Vec<u8> = self.txt.bytes();

@@ -378,7 +378,6 @@ impl Editor {
             SaveBuffer { force } => self.save_current_buffer(None, force),
             SearchInCurrentBuffer => self.search_in_current_buffer(),
             SelectBuffer => self.select_buffer(),
-            SetConfigProp { input } => self.set_config_prop(&input),
             SetMode { m } => self.set_mode(m),
             SetStatusMessage { message } => self.set_status_message(&message),
             SetViewPort(vp) => {
@@ -389,6 +388,7 @@ impl Editor {
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
+            UpdateConfig { input } => self.update_config(&input),
             ViewLogs => self.view_logs(),
             Yank => self.set_clipboard(self.buffers.active().dot_contents()),
 
