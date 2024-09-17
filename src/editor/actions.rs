@@ -260,7 +260,7 @@ impl Editor {
                 None => return None,
             },
             // virtual and minibuffer buffers don't support saving and have no save path
-            (_, Bk::Virtual(_) | Bk::Output(_) | Bk::MiniBuffer) => return None,
+            (_, Bk::Directory(_) | Bk::Virtual(_) | Bk::Output(_) | Bk::MiniBuffer) => return None,
         };
 
         match desired_path.try_exists() {
@@ -416,8 +416,8 @@ impl Editor {
     // TODO: implement customisation of load and execute via the events file once that is in place.
 
     /// Default semantics for attempting to load the current dot:
-    ///   - an absolute path -> open in ad
     ///   - a relative path from the directory of the containing file -> open in ad
+    ///   - an absolute path -> open in ad
     ///     - if either have a valid addr following a colon then set dot to that addr
     ///   - search within the current buffer for the next occurance of dot and select it
     ///
@@ -452,17 +452,17 @@ impl Editor {
 
         let path = Path::new(&maybe_path);
 
-        if path.exists() {
-            self.open_file(path);
-            return try_set_addr(&mut self.buffers);
-        }
-
-        if let Some(parent) = b.dir() {
-            let full_path = parent.join(path);
+        if let Some(dir) = b.dir() {
+            let full_path = dir.join(path);
             if full_path.exists() {
                 self.open_file(full_path);
                 return try_set_addr(&mut self.buffers);
             }
+        }
+
+        if path.exists() {
+            self.open_file(path);
+            return try_set_addr(&mut self.buffers);
         }
 
         b.find_forward(&dot);
@@ -627,7 +627,7 @@ mod tests {
                     stringify!($msg),
                     $expected
                 ),
-                Err(_) => panic!("recv {}({})", stringify!($msg), $expected),
+                Err(e) => panic!("err={e}\nrecv {}({})", stringify!($msg), $expected),
             }
         };
     }

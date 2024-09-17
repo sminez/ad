@@ -121,15 +121,19 @@ impl TextObject {
     }
 }
 
-struct FindDelimited {
-    l: char,
-    r: char,
+pub struct FindDelimited {
+    l: String,
+    r: String,
     rev: bool,
 }
 
 impl FindDelimited {
-    fn new(l: char, r: char) -> Self {
-        Self { l, r, rev: false }
+    pub fn new(l: impl Into<String>, r: impl Into<String>) -> Self {
+        Self {
+            l: l.into(),
+            r: r.into(),
+            rev: false,
+        }
     }
 }
 
@@ -138,8 +142,8 @@ impl Find for FindDelimited {
 
     fn reversed(&self) -> Self::Reversed {
         Self {
-            l: self.l,
-            r: self.r,
+            l: self.l.clone(),
+            r: self.r.clone(),
             rev: !self.rev,
         }
     }
@@ -149,19 +153,22 @@ impl Find for FindDelimited {
         I: Iterator<Item = (usize, char)>,
     {
         let (target, other) = if self.rev {
-            (self.l, self.r)
+            (&self.l, &self.r)
         } else {
-            (self.r, self.l)
+            (&self.r, &self.l)
         };
         let mut skips = 0;
 
         for (i, ch) in it {
-            if ch == other && target != other {
+            if other.contains(ch) && target != other {
+                // if ch == other && target != other {
                 skips += 1;
-            } else if skips == 0 && ch == target {
+            } else if skips == 0 && target.contains(ch) {
+                // } else if skips == 0 && ch == target {
                 let ix = if self.rev { i + 1 } else { i - 1 };
                 return Some((ix, ix));
-            } else if ch == target {
+            } else if target.contains(ch) {
+                // } else if ch == target {
                 skips -= 1;
             }
         }

@@ -17,7 +17,7 @@ mod text_object;
 
 pub(crate) use cur::Cur;
 pub(crate) use range::{LineRange, Range};
-pub(crate) use text_object::TextObject;
+pub(crate) use text_object::{FindDelimited, TextObject};
 
 /// A Dot represents the currently selected contents of a Buffer.
 ///
@@ -82,6 +82,13 @@ impl Dot {
                     },
             } => (from, to),
         }
+    }
+
+    /// The number of characters contained within this Dot.
+    pub fn n_chars(&self) -> usize {
+        let (from, to) = self.as_char_indices();
+
+        to - from + 1
     }
 
     /// Whether or not this dot is a [Cur].

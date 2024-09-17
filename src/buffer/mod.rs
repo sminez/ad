@@ -2,7 +2,10 @@
 use crate::{
     config,
     config::ColorScheme,
-    dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
+    dot::{
+        find::{find_forward_wrapping, Find},
+        Cur, Dot, FindDelimited, LineRange, Range, TextObject,
+    },
     editor::{Action, ViewPort},
     ftype::{
         lex::{Token, TokenType, Tokenizer, Tokens},
@@ -21,7 +24,7 @@ use std::{
     path::{Path, PathBuf},
     time::SystemTime,
 };
-use tracing::{debug, info};
+use tracing::debug;
 
 mod buffers;
 mod edit;
@@ -49,6 +52,8 @@ pub(crate) enum ActionOutcome {
 pub(crate) enum BufferKind {
     /// A regular buffer that is backed by a file on disk.
     File(PathBuf),
+    /// A directory buffer that is modifyable but cannot be saved
+    Directory(PathBuf),
     /// An in-memory buffer that is not exposed through fsys
     Virtual(String),
     /// An in-memory buffer holding output from commands run within a given directory
@@ -69,6 +74,7 @@ impl BufferKind {
     fn display_name(&self, cwd: &Path) -> String {
         match self {
             BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
+            BufferKind::Directory(p) => relative_path_from(cwd, p).display().to_string(),
             BufferKind::Virtual(s) => s.clone(),
             BufferKind::Output(s) => s.clone(),
             BufferKind::Unnamed => UNNAMED_BUFFER.to_string(),
@@ -80,8 +86,17 @@ impl BufferKind {
     fn dir(&self) -> Option<&Path> {
         match &self {
             BufferKind::File(p) => p.parent(),
+            BufferKind::Directory(p) => Some(p.as_ref()),
             _ => None,
         }
+    }
+
+    pub(crate) fn is_file(&self) -> bool {
+        matches!(self, Self::File(_))
+    }
+
+    pub(crate) fn is_dir(&self) -> bool {
+        matches!(self, Self::Directory(_))
     }
 
     /// The key for the +output buffer that output from command run from this buffer should be
@@ -90,6 +105,38 @@ impl BufferKind {
         match self.dir() {
             Some(path) => format!("{}/{DEFAULT_OUTPUT_BUFFER}", path.display()),
             None => DEFAULT_OUTPUT_BUFFER.to_string(),
+        }
+    }
+
+    fn try_kind_and_content_from_path(path: PathBuf) -> io::Result<(Self, String)> {
+        match path.metadata() {
+            Ok(m) if m.is_dir() => {
+                let mut raw_entries = Vec::new();
+                for entry in path.read_dir()? {
+                    let p = entry?.path();
+                    raw_entries.push(p.strip_prefix(&path).unwrap_or(&p).display().to_string());
+                }
+                raw_entries.sort_unstable();
+
+                let mut raw = format!("{}\n\n..\n", path.display());
+                raw.push_str(&raw_entries.join("\n"));
+
+                Ok((Self::Directory(path), raw))
+            }
+
+            _ => {
+                let mut raw = match fs::read_to_string(&path) {
+                    Ok(contents) => contents,
+                    Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
+                    Err(e) => return Err(e),
+                };
+
+                if raw.ends_with('\n') {
+                    raw.pop();
+                }
+
+                Ok((Self::File(path), raw))
+            }
         }
     }
 }
@@ -115,21 +162,12 @@ pub struct Buffer {
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
     pub(super) fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
-        let mut raw = match fs::read_to_string(&path) {
-            Ok(contents) => contents,
-            Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
-            Err(e) => return Err(e),
-        };
-
-        if raw.ends_with('\n') {
-            raw.pop();
-        }
-
         let tokenizer = try_tokenizer_for_path(&path);
+        let (kind, raw) = BufferKind::try_kind_and_content_from_path(path)?;
 
         Ok(Self {
             id,
-            kind: BufferKind::File(path),
+            kind,
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(raw),
@@ -191,29 +229,28 @@ impl Buffer {
 
     pub(super) fn reload_from_disk(&mut self) -> String {
         let path = match &self.kind {
-            BufferKind::File(p) => p,
+            BufferKind::File(p) | BufferKind::Directory(p) => p,
             _ => return "Buffer is not backed by a file on disk".to_string(),
         };
 
-        info!(id=%self.id, path=%path.as_os_str().to_string_lossy(), "reloading buffer state from disk");
-        let mut raw = match fs::read_to_string(path) {
-            Ok(contents) => contents,
-            Err(e) => return format!("Error reloading file: {e}"),
+        debug!(id=%self.id, path=%path.as_os_str().to_string_lossy(), "reloading buffer state from disk");
+        let raw = match BufferKind::try_kind_and_content_from_path(path.to_path_buf()) {
+            Ok((_, raw)) => raw,
+            Err(e) => return format!("Error reloading buffer: {e}"),
         };
 
-        if raw.ends_with('\n') {
-            raw.pop();
-        }
-
-        let n_bytes = raw.len();
-        debug!(%n_bytes, "loaded buffer content");
+        let n_chars = raw.len();
         self.txt = GapBuffer::from(raw);
+        self.dot.clamp_idx(n_chars);
         self.edit_log.clear();
         self.dirty = false;
         self.last_save = SystemTime::now();
         self.rendered_line_cache.clear();
 
         let n_lines = self.txt.len_lines();
+        let n_bytes = self.txt.len();
+        debug!(%n_bytes, "reloaded buffer content");
+
         let display_path = match path.canonicalize() {
             Ok(cp) => cp.display().to_string(),
             Err(_) => path.display().to_string(),
@@ -317,6 +354,7 @@ impl Buffer {
     pub fn full_name(&self) -> &str {
         match &self.kind {
             BufferKind::File(p) => p.to_str().expect("valid unicode"),
+            BufferKind::Directory(p) => p.to_str().expect("valid unicode"),
             BufferKind::Virtual(s) => s,
             BufferKind::Output(s) => s,
             BufferKind::Unnamed => UNNAMED_BUFFER,
@@ -647,16 +685,30 @@ impl Buffer {
         }
     }
 
-    pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
+    pub(crate) fn expand_dot_from_screen_coords_if_outside_current_range(
         &mut self,
         x: usize,
         y: usize,
         screen_rows: usize,
     ) {
         let mouse_cur = self.cur_from_screen_coords(x, y, screen_rows);
-        if !self.dot.contains(&mouse_cur) {
-            self.set_dot_from_screen_coords(x, y, screen_rows);
+        if self.dot.contains(&mouse_cur) {
+            return;
         }
+
+        self.set_dot_from_screen_coords(x, y, screen_rows);
+
+        let mut min_dot = Find::expand(&FindDelimited::new('(', ')'), self.dot, self);
+        let candidates = [("[", "]"), ("<", ">"), ("{", "}"), (" \t\n", " \t\n")];
+
+        for (l, r) in candidates {
+            let dot = Find::expand(&FindDelimited::new(l, r), self.dot, self);
+            if dot.n_chars() < min_dot.n_chars() {
+                min_dot = dot;
+            }
+        }
+
+        self.dot = min_dot;
     }
 
     fn cur_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) -> Cur {
@@ -915,6 +967,12 @@ impl Buffer {
         self.rendered_line_cache.retain(|&k, _| k < from && k > to);
     }
 
+    /// Only files get marked as dirty to ensure that they are prompted for saving before being
+    /// closed.
+    fn mark_dirty(&mut self) {
+        self.dirty = self.kind.is_file();
+    }
+
     fn insert_char(&mut self, dot: Dot, ch: char) -> (Cur, Option<String>) {
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
@@ -925,7 +983,7 @@ impl Buffer {
         self.clear_render_cache_between_indices(idx, idx);
         self.txt.insert_char(idx, ch);
         self.edit_log.insert_char(cur, ch);
-        self.dirty = true;
+        self.mark_dirty();
 
         (Cur { idx: idx + 1 }, deleted)
     }
@@ -950,7 +1008,7 @@ impl Buffer {
             cur.idx += len;
         }
 
-        self.dirty = true;
+        self.mark_dirty();
         self.clear_render_cache_between_indices(idx, idx + len);
 
         (cur, deleted)
@@ -972,7 +1030,7 @@ impl Buffer {
             let ch = self.txt.char(idx);
             self.txt.remove_char(idx);
             self.edit_log.delete_char(cur, ch);
-            self.dirty = true;
+            self.mark_dirty();
         }
 
         cur
@@ -988,7 +1046,7 @@ impl Buffer {
         let s = self.txt.slice(from, to).to_string();
         self.txt.remove_range(from, to);
         self.edit_log.delete_string(r.start, s.clone());
-        self.dirty = true;
+        self.mark_dirty();
 
         (r.start, Some(s))
     }

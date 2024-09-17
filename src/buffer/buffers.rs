@@ -1,5 +1,6 @@
 use crate::{
     buffer::{Buffer, BufferKind, Cur, DEFAULT_OUTPUT_BUFFER},
+    dot::TextObject,
     editor::ViewPort,
 };
 use std::{
@@ -45,8 +46,17 @@ impl Buffers {
             Err(e) if e.kind() == ErrorKind::NotFound => path.as_ref().to_path_buf(),
             Err(e) => return Err(e),
         };
+
+        if self.active().kind.is_dir() && path.metadata().map(|m| m.is_dir()).unwrap_or_default() {
+            let b = self.active_mut();
+            b.kind = BufferKind::Directory(path);
+            b.reload_from_disk();
+            b.set_dot(TextObject::BufferStart, 1);
+            return Ok(None);
+        }
+
         let idx = self.inner.iter().position(|b| match &b.kind {
-            BufferKind::File(p) => p == &path,
+            BufferKind::File(p) | BufferKind::Directory(p) => p == &path,
             _ => false,
         });
 
@@ -156,7 +166,7 @@ impl Buffers {
     pub fn dirty_buffers(&self) -> Vec<String> {
         self.inner
             .iter()
-            .filter(|b| b.dirty && matches!(b.kind, BufferKind::File(_)))
+            .filter(|b| b.dirty && b.kind.is_file())
             .map(|b| b.full_name().to_string())
             .collect()
     }
