@@ -1,7 +1,7 @@
 //! A [Buffer] represents a single file or in memory text buffer open within the editor.
 use crate::{
-    config,
     config::ColorScheme,
+    config_handle,
     dot::{
         find::{find_forward_wrapping, Find},
         Cur, Dot, FindDelimited, LineRange, Range, TextObject,
@@ -498,7 +498,7 @@ impl Buffer {
             return 0;
         }
 
-        let tabstop = config!().tabstop;
+        let tabstop = config_handle!().tabstop;
 
         let mut rx = 0;
         for c in self.txt.line(y).chars().take(x) {
@@ -518,7 +518,7 @@ impl Buffer {
 
         let mut rx = 0;
         let mut cx = 0;
-        let tabstop = config!().tabstop;
+        let tabstop = config_handle!().tabstop;
 
         for c in self.txt.line(y).chars() {
             if c == '\n' {
@@ -563,7 +563,7 @@ impl Buffer {
         dot_range: Option<(usize, usize)>,
     ) -> (String, Option<(usize, usize)>) {
         let max_chars = screen_cols - lpad;
-        let tabstop = config!().tabstop;
+        let tabstop = config_handle!().tabstop;
         let mut rline = Vec::with_capacity(max_chars);
         // Iterating over characters not bytes as we need to account for multi-byte utf8
         let line = self.txt.line(y);
@@ -828,7 +828,7 @@ impl Buffer {
 
     fn handle_raw_key(&mut self, k: Key) -> Option<ActionOutcome> {
         let (match_indent, expand_tab, tabstop) = {
-            let conf = config!();
+            let conf = config_handle!();
             (conf.match_indent, conf.expand_tab, conf.tabstop)
         };
 

@@ -1,9 +1,8 @@
 //! Editor actions in response to user input
 use crate::{
     buffer::{BufferKind, Buffers, MiniBuffer, MiniBufferSelection},
-    config,
     config::Config,
-    die,
+    config_handle, die,
     dot::{Cur, Dot, TextObject},
     editor::Editor,
     exec::{Addr, Address, Program},
@@ -174,7 +173,7 @@ impl Editor {
     }
 
     fn find_file_under_dir(&mut self, d: &Path) {
-        let cmd = config!().find_command.clone();
+        let cmd = config_handle!().find_command.clone();
 
         let selection = match cmd.split_once(' ') {
             Some((cmd, args)) => {

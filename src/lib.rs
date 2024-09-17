@@ -77,7 +77,7 @@ pub(crate) fn update_config(input: &str) -> Result<(), String> {
 
 /// Get a read-only handle to the global Config data
 #[macro_export]
-macro_rules! config {
+macro_rules! config_handle {
     () => {{
         $crate::CONFIG
             .get_or_init(|| std::sync::RwLock::new($crate::Config::default()))

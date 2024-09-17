@@ -2,7 +2,7 @@
 //! modifying the current buffer state.
 use crate::{
     buffer::{Buffer, GapBuffer, TextObject},
-    config,
+    config_handle,
     editor::Editor,
     key::{Arrow, Key},
     util::run_command_blocking,
@@ -76,7 +76,7 @@ impl MiniBuffer {
         let mut mb = MiniBuffer::new(
             prompt.to_string(),
             initial_lines,
-            config!().minibuffer_lines,
+            config_handle!().minibuffer_lines,
         );
         let mut input = String::new();
         let mut x = 0;

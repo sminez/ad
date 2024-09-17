@@ -1,9 +1,8 @@
 //! Rendering the user interface
 use crate::{
     buffer::{Buffer, MiniBufferState},
-    config,
     config::ColorScheme,
-    die,
+    config_handle, die,
     editor::Editor,
     key::Key,
     term::{Cursor, Style},
@@ -42,7 +41,7 @@ impl Editor {
             .clamp_scroll(self.screen_rows, self.screen_cols);
 
         let (cs, status_timeout) = {
-            let conf = config!();
+            let conf = config_handle!();
             (conf.colorscheme, conf.status_timeout)
         };
 

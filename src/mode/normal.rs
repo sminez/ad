@@ -1,6 +1,6 @@
 //! vim style normal mode
 use crate::{
-    config,
+    config_handle,
     dot::TextObject::*,
     editor::{Action::*, Actions, ViewPort},
     key::{Arrow::*, Key::*},
@@ -123,7 +123,7 @@ pub(crate) fn normal_mode() -> Mode {
         cur_shape: CurShape::Block,
         keymap,
         handle_expired_pending: |keys| {
-            config!()
+            config_handle!()
                 .bindings
                 .get(keys)
                 .map(|prog| Actions::Single(ShellRun { cmd: prog.clone() }))
