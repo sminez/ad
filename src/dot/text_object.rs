@@ -161,14 +161,11 @@ impl Find for FindDelimited {
 
         for (i, ch) in it {
             if other.contains(ch) && target != other {
-                // if ch == other && target != other {
                 skips += 1;
             } else if skips == 0 && target.contains(ch) {
-                // } else if skips == 0 && ch == target {
                 let ix = if self.rev { i + 1 } else { i - 1 };
                 return Some((ix, ix));
             } else if target.contains(ch) {
-                // } else if ch == target {
                 skips -= 1;
             }
         }
