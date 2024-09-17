@@ -74,10 +74,10 @@ impl Editor {
                 None
             }
 
-            "q" | "quit" => Some(Single(Exit { force: false })),
-            "q!" | "quit!" => Some(Single(Exit { force: true })),
+            "q" | "quit" | "Exit" => Some(Single(Exit { force: false })),
+            "q!" | "quit!" | "Exit!" => Some(Single(Exit { force: true })),
 
-            "r" | "reload" => Some(Single(ReloadActiveBuffer)),
+            "r" | "reload" | "Get" => Some(Single(ReloadActiveBuffer)),
             "R" | "reload-config" => Some(Single(ReloadConfig)),
             "reload-buffer" => match args.parse::<usize>() {
                 Ok(id) => Some(Single(ReloadBuffer { id })),
@@ -94,7 +94,7 @@ impl Editor {
 
             "vl" | "view-logs" => Some(Single(ViewLogs)),
 
-            "w" | "write" => {
+            "w" | "write" | "Put" => {
                 if args.is_empty() {
                     Some(Single(SaveBuffer { force: false }))
                 } else {
@@ -104,7 +104,7 @@ impl Editor {
                     }))
                 }
             }
-            "w!" | "write!" => {
+            "w!" | "write!" | "Put!" => {
                 if args.is_empty() {
                     Some(Single(SaveBuffer { force: true }))
                 } else {
