@@ -154,7 +154,7 @@ impl<'a> Find for &'a str {
             }
 
             if cix == last {
-                return Some((start, i + 1));
+                return Some((start, i));
             }
 
             cix += 1;
@@ -181,5 +181,25 @@ impl Find for String {
 
     fn reversed(&self) -> Self::Reversed {
         self.chars().rev().collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    #[test_case("this"; "first word")]
+    #[test_case("is"; "inner word two chars")]
+    #[test_case("a"; "inner word single char")]
+    #[test_case("find"; "inner word multiple chars")]
+    #[test_case("test"; "last word")]
+    #[test]
+    fn find_forward_str(s: &str) {
+        let b = Buffer::new_virtual(0, "test", "this is a find test");
+        let dot = find_forward_wrapping(&s, &b).expect("to find string");
+        let matched_text = dot.content(&b);
+
+        assert_eq!(matched_text, s);
     }
 }

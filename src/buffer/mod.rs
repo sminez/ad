@@ -1057,6 +1057,10 @@ impl Buffer {
 
     pub(crate) fn find_forward(&mut self, s: &str) {
         if let Some(dot) = find_forward_wrapping(&s, self) {
+            for (from, to) in [self.dot.as_char_indices(), dot.as_char_indices()] {
+                self.clear_render_cache_between_indices(from, to);
+            }
+
             self.dot = dot;
         }
     }
