@@ -114,7 +114,11 @@ impl BufferKind {
                 let mut raw_entries = Vec::new();
                 for entry in path.read_dir()? {
                     let p = entry?.path();
-                    raw_entries.push(p.strip_prefix(&path).unwrap_or(&p).display().to_string());
+                    let mut s = p.strip_prefix(&path).unwrap_or(&p).display().to_string();
+                    if p.metadata().map(|m| m.is_dir()).unwrap_or_default() {
+                        s.push('/');
+                    }
+                    raw_entries.push(s);
                 }
                 raw_entries.sort_unstable();
 
