@@ -18,7 +18,6 @@ use crate::{
 };
 use std::{
     cmp::min,
-    collections::BTreeMap,
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
@@ -160,7 +159,6 @@ pub struct Buffer {
     pub(crate) dirty: bool,
     edit_log: EditLog,
     tokenizer: Option<Tokenizer>,
-    rendered_line_cache: BTreeMap<usize, String>,
 }
 
 impl Buffer {
@@ -182,7 +180,6 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer,
-            rendered_line_cache: BTreeMap::new(),
         })
     }
 
@@ -249,7 +246,6 @@ impl Buffer {
         self.edit_log.clear();
         self.dirty = false;
         self.last_save = SystemTime::now();
-        self.rendered_line_cache.clear();
 
         let n_lines = self.txt.len_lines();
         let n_bytes = self.txt.len();
@@ -277,7 +273,6 @@ impl Buffer {
             dirty: false,
             edit_log: Default::default(),
             tokenizer: None,
-            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -296,7 +291,6 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer: None,
-            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -323,7 +317,6 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer: None,
-            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -343,7 +336,6 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer: None,
-            rendered_line_cache: BTreeMap::new(),
         }
     }
 
@@ -380,10 +372,6 @@ impl Buffer {
     /// Check whether or not this is an unnamed buffer
     pub fn is_unnamed(&self) -> bool {
         self.kind == BufferKind::Unnamed
-    }
-
-    pub(crate) fn clear_render_cache(&mut self) {
-        self.rendered_line_cache.clear();
     }
 
     /// The raw binary contents of this buffer
@@ -612,24 +600,7 @@ impl Buffer {
     /// available screen space.
     /// This includes tab expansion and any styling that might be applied but not
     /// trailing \r\n or screen clearing escape codes.
-    pub(crate) fn styled_rline_unchecked<'a>(
-        &'a mut self,
-        y: usize,
-        lpad: usize,
-        screen_cols: usize,
-        cs: &ColorScheme,
-    ) -> &'a str {
-        // we need a mutable ref to self for computing the new line
-        #[allow(clippy::map_entry)]
-        if !self.rendered_line_cache.contains_key(&y) {
-            let line = self.compute_styled_rline_unchecked(y, lpad, screen_cols, cs);
-            self.rendered_line_cache.insert(y, line);
-        }
-
-        self.rendered_line_cache.get(&y).unwrap()
-    }
-
-    fn compute_styled_rline_unchecked(
+    pub(crate) fn styled_rline_unchecked(
         &self,
         y: usize,
         lpad: usize,
@@ -727,14 +698,12 @@ impl Buffer {
     }
 
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
-        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         self.dot = Dot::Cur {
             c: self.cur_from_screen_coords(x, y, screen_rows),
         };
     }
 
     pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
-        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         let mut r = self.dot.as_range();
         let c = self.cur_from_screen_coords(x, y, screen_rows);
         r.set_active_cursor(c);
@@ -799,20 +768,8 @@ impl Buffer {
             Action::Redo => return self.redo(),
             Action::Undo => return self.undo(),
 
-            Action::DotCollapseFirst => {
-                self.clear_render_cache_between_indices(
-                    self.dot.first_cur().idx,
-                    self.dot.last_cur().idx,
-                );
-                self.dot = self.dot.collapse_to_first_cur();
-            }
-            Action::DotCollapseLast => {
-                self.clear_render_cache_between_indices(
-                    self.dot.first_cur().idx,
-                    self.dot.last_cur().idx,
-                );
-                self.dot = self.dot.collapse_to_last_cur();
-            }
+            Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
+            Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
             Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
             Action::DotExtendForward(tobj, count) => self.extend_dot_forward(tobj, count),
             Action::DotFlip => self.dot.flip(),
@@ -881,7 +838,6 @@ impl Buffer {
 
     /// Set dot and clamp to ensure it is within bounds
     pub(crate) fn set_dot(&mut self, t: TextObject, n: usize) {
-        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.set_dot(self);
         }
@@ -890,7 +846,6 @@ impl Buffer {
 
     /// Extend dot foward and clamp to ensure it is within bounds
     fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
-        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.extend_dot_forward(self);
         }
@@ -899,7 +854,6 @@ impl Buffer {
 
     /// Extend dot backward and clamp to ensure it is within bounds
     fn extend_dot_backward(&mut self, t: TextObject, n: usize) {
-        self.clear_render_cache_between_indices(self.dot.first_cur().idx, self.dot.last_cur().idx);
         for _ in 0..n {
             t.extend_dot_backward(self);
         }
@@ -965,12 +919,6 @@ impl Buffer {
         self.dot = Dot::Cur { c: new_cur };
     }
 
-    fn clear_render_cache_between_indices(&mut self, char_from: usize, char_to: usize) {
-        let from = self.txt.char_to_line(char_from);
-        let to = self.txt.char_to_line(char_to);
-        self.rendered_line_cache.retain(|&k, _| k < from && k > to);
-    }
-
     /// Only files get marked as dirty to ensure that they are prompted for saving before being
     /// closed.
     fn mark_dirty(&mut self) {
@@ -984,7 +932,6 @@ impl Buffer {
         };
 
         let idx = cur.idx;
-        self.clear_render_cache_between_indices(idx, idx);
         self.txt.insert_char(idx, ch);
         self.edit_log.insert_char(cur, ch);
         self.mark_dirty();
@@ -998,9 +945,6 @@ impl Buffer {
             Dot::Range { r } => self.delete_range(r),
         };
 
-        let idx = cur.idx;
-        let len = s.len();
-
         // Inserting an empty string should not be recorded as an edit (and is
         // a no-op for the content of self.txt) but we support it as inserting
         // an empty string while dot is a range has the same effect as a delete.
@@ -1013,13 +957,11 @@ impl Buffer {
         }
 
         self.mark_dirty();
-        self.clear_render_cache_between_indices(idx, idx + len);
 
         (cur, deleted)
     }
 
     fn delete_dot(&mut self, dot: Dot) -> (Cur, Option<String>) {
-        self.clear_render_cache_between_indices(dot.first_cur().idx, dot.last_cur().idx);
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (self.delete_cur(c), None),
             Dot::Range { r } => self.delete_range(r),
@@ -1057,10 +999,6 @@ impl Buffer {
 
     pub(crate) fn find_forward(&mut self, s: &str) {
         if let Some(dot) = find_forward_wrapping(&s, self) {
-            for (from, to) in [self.dot.as_char_indices(), dot.as_char_indices()] {
-                self.clear_render_cache_between_indices(from, to);
-            }
-
             self.dot = dot;
         }
     }

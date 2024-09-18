@@ -314,7 +314,6 @@ impl Editor {
         if let Err(msg) = update_config(input) {
             self.set_status_message(&msg);
         }
-        self.buffers.active_mut().clear_render_cache();
     }
 
     pub(super) fn set_mode(&mut self, name: &str) {
