@@ -1,5 +1,5 @@
 //! RPC messaging between the fuse filesystem thread and the main editor thread
-use crate::editor::InputEvent;
+use crate::input::InputEvent;
 use std::sync::mpsc::{channel, Sender};
 use tracing::error;
 

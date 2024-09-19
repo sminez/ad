@@ -24,6 +24,7 @@ pub mod editor;
 pub mod exec;
 pub mod fsys;
 pub mod ftype;
+pub mod input;
 pub mod key;
 pub mod log;
 pub mod mode;

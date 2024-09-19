@@ -6,6 +6,7 @@ use crate::{
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
+    input::{Input, InputEvent},
     key::{Arrow, Key, MouseButton, MouseEvent},
     mode::{modes, Mode},
     restore_terminal_state, set_config,
@@ -27,12 +28,9 @@ use tracing::{debug, trace};
 
 mod actions;
 mod commands;
-mod input;
 mod render;
 
 pub(crate) use actions::{Action, Actions, ViewPort};
-use input::Input;
-pub(crate) use input::InputEvent;
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

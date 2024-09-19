@@ -24,6 +24,7 @@ pub(crate) enum InputEvent {
     WinsizeChanged,
 }
 
+/// A tui input handle that parses stdin and emits [InputEvent]s to the main editor event loop.
 pub(super) struct Input {
     stdin: Stdin,
     tx: Sender<InputEvent>,

@@ -1,5 +1,5 @@
 //! Utility functions
-use crate::editor::{Action, InputEvent};
+use crate::{editor::Action, input::InputEvent};
 use std::{
     env,
     ffi::OsStr,

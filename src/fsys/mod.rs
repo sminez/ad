@@ -25,7 +25,7 @@
 //!       body
 //!       event
 //! ```
-use crate::editor::InputEvent;
+use crate::input::InputEvent;
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     server::{ReadOutcome, Serve9p, Server},
