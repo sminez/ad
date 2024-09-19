@@ -656,34 +656,30 @@ impl Buffer {
     /// If the current dot is a cursor rather than a range, expand it to a sensible range.
     pub(crate) fn expand_cur_dot(&mut self) {
         if let Dot::Cur { .. } = self.dot {
-            self.set_dot(TextObject::Word, 1);
+            let mut min_dot = Find::expand(&FindDelimited::new('(', ')'), self.dot, self);
+            let candidates = [("[", "]"), ("<", ">"), ("{", "}"), (" \t\n", " \t\n")];
+
+            for (l, r) in candidates {
+                let dot = Find::expand(&FindDelimited::new(l, r), self.dot, self);
+                if dot.n_chars() < min_dot.n_chars() {
+                    min_dot = dot;
+                }
+            }
+
+            self.dot = min_dot;
         }
     }
 
-    pub(crate) fn expand_dot_from_screen_coords_if_outside_current_range(
+    pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
         &mut self,
         x: usize,
         y: usize,
         screen_rows: usize,
     ) {
         let mouse_cur = self.cur_from_screen_coords(x, y, screen_rows);
-        if self.dot.contains(&mouse_cur) {
-            return;
+        if !self.dot.contains(&mouse_cur) {
+            self.set_dot_from_screen_coords(x, y, screen_rows);
         }
-
-        self.set_dot_from_screen_coords(x, y, screen_rows);
-
-        let mut min_dot = Find::expand(&FindDelimited::new('(', ')'), self.dot, self);
-        let candidates = [("[", "]"), ("<", ">"), ("{", "}"), (" \t\n", " \t\n")];
-
-        for (l, r) in candidates {
-            let dot = Find::expand(&FindDelimited::new(l, r), self.dot, self);
-            if dot.n_chars() < min_dot.n_chars() {
-                min_dot = dot;
-            }
-        }
-
-        self.dot = min_dot;
     }
 
     fn cur_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) -> Cur {
