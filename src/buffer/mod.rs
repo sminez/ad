@@ -698,8 +698,8 @@ impl Buffer {
         let n_chars = self.txt.len_chars();
 
         let is_file_char = |ch: char| ch.is_alphanumeric() || "._-+/:@".contains(ch);
-        let is_addr_char = |ch: char| "0123456789+-/$.#,;?".contains(ch);
-        let is_regex_char = |ch: char| "^+-.*?#,;[]()$".contains(ch);
+        let is_addr_char = |ch: char| "+-/$.#,;?".contains(ch);
+        let is_url_char = |ch: char| "?&=".contains(ch);
         let has_url_prefix = |i: usize| {
             let http = i > 4 && i + 3 <= n_chars && self.txt.slice(i - 4, i + 3) == HTTP;
             let https = i > 5 && i + 3 <= n_chars && self.txt.slice(i - 5, i + 3) == HTTPS;
@@ -721,7 +721,7 @@ impl Buffer {
         }
 
         for (i, ch) in self.rev_iter_between(current_index, 0) {
-            if !(is_file_char(ch) || is_addr_char(ch) || is_regex_char(ch)) {
+            if !(is_file_char(ch) || is_url_char(ch) || is_addr_char(ch)) {
                 break;
             }
             if colon.is_none() && ch == ':' && !has_url_prefix(i) {
@@ -730,24 +730,34 @@ impl Buffer {
             from = i;
         }
 
-        // Now grab the address ("chars until whitespace") if we had a trailing colon
+        // Now grab the address if we had a trailing colon
         if let Some(ix) = colon {
             to = ix;
-            for (i, ch) in self.iter_between(ix, self.txt.len_chars()) {
-                if ch.is_whitespace() {
+            for (_, ch) in self.iter_between(ix + 1, self.txt.len_chars()) {
+                if ch.is_whitespace() || "()[]{}<>;".contains(ch) {
                     break;
                 }
-                to = i;
+                to += 1;
             }
         }
 
         let dot_content = self.txt.slice(from, to + 1).to_string();
 
-        // If dot looks like a URL then strip trailing '.' if there is one and return it
+        // If dot looks like a URL then expand until whitespace and strip trailing punctuation
         if dot_content.starts_with(HTTP) || dot_content.starts_with(HTTPS) {
+            if to < self.txt.len_chars() {
+                for (_, ch) in self.iter_between(to + 1, self.txt.len_chars()) {
+                    if ch.is_whitespace() || "()[]{}<>;".contains(ch) {
+                        break;
+                    }
+                    to += 1;
+                }
+            }
+
             if dot_content.ends_with('.') {
                 to -= 1;
             }
+
             return Some(Dot::from_char_indices(from, to));
         }
 
@@ -1373,5 +1383,37 @@ pub(crate) mod tests {
 
         assert_eq!(line, expected_line);
         assert_eq!(dot_range, expected_dot_range);
+    }
+
+    // Tests are executed from the root of the crate so existing file paths are relative to there
+    #[test_case("foo", None; "unknown format")]
+    #[test_case("someFunc()", None; "camel case function call")]
+    #[test_case("some_func()", None; "snake case function call")]
+    #[test_case("not_a_real_file.rs", None; "file that does not exist")]
+    #[test_case("README.md", Some("README.md"); "file that exists")]
+    #[test_case("README.md:12,19", Some("README.md:12,19"); "file that exists with addr")]
+    #[test_case("/usr/bin/sh", Some("/usr/bin/sh"); "file that exists abs path")]
+    #[test_case("/usr/bin/sh:12-+#", Some("/usr/bin/sh:12-+#"); "file that exists abs path with addr")]
+    #[test_case("http://example.com", Some("http://example.com"); "http url")]
+    #[test_case("http://example.com/some/path", Some("http://example.com/some/path"); "http url with path")]
+    #[test_case("http://example.com?foo=1", Some("http://example.com?foo=1"); "http url with query string")]
+    #[test_case("http://example.com?foo=1&bar=2", Some("http://example.com?foo=1&bar=2"); "http url with multi query string")]
+    #[test]
+    fn try_expand_known_works(s: &str, expected: Option<&str>) {
+        // Check with surrounding whitespace and delimiters
+        for (l, r) in [(" ", " "), ("(", ")"), ("[", "]"), ("<", ">"), ("{", "}")] {
+            let b = Buffer::new_unnamed(0, &format!("abc_123 {l}{s}{r}\tmore text"));
+
+            // Check with the initial cursor position being at any offset within the target
+            for i in 0..s.len() {
+                let dot = b.try_expand_known(9 + i);
+                let maybe_content = dot.map(|d| d.content(&b));
+                assert_eq!(
+                    maybe_content.as_deref(),
+                    expected,
+                    "failed at offset={i} with lr=({l:?}, {r:?})"
+                )
+            }
+        }
     }
 }
