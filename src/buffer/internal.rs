@@ -796,6 +796,20 @@ impl<'a> fmt::Display for Slice<'a> {
     }
 }
 
+impl<'a, 'b> PartialEq<&'b str> for Slice<'a> {
+    fn eq(&self, other: &&'b str) -> bool {
+        let b = other.as_bytes();
+
+        &b[..self.left.len()] == self.left && &b[self.left.len()..] == self.right
+    }
+}
+
+impl<'a> PartialEq<String> for Slice<'a> {
+    fn eq(&self, other: &String) -> bool {
+        *self == other.as_str()
+    }
+}
+
 /// An iterator of characters from a [Slice]
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Chars<'a> {
@@ -1496,6 +1510,14 @@ mod tests {
         let (s1, s2) = slice.as_strs();
         assert_eq!(s1, " world");
         assert_eq!(s2, "!\nhow");
+    }
+
+    #[test]
+    fn slice_eq_str_works() {
+        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
+        gb.move_gap_to(3);
+        let slice = gb.slice(0, 5);
+        assert_eq!(slice, "hello");
     }
 
     #[test]

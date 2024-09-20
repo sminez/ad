@@ -2,11 +2,9 @@
 use crate::{
     config::ColorScheme,
     config_handle,
-    dot::{
-        find::{find_forward_wrapping, Find},
-        Cur, Dot, FindDelimited, LineRange, Range, TextObject,
-    },
+    dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
+    exec::IterBoundedChars,
     ftype::{
         lex::{Token, TokenType, Tokenizer, Tokens},
         try_tokenizer_for_path,
@@ -37,6 +35,8 @@ pub(crate) use buffers::Buffers;
 pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 pub(crate) const DEFAULT_OUTPUT_BUFFER: &str = "+output";
+const HTTPS: &str = "https://";
+const HTTP: &str = "http://";
 
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
 // finished processing a given Action.
@@ -654,20 +654,122 @@ impl Buffer {
     }
 
     /// If the current dot is a cursor rather than a range, expand it to a sensible range.
+    ///
+    /// This is modeled after (but not identical to) the behaviour in acme's `expand` function
+    /// found in look.c
     pub(crate) fn expand_cur_dot(&mut self) {
-        if let Dot::Cur { .. } = self.dot {
-            let mut min_dot = Find::expand(&FindDelimited::new('(', ')'), self.dot, self);
-            let candidates = [("[", "]"), ("<", ">"), ("{", "}"), (" \t\n", " \t\n")];
+        let current_index = match self.dot {
+            Dot::Cur { c: Cur { idx } } => idx,
+            Dot::Range { .. } => return,
+        };
 
-            for (l, r) in candidates {
-                let dot = Find::expand(&FindDelimited::new(l, r), self.dot, self);
-                if dot.n_chars() < min_dot.n_chars() {
-                    min_dot = dot;
-                }
-            }
-
-            self.dot = min_dot;
+        if let Some(dot) = self.try_expand_known(current_index) {
+            self.dot = dot;
+            return;
         }
+
+        // Expand until we hit non-alphanumeric characters on each sides
+        let (mut from, mut to) = (current_index, current_index);
+        for (i, ch) in self.iter_between(current_index, self.txt.len_chars()) {
+            if !(ch == '_' || ch.is_alphanumeric()) {
+                break;
+            }
+            to = i;
+        }
+
+        for (i, ch) in self.rev_iter_between(current_index, 0) {
+            if !(ch == '_' || ch.is_alphanumeric()) {
+                break;
+            }
+            from = i;
+        }
+
+        self.dot = Dot::from_char_indices(from, to);
+    }
+
+    /// Try to be smart about expanding from the current cursor position to something that we
+    /// understand how to parse:
+    ///   - file path with addr (some/path:addr)
+    ///   - file path
+    ///   - url
+    fn try_expand_known(&self, current_index: usize) -> Option<Dot> {
+        let (mut from, mut to) = (current_index, current_index);
+        let mut colon: Option<usize> = None;
+        let n_chars = self.txt.len_chars();
+
+        let is_file_char = |ch: char| ch.is_alphanumeric() || "._-+/:@".contains(ch);
+        let is_addr_char = |ch: char| "0123456789+-/$.#,;?".contains(ch);
+        let is_regex_char = |ch: char| "^+-.*?#,;[]()$".contains(ch);
+        let has_url_prefix = |i: usize| {
+            let http = i > 4 && i + 3 <= n_chars && self.txt.slice(i - 4, i + 3) == HTTP;
+            let https = i > 5 && i + 3 <= n_chars && self.txt.slice(i - 5, i + 3) == HTTPS;
+
+            http || https
+        };
+
+        // Start by expanding to cover things that are candidates for being file names (optionally
+        // with a following address) or URLs
+        for (i, ch) in self.iter_between(current_index, self.txt.len_chars()) {
+            if !is_file_char(ch) {
+                break;
+            }
+            if ch == ':' && !has_url_prefix(i) {
+                colon = Some(i);
+                break;
+            }
+            to = i;
+        }
+
+        for (i, ch) in self.rev_iter_between(current_index, 0) {
+            if !(is_file_char(ch) || is_addr_char(ch) || is_regex_char(ch)) {
+                break;
+            }
+            if colon.is_none() && ch == ':' && !has_url_prefix(i) {
+                colon = Some(i);
+            }
+            from = i;
+        }
+
+        // Now grab the address ("chars until whitespace") if we had a trailing colon
+        if let Some(ix) = colon {
+            to = ix;
+            for (i, ch) in self.iter_between(ix, self.txt.len_chars()) {
+                if ch.is_whitespace() {
+                    break;
+                }
+                to = i;
+            }
+        }
+
+        let dot_content = self.txt.slice(from, to + 1).to_string();
+
+        // If dot looks like a URL then strip trailing '.' if there is one and return it
+        if dot_content.starts_with(HTTP) || dot_content.starts_with(HTTPS) {
+            if dot_content.ends_with('.') {
+                to -= 1;
+            }
+            return Some(Dot::from_char_indices(from, to));
+        }
+
+        let dot = Dot::from_char_indices(from, to);
+
+        // If dot up until ':' is a file then return the entire dot
+        let fname = match dot_content.split_once(':') {
+            Some((fname, _)) => fname,
+            None => &dot_content,
+        };
+
+        let path = Path::new(fname);
+        if path.exists() {
+            return Some(dot);
+        } else if let Some(dir) = self.dir() {
+            if dir.join(path).exists() {
+                return Some(dot);
+            }
+        }
+
+        // Not a file or a URL
+        None
     }
 
     pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
