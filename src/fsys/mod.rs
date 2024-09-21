@@ -25,7 +25,7 @@
 //!       body
 //!       event
 //! ```
-use crate::input::InputEvent;
+use crate::input::Event;
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     server::{ReadOutcome, Serve9p, Server},
@@ -87,7 +87,7 @@ const E_UNKNOWN_FILE: &str = "unknown file";
 /// The filesystem interface for ad
 #[derive(Debug)]
 pub(crate) struct AdFs {
-    tx: Sender<InputEvent>,
+    tx: Sender<Event>,
     buffer_nodes: BufferNodes,
     // Root level files and directories
     mount_dir_stat: Stat,
@@ -107,7 +107,7 @@ impl FsHandle {
 
 impl AdFs {
     /// Construct a new filesystem interface using channels held by the editor.
-    pub fn new(tx: Sender<InputEvent>, brx: Receiver<BufId>) -> Self {
+    pub fn new(tx: Sender<Event>, brx: Receiver<BufId>) -> Self {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
 

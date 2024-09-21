@@ -1,5 +1,5 @@
 //! RPC messaging between the fuse filesystem thread and the main editor thread
-use crate::input::InputEvent;
+use crate::input::Event;
 use std::sync::mpsc::{channel, Sender};
 use tracing::error;
 
@@ -12,9 +12,9 @@ pub(crate) struct Message {
 
 impl Message {
     /// Make a request to the main thread and return the response we got back
-    pub(super) fn send(req: Req, etx: &Sender<InputEvent>) -> Result<String, String> {
+    pub(super) fn send(req: Req, etx: &Sender<Event>) -> Result<String, String> {
         let (tx, rx) = channel();
-        let evt = InputEvent::Message(Self { req, tx });
+        let evt = Event::Message(Self { req, tx });
 
         if let Err(e) = etx.send(evt) {
             error!("error sending message from fsys to main thread: {e}");

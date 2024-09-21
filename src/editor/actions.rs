@@ -589,19 +589,15 @@ impl Editor {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
         match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command(
-                cmd,
-                rest.split_whitespace(),
-                d,
-                id,
-                self.tx_input_events.clone(),
-            ),
+            Some((cmd, rest)) => {
+                run_command(cmd, rest.split_whitespace(), d, id, self.tx_events.clone())
+            }
             None => run_command(
                 raw_cmd_str,
                 std::iter::empty::<&str>(),
                 d,
                 id,
-                self.tx_input_events.clone(),
+                self.tx_events.clone(),
             ),
         }
     }

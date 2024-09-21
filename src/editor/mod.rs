@@ -6,7 +6,7 @@ use crate::{
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
-    input::{InputEvent, StdinInput},
+    input::{Event, StdinInput},
     key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
     restore_terminal_state, set_config,
@@ -54,8 +54,8 @@ pub struct Editor {
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
-    tx_input_events: Sender<InputEvent>,
-    rx_input_events: Receiver<InputEvent>,
+    tx_events: Sender<Event>,
+    rx_events: Receiver<Event>,
     tx_fsys: Sender<BufId>,
     rx_fsys: Option<Receiver<BufId>>,
     mode: EditorMode,
@@ -78,7 +78,7 @@ impl Editor {
             Err(e) => die!("Unable to determine working directory: {e}"),
         };
         let stdout = io::stdout();
-        let (tx_input_events, rx_input_events) = channel();
+        let (tx_events, rx_events) = channel();
         let (tx_fsys, rx_fsys) = channel();
 
         set_config(cfg);
@@ -94,8 +94,8 @@ impl Editor {
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
-            tx_input_events,
-            rx_input_events,
+            tx_events,
+            rx_events,
             tx_fsys,
             rx_fsys: Some(rx_fsys),
             mode,
@@ -129,45 +129,43 @@ impl Editor {
     /// Initialise any UI state required for our [EditorMode] and run the main event loop.
     pub fn run(mut self) {
         let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
-        AdFs::new(self.tx_input_events.clone(), rx_fsys).run_threaded();
+        AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
         self.ensure_correct_fsys_state();
 
         match self.mode {
-            EditorMode::Terminal => {
-                self.run_event_loop_with_screen_refresh(self.tx_input_events.clone())
-            }
+            EditorMode::Terminal => self.run_event_loop_with_screen_refresh(self.tx_events.clone()),
             EditorMode::Headless => self.run_event_loop(),
         }
     }
 
     #[inline]
-    fn handle_input_event(&mut self) {
-        match self.rx_input_events.recv().unwrap() {
-            InputEvent::Input(i) => self.handle_input(i),
-            InputEvent::Action(a) => self.handle_action(a),
-            InputEvent::Message(msg) => self.handle_message(msg),
-            InputEvent::WinsizeChanged => self.update_window_size(),
+    fn handle_event(&mut self) {
+        match self.rx_events.recv().unwrap() {
+            Event::Input(i) => self.handle_input(i),
+            Event::Action(a) => self.handle_action(a),
+            Event::Message(msg) => self.handle_message(msg),
+            Event::WinsizeChanged => self.update_window_size(),
         }
     }
 
     fn run_event_loop(&mut self) {
         while self.running {
-            self.handle_input_event();
+            self.handle_event();
         }
     }
 
-    fn run_event_loop_with_screen_refresh(&mut self, tx: Sender<InputEvent>) {
+    fn run_event_loop_with_screen_refresh(&mut self, tx: Sender<Event>) {
         self.init_tui(tx);
 
         while self.running {
             self.refresh_screen();
-            self.handle_input_event();
+            self.handle_event();
         }
 
         clear_screen(&mut self.stdout);
     }
 
-    fn init_tui(&mut self, tx: Sender<InputEvent>) {
+    fn init_tui(&mut self, tx: Sender<Event>) {
         let original_termios = get_termios();
         enable_raw_mode(original_termios);
         _ = ORIGINAL_TERMIOS.set(original_termios);
@@ -201,11 +199,11 @@ impl Editor {
 
     pub(crate) fn block_for_input(&mut self) -> Input {
         loop {
-            match self.rx_input_events.recv().unwrap() {
-                InputEvent::Input(k) => return k,
-                InputEvent::Action(a) => self.handle_action(a),
-                InputEvent::Message(msg) => self.handle_message(msg),
-                InputEvent::WinsizeChanged => self.update_window_size(),
+            match self.rx_events.recv().unwrap() {
+                Event::Input(k) => return k,
+                Event::Action(a) => self.handle_action(a),
+                Event::Message(msg) => self.handle_message(msg),
+                Event::WinsizeChanged => self.update_window_size(),
             }
         }
     }

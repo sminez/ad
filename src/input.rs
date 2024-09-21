@@ -13,7 +13,7 @@ use std::{
 
 /// An input event that can be processed by the editor event loop
 #[derive(Debug)]
-pub(crate) enum InputEvent {
+pub(crate) enum Event {
     /// A [Message] received from the virtual filesystem interface
     Message(Message),
     /// An [Input] from the user
@@ -27,20 +27,20 @@ pub(crate) enum InputEvent {
 /// A tui input handle that parses stdin and emits [InputEvent]s to the main editor event loop.
 pub(super) struct StdinInput {
     stdin: Stdin,
-    tx: Sender<InputEvent>,
+    tx: Sender<Event>,
 }
 
 impl StdinInput {
-    pub(super) fn new(tx: Sender<InputEvent>) -> Self {
+    pub(super) fn new(tx: Sender<Event>) -> Self {
         Self { stdin: stdin(), tx }
     }
 
     pub fn run_threaded(mut self) -> JoinHandle<()> {
         spawn(move || loop {
             if let Some(key) = self.try_read_input() {
-                self.tx.send(InputEvent::Input(key)).unwrap();
+                self.tx.send(Event::Input(key)).unwrap();
             } else if win_size_changed() {
-                self.tx.send(InputEvent::WinsizeChanged).unwrap();
+                self.tx.send(Event::WinsizeChanged).unwrap();
             }
         })
     }

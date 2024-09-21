@@ -3,7 +3,7 @@ use super::{
     empty_dir_stat, empty_file_stat, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID,
     CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
 };
-use crate::input::InputEvent;
+use crate::input::Event;
 use ninep::fs::Stat;
 use std::{
     collections::BTreeMap,
@@ -62,12 +62,12 @@ pub(super) struct BufferNodes {
     stat: Stat,
     current_buff_stat: Stat,
     index_stat: Stat,
-    tx: Sender<InputEvent>,
+    tx: Sender<Event>,
     brx: Receiver<BufId>,
 }
 
 impl BufferNodes {
-    pub(super) fn new(tx: Sender<InputEvent>, brx: Receiver<BufId>) -> Self {
+    pub(super) fn new(tx: Sender<Event>, brx: Receiver<BufId>) -> Self {
         Self {
             known: BTreeMap::default(),
             next_qid: CURRENT_BUFFER_QID + 1,
@@ -268,7 +268,7 @@ impl BufferNode {
         self.file_stats.values().any(|s| s.fm.qid == qid)
     }
 
-    fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<InputEvent>) -> Option<Stat> {
+    fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<Event>) -> Option<Stat> {
         if fname == OUTPUT {
             return self.file_stats.get(OUTPUT).cloned();
         }
@@ -281,7 +281,7 @@ impl BufferNode {
         Some(stat.clone())
     }
 
-    fn current_file_content(&self, fname: &str, tx: &Sender<InputEvent>) -> Option<String> {
+    fn current_file_content(&self, fname: &str, tx: &Sender<Event>) -> Option<String> {
         let req = match fname {
             FILENAME => Req::ReadBufferName { id: self.id },
             DOT => Req::ReadBufferDot { id: self.id },

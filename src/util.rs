@@ -1,5 +1,5 @@
 //! Utility functions
-use crate::{editor::Action, input::InputEvent};
+use crate::{editor::Action, input::Event};
 use std::{
     env,
     ffi::OsStr,
@@ -84,18 +84,13 @@ where
 
 /// Run an external command and append its output to the output buffer for `bufid` from a
 /// background thread.
-pub(crate) fn run_command<I, S>(
-    cmd: &str,
-    args: I,
-    cwd: &Path,
-    bufid: usize,
-    tx: Sender<InputEvent>,
-) where
+pub(crate) fn run_command<I, S>(cmd: &str, args: I, cwd: &Path, bufid: usize, tx: Sender<Event>)
+where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
     let mut command = prepare_command(cmd, args, cwd, bufid);
-    _ = tx.send(InputEvent::Action(Action::SetStatusMessage {
+    _ = tx.send(Event::Action(Action::SetStatusMessage {
         message: format!("running '{cmd}' ..."),
     }));
 
@@ -103,7 +98,7 @@ pub(crate) fn run_command<I, S>(
         let output = match command.output() {
             Ok(output) => output,
             Err(err) => {
-                _ = tx.send(InputEvent::Action(Action::SetStatusMessage {
+                _ = tx.send(Event::Action(Action::SetStatusMessage {
                     message: err.to_string(),
                 }));
                 return;
@@ -116,7 +111,7 @@ pub(crate) fn run_command<I, S>(
         if content.is_empty() {
             return;
         }
-        _ = tx.send(InputEvent::Action(Action::AppendToOutputBuffer {
+        _ = tx.send(Event::Action(Action::AppendToOutputBuffer {
             bufid,
             content,
         }));
