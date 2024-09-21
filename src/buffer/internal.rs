@@ -85,7 +85,8 @@ fn compute_line_endings(s: &str) -> (usize, BTreeMap<ByteOffset, CharOffset>) {
 impl From<String> for GapBuffer {
     fn from(s: String) -> Self {
         let gap_start = s.len();
-        let cap = s.capacity();
+        let next_gap = clamp_gap_size(gap_start, MIN_GAP);
+        let cap = gap_start + next_gap;
         let (n_chars, line_endings) = compute_line_endings(&s);
         let mut v = s.into_bytes();
         v.resize(cap, 0);
@@ -95,7 +96,7 @@ impl From<String> for GapBuffer {
             cap,
             gap_start,
             gap_end: cap,
-            next_gap: clamp_gap_size(gap_start, MIN_GAP),
+            next_gap,
             n_chars,
             line_endings,
         };
@@ -994,6 +995,15 @@ mod tests {
         v.insert(gb.gap_start, b'[');
 
         String::from_utf8(v).expect("valid utf8")
+    }
+
+    #[test]
+    fn from_string_matches_from_str() {
+        let s = "this is a test";
+        let gb1 = GapBuffer::from(s.to_string());
+        let gb2 = GapBuffer::from(s);
+
+        assert_eq!(gb1, gb2);
     }
 
     #[test]
