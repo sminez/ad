@@ -1,9 +1,9 @@
 //! Rendering the user interface
 use crate::{
-    buffer::{Buffer, MiniBufferState},
+    buffer::Buffer,
     config::ColorScheme,
     config_handle, die,
-    editor::Editor,
+    editor::{Editor, MiniBufferState},
     key::Input,
     term::{Cursor, Style},
     VERSION,
@@ -26,7 +26,8 @@ impl Editor {
             cx,
             cy,
             selected_line_idx,
-            prompt_line,
+            prompt,
+            input,
             b,
             top,
             bottom,
@@ -52,7 +53,7 @@ impl Editor {
         if w_minibuffer {
             self.render_minibuffer_state(
                 &mut buf,
-                prompt_line,
+                &format!("{prompt}{input}"),
                 b,
                 selected_line_idx,
                 top,

@@ -1,13 +1,12 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
+    buffer::BufferKind,
     config::Config,
     config_handle, die,
     dot::{Cur, Dot, TextObject},
-    editor::Editor,
+    editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
     fsys::BufId,
-    input::FilterScope,
     key::Input,
     mode::Mode,
     replace_config, update_config,
@@ -158,7 +157,7 @@ impl Editor {
             Ok(None) => {
                 match self.buffers.active().state_changed_on_disk() {
                     Ok(true) => {
-                        let res = MiniBuffer::prompt("File changed on disk, reload? [y/n]: ", self);
+                        let res = self.minibuffer_prompt("File changed on disk, reload? [y/n]: ");
                         if let Some("y" | "Y" | "yes") = res.as_deref() {
                             let msg = self.buffers.active_mut().reload_from_disk();
                             self.set_status_message(&msg);
@@ -178,14 +177,13 @@ impl Editor {
 
         let selection = match cmd.split_once(' ') {
             Some((cmd, args)) => {
-                MiniBuffer::select_from_command_output("> ", cmd, args.split_whitespace(), d, self)
+                self.minibuffer_select_from_command_output("> ", cmd, args.split_whitespace(), d)
             }
-            None => MiniBuffer::select_from_command_output(
+            None => self.minibuffer_select_from_command_output(
                 "> ",
                 &cmd,
                 std::iter::empty::<&str>(),
                 d,
-                self,
             ),
         };
 
@@ -227,7 +225,7 @@ impl Editor {
             _ => {
                 let is_last_buffer = self.buffers.len() == 1;
                 self.tx_fsys.send(BufId::Remove(id)).unwrap();
-                self.clear_input_filter(FilterScope::Buffer(id));
+                self.clear_input_filter(id);
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
             }
@@ -256,7 +254,7 @@ impl Editor {
             // the editor: both need verifying
             (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
             // Attempting to save without a name so we prompt for one and verify it
-            (None, Bk::Unnamed) => match MiniBuffer::prompt("Save As: ", self) {
+            (None, Bk::Unnamed) => match self.minibuffer_prompt("Save As: ") {
                 Some(s) => s.into(),
                 None => return None,
             },
@@ -267,7 +265,7 @@ impl Editor {
         match desired_path.try_exists() {
             Ok(false) => (),
             Ok(true) => {
-                if !MiniBuffer::confirm("File already exists", self) {
+                if !self.minibuffer_confirm("File already exists") {
                     return None;
                 }
             }
@@ -336,7 +334,7 @@ impl Editor {
         let dirty_buffers = self.buffers.dirty_buffers();
         if !dirty_buffers.is_empty() && !force {
             self.set_status_message("No write since last change. Use ':q!' to force exit");
-            MiniBuffer::select_from("No write since last change> ", dirty_buffers, self);
+            self.minibuffer_select_from("No write since last change> ", dirty_buffers);
             return;
         }
 
@@ -369,7 +367,7 @@ impl Editor {
             .map(|(i, line)| format!("{:>4} | {}", i + 1, line))
             .collect();
 
-        let selection = MiniBuffer::select_from("> ", numbered_lines, self);
+        let selection = self.minibuffer_select_from("> ", numbered_lines);
         if let MiniBufferSelection::Line { cy, .. } = selection {
             self.buffers.active_mut().dot = Dot::Cur {
                 c: Cur::from_yx(cy, 0, self.buffers.active()),
@@ -380,7 +378,7 @@ impl Editor {
     }
 
     pub(super) fn select_buffer(&mut self) {
-        let selection = MiniBuffer::select_from("> ", self.buffers.as_buf_list(), self);
+        let selection = self.minibuffer_select_from("> ", self.buffers.as_buf_list());
         if let MiniBufferSelection::Line { line, .. } = selection {
             // unwrap is fine here because we know the format of the buf list we are supplying
             if let Ok(id) = line.split_once(' ').unwrap().0.parse::<usize>() {
@@ -395,7 +393,7 @@ impl Editor {
     }
 
     pub(super) fn debug_buffer_contents(&mut self) {
-        MiniBuffer::select_from(
+        self.minibuffer_select_from(
             "<RAW BUFFER> ",
             self.buffers
                 .active()
@@ -403,7 +401,6 @@ impl Editor {
                 .into_iter()
                 .map(|l| format!("{:?}", l))
                 .collect(),
-            self,
         );
     }
 
@@ -412,7 +409,7 @@ impl Editor {
     }
 
     pub(super) fn debug_edit_log(&mut self) {
-        MiniBuffer::select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log(), self);
+        self.minibuffer_select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log());
     }
 
     // TODO: implement customisation of load and execute via the events file once that is in place.
@@ -515,14 +512,13 @@ impl Editor {
         // this should be a scratchpad that we can dismiss and bring back but that will require
         // support in the main Buffers struct and a new way of creating a MiniBuffer.
         if !buf.is_empty() {
-            MiniBuffer::select_from(
+            self.minibuffer_select_from(
                 "%>",
                 String::from_utf8(buf)
                     .unwrap()
                     .lines()
                     .map(|l| l.to_string())
                     .collect(),
-                self,
             );
         }
     }
@@ -530,7 +526,7 @@ impl Editor {
     pub(super) fn command_mode(&mut self) {
         self.modes.insert(0, Mode::ephemeral_mode("COMMAND"));
 
-        if let Some(input) = MiniBuffer::prompt(":", self) {
+        if let Some(input) = self.minibuffer_prompt(":") {
             self.execute_command(&input);
         }
 
@@ -540,7 +536,7 @@ impl Editor {
     pub(super) fn run_mode(&mut self) {
         self.modes.insert(0, Mode::ephemeral_mode("RUN"));
 
-        if let Some(input) = MiniBuffer::prompt("!", self) {
+        if let Some(input) = self.minibuffer_prompt("!") {
             self.run_shell_cmd(&input);
         }
 
@@ -550,7 +546,7 @@ impl Editor {
     pub(super) fn sam_mode(&mut self) {
         self.modes.insert(0, Mode::ephemeral_mode("EDIT"));
 
-        if let Some(input) = MiniBuffer::prompt("Edit> ", self) {
+        if let Some(input) = self.minibuffer_prompt("Edit> ") {
             self.execute_edit_command(&input);
         };
 

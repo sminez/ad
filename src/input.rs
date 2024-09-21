@@ -45,12 +45,6 @@ pub(crate) enum FilterOutput {
     Actions(Actions),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum FilterScope {
-    Global,
-    Buffer(usize),
-}
-
 /// A tui input handle that parses stdin and emits [Event]s to the main editor event loop.
 pub(super) struct StdinInput {
     stdin: Stdin,

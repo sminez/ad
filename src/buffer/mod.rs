@@ -26,13 +26,11 @@ use tracing::debug;
 mod buffers;
 mod edit;
 mod internal;
-mod minibuffer;
 
 use edit::{Edit, EditLog, Kind, Txt};
 pub use internal::{Chars, GapBuffer, IdxChars, Slice};
 
 pub(crate) use buffers::Buffers;
-pub(crate) use minibuffer::{MiniBuffer, MiniBufferSelection, MiniBufferState};
 
 pub(crate) const DEFAULT_OUTPUT_BUFFER: &str = "+output";
 const HTTPS: &str = "https://";

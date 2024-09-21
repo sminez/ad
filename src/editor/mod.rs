@@ -6,7 +6,7 @@ use crate::{
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
-    input::{Event, FilterOutput, FilterScope, InputFilter, StdinInput},
+    input::{Event, FilterOutput, InputFilter, StdinInput},
     key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
     restore_terminal_state, set_config,
@@ -29,9 +29,11 @@ use tracing::{debug, trace, warn};
 
 mod actions;
 mod commands;
+mod minibuffer;
 mod render;
 
 pub(crate) use actions::{Action, Actions, ViewPort};
+pub(crate) use minibuffer::{MiniBufferSelection, MiniBufferState};
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +57,7 @@ pub struct Editor {
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
-    input_filters: HashMap<FilterScope, Box<dyn InputFilter>>,
+    input_filters: HashMap<usize, Box<dyn InputFilter>>,
     tx_events: Sender<Event>,
     rx_events: Receiver<Event>,
     tx_fsys: Sender<BufId>,
@@ -193,10 +195,6 @@ impl Editor {
         unsafe { register_signal_handler() };
         self.update_window_size();
         StdinInput::new(tx).run_threaded();
-    }
-
-    pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
-        (self.screen_rows, self.screen_cols)
     }
 
     /// Update the status line to contain the given message.
@@ -478,38 +476,28 @@ impl Editor {
         }
     }
 
-    // FIXME: NEED TO REWRITE THE WAY THE MINIBUFFER WORKS TO HAVE A SINGLE INSTANCE STORED ON THE
-    // EDITOR ITSELF AND THEN USE GLOBAL INPUT FILTERS TO TAKE OVER THE EVENT LOOP.
-
     /// Returns `true` if the filter was successfully set, false if there was already one in place.
-    pub(crate) fn try_set_input_filter<F>(&mut self, scope: FilterScope, filter: F) -> bool
+    pub(crate) fn try_set_input_filter<F>(&mut self, bufid: usize, filter: F) -> bool
     where
         F: InputFilter,
     {
-        if self.input_filters.contains_key(&scope) {
-            warn!("attempt to set an input filter when one is already in place. scope={scope:?}");
+        if self.input_filters.contains_key(&bufid) {
+            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
             return false;
         }
-        self.input_filters.insert(scope, Box::new(filter));
+        self.input_filters.insert(bufid, Box::new(filter));
 
         true
     }
 
     /// Remove the input filter for the given scope if one exists.
-    pub(crate) fn clear_input_filter(&mut self, scope: FilterScope) {
-        self.input_filters.remove(&scope);
+    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
+        self.input_filters.remove(&bufid);
     }
 
-    /// The active input filter (if there is one) prefering a global filter over one attached to
-    /// the active buffer.
+    /// The active input filter (if there is one).
     fn input_filter(&mut self) -> Option<&mut Box<dyn InputFilter>> {
-        // Attempting to fallback to a different mutable get from the filter map results in some
-        // weird lifetime issues which is why there is the explicit check of the key first here.
-        if self.input_filters.contains_key(&FilterScope::Global) {
-            self.input_filters.get_mut(&FilterScope::Global)
-        } else {
-            let id = self.active_buffer_id();
-            self.input_filters.get_mut(&FilterScope::Buffer(id))
-        }
+        let id = self.active_buffer_id();
+        self.input_filters.get_mut(&id)
     }
 }
