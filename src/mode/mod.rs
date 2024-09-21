@@ -1,7 +1,7 @@
 //! Modal editing support.
 use crate::{
     editor::Actions,
-    key::Key,
+    key::Input,
     term::CurShape,
     trie::{QueryResult, Trie},
 };
@@ -21,8 +21,8 @@ pub(crate) fn modes() -> Vec<Mode> {
 pub(crate) struct Mode {
     pub(crate) name: String,
     pub(crate) cur_shape: CurShape,
-    pub(crate) keymap: Trie<Key, Actions>,
-    handle_expired_pending: fn(&[Key]) -> Option<Actions>,
+    pub(crate) keymap: Trie<Input, Actions>,
+    handle_expired_pending: fn(&[Input]) -> Option<Actions>,
 }
 
 impl fmt::Display for Mode {
@@ -41,7 +41,7 @@ impl Mode {
         }
     }
 
-    pub fn handle_keys(&self, keys: &mut Vec<Key>) -> Option<Actions> {
+    pub fn handle_keys(&self, keys: &mut Vec<Input>) -> Option<Actions> {
         match self.keymap.get(keys) {
             QueryResult::Val(outcome) => {
                 keys.clear();

@@ -4,7 +4,7 @@ use crate::{
     config::ColorScheme,
     config_handle, die,
     editor::Editor,
-    key::Key,
+    key::Input,
     term::{Cursor, Style},
     VERSION,
 };
@@ -222,22 +222,22 @@ impl Editor {
     }
 }
 
-fn render_pending(keys: &[Key]) -> String {
+fn render_pending(keys: &[Input]) -> String {
     let mut s = String::new();
     for k in keys {
         match k {
-            Key::Char(c) if c.is_ascii_whitespace() => s.push_str(&format!("<{:x}>", *c as u8)),
-            Key::Char(c) => s.push(*c),
-            Key::Ctrl(c) => {
+            Input::Char(c) if c.is_ascii_whitespace() => s.push_str(&format!("<{:x}>", *c as u8)),
+            Input::Char(c) => s.push(*c),
+            Input::Ctrl(c) => {
                 s.push('^');
                 s.push(*c);
             }
-            Key::Alt(c) => {
+            Input::Alt(c) => {
                 s.push('^');
                 s.push('[');
                 s.push(*c);
             }
-            Key::CtrlAlt(c) => {
+            Input::CtrlAlt(c) => {
                 s.push('^');
                 s.push('[');
                 s.push('^');
@@ -258,7 +258,7 @@ fn render_pending(keys: &[Key]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::key::Key::*;
+    use crate::key::Input::*;
     use simple_test_case::test_case;
 
     #[test_case(vec![Char('a')], "a"; "single char")]
@@ -274,7 +274,7 @@ mod tests {
         "truncated"
     )]
     #[test]
-    fn render_pending_works(pending: Vec<Key>, expected: &str) {
+    fn render_pending_works(pending: Vec<Input>, expected: &str) {
         let s = render_pending(&pending);
         assert_eq!(s, expected);
     }

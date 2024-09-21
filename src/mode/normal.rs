@@ -3,7 +3,7 @@ use crate::{
     config_handle,
     dot::TextObject::*,
     editor::{Action::*, Actions, ViewPort},
-    key::{Arrow::*, Key::*},
+    key::{Arrow::*, Input::*},
     keymap,
     mode::Mode,
     term::CurShape,
@@ -113,8 +113,8 @@ pub(crate) fn normal_mode() -> Mode {
 
     };
 
-    keymap.set_default(|&k| match k {
-        Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawKey { k })),
+    keymap.set_default(|&i| match i {
+        Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawInput { i })),
         _ => None,
     });
 

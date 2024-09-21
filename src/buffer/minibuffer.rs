@@ -4,7 +4,7 @@ use crate::{
     buffer::{Buffer, GapBuffer, TextObject},
     config_handle,
     editor::Editor,
-    key::{Arrow, Key},
+    key::{Arrow, Input},
     util::run_command_blocking,
 };
 use std::{cmp::min, ffi::OsStr, path::Path};
@@ -129,13 +129,13 @@ impl MiniBuffer {
                 bottom,
             }));
 
-            match ed.block_for_key() {
-                Key::Char(c) => {
+            match ed.block_for_input() {
+                Input::Char(c) => {
                     input.insert(x, c);
                     x += 1;
                     mb.handle_on_change(&input, &on_change);
                 }
-                Key::Ctrl('h') | Key::Backspace | Key::Del => {
+                Input::Ctrl('h') | Input::Backspace | Input::Del => {
                     if x > 0 && x <= input.len() {
                         input.remove(x - 1);
                         x = x.saturating_sub(1);
@@ -143,8 +143,8 @@ impl MiniBuffer {
                     }
                 }
 
-                Key::Esc => return MiniBufferSelection::Cancelled,
-                Key::Return => {
+                Input::Esc => return MiniBufferSelection::Cancelled,
+                Input::Return => {
                     return match mb.b.line(y) {
                         Some(_) if line_indices.is_empty() => {
                             MiniBufferSelection::UserInput { input }
@@ -158,16 +158,16 @@ impl MiniBuffer {
                     };
                 }
 
-                Key::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
-                Key::Arrow(Arrow::Left) => x = x.saturating_sub(1),
-                Key::Alt('k') | Key::Arrow(Arrow::Up) => {
+                Input::Arrow(Arrow::Right) => x = min(x + 1, input.len()),
+                Input::Arrow(Arrow::Left) => x = x.saturating_sub(1),
+                Input::Alt('k') | Input::Arrow(Arrow::Up) => {
                     if selected_line_idx == 0 {
                         mb.b.set_dot(TextObject::BufferEnd, 1);
                     } else {
                         mb.b.set_dot(TextObject::Arr(Arrow::Up), 1);
                     }
                 }
-                Key::Alt('j') | Key::Arrow(Arrow::Down) => {
+                Input::Alt('j') | Input::Arrow(Arrow::Down) => {
                     if selected_line_idx == visible_lines.len() - 1 {
                         mb.b.set_dot(TextObject::BufferStart, 1);
                     } else {

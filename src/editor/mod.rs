@@ -6,8 +6,8 @@ use crate::{
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
-    input::{Input, InputEvent},
-    key::{Arrow, Key, MouseButton, MouseEvent},
+    input::{InputEvent, StdinInput},
+    key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
     restore_terminal_state, set_config,
     term::{
@@ -52,7 +52,7 @@ pub struct Editor {
     status_message: String,
     status_time: Instant,
     modes: Vec<Mode>,
-    pending_keys: Vec<Key>,
+    pending_keys: Vec<Input>,
     buffers: Buffers,
     tx_input_events: Sender<InputEvent>,
     rx_input_events: Receiver<InputEvent>,
@@ -143,7 +143,7 @@ impl Editor {
     #[inline]
     fn handle_input_event(&mut self) {
         match self.rx_input_events.recv().unwrap() {
-            InputEvent::KeyPress(k) => self.handle_keypress(k),
+            InputEvent::Input(i) => self.handle_input(i),
             InputEvent::Action(a) => self.handle_action(a),
             InputEvent::Message(msg) => self.handle_message(msg),
             InputEvent::WinsizeChanged => self.update_window_size(),
@@ -185,7 +185,7 @@ impl Editor {
         // SAFETY: we only register our signal handler once
         unsafe { register_signal_handler() };
         self.update_window_size();
-        Input::new(tx).run_threaded();
+        StdinInput::new(tx).run_threaded();
     }
 
     pub(crate) fn screen_rowcol(&self) -> (usize, usize) {
@@ -199,10 +199,10 @@ impl Editor {
         self.status_time = Instant::now();
     }
 
-    pub(crate) fn block_for_key(&mut self) -> Key {
+    pub(crate) fn block_for_input(&mut self) -> Input {
         loop {
             match self.rx_input_events.recv().unwrap() {
-                InputEvent::KeyPress(k) => return k,
+                InputEvent::Input(k) => return k,
                 InputEvent::Action(a) => self.handle_action(a),
                 InputEvent::Message(msg) => self.handle_message(msg),
                 InputEvent::WinsizeChanged => self.update_window_size(),
@@ -309,7 +309,7 @@ impl Editor {
         }
     }
 
-    fn handle_keypress(&mut self, k: Key) {
+    fn handle_input(&mut self, k: Input) {
         self.pending_keys.push(k);
 
         if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {
@@ -393,8 +393,8 @@ impl Editor {
             DebugBufferContents => self.debug_buffer_contents(),
             DebugEditLog => self.debug_edit_log(),
 
-            RawKey { k } if k == Key::PageUp || k == Key::PageDown => {
-                let arr = if k == Key::PageUp {
+            RawInput { i } if i == Input::PageUp || i == Input::PageDown => {
+                let arr = if i == Input::PageUp {
                     Arrow::Up
                 } else {
                     Arrow::Down
@@ -405,7 +405,9 @@ impl Editor {
                     self.screen_rows,
                 ));
             }
-            RawKey { k: Key::Mouse(evt) } => self.handle_mouse_event(evt),
+            RawInput {
+                i: Input::Mouse(evt),
+            } => self.handle_mouse_event(evt),
 
             a => self.forward_action_to_active_buffer(a),
         }

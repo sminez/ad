@@ -9,7 +9,7 @@ use crate::{
         lex::{Token, TokenType, Tokenizer, Tokens},
         try_tokenizer_for_path,
     },
-    key::Key,
+    key::Input,
     term::Style,
     util::relative_path_from,
     MAX_NAME_LEN, UNNAMED_BUFFER,
@@ -884,7 +884,7 @@ impl Buffer {
             Action::DotFlip => self.dot.flip(),
             Action::DotSet(t, count) => self.set_dot(t, count),
 
-            Action::RawKey { k } => return self.handle_raw_key(k),
+            Action::RawInput { i } => return self.handle_raw_input(i),
 
             _ => (),
         }
@@ -892,14 +892,14 @@ impl Buffer {
         None
     }
 
-    fn handle_raw_key(&mut self, k: Key) -> Option<ActionOutcome> {
+    fn handle_raw_input(&mut self, k: Input) -> Option<ActionOutcome> {
         let (match_indent, expand_tab, tabstop) = {
             let conf = config_handle!();
             (conf.match_indent, conf.expand_tab, conf.tabstop)
         };
 
         match k {
-            Key::Return => {
+            Input::Return => {
                 let prefix = if match_indent {
                     let cur = self.dot.first_cur();
                     let y = self.txt.char_to_line(cur.idx);
@@ -920,7 +920,7 @@ impl Buffer {
                 return deleted.map(ActionOutcome::SetClipboard);
             }
 
-            Key::Tab => {
+            Input::Tab => {
                 let (c, deleted) = if expand_tab {
                     self.insert_string(self.dot, " ".repeat(tabstop))
                 } else {
@@ -931,13 +931,13 @@ impl Buffer {
                 return deleted.map(ActionOutcome::SetClipboard);
             }
 
-            Key::Char(ch) => {
+            Input::Char(ch) => {
                 let (c, deleted) = self.insert_char(self.dot, ch);
                 self.dot = Dot::Cur { c };
                 return deleted.map(ActionOutcome::SetClipboard);
             }
 
-            Key::Arrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
+            Input::Arrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
 
             _ => (),
         }
@@ -1236,7 +1236,7 @@ pub(crate) mod tests {
     #[test]
     fn move_forward_at_end_of_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "");
-        b.handle_raw_key(Key::Arrow(Arrow::Right));
+        b.handle_raw_input(Input::Arrow(Arrow::Right));
 
         let c = Cur { idx: 0 };
         assert_eq!(b.dot, Dot::Cur { c });

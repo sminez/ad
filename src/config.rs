@@ -1,5 +1,5 @@
 //! A minimal config file format for ad
-use crate::{key::Key, mode::normal_mode, term::Color};
+use crate::{key::Input, mode::normal_mode, term::Color};
 use std::{collections::BTreeMap, env, fs, io};
 
 /// Editor level configuration
@@ -12,7 +12,7 @@ pub struct Config {
     pub(crate) minibuffer_lines: usize,
     pub(crate) find_command: String,
     pub(crate) colorscheme: ColorScheme,
-    pub(crate) bindings: BTreeMap<Vec<Key>, String>,
+    pub(crate) bindings: BTreeMap<Vec<Input>, String>,
 }
 
 impl Default for Config {
@@ -124,7 +124,7 @@ impl Config {
                 if nm.keymap.contains_key_or_prefix(keys) {
                     let mut s = String::new();
                     for k in keys {
-                        if let Key::Char(c) = k {
+                        if let Input::Char(c) = k {
                             s.push(*c);
                         }
                     }
@@ -180,7 +180,7 @@ impl Config {
             .split_once("=>")
             .ok_or_else(|| format!("'{input}' is not a 'map ... => prog' statement"))?;
 
-        let keys: Vec<Key> = keys
+        let keys: Vec<Input> = keys
             .split_whitespace()
             .filter_map(|s| {
                 if s.len() == 1 {
@@ -188,11 +188,11 @@ impl Config {
                     if c.is_whitespace() {
                         None
                     } else {
-                        Some(Key::Char(c))
+                        Some(Input::Char(c))
                     }
                 } else {
                     match s {
-                        "<space>" => Some(Key::Char(' ')),
+                        "<space>" => Some(Input::Char(' ')),
                         _ => None,
                     }
                 }
@@ -250,8 +250,8 @@ map G G => my-prog
     #[test]
     fn parse_of_example_config_works() {
         let cfg = Config::parse(EXAMPLE_CONFIG).unwrap();
-        let bindings: BTreeMap<Vec<Key>, String> =
-            [(vec![Key::Char(' '), Key::Char('F')], "fmt".to_string())]
+        let bindings: BTreeMap<Vec<Input>, String> =
+            [(vec![Input::Char(' '), Input::Char('F')], "fmt".to_string())]
                 .into_iter()
                 .collect();
 
@@ -271,9 +271,12 @@ map G G => my-prog
             tabstop: 7,
             expand_tab: false,
             match_indent: false,
-            bindings: [(vec![Key::Char('G'), Key::Char('G')], "my-prog".to_string())]
-                .into_iter()
-                .collect(),
+            bindings: [(
+                vec![Input::Char('G'), Input::Char('G')],
+                "my-prog".to_string(),
+            )]
+            .into_iter()
+            .collect(),
             ..Default::default()
         };
 

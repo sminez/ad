@@ -7,7 +7,7 @@ use crate::{
     editor::Editor,
     exec::{Addr, Address, Program},
     fsys::BufId,
-    key::Key,
+    key::Input,
     mode::Mode,
     replace_config, update_config,
     util::{
@@ -68,7 +68,7 @@ pub(crate) enum Action {
     OpenFile { path: String },
     Paste,
     PreviousBuffer,
-    RawKey { k: Key },
+    RawInput { i: Input },
     Redo,
     ReloadActiveBuffer,
     ReloadBuffer { id: usize },

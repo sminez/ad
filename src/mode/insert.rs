@@ -2,7 +2,7 @@
 use crate::{
     dot::TextObject::*,
     editor::{Action::*, Actions},
-    key::{Arrow::*, Key::*},
+    key::{Arrow::*, Input::*},
     keymap,
     mode::Mode,
     term::CurShape,
@@ -25,7 +25,7 @@ pub(crate) fn insert_mode() -> Mode {
     };
 
     // By default we just let the buffer try to handle this
-    keymap.set_default(|&k| Some(Actions::Single(RawKey { k })));
+    keymap.set_default(|&i| Some(Actions::Single(RawInput { i })));
 
     Mode {
         name: "INSERT".to_string(),
@@ -33,9 +33,9 @@ pub(crate) fn insert_mode() -> Mode {
         keymap,
         handle_expired_pending: |keys| {
             Some(if keys.len() == 1 {
-                Actions::Single(RawKey { k: keys[0] })
+                Actions::Single(RawInput { i: keys[0] })
             } else {
-                Actions::Multi(keys.iter().map(|&k| RawKey { k }).collect())
+                Actions::Multi(keys.iter().map(|&i| RawInput { i }).collect())
             })
         },
     }

@@ -2,7 +2,7 @@
 use crate::{
     editor::Action,
     fsys::Message,
-    key::{Key, MouseEvent},
+    key::{Input, MouseEvent},
     term::win_size_changed,
 };
 use std::{
@@ -16,8 +16,8 @@ use std::{
 pub(crate) enum InputEvent {
     /// A [Message] received from the virtual filesystem interface
     Message(Message),
-    /// A [Key] press from the user
-    KeyPress(Key),
+    /// An [Input] from the user
+    Input(Input),
     /// An [Action] for the event loop to handle
     Action(Action),
     /// A signal that our window size has changed
@@ -25,20 +25,20 @@ pub(crate) enum InputEvent {
 }
 
 /// A tui input handle that parses stdin and emits [InputEvent]s to the main editor event loop.
-pub(super) struct Input {
+pub(super) struct StdinInput {
     stdin: Stdin,
     tx: Sender<InputEvent>,
 }
 
-impl Input {
+impl StdinInput {
     pub(super) fn new(tx: Sender<InputEvent>) -> Self {
         Self { stdin: stdin(), tx }
     }
 
     pub fn run_threaded(mut self) -> JoinHandle<()> {
         spawn(move || loop {
-            if let Some(key) = self.try_read_key() {
-                self.tx.send(InputEvent::KeyPress(key)).unwrap();
+            if let Some(key) = self.try_read_input() {
+                self.tx.send(InputEvent::Input(key)).unwrap();
             } else if win_size_changed() {
                 self.tx.send(InputEvent::WinsizeChanged).unwrap();
             }
@@ -56,31 +56,31 @@ impl Input {
         }
     }
 
-    pub fn try_read_key(&mut self) -> Option<Key> {
+    pub fn try_read_input(&mut self) -> Option<Input> {
         let c = self.try_read_char()?;
 
         // Normal key press
-        match Key::from_char(c) {
-            Key::Esc => (),
+        match Input::from_char(c) {
+            Input::Esc => (),
             key => return Some(key),
         }
 
         let c2 = match self.try_read_char() {
             Some(c2) => c2,
-            None => return Some(Key::Esc),
+            None => return Some(Input::Esc),
         };
         let c3 = match self.try_read_char() {
             Some(c3) => c3,
-            None => return Some(Key::try_from_seq2(c, c2).unwrap_or(Key::Esc)),
+            None => return Some(Input::try_from_seq2(c, c2).unwrap_or(Input::Esc)),
         };
 
-        if let Some(key) = Key::try_from_seq2(c2, c3) {
+        if let Some(key) = Input::try_from_seq2(c2, c3) {
             return Some(key);
         }
 
         if c2 == '[' && c3.is_ascii_digit() {
             if let Some('~') = self.try_read_char() {
-                if let Some(key) = Key::try_from_bracket_tilde(c3) {
+                if let Some(key) = Input::try_from_bracket_tilde(c3) {
                     return Some(key);
                 }
             }
@@ -105,9 +105,9 @@ impl Input {
             let nums: Vec<usize> = s.split(';').map(|s| s.parse::<usize>().unwrap()).collect();
             let (b, x, y) = (nums[0], nums[1], nums[2]);
 
-            return MouseEvent::try_from_raw(b, x, y, m).map(Key::Mouse);
+            return MouseEvent::try_from_raw(b, x, y, m).map(Input::Mouse);
         }
 
-        Some(Key::Esc)
+        Some(Input::Esc)
     }
 }
