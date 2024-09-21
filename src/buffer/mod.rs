@@ -86,6 +86,7 @@ impl BufferKind {
         match &self {
             BufferKind::File(p) => p.parent(),
             BufferKind::Directory(p) => Some(p.as_ref()),
+            BufferKind::Output(s) => Path::new(s).parent(),
             _ => None,
         }
     }
@@ -770,7 +771,7 @@ impl Buffer {
         };
 
         let path = Path::new(fname);
-        if path.exists() {
+        if path.is_absolute() && path.exists() {
             return Some(dot);
         } else if let Some(dir) = self.dir() {
             if dir.join(path).exists() {
@@ -1138,6 +1139,7 @@ pub(crate) mod tests {
     use crate::key::Arrow;
     use edit::tests::{del_c, del_s, in_c, in_s};
     use simple_test_case::test_case;
+    use std::env;
 
     #[test_case(0, 1; "n0")]
     #[test_case(5, 1; "n5")]
@@ -1400,9 +1402,14 @@ pub(crate) mod tests {
     #[test_case("http://example.com?foo=1&bar=2", Some("http://example.com?foo=1&bar=2"); "http url with multi query string")]
     #[test]
     fn try_expand_known_works(s: &str, expected: Option<&str>) {
+        let cwd = env::current_dir().unwrap().display().to_string();
         // Check with surrounding whitespace and delimiters
         for (l, r) in [(" ", " "), ("(", ")"), ("[", "]"), ("<", ">"), ("{", "}")] {
-            let b = Buffer::new_unnamed(0, &format!("abc_123 {l}{s}{r}\tmore text"));
+            let b = Buffer::new_output(
+                0,
+                format!("{cwd}/+output"),
+                format!("abc_123 {l}{s}{r}\tmore text"),
+            );
 
             // Check with the initial cursor position being at any offset within the target
             for i in 0..s.len() {

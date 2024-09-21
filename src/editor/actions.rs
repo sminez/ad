@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferKind, Buffers, MiniBuffer, MiniBufferSelection},
+    buffer::{BufferKind, MiniBuffer, MiniBufferSelection},
     config::Config,
     config_handle, die,
     dot::{Cur, Dot, TextObject},
@@ -441,29 +441,26 @@ impl Editor {
             None => (dot.as_str(), None),
         };
 
-        let try_set_addr = |buffers: &mut Buffers| {
+        let mut path = Path::new(&maybe_path).to_path_buf();
+        let mut is_file = path.is_absolute() && path.exists();
+
+        if let (false, Some(dir)) = (is_file, b.dir()) {
+            let full_path = dir.join(&path);
+            if full_path.exists() {
+                path = full_path;
+                is_file = true;
+            }
+        }
+
+        if is_file {
+            self.open_file(path);
             if let Some(mut addr) = maybe_addr {
-                let b = buffers.active_mut();
+                let b = self.buffers.active_mut();
                 b.dot = b.map_addr(&mut addr);
             }
-        };
-
-        let path = Path::new(&maybe_path);
-
-        if let Some(dir) = b.dir() {
-            let full_path = dir.join(path);
-            if full_path.exists() {
-                self.open_file(full_path);
-                return try_set_addr(&mut self.buffers);
-            }
+        } else {
+            b.find_forward(&dot);
         }
-
-        if path.exists() {
-            self.open_file(path);
-            return try_set_addr(&mut self.buffers);
-        }
-
-        b.find_forward(&dot);
     }
 
     /// Default semantics for attempting to execute the current dot:
