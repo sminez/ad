@@ -6,7 +6,7 @@ use crate::{
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, BufId, Message, Req},
-    input::{Event, StdinInput},
+    input::{Event, FilterOutput, FilterScope, InputFilter, StdinInput},
     key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
     restore_terminal_state, set_config,
@@ -17,6 +17,7 @@ use crate::{
     LogBuffer, ORIGINAL_TERMIOS,
 };
 use std::{
+    collections::HashMap,
     env,
     io::{self, Stdout, Write},
     panic,
@@ -24,7 +25,7 @@ use std::{
     sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 mod actions;
 mod commands;
@@ -54,6 +55,7 @@ pub struct Editor {
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
+    input_filters: HashMap<FilterScope, Box<dyn InputFilter>>,
     tx_events: Sender<Event>,
     rx_events: Receiver<Event>,
     tx_fsys: Sender<BufId>,
@@ -94,6 +96,7 @@ impl Editor {
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
+            input_filters: HashMap::new(),
             tx_events,
             rx_events,
             tx_fsys,
@@ -139,8 +142,8 @@ impl Editor {
     }
 
     #[inline]
-    fn handle_event(&mut self) {
-        match self.rx_events.recv().unwrap() {
+    fn handle_event(&mut self, event: Event) {
+        match event {
             Event::Input(i) => self.handle_input(i),
             Event::Action(a) => self.handle_action(a),
             Event::Message(msg) => self.handle_message(msg),
@@ -150,7 +153,10 @@ impl Editor {
 
     fn run_event_loop(&mut self) {
         while self.running {
-            self.handle_event();
+            match self.rx_events.recv() {
+                Ok(next_event) => self.handle_event(next_event),
+                _ => break,
+            }
         }
     }
 
@@ -159,7 +165,10 @@ impl Editor {
 
         while self.running {
             self.refresh_screen();
-            self.handle_event();
+            match self.rx_events.recv() {
+                Ok(next_event) => self.handle_event(next_event),
+                _ => break,
+            }
         }
 
         clear_screen(&mut self.stdout);
@@ -307,8 +316,16 @@ impl Editor {
         }
     }
 
-    fn handle_input(&mut self, k: Input) {
-        self.pending_keys.push(k);
+    fn handle_input(&mut self, input: Input) {
+        if let Some(filter) = self.input_filter() {
+            match filter.handle(&input) {
+                FilterOutput::Actions(actions) => self.handle_actions(actions),
+                FilterOutput::Passthrough => (),
+                FilterOutput::Drop => return,
+            }
+        }
+
+        self.pending_keys.push(input);
 
         if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {
             self.handle_actions(actions);
@@ -458,6 +475,41 @@ impl Editor {
             }
 
             _ => (),
+        }
+    }
+
+    // FIXME: NEED TO REWRITE THE WAY THE MINIBUFFER WORKS TO HAVE A SINGLE INSTANCE STORED ON THE
+    // EDITOR ITSELF AND THEN USE GLOBAL INPUT FILTERS TO TAKE OVER THE EVENT LOOP.
+
+    /// Returns `true` if the filter was successfully set, false if there was already one in place.
+    pub(crate) fn try_set_input_filter<F>(&mut self, scope: FilterScope, filter: F) -> bool
+    where
+        F: InputFilter,
+    {
+        if self.input_filters.contains_key(&scope) {
+            warn!("attempt to set an input filter when one is already in place. scope={scope:?}");
+            return false;
+        }
+        self.input_filters.insert(scope, Box::new(filter));
+
+        true
+    }
+
+    /// Remove the input filter for the given scope if one exists.
+    pub(crate) fn clear_input_filter(&mut self, scope: FilterScope) {
+        self.input_filters.remove(&scope);
+    }
+
+    /// The active input filter (if there is one) prefering a global filter over one attached to
+    /// the active buffer.
+    fn input_filter(&mut self) -> Option<&mut Box<dyn InputFilter>> {
+        // Attempting to fallback to a different mutable get from the filter map results in some
+        // weird lifetime issues which is why there is the explicit check of the key first here.
+        if self.input_filters.contains_key(&FilterScope::Global) {
+            self.input_filters.get_mut(&FilterScope::Global)
+        } else {
+            let id = self.active_buffer_id();
+            self.input_filters.get_mut(&FilterScope::Buffer(id))
         }
     }
 }

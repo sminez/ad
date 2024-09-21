@@ -7,6 +7,7 @@ use crate::{
     editor::Editor,
     exec::{Addr, Address, Program},
     fsys::BufId,
+    input::FilterScope,
     key::Input,
     mode::Mode,
     replace_config, update_config,
@@ -226,6 +227,7 @@ impl Editor {
             _ => {
                 let is_last_buffer = self.buffers.len() == 1;
                 self.tx_fsys.send(BufId::Remove(id)).unwrap();
+                self.clear_input_filter(FilterScope::Buffer(id));
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
             }
@@ -319,6 +321,8 @@ impl Editor {
     pub(super) fn set_mode(&mut self, name: &str) {
         if let Some((i, _)) = self.modes.iter().enumerate().find(|(_, m)| m.name == name) {
             self.modes.swap(0, i);
+            // FIXME: This should be a message to the UI rather than the editor itself writing to
+            // stdout
             let cur_shape = self.modes[0].cur_shape.to_string();
             if let Err(e) = self.stdout.write_all(cur_shape.as_bytes()) {
                 // In this situation we're probably not going to be able to do all that much
