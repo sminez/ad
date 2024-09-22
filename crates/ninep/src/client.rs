@@ -12,6 +12,7 @@ use std::{
     mem,
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 // TODO:
@@ -62,6 +63,30 @@ pub struct Client<S>
 where
     S: Stream,
 {
+    /// The shared inner client holding our connection to the server
+    ///
+    /// Shared between clones
+    inner: Arc<Mutex<ClientInner<S>>>,
+    msize: u32,
+}
+
+impl<S> Clone for Client<S>
+where
+    S: Stream,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            msize: self.msize,
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ClientInner<S>
+where
+    S: Stream,
+{
     stream: S,
     uname: String,
     msize: u32,
@@ -69,7 +94,7 @@ where
     next_fid: u32,
 }
 
-impl<S> Drop for Client<S>
+impl<S> Drop for ClientInner<S>
 where
     S: Stream,
 {
@@ -78,6 +103,31 @@ where
         for (_, fid) in fids.into_iter() {
             _ = self.send(0, Tdata::Clunk { fid });
         }
+    }
+}
+
+impl<S> ClientInner<S>
+where
+    S: Stream,
+{
+    fn send(&mut self, tag: u16, content: Tdata) -> io::Result<Rmessage> {
+        let t = Tmessage { tag, content };
+        t.write_to(&mut self.stream)?;
+
+        match Rmessage::read_from(&mut self.stream)? {
+            Rmessage {
+                content: Rdata::Error { ename },
+                ..
+            } => err(ename),
+            msg => Ok(msg),
+        }
+    }
+
+    fn next_fid(&mut self) -> u32 {
+        let fid = self.next_fid;
+        self.next_fid += 1;
+
+        fid
     }
 }
 
@@ -93,11 +143,14 @@ impl Client<UnixStream> {
         fids.insert(String::new(), 0);
 
         let mut client = Self {
-            stream,
-            uname,
+            inner: Arc::new(Mutex::new(ClientInner {
+                stream,
+                uname,
+                msize: MSIZE,
+                fids,
+                next_fid: 1,
+            })),
             msize: MSIZE,
-            fids,
-            next_fid: 1,
         };
         client.connect(aname)?;
 
@@ -131,11 +184,14 @@ impl Client<TcpStream> {
         fids.insert(String::new(), 0);
 
         let mut client = Self {
-            stream,
-            uname,
+            inner: Arc::new(Mutex::new(ClientInner {
+                stream,
+                uname,
+                msize: MSIZE,
+                fids,
+                next_fid: 1,
+            })),
             msize: MSIZE,
-            fids,
-            next_fid: 1,
         };
         client.connect(aname)?;
 
@@ -147,29 +203,18 @@ impl<S> Client<S>
 where
     S: Stream,
 {
-    fn send(&mut self, tag: u16, content: Tdata) -> io::Result<Rmessage> {
-        let t = Tmessage { tag, content };
-        t.write_to(&mut self.stream)?;
-
-        match Rmessage::read_from(&mut self.stream)? {
-            Rmessage {
-                content: Rdata::Error { ename },
-                ..
-            } => err(ename),
-            msg => Ok(msg),
+    #[inline]
+    fn inner(&mut self) -> MutexGuard<'_, ClientInner<S>> {
+        match self.inner.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
         }
-    }
-
-    fn next_fid(&mut self) -> u32 {
-        let fid = self.next_fid;
-        self.next_fid += 1;
-
-        fid
     }
 
     /// Establish our connection to the target 9p server and begin the session.
     fn connect(&mut self, aname: impl Into<String>) -> io::Result<()> {
-        let resp = self.send(
+        let mut inner = self.inner();
+        let resp = inner.send(
             u16::MAX,
             Tdata::Version {
                 msize: MSIZE,
@@ -181,31 +226,36 @@ where
         if version != VERSION {
             return err("server version not supported");
         }
-        self.msize = msize;
+        inner.msize = msize;
+        let uname = inner.uname.clone();
 
-        self.send(
+        inner.send(
             0,
             Tdata::Attach {
                 fid: 0,
                 afid: u32::MAX, // no auth
-                uname: self.uname.clone(),
+                uname,
                 aname: aname.into(),
             },
         )?;
+
+        drop(inner);
+        self.msize = msize;
 
         Ok(())
     }
 
     /// Associate the given path with a new fid.
     pub fn walk(&mut self, path: impl Into<String>) -> io::Result<u32> {
+        let mut inner = self.inner();
         let path = path.into();
-        if let Some(fid) = self.fids.get(&path) {
+        if let Some(fid) = inner.fids.get(&path) {
             return Ok(*fid);
         }
 
-        let new_fid = self.next_fid();
+        let new_fid = inner.next_fid();
 
-        self.send(
+        inner.send(
             0,
             Tdata::Walk {
                 fid: 0,
@@ -214,7 +264,7 @@ where
             },
         )?;
 
-        self.fids.insert(path, new_fid);
+        inner.fids.insert(path, new_fid);
 
         Ok(new_fid)
     }
@@ -223,9 +273,10 @@ where
     ///
     /// Clunks of the root fid (0) will be ignored
     pub fn clunk(&mut self, fid: u32) -> io::Result<()> {
+        let mut inner = self.inner();
         if fid != 0 {
-            self.send(0, Tdata::Clunk { fid })?;
-            self.fids.retain(|_, v| *v != fid);
+            inner.send(0, Tdata::Clunk { fid })?;
+            inner.fids.retain(|_, v| *v != fid);
         }
 
         Ok(())
@@ -233,16 +284,19 @@ where
 
     /// Free server side state for the given path.
     pub fn clunk_path(&mut self, path: impl Into<String>) -> io::Result<()> {
-        match self.fids.get(&path.into()) {
-            Some(fid) => self.clunk(*fid),
-            None => Ok(()),
-        }
+        let fid = match self.inner().fids.get(&path.into()) {
+            Some(fid) => *fid,
+            None => return Ok(()),
+        };
+
+        self.clunk(fid)
     }
 
     /// Request the current [Stat] of the file or directory identified by the given path.
     pub fn stat(&mut self, path: impl Into<String>) -> io::Result<Stat> {
         let fid = self.walk(path)?;
-        let resp = self.send(0, Tdata::Stat { fid })?;
+        let mut inner = self.inner();
+        let resp = inner.send(0, Tdata::Stat { fid })?;
         let raw_stat = expect_rmessage!(resp, Stat { stat, .. });
 
         match raw_stat.try_into() {
@@ -252,7 +306,7 @@ where
     }
 
     fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> io::Result<Vec<u8>> {
-        let resp = self.send(0, Tdata::Read { fid, offset, count })?;
+        let resp = self.inner().send(0, Tdata::Read { fid, offset, count })?;
         let Data(data) = expect_rmessage!(resp, Read { data });
 
         Ok(data)
@@ -261,7 +315,7 @@ where
     fn _read_all(&mut self, path: impl Into<String>, mode: Mode) -> io::Result<Vec<u8>> {
         let fid = self.walk(path)?;
         let mode = mode.bits();
-        self.send(0, Tdata::Open { fid, mode })?;
+        self.inner().send(0, Tdata::Open { fid, mode })?;
 
         let count = self.msize;
         let mut bytes = Vec::new();
@@ -318,14 +372,14 @@ where
     ///
     /// The size of each chunk is determined by the supported message size of the server replying
     /// to the requests.
-    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter<'_, S>> {
+    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter<S>> {
         let fid = self.walk(path)?;
         let mode = Mode::FILE.bits();
         let count = self.msize;
-        self.send(0, Tdata::Open { fid, mode })?;
+        self.inner().send(0, Tdata::Open { fid, mode })?;
 
         Ok(ChunkIter {
-            client: self,
+            client: self.clone(),
             fid,
             offset: 0,
             count,
@@ -333,14 +387,14 @@ where
     }
 
     /// Iterate over newline delimited lines of utf-8 encoded text from the file at `path`.
-    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter<'_, S>> {
+    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter<S>> {
         let fid = self.walk(path)?;
         let mode = Mode::FILE.bits();
         let count = self.msize;
-        self.send(0, Tdata::Open { fid, mode })?;
+        self.inner().send(0, Tdata::Open { fid, mode })?;
 
         Ok(ReadLineIter {
-            client: self,
+            client: self.clone(),
             buf: Vec::new(),
             fid,
             offset: 0,
@@ -361,10 +415,11 @@ where
         let mut cur = 0;
         let header_size = 4 + 8 + 4; // fid + offset + data len
         let chunk_size = (self.msize - header_size) as usize;
+        let mut inner = self.inner();
 
         while cur <= len {
             let end = min(cur + chunk_size, len);
-            let resp = self.send(
+            let resp = inner.send(
                 0,
                 Tdata::Write {
                     fid,
@@ -406,7 +461,7 @@ where
         mode: Mode,
     ) -> io::Result<()> {
         let fid = self.walk(dir)?;
-        self.send(
+        self.inner().send(
             0,
             Tdata::Create {
                 fid,
@@ -422,7 +477,7 @@ where
     /// Attempt to remove a file from the connected filesystem.
     pub fn remove(&mut self, path: impl Into<String>) -> io::Result<()> {
         let fid = self.walk(path)?;
-        self.send(0, Tdata::Remove { fid })?;
+        self.inner().send(0, Tdata::Remove { fid })?;
 
         Ok(())
     }
@@ -430,17 +485,17 @@ where
 
 /// An iterator of [Vec<u8>] chunks out of a given file.
 #[derive(Debug)]
-pub struct ChunkIter<'a, S>
+pub struct ChunkIter<S>
 where
     S: Stream,
 {
-    client: &'a mut Client<S>,
+    client: Client<S>,
     fid: u32,
     offset: u64,
     count: u32,
 }
 
-impl<'a, S> Iterator for ChunkIter<'a, S>
+impl<S> Iterator for ChunkIter<S>
 where
     S: Stream,
 {
@@ -465,11 +520,11 @@ where
 
 /// An iterator of [String] lines out of a given file.
 #[derive(Debug)]
-pub struct ReadLineIter<'a, S>
+pub struct ReadLineIter<S>
 where
     S: Stream,
 {
-    client: &'a mut Client<S>,
+    client: Client<S>,
     buf: Vec<u8>,
     fid: u32,
     offset: u64,
@@ -477,7 +532,7 @@ where
     at_eof: bool,
 }
 
-impl<'a, S> Iterator for ReadLineIter<'a, S>
+impl<S> Iterator for ReadLineIter<S>
 where
     S: Stream,
 {
