@@ -1,5 +1,5 @@
 //! RPC messaging between the fuse filesystem thread and the main editor thread
-use crate::input::Event;
+use crate::{fsys::event::InputFilter, input::Event};
 use std::sync::mpsc::{channel, Sender};
 use tracing::error;
 
@@ -31,7 +31,7 @@ impl Message {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) enum Req {
     ControlMessage { msg: String },
 
@@ -49,4 +49,9 @@ pub(crate) enum Req {
     ClearBufferBody { id: usize },
     InsertBufferBody { id: usize, s: String, offset: usize },
     AppendOutput { id: usize, s: String },
+
+    AddInputEventFilter { id: usize, filter: InputFilter },
+    RemoveInputEventFilter { id: usize },
+    LoadInBuffer { id: usize, txt: String },
+    ExecuteInBuffer { id: usize, txt: String },
 }

@@ -412,8 +412,6 @@ impl Editor {
         self.minibuffer_select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log());
     }
 
-    // TODO: implement customisation of load and execute via the events file once that is in place.
-
     /// Default semantics for attempting to load the current dot:
     ///   - a relative path from the directory of the containing file -> open in ad
     ///   - an absolute path -> open in ad
@@ -427,19 +425,32 @@ impl Editor {
     pub(super) fn default_load_dot(&mut self) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
+        if b.notify_load() {
+            return; // input filter in place
+        }
 
-        let dot = b.dot.content(b);
+        let s = b.dot.content(b);
+        let id = b.id;
 
-        let (maybe_path, maybe_addr) = match dot.find(':') {
+        self.load_explicit_string(id, s);
+    }
+
+    pub(super) fn load_explicit_string(&mut self, bufid: usize, s: String) {
+        let b = match self.buffers.with_id_mut(bufid) {
+            Some(b) => b,
+            None => return,
+        };
+
+        let (maybe_path, maybe_addr) = match s.find(':') {
             Some(idx) => {
-                let (s, addr) = dot.split_at(idx);
+                let (s, addr) = s.split_at(idx);
                 let (_, addr) = addr.split_at(1);
                 match Addr::parse(&mut addr.chars().peekable()) {
                     Ok(expr) => (s, Some(expr)),
                     Err(_) => (s, None),
                 }
             }
-            None => (dot.as_str(), None),
+            None => (s.as_str(), None),
         };
 
         let mut path = Path::new(&maybe_path).to_path_buf();
@@ -460,7 +471,7 @@ impl Editor {
                 b.dot = b.map_addr(&mut addr);
             }
         } else {
-            b.find_forward(&dot);
+            b.find_forward(&s);
         }
     }
 
@@ -475,12 +486,28 @@ impl Editor {
     pub(super) fn default_execute_dot(&mut self) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
+        if b.notify_execute() {
+            return; // input filter in place
+        }
+
         let cmd = b.dot.content(b);
 
         match self.parse_command(cmd.trim_end()) {
             Some(actions) => self.handle_actions(actions),
             None => self.run_shell_cmd(&cmd),
         }
+    }
+
+    pub(super) fn execute_explicit_string(&mut self, bufid: usize, s: String) {
+        let current_id = self.active_buffer_id();
+        self.buffers.focus_id_silent(bufid);
+
+        match self.parse_command(s.trim_end()) {
+            Some(actions) => self.handle_actions(actions),
+            None => self.run_shell_cmd(&s),
+        }
+
+        self.buffers.focus_id_silent(current_id);
     }
 
     pub(super) fn execute_command(&mut self, cmd: &str) {

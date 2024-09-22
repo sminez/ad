@@ -1,12 +1,11 @@
 //! Fetching and parsing input from the user
 use crate::{
-    editor::{Action, Actions},
+    editor::Action,
     fsys::Message,
     key::{Input, MouseEvent},
     term::win_size_changed,
 };
 use std::{
-    fmt,
     io::{stdin, Read, Stdin},
     sync::mpsc::Sender,
     thread::{spawn, JoinHandle},
@@ -23,26 +22,6 @@ pub(crate) enum Event {
     Action(Action),
     /// A signal that our window size has changed
     WinsizeChanged,
-}
-
-/// An [InputFilter] can be registered against all incoming events (such as for the minibuffer) or
-/// for a specified buffer. [Input] [Event]s routed to a buffer with a registered input filter are
-/// first passed through the filter instead of being handled directly.
-///
-/// See [InputFilter::handle] for more.
-pub(crate) trait InputFilter: fmt::Debug + 'static {
-    /// Decide how to handle a given [Input]:
-    ///
-    /// If an InputFilter has a handle on the Editor's `tx_events` channel then that can be used
-    /// to submit events to the main event loop at a later point following a call to `handle`.
-    fn handle(&mut self, input: &Input) -> FilterOutput;
-}
-
-#[derive(Debug)]
-pub(crate) enum FilterOutput {
-    Drop,
-    Passthrough,
-    Actions(Actions),
 }
 
 /// A tui input handle that parses stdin and emits [Event]s to the main editor event loop.

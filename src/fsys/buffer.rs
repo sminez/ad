@@ -1,16 +1,21 @@
 //! Buffer state for the fuse filesystem
-use super::{
-    empty_dir_stat, empty_file_stat, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID,
-    CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
+use crate::{
+    die,
+    fsys::{
+        empty_dir_stat, empty_file_stat,
+        event::{run_threaded_input_listener, FsysEvent, InputFilter, InputRequest},
+        InternalRead, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER,
+        CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
+    },
+    input::Event,
 };
-use crate::input::Event;
-use ninep::fs::Stat;
+use ninep::{fs::Stat, server::ReadOutcome};
 use std::{
     collections::BTreeMap,
-    sync::mpsc::{Receiver, Sender},
+    sync::mpsc::{channel, Receiver, Sender},
     time::SystemTime,
 };
-use tracing::{debug, trace};
+use tracing::{debug, error, trace};
 
 const FILENAME: &str = "filename";
 const DOT: &str = "dot";
@@ -52,6 +57,13 @@ pub(crate) enum BufId {
     Remove(usize),
     /// A change to the currently active buffer
     Current(usize),
+}
+
+#[derive(Debug)]
+pub(super) enum QidCheck {
+    Unknown,
+    EventFile { buf_qid: u64 },
+    OtherFile,
 }
 
 #[derive(Debug)]
@@ -100,6 +112,35 @@ impl BufferNodes {
         self.known.contains_key(&qid) || self.known.values().any(|bn| bn.contains_qid(qid))
     }
 
+    pub(super) fn check_if_known_qid(&self, qid: u64) -> QidCheck {
+        if self.known.contains_key(&qid) {
+            QidCheck::OtherFile
+        } else {
+            for (&buf_qid, bn) in self.known.iter() {
+                match bn.check_if_known_qid(qid) {
+                    QidCheck::Unknown => (),
+                    QidCheck::EventFile { .. } => return QidCheck::EventFile { buf_qid },
+                    QidCheck::OtherFile => return QidCheck::OtherFile,
+                }
+            }
+
+            QidCheck::Unknown
+        }
+    }
+
+    pub(super) fn attach_input_filter(&mut self, buf_qid: u64) -> Result<()> {
+        match self.known.get_mut(&buf_qid) {
+            Some(bn) => bn.attach_input_filter(&self.tx),
+            None => Err(E_UNKNOWN_FILE.to_string()),
+        }
+    }
+
+    pub(super) fn clear_input_filter(&mut self, buf_qid: u64) {
+        if let Some(bn) = self.known.get_mut(&buf_qid) {
+            bn.clear_input_filter(&self.tx);
+        }
+    }
+
     pub(super) fn lookup_file_stat(&mut self, parent: u64, name: &str) -> Option<Stat> {
         match (parent, name) {
             (BUFFERS_QID, CURRENT_BUFFER) => Some(self.current_buff_stat.clone()),
@@ -136,24 +177,25 @@ impl BufferNodes {
             .refreshed_file_stat(fname, &self.tx)
     }
 
-    pub(super) fn get_file_content(&mut self, qid: u64) -> Option<String> {
+    pub(super) fn get_file_content(&mut self, qid: u64) -> InternalRead {
         if qid == CURRENT_BUFFER_QID {
-            return Some(self.current_buffid.to_string());
+            return InternalRead::Immediate(self.current_buffid.to_string().as_bytes().to_vec());
         } else if qid == INDEX_BUFFER_QID {
-            return Some(self.index());
+            return InternalRead::Immediate(self.index().as_bytes().to_vec());
         }
 
         let (parent, fname) = parent_and_fname(qid);
-        self.known
-            .get(&parent)?
-            .current_file_content(fname, &self.tx)
+        match self.known.get_mut(&parent) {
+            Some(bn) => bn.current_file_content(fname, &self.tx),
+            None => InternalRead::Unknown,
+        }
     }
 
     fn index(&mut self) -> String {
         let mut entries = Vec::with_capacity(self.known.len());
 
         for b in self.known.values_mut() {
-            let filename = b.current_file_content(FILENAME, &self.tx).unwrap();
+            let filename = b.current_file_content_as_string(FILENAME, &self.tx);
             let id = &b.str_id;
 
             entries.push(format!("{id}\t{filename}\n"));
@@ -198,7 +240,8 @@ impl BufferNodes {
             XDOT => Req::SetBufferXDot { id, s },
             XADDR => Req::SetBufferXAddr { id, s },
             OUTPUT => Req::AppendOutput { id, s },
-            FILENAME | EVENT => return Err(E_UNKNOWN_FILE.to_string()),
+            EVENT => return FsysEvent::send_to_editor(id, s, &self.tx),
+            FILENAME => return Err(E_UNKNOWN_FILE.to_string()),
             _ => return Err(E_UNKNOWN_FILE.to_string()),
         };
 
@@ -219,10 +262,12 @@ impl BufferNodes {
                     self.known.insert(qid, BufferNode::new(id, qid));
                 }
 
+                // TODO: handle closing defered reads of files associated with this buffer
                 BufId::Remove(id) => {
                     debug!(%id, "removing buffer from fsys state");
                     self.known.retain(|_, v| v.id != id);
                 }
+
                 BufId::Current(id) => {
                     debug!(%id, "setting current buffer in fsys state");
                     self.current_buffid = id;
@@ -244,6 +289,7 @@ pub(super) struct BufferNode {
     str_id: String,
     stat: Stat,
     file_stats: BTreeMap<&'static str, Stat>,
+    input_handle: Option<Sender<InputRequest>>,
 }
 
 impl BufferNode {
@@ -253,6 +299,7 @@ impl BufferNode {
             str_id: id.to_string(),
             stat: empty_dir_stat(qid, &id.to_string()),
             file_stats: stub_file_stats(qid),
+            input_handle: None,
         }
     }
 
@@ -268,20 +315,56 @@ impl BufferNode {
         self.file_stats.values().any(|s| s.fm.qid == qid)
     }
 
+    fn check_if_known_qid(&self, qid: u64) -> QidCheck {
+        for (&fname, s) in self.file_stats.iter() {
+            if s.fm.qid == qid {
+                return if fname == EVENT {
+                    // replaced with the correct qid by BufferNodes
+                    QidCheck::EventFile { buf_qid: 0 }
+                } else {
+                    QidCheck::OtherFile
+                };
+            }
+        }
+
+        QidCheck::Unknown
+    }
+
+    fn attach_input_filter(&mut self, etx: &Sender<Event>) -> Result<()> {
+        let (tx, rx) = channel();
+        let req = Req::AddInputEventFilter {
+            id: self.id,
+            filter: InputFilter::new(tx),
+        };
+
+        Message::send(req, etx)?;
+        self.input_handle = Some(run_threaded_input_listener(rx));
+
+        Ok(())
+    }
+
+    fn clear_input_filter(&mut self, etx: &Sender<Event>) {
+        if let Some(tx) = self.input_handle.take() {
+            _ = tx.send(InputRequest::Shutdown);
+            _ = Message::send(Req::RemoveInputEventFilter { id: self.id }, etx);
+        }
+    }
+
     fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<Event>) -> Option<Stat> {
-        if fname == OUTPUT {
-            return self.file_stats.get(OUTPUT).cloned();
+        if fname == OUTPUT || fname == EVENT {
+            return self.file_stats.get(fname).cloned();
         }
 
         trace!(id=%self.id, %fname, "refreshing file stat");
-        let content = self.current_file_content(fname, tx)?;
+        let content = self.current_file_content_as_string(fname, tx);
         let stat = self.file_stats.get_mut(fname)?;
         stat.n_bytes = content.as_bytes().len() as u64;
 
         Some(stat.clone())
     }
 
-    fn current_file_content(&self, fname: &str, tx: &Sender<Event>) -> Option<String> {
+    // Must not be called for the event file or unknown files
+    fn current_file_content_as_string(&mut self, fname: &str, tx: &Sender<Event>) -> String {
         let req = match fname {
             FILENAME => Req::ReadBufferName { id: self.id },
             DOT => Req::ReadBufferDot { id: self.id },
@@ -289,11 +372,69 @@ impl BufferNode {
             BODY => Req::ReadBufferBody { id: self.id },
             XDOT => Req::ReadBufferXDot { id: self.id },
             XADDR => Req::ReadBufferXAddr { id: self.id },
-            EVENT | OUTPUT => return Some("".to_string()), // TODO: sort out the event file
-            _ => return None,
+            OUTPUT => return String::new(),
+            fname => die!("current_file_as_string called for {fname}"),
         };
 
-        Message::send(req, tx).ok()
+        match Message::send(req, tx) {
+            Ok(s) => s,
+            Err(e) => {
+                error!("fsys failed to read file content: {e}");
+                String::new()
+            }
+        }
+    }
+
+    fn current_file_content(&mut self, fname: &str, tx: &Sender<Event>) -> InternalRead {
+        let req = match fname {
+            FILENAME => Req::ReadBufferName { id: self.id },
+            DOT => Req::ReadBufferDot { id: self.id },
+            ADDR => Req::ReadBufferAddr { id: self.id },
+            BODY => Req::ReadBufferBody { id: self.id },
+            XDOT => Req::ReadBufferXDot { id: self.id },
+            XADDR => Req::ReadBufferXAddr { id: self.id },
+            OUTPUT => return InternalRead::Immediate(Vec::new()),
+            EVENT => {
+                return match self.pending_events() {
+                    Ok(ir) => ir,
+                    Err(_) => {
+                        self.clear_input_filter(tx);
+                        InternalRead::Unknown
+                    }
+                }
+            }
+
+            _ => return InternalRead::Unknown,
+        };
+
+        match Message::send(req, tx) {
+            Ok(s) => InternalRead::Immediate(s.as_bytes().to_vec()),
+            Err(e) => {
+                error!("fsys failed to read file content: {e}");
+                InternalRead::Unknown
+            }
+        }
+    }
+
+    fn pending_events(&self) -> Result<InternalRead> {
+        let tx = match self.input_handle.as_ref() {
+            Some(tx) => tx,
+            None => {
+                error!("pending_events without input filter (id={})", self.id);
+                return Ok(InternalRead::Unknown);
+            }
+        };
+
+        let (read_tx, read_rx) = channel();
+        if tx.send(InputRequest::Read { tx: read_tx }).is_err() {
+            return Err("failed to send".to_string());
+        }
+
+        match read_rx.recv() {
+            Ok(ReadOutcome::Immediate(data)) => Ok(InternalRead::Immediate(data)),
+            Ok(ReadOutcome::Blocked(rx)) => Ok(InternalRead::Blocked(rx)),
+            Err(_) => Err("failed to read".to_string()),
+        }
     }
 }
 

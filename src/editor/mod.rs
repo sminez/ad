@@ -5,8 +5,8 @@ use crate::{
     die,
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
-    fsys::{AdFs, BufId, Message, Req},
-    input::{Event, FilterOutput, InputFilter, StdinInput},
+    fsys::{AdFs, BufId, InputFilter, Message, Req},
+    input::{Event, StdinInput},
     key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
     restore_terminal_state, set_config,
@@ -17,7 +17,6 @@ use crate::{
     LogBuffer, ORIGINAL_TERMIOS,
 };
 use std::{
-    collections::HashMap,
     env,
     io::{self, Stdout, Write},
     panic,
@@ -57,7 +56,6 @@ pub struct Editor {
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
-    input_filters: HashMap<usize, Box<dyn InputFilter>>,
     tx_events: Sender<Event>,
     rx_events: Receiver<Event>,
     tx_fsys: Sender<BufId>,
@@ -98,7 +96,6 @@ impl Editor {
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
-            input_filters: HashMap::new(),
             tx_events,
             rx_events,
             tx_fsys,
@@ -259,11 +256,12 @@ impl Editor {
         use Req::*;
 
         debug!("received fys message: {req:?}");
+        let default_handled = || tx.send(Ok("handled".to_string())).unwrap();
 
         match req {
             ControlMessage { msg } => {
                 self.execute_command(&msg);
-                tx.send(Ok("handled".to_string())).unwrap();
+                default_handled();
             }
 
             ReadBufferName { id } => self.send_buffer_resp(id, tx, |b| b.full_name().to_string()),
@@ -309,20 +307,36 @@ impl Editor {
 
             AppendOutput { id, s } => {
                 self.buffers.write_output_for_buffer(id, s);
-                tx.send(Ok("handled".to_string())).unwrap()
+                default_handled();
+            }
+
+            AddInputEventFilter { id, filter } => {
+                let resp = if self.try_set_input_filter(id, filter) {
+                    Ok("handled".to_string())
+                } else {
+                    Err("filter already in place".to_string())
+                };
+                tx.send(resp).unwrap()
+            }
+
+            RemoveInputEventFilter { id } => {
+                self.clear_input_filter(id);
+                default_handled();
+            }
+
+            LoadInBuffer { id, txt } => {
+                self.load_explicit_string(id, txt);
+                default_handled();
+            }
+
+            ExecuteInBuffer { id, txt } => {
+                self.execute_explicit_string(id, txt);
+                default_handled();
             }
         }
     }
 
     fn handle_input(&mut self, input: Input) {
-        if let Some(filter) = self.input_filter() {
-            match filter.handle(&input) {
-                FilterOutput::Actions(actions) => self.handle_actions(actions),
-                FilterOutput::Passthrough => (),
-                FilterOutput::Drop => return,
-            }
-        }
-
         self.pending_keys.push(input);
 
         if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {
@@ -477,27 +491,26 @@ impl Editor {
     }
 
     /// Returns `true` if the filter was successfully set, false if there was already one in place.
-    pub(crate) fn try_set_input_filter<F>(&mut self, bufid: usize, filter: F) -> bool
-    where
-        F: InputFilter,
-    {
-        if self.input_filters.contains_key(&bufid) {
+    pub(crate) fn try_set_input_filter(&mut self, bufid: usize, filter: InputFilter) -> bool {
+        let b = match self.buffers.with_id_mut(bufid) {
+            Some(b) => b,
+            None => return false,
+        };
+
+        if b.input_filter.is_some() {
             warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
             return false;
         }
-        self.input_filters.insert(bufid, Box::new(filter));
+
+        b.input_filter = Some(filter);
 
         true
     }
 
     /// Remove the input filter for the given scope if one exists.
     pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
-        self.input_filters.remove(&bufid);
-    }
-
-    /// The active input filter (if there is one).
-    fn input_filter(&mut self) -> Option<&mut Box<dyn InputFilter>> {
-        let id = self.active_buffer_id();
-        self.input_filters.get_mut(&id)
+        if let Some(b) = self.buffers.with_id_mut(bufid) {
+            b.input_filter = None;
+        }
     }
 }

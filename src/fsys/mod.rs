@@ -41,12 +41,14 @@ use std::{
 use tracing::trace;
 
 mod buffer;
+mod event;
 mod message;
 
 pub(crate) use buffer::BufId;
+pub(crate) use event::{InputFilter, Source};
 pub(crate) use message::{Message, Req};
 
-use buffer::BufferNodes;
+use buffer::{BufferNodes, QidCheck};
 
 const DEFAULT_SOCKET_NAME: &str = "ad";
 const MOUNT_DIR: &str = ".ad/mnt";
@@ -82,7 +84,21 @@ const CURRENT_BUFFER: &str = "current";
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
 const QID_OFFSET: u64 = 9;
 
+const TOP_LEVEL_QIDS: [u64; 5] = [
+    MOUNT_ROOT_QID,
+    CONTROL_FILE_QID,
+    BUFFERS_QID,
+    INDEX_BUFFER_QID,
+    CURRENT_BUFFER_QID,
+];
+
 const E_UNKNOWN_FILE: &str = "unknown file";
+
+enum InternalRead {
+    Immediate(Vec<u8>),
+    Blocked(Receiver<Vec<u8>>),
+    Unknown,
+}
 
 /// The filesystem interface for ad
 #[derive(Debug)]
@@ -126,18 +142,6 @@ impl AdFs {
     pub fn run_threaded(self) -> FsHandle {
         let s = Server::new(self);
         FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()))
-    }
-
-    fn is_known_qid(&self, qid: u64) -> bool {
-        [
-            MOUNT_ROOT_QID,
-            CONTROL_FILE_QID,
-            BUFFERS_QID,
-            INDEX_BUFFER_QID,
-            CURRENT_BUFFER_QID,
-        ]
-        .contains(&qid)
-            || self.buffer_nodes.is_known_buffer_qid(qid)
     }
 }
 
@@ -202,10 +206,25 @@ impl Serve9p for AdFs {
         trace!(%qid, %uname, ?mode, "handling open request");
         self.buffer_nodes.update();
 
-        if self.is_known_qid(qid) {
+        if TOP_LEVEL_QIDS.contains(&qid) {
             Ok(IO_UNIT)
         } else {
-            Err(format!("{E_UNKNOWN_FILE}: {qid}"))
+            match self.buffer_nodes.check_if_known_qid(qid) {
+                QidCheck::Unknown => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
+                QidCheck::OtherFile => Ok(IO_UNIT),
+                QidCheck::EventFile { buf_qid } => {
+                    match self.buffer_nodes.attach_input_filter(buf_qid) {
+                        Ok(_) => Ok(IO_UNIT),
+                        Err(e) => Err(e),
+                    }
+                }
+            }
+        }
+    }
+
+    fn clunk(&mut self, _fid: u32, qid: u64) {
+        if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
+            self.buffer_nodes.clear_input_filter(buf_qid);
         }
     }
 
@@ -217,15 +236,12 @@ impl Serve9p for AdFs {
             CONTROL_FILE_QID => Vec::new(),
 
             qid => match self.buffer_nodes.get_file_content(qid) {
-                Some(content) => content
-                    .as_bytes()
-                    .iter()
-                    .copied()
-                    .skip(offset)
-                    .take(count)
-                    .collect(),
+                InternalRead::Unknown => return Err(format!("{E_UNKNOWN_FILE}: {qid}")),
+                InternalRead::Immediate(content) => {
+                    content.into_iter().skip(offset).take(count).collect()
+                }
 
-                None => return Err(format!("{E_UNKNOWN_FILE}: {qid}")),
+                InternalRead::Blocked(tx) => return Ok(ReadOutcome::Blocked(tx)),
             },
         };
 

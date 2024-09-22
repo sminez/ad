@@ -114,6 +114,10 @@ pub trait Serve9p: Send + 'static {
     /// bytes that will be supported per read/write call on this resource.
     fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
+    /// Clunk a currently open file.
+    #[allow(unused_variables)]
+    fn clunk(&mut self, fid: u32, qid: u64) {}
+
     /// Create a new file in the given parent directory.
     fn create(
         &mut self,
@@ -496,6 +500,15 @@ where
         }
     }
 
+    /// Explicitly clunk all
+    fn clunk_and_clear(&mut self) {
+        let mut guard = self.s.lock().unwrap();
+        for (&fid, &qid) in self.state.fids.iter() {
+            guard.clunk(fid, qid);
+        }
+        self.state.fids.clear();
+    }
+
     fn handle_connection(mut self) {
         use Tdata::*;
 
@@ -511,7 +524,7 @@ where
                 Version { msize, version } => {
                     let res = self.handle_version(msize, version);
                     if res.is_ok() {
-                        self.state.fids.clear();
+                        self.clunk_and_clear();
                     }
 
                     res
@@ -636,7 +649,9 @@ where
     fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
         match self.state.fids.entry(fid) {
             Entry::Occupied(ent) => {
-                ent.remove();
+                let qid = ent.remove();
+                self.s.lock().unwrap().clunk(fid, qid);
+
                 Ok(Rdata::Clunk {})
             }
             Entry::Vacant(_) => Err(E_UNKNOWN_FID.to_string()),

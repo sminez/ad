@@ -17,7 +17,7 @@ type BufferId = usize;
 
 /// A non-empty vec of buffers where the active buffer is accessible and default
 /// buffers are inserted where needed to maintain invariants
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Buffers {
     next_id: BufferId,
     inner: VecDeque<Buffer>,
@@ -151,6 +151,13 @@ impl Buffers {
     pub(crate) fn focus_id(&mut self, id: BufferId) {
         if let Some(idx) = self.inner.iter().position(|b| b.id == id) {
             self.record_jump_position();
+            self.inner.swap(0, idx);
+        }
+    }
+
+    /// Focus the given buffer ID without touching the jump list
+    pub(crate) fn focus_id_silent(&mut self, id: BufferId) {
+        if let Some(idx) = self.inner.iter().position(|b| b.id == id) {
             self.inner.swap(0, idx);
         }
     }

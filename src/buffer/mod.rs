@@ -5,6 +5,7 @@ use crate::{
     dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
     exec::IterBoundedChars,
+    fsys::{InputFilter, Source},
     ftype::{
         lex::{Token, TokenType, Tokenizer, Tokens},
         try_tokenizer_for_path,
@@ -144,7 +145,7 @@ impl BufferKind {
 }
 
 /// Internal state for a text buffer backed by a file on disk
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Buffer {
     pub(crate) id: usize,
     pub(crate) kind: BufferKind,
@@ -156,6 +157,7 @@ pub struct Buffer {
     pub(crate) col_off: usize,
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
+    pub(crate) input_filter: Option<InputFilter>,
     edit_log: EditLog,
     tokenizer: Option<Tokenizer>,
 }
@@ -179,6 +181,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer,
+            input_filter: None,
         })
     }
 
@@ -272,6 +275,7 @@ impl Buffer {
             dirty: false,
             edit_log: Default::default(),
             tokenizer: None,
+            input_filter: None,
         }
     }
 
@@ -290,6 +294,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer: None,
+            input_filter: None,
         }
     }
 
@@ -316,6 +321,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer: None,
+            input_filter: None,
         }
     }
 
@@ -335,6 +341,7 @@ impl Buffer {
             dirty: false,
             edit_log: EditLog::default(),
             tokenizer: None,
+            input_filter: None,
         }
     }
 
@@ -499,6 +506,10 @@ impl Buffer {
     }
 
     pub(crate) fn x_from_rx(&self, y: usize) -> usize {
+        self.x_from_provided_rx(y, self.rx)
+    }
+
+    pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
         if self.is_empty() {
             return 0;
         }
@@ -517,7 +528,7 @@ impl Buffer {
             }
             rx += 1;
 
-            if rx > self.rx {
+            if rx > buf_rx {
                 break;
             }
             cx += 1;
@@ -781,38 +792,50 @@ impl Buffer {
         None
     }
 
-    pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
-        &mut self,
-        x: usize,
-        y: usize,
-        screen_rows: usize,
-    ) {
-        let mouse_cur = self.cur_from_screen_coords(x, y, screen_rows);
-        if !self.dot.contains(&mouse_cur) {
-            self.set_dot_from_screen_coords(x, y, screen_rows);
-        }
+    #[inline]
+    fn set_rx_from_screen_rows(&mut self, x: usize, screen_rows: usize) {
+        self.rx = self.rx_from_screen_rows(x, screen_rows);
     }
 
-    fn cur_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) -> Cur {
+    #[inline]
+    pub(crate) fn rx_from_screen_rows(&self, x: usize, screen_rows: usize) -> usize {
         let (_, w_sgncol) = self.sign_col_dims(screen_rows);
-        self.rx = x.saturating_sub(1).saturating_sub(w_sgncol);
+        x.saturating_sub(1).saturating_sub(w_sgncol)
+    }
+
+    pub(crate) fn cur_from_screen_coords(&self, y: usize, rx: usize) -> Cur {
         let y = min(y + self.row_off - 1, self.len_lines() - 1);
-        let mut cur = Cur::from_yx(y, self.x_from_rx(y), self);
+        let mut cur = Cur::from_yx(y, self.x_from_provided_rx(y, rx), self);
 
         cur.clamp_idx(self.txt.len_chars());
 
         cur
     }
 
+    pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
+        &mut self,
+        x: usize,
+        y: usize,
+        screen_rows: usize,
+    ) {
+        self.set_rx_from_screen_rows(x, screen_rows);
+        let mouse_cur = self.cur_from_screen_coords(y, self.rx);
+        if !self.dot.contains(&mouse_cur) {
+            self.set_dot_from_screen_coords(x, y, screen_rows);
+        }
+    }
+
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+        self.set_rx_from_screen_rows(x, screen_rows);
         self.dot = Dot::Cur {
-            c: self.cur_from_screen_coords(x, y, screen_rows),
+            c: self.cur_from_screen_coords(y, self.rx),
         };
     }
 
     pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
         let mut r = self.dot.as_range();
-        let c = self.cur_from_screen_coords(x, y, screen_rows);
+        self.set_rx_from_screen_rows(x, screen_rows);
+        let c = self.cur_from_screen_coords(y, self.rx);
         r.set_active_cursor(c);
 
         let mut dot = Dot::Range { r };
@@ -854,19 +877,19 @@ impl Buffer {
     pub(crate) fn handle_action(&mut self, a: Action) -> Option<ActionOutcome> {
         match a {
             Action::Delete => {
-                let (c, deleted) = self.delete_dot(self.dot);
+                let (c, deleted) = self.delete_dot(self.dot, Some(Source::Fsys));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
-                let (c, deleted) = self.insert_char(self.dot, c);
+                let (c, deleted) = self.insert_char(self.dot, c, Some(Source::Fsys));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertString { s } => {
-                let (c, deleted) = self.insert_string(self.dot, s);
+                let (c, deleted) = self.insert_string(self.dot, s, Some(Source::Fsys));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
@@ -908,9 +931,9 @@ impl Buffer {
                     None
                 };
 
-                let (c, deleted) = self.insert_char(self.dot, '\n');
+                let (c, deleted) = self.insert_char(self.dot, '\n', Some(Source::Keyboard));
                 let c = match prefix {
-                    Some(s) => self.insert_string(Dot::Cur { c }, s).0,
+                    Some(s) => self.insert_string(Dot::Cur { c }, s, None).0,
                     None => c,
                 };
 
@@ -920,9 +943,9 @@ impl Buffer {
 
             Input::Tab => {
                 let (c, deleted) = if expand_tab {
-                    self.insert_string(self.dot, " ".repeat(tabstop))
+                    self.insert_string(self.dot, " ".repeat(tabstop), Some(Source::Keyboard))
                 } else {
-                    self.insert_char(self.dot, '\t')
+                    self.insert_char(self.dot, '\t', Some(Source::Keyboard))
                 };
 
                 self.dot = Dot::Cur { c };
@@ -930,7 +953,7 @@ impl Buffer {
             }
 
             Input::Char(ch) => {
-                let (c, deleted) = self.insert_char(self.dot, ch);
+                let (c, deleted) = self.insert_char(self.dot, ch, Some(Source::Keyboard));
                 self.dot = Dot::Cur { c };
                 return deleted.map(ActionOutcome::SetClipboard);
             }
@@ -1006,9 +1029,9 @@ impl Buffer {
 
     fn apply_edit(&mut self, Edit { kind, cur, txt }: Edit) {
         let new_cur = match (kind, txt) {
-            (Kind::Insert, Txt::Char(c)) => self.insert_char(Dot::Cur { c: cur }, c).0,
-            (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s).0,
-            (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }).0,
+            (Kind::Insert, Txt::Char(c)) => self.insert_char(Dot::Cur { c: cur }, c, None).0,
+            (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s, None).0,
+            (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }, None).0,
             (Kind::Delete, Txt::String(s)) => {
                 let start_idx = cur.idx;
                 let end_idx = (start_idx + s.chars().count()).saturating_sub(1);
@@ -1018,6 +1041,7 @@ impl Buffer {
                         r: Range::from_cursors(cur, end, true),
                     }
                     .collapse_null_range(),
+                    None,
                 )
                 .0
             }
@@ -1032,24 +1056,60 @@ impl Buffer {
         self.dirty = self.kind.is_file();
     }
 
-    fn insert_char(&mut self, dot: Dot, ch: char) -> (Cur, Option<String>) {
+    /// Returns true if a filter was present and the notification was sent
+    pub(crate) fn notify_load(&self) -> bool {
+        match self.input_filter.as_ref() {
+            Some(f) => {
+                let (ch_from, ch_to) = self.dot.as_char_indices();
+                let txt = self.dot.content(self);
+                f.notify_load(Source::Mouse, ch_from, ch_to, &txt);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Returns true if a filter was present and the notification was sent
+    pub(crate) fn notify_execute(&self) -> bool {
+        match self.input_filter.as_ref() {
+            Some(f) => {
+                let (ch_from, ch_to) = self.dot.as_char_indices();
+                let txt = self.dot.content(self);
+                f.notify_execute(Source::Mouse, ch_from, ch_to, &txt);
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn insert_char(&mut self, dot: Dot, ch: char, source: Option<Source>) -> (Cur, Option<String>) {
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
-            Dot::Range { r } => self.delete_range(r),
+            Dot::Range { r } => self.delete_range(r, source),
         };
 
         let idx = cur.idx;
         self.txt.insert_char(idx, ch);
+
+        if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
+            f.notify_insert(source, idx, idx + 1, &ch.to_string());
+        }
+
         self.edit_log.insert_char(cur, ch);
         self.mark_dirty();
 
         (Cur { idx: idx + 1 }, deleted)
     }
 
-    fn insert_string(&mut self, dot: Dot, s: String) -> (Cur, Option<String>) {
+    fn insert_string(
+        &mut self,
+        dot: Dot,
+        s: String,
+        source: Option<Source>,
+    ) -> (Cur, Option<String>) {
         let (mut cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
-            Dot::Range { r } => self.delete_range(r),
+            Dot::Range { r } => self.delete_range(r, source),
         };
 
         // Inserting an empty string should not be recorded as an edit (and is
@@ -1059,6 +1119,11 @@ impl Buffer {
             let idx = cur.idx;
             let len = s.chars().count();
             self.txt.insert_str(idx, &s);
+
+            if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
+                f.notify_insert(source, idx, idx + len, &s);
+            }
+
             self.edit_log.insert_string(cur, s);
             cur.idx += len;
         }
@@ -1068,20 +1133,25 @@ impl Buffer {
         (cur, deleted)
     }
 
-    fn delete_dot(&mut self, dot: Dot) -> (Cur, Option<String>) {
+    fn delete_dot(&mut self, dot: Dot, source: Option<Source>) -> (Cur, Option<String>) {
         let (cur, deleted) = match dot {
-            Dot::Cur { c } => (self.delete_cur(c), None),
-            Dot::Range { r } => self.delete_range(r),
+            Dot::Cur { c } => (self.delete_cur(c, source), None),
+            Dot::Range { r } => self.delete_range(r, source),
         };
 
         (cur, deleted)
     }
 
-    fn delete_cur(&mut self, cur: Cur) -> Cur {
+    fn delete_cur(&mut self, cur: Cur, source: Option<Source>) -> Cur {
         let idx = cur.idx;
         if idx < self.txt.len_chars() {
             let ch = self.txt.char(idx);
             self.txt.remove_char(idx);
+
+            if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
+                f.notify_delete(source, idx, idx + 1);
+            }
+
             self.edit_log.delete_char(cur, ch);
             self.mark_dirty();
         }
@@ -1089,7 +1159,7 @@ impl Buffer {
         cur
     }
 
-    fn delete_range(&mut self, r: Range) -> (Cur, Option<String>) {
+    fn delete_range(&mut self, r: Range, source: Option<Source>) -> (Cur, Option<String>) {
         let (from, to) = if r.start.idx != r.end.idx {
             (r.start.idx, min(r.end.idx + 1, self.txt.len_chars()))
         } else {
@@ -1098,6 +1168,11 @@ impl Buffer {
 
         let s = self.txt.slice(from, to).to_string();
         self.txt.remove_range(from, to);
+
+        if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
+            f.notify_delete(source, from, to);
+        }
+
         self.edit_log.delete_string(r.start, s.clone());
         self.mark_dirty();
 
@@ -1326,7 +1401,7 @@ pub(crate) mod tests {
         let initial_content = "foo foo foo\n";
         let mut b = Buffer::new_unnamed(0, initial_content);
 
-        b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string());
+        b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string(), None);
         b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
@@ -1338,7 +1413,7 @@ pub(crate) mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content);
 
         let r = Range::from_cursors(c(0), c(2), true);
-        b.delete_dot(Dot::Range { r });
+        b.delete_dot(Dot::Range { r }, None);
         b.handle_action(Action::Undo);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
@@ -1350,8 +1425,8 @@ pub(crate) mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content);
 
         let r = Range::from_cursors(c(0), c(2), true);
-        b.delete_dot(Dot::Range { r });
-        b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string());
+        b.delete_dot(Dot::Range { r }, None);
+        b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string(), None);
 
         assert_eq!(b.string_lines(), vec!["bar foo foo", ""]);
 
