@@ -222,7 +222,7 @@ impl Buffers {
 
     #[inline]
     pub fn is_empty_scratch(&self) -> bool {
-        self.inner.len() == 1 && self.inner[0].is_unnamed() && !self.inner[0].dirty
+        self.inner.len() == 1 && self.inner[0].is_unnamed() && self.inner[0].txt.is_empty()
     }
 
     /// Append to the +output buffer assigned to the buffer with provided id.
