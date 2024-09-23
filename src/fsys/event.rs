@@ -41,7 +41,7 @@ impl InputFilter {
     }
 
     pub fn notify_execute(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
-        let evt = FsysEvent::new(source, Kind::LoadBody, ch_from, ch_to, txt);
+        let evt = FsysEvent::new(source, Kind::ExecuteBody, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 }
