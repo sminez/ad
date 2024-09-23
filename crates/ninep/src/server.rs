@@ -64,6 +64,11 @@ const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 const UNKNOWN_VERSION: &str = "unknown";
 const SUPPORTED_VERSION: &str = "9P2000";
 
+/// An opaque client ID that can be used by server implementations to determine which client a
+/// request originated from by comparing equality.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ClientId(u64);
+
 /// The outcome of a client attempting to [read](Serve9p::read) a given file.
 #[derive(Debug)]
 pub enum ReadOutcome {
@@ -105,22 +110,29 @@ pub trait Serve9p: Send + 'static {
     ///
     /// [Server] will ensure that this method is only called for known parents who have previously
     /// been identified has having [FileType::Directory].
-    fn walk(&mut self, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta>;
+    fn walk(
+        &mut self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta>;
 
     /// Open an existing file in the requested mode for subsequent I/O via [read](Serve9p::read) and
     /// [write](Serve9p::write) calls.
     ///
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
     /// bytes that will be supported per read/write call on this resource.
-    fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
+    fn open(&mut self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
     /// Clunk a currently open file.
     #[allow(unused_variables)]
-    fn clunk(&mut self, fid: u32, qid: u64) {}
+    fn clunk(&mut self, cid: ClientId, qid: u64) {}
 
     /// Create a new file in the given parent directory.
     fn create(
         &mut self,
+        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
@@ -129,22 +141,36 @@ pub trait Serve9p: Send + 'static {
     ) -> Result<(FileMeta, IoUnit)>;
 
     /// Read `count` bytes from the requested file starting from the given `offset`.
-    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<ReadOutcome>;
+    fn read(
+        &mut self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        count: usize,
+        uname: &str,
+    ) -> Result<ReadOutcome>;
 
     /// List the contents of the given directory.
-    fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>>;
+    fn read_dir(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>>;
 
     /// Write the given `data` to the requested file starting at `offset`
-    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>, uname: &str) -> Result<usize>;
+    fn write(
+        &mut self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        data: Vec<u8>,
+        uname: &str,
+    ) -> Result<usize>;
 
     /// Remove the requested file from the filesystem.
-    fn remove(&mut self, qid: u64, uname: &str) -> Result<()>;
+    fn remove(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<()>;
 
     /// Request a machine independent "directory entry" for the given resource.
-    fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat>;
+    fn stat(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat>;
 
     /// Attempt to set the machine independent "directory entry" for the given resource.
-    fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()>;
+    fn write_stat(&mut self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()>;
 }
 
 /// A threaded `9p` server capable of listening on either a TCP socket or UNIX domain socket.
@@ -157,6 +183,7 @@ where
     msize: u32,
     roots: BTreeMap<String, u64>,
     qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+    next_client_id: u64,
 }
 
 impl<S> Server<S>
@@ -181,17 +208,19 @@ where
             msize: MAX_DATA_LEN as u32,
             roots,
             qids: Arc::new(RwLock::new(qids)),
+            next_client_id: 0,
         }
     }
 
     /// Bind this server to the specified port and serve over a tcp socket.
-    pub fn serve_tcp(self, port: u16) -> JoinHandle<()> {
+    pub fn serve_tcp(mut self, port: u16) -> JoinHandle<()> {
         spawn(move || {
             let listener = tcp_socket(port);
 
             for stream in listener.incoming() {
                 let stream = stream.unwrap();
                 let session = Session::new_unattached(
+                    ClientId(self.next_client_id),
                     self.msize,
                     self.roots.clone(),
                     self.s.clone(),
@@ -199,13 +228,14 @@ where
                     stream,
                 );
 
+                self.next_client_id += 1;
                 spawn(move || session.handle_connection());
             }
         })
     }
 
     /// Bind this server to the specified path and serve over a unix socket.
-    pub fn serve_socket(self, socket_name: impl Into<String>) -> JoinHandle<()> {
+    pub fn serve_socket(mut self, socket_name: impl Into<String>) -> JoinHandle<()> {
         let socket_name = socket_name.into();
 
         spawn(move || {
@@ -214,6 +244,7 @@ where
             for stream in sock.listener.incoming() {
                 let stream = stream.unwrap();
                 let session = Session::new_unattached(
+                    ClientId(self.next_client_id),
                     self.msize,
                     self.roots.clone(),
                     self.s.clone(),
@@ -221,6 +252,7 @@ where
                     stream,
                 );
 
+                self.next_client_id += 1;
                 spawn(move || session.handle_connection());
             }
         })
@@ -260,6 +292,7 @@ where
     S: Serve9p,
     U: Stream,
 {
+    client_id: ClientId,
     state: T,
     msize: u32,
     roots: BTreeMap<String, u64>,
@@ -350,6 +383,7 @@ where
     U: Stream,
 {
     fn new_unattached(
+        client_id: ClientId,
         msize: u32,
         roots: BTreeMap<String, u64>,
         s: Arc<Mutex<S>>,
@@ -357,6 +391,7 @@ where
         stream: U,
     ) -> Self {
         Self {
+            client_id,
             state: Unattached::default(),
             msize,
             roots,
@@ -368,6 +403,7 @@ where
 
     fn into_attached(self, ty: Attached) -> Session<Attached, S, U> {
         let Self {
+            client_id,
             msize,
             roots,
             s,
@@ -376,7 +412,7 @@ where
             ..
         } = self;
 
-        Session::new_attached(ty, msize, roots, s, qids, stream)
+        Session::new_attached(client_id, ty, msize, roots, s, qids, stream)
     }
 
     fn handle_connection(mut self) {
@@ -483,6 +519,7 @@ where
     U: Stream,
 {
     fn new_attached(
+        client_id: ClientId,
         state: Attached,
         msize: u32,
         roots: BTreeMap<String, u64>,
@@ -491,6 +528,7 @@ where
         stream: U,
     ) -> Self {
         Self {
+            client_id,
             state,
             msize,
             roots,
@@ -503,8 +541,8 @@ where
     /// Explicitly clunk all
     fn clunk_and_clear(&mut self) {
         let mut guard = self.s.lock().unwrap();
-        for (&fid, &qid) in self.state.fids.iter() {
-            guard.clunk(fid, qid);
+        for &qid in self.state.fids.values() {
+            guard.clunk(self.client_id, qid);
         }
         self.state.fids.clear();
     }
@@ -515,7 +553,7 @@ where
         loop {
             let t = match Tmessage::read_from(&mut self.stream) {
                 Ok(t) => t,
-                Err(_) => return,
+                Err(_) => return self.clunk_and_clear(),
             };
 
             let Tmessage { tag, content } = t;
@@ -627,7 +665,7 @@ where
         let mut qid = fm.qid;
 
         for name in wnames.iter() {
-            let fm = s.walk(qid, name, &self.state.uname)?;
+            let fm = s.walk(self.client_id, qid, name, &self.state.uname)?;
             qid = fm.qid;
             wqids.push(fm.as_qid());
             qids.insert(qid, fm);
@@ -650,7 +688,7 @@ where
         match self.state.fids.entry(fid) {
             Entry::Occupied(ent) => {
                 let qid = ent.remove();
-                self.s.lock().unwrap().clunk(fid, qid);
+                self.s.lock().unwrap().clunk(self.client_id, qid);
 
                 Ok(Rdata::Clunk {})
             }
@@ -663,7 +701,11 @@ where
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
-        let s = self.s.lock().unwrap().stat(fm.qid, &self.state.uname)?;
+        let s = self
+            .s
+            .lock()
+            .unwrap()
+            .stat(self.client_id, fm.qid, &self.state.uname)?;
         let stat: RawStat = s.into();
         let size = stat.size + size_of::<u16>() as u16;
 
@@ -680,7 +722,7 @@ where
         self.s
             .lock()
             .unwrap()
-            .write_stat(fm.qid, stat, &self.state.uname)?;
+            .write_stat(self.client_id, fm.qid, stat, &self.state.uname)?;
 
         Ok(Rdata::Wstat {})
     }
@@ -690,11 +732,11 @@ where
             Some(fm) => fm,
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
-        let iounit = self
-            .s
-            .lock()
-            .unwrap()
-            .open(fm.qid, mode, &self.state.uname)?;
+        let iounit =
+            self.s
+                .lock()
+                .unwrap()
+                .open(self.client_id, fm.qid, mode, &self.state.uname)?;
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -711,11 +753,14 @@ where
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
-        let (fm, iounit) =
-            self.s
-                .lock()
-                .unwrap()
-                .create(fm.qid, &name, perm, mode, &self.state.uname)?;
+        let (fm, iounit) = self.s.lock().unwrap().create(
+            self.client_id,
+            fm.qid,
+            &name,
+            perm,
+            mode,
+            &self.state.uname,
+        )?;
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
@@ -758,6 +803,7 @@ where
             Directory => self.read_dir(fm.qid, offset as usize, count as usize)?,
             Regular | AppendOnly | Exclusive => {
                 let outcome = self.s.lock().unwrap().read(
+                    self.client_id,
                     fm.qid,
                     offset as usize,
                     count as usize,
@@ -788,7 +834,11 @@ where
     }
 
     fn read_dir(&mut self, qid: u64, offset: usize, count: usize) -> Result<Vec<u8>> {
-        let stats = self.s.lock().unwrap().read_dir(qid, &self.state.uname)?;
+        let stats = self
+            .s
+            .lock()
+            .unwrap()
+            .read_dir(self.client_id, qid, &self.state.uname)?;
 
         let mut buf = Vec::with_capacity(count);
         let mut to_skip = offset;
@@ -832,11 +882,13 @@ where
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
-        let count =
-            self.s
-                .lock()
-                .unwrap()
-                .write(fm.qid, offset as usize, data, &self.state.uname)? as u32;
+        let count = self.s.lock().unwrap().write(
+            self.client_id,
+            fm.qid,
+            offset as usize,
+            data,
+            &self.state.uname,
+        )? as u32;
 
         Ok(Rdata::Write { count })
     }
@@ -847,7 +899,10 @@ where
             None => return Err(E_UNKNOWN_FID.to_string()),
         };
 
-        self.s.lock().unwrap().remove(fm.qid, &self.state.uname)?;
+        self.s
+            .lock()
+            .unwrap()
+            .remove(self.client_id, fm.qid, &self.state.uname)?;
 
         Ok(Rdata::Remove {})
     }

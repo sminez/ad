@@ -5,7 +5,7 @@ use crate::{
     dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
     editor::{Action, ViewPort},
     exec::IterBoundedChars,
-    fsys::{InputFilter, Source},
+    fsys::InputFilter,
     ftype::{
         lex::{Token, TokenType, Tokenizer, Tokens},
         try_tokenizer_for_path,
@@ -15,6 +15,7 @@ use crate::{
     util::relative_path_from,
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
+use ad_event::Source;
 use std::{
     cmp::min,
     fs,

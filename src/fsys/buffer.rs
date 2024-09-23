@@ -3,7 +3,7 @@ use crate::{
     die,
     fsys::{
         empty_dir_stat, empty_file_stat,
-        event::{run_threaded_input_listener, FsysEvent, InputFilter, InputRequest},
+        event::{run_threaded_input_listener, send_event_to_editor, InputFilter, InputRequest},
         InternalRead, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER,
         CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
     },
@@ -240,7 +240,7 @@ impl BufferNodes {
             XDOT => Req::SetBufferXDot { id, s },
             XADDR => Req::SetBufferXAddr { id, s },
             OUTPUT => Req::AppendOutput { id, s },
-            EVENT => return FsysEvent::send_to_editor(id, s, &self.tx),
+            EVENT => return send_event_to_editor(id, &s, &self.tx),
             FILENAME => return Err(E_UNKNOWN_FILE.to_string()),
             _ => return Err(E_UNKNOWN_FILE.to_string()),
         };

@@ -4,4 +4,5 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ad_event = { version = "0.1", path = "../ad_event" }
 ninep = { version = "0.2", path = "../ninep" }

@@ -6,6 +6,7 @@ version = 3
 name = "ad-editor"
 version = "0.1.1"
 dependencies = [
+ "ad_event",
  "criterion",
  "libc",
  "ninep",
@@ -18,7 +19,15 @@ dependencies = [
 name = "ad_client"
 version = "0.1.0"
 dependencies = [
+ "ad_event",
  "ninep",
+]
+
+[[package]]
+name = "ad_event"
+version = "0.1.0"
+dependencies = [
+ "simple_test_case",
 ]
 
 [[package]]

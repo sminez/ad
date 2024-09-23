@@ -28,10 +28,11 @@
 use crate::input::Event;
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{ReadOutcome, Serve9p, Server},
+    server::{ClientId, ReadOutcome, Serve9p, Server},
     Result,
 };
 use std::{
+    collections::HashMap,
     env,
     fs::create_dir_all,
     sync::mpsc::{Receiver, Sender},
@@ -45,7 +46,7 @@ mod event;
 mod message;
 
 pub(crate) use buffer::BufId;
-pub(crate) use event::{InputFilter, Source};
+pub(crate) use event::InputFilter;
 pub(crate) use message::{Message, Req};
 
 use buffer::{BufferNodes, QidCheck};
@@ -100,11 +101,21 @@ enum InternalRead {
     Unknown,
 }
 
+// FIXME: using fids for this doesn't work as each client has its own space for them. We need to
+// identify the connected client instead.
+#[derive(Debug, Default)]
+struct Cids {
+    cids: Vec<ClientId>,
+    read_locked: Option<ClientId>,
+}
+
 /// The filesystem interface for ad
 #[derive(Debug)]
 pub(crate) struct AdFs {
     tx: Sender<Event>,
     buffer_nodes: BufferNodes,
+    /// map of qids to client IDs with that qid open
+    open_cids: HashMap<u64, Cids>,
     // Root level files and directories
     mount_dir_stat: Stat,
     control_file_stat: Stat,
@@ -133,6 +144,7 @@ impl AdFs {
         Self {
             tx,
             buffer_nodes,
+            open_cids: HashMap::new(),
             mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
             control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
         }
@@ -143,11 +155,38 @@ impl AdFs {
         let s = Server::new(self);
         FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()))
     }
+
+    fn add_open_cid(&mut self, qid: u64, cid: ClientId) {
+        self.open_cids.entry(qid).or_default().cids.push(cid);
+    }
+
+    fn remove_open_cid(&mut self, qid: u64, cid: ClientId) {
+        self.open_cids.entry(qid).and_modify(|cids| {
+            cids.cids.retain(|&id| id != cid);
+            if cids.read_locked == Some(cid) {
+                cids.read_locked = None;
+            }
+        });
+    }
+
+    fn lock_qid_for_reading(&mut self, qid: u64, cid: ClientId) -> Result<()> {
+        trace!("locking qid for reading qid={qid} cid={cid:?}");
+        match self.open_cids.get_mut(&qid) {
+            Some(cids) => cids.read_locked = Some(cid),
+            None => return Err(E_UNKNOWN_FILE.to_string()),
+        }
+
+        Ok(())
+    }
+
+    fn read_locked_cid(&self, qid: u64) -> Option<ClientId> {
+        self.open_cids.get(&qid).and_then(|cids| cids.read_locked)
+    }
 }
 
 impl Serve9p for AdFs {
-    fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat> {
-        trace!(%qid, %uname, "handling stat request");
+    fn stat(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
+        trace!(?cid, %qid, %uname, "handling stat request");
         self.buffer_nodes.update();
 
         match qid {
@@ -161,8 +200,8 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()> {
-        trace!(%qid, %uname, "handling write stat request");
+    fn write_stat(&mut self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+        trace!(?cid, %qid, %uname, "handling write stat request");
         self.buffer_nodes.update();
 
         if stat.n_bytes == 0 {
@@ -177,8 +216,14 @@ impl Serve9p for AdFs {
         Ok(())
     }
 
-    fn walk(&mut self, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta> {
-        trace!(%parent_qid, %child, %uname, "handling walk request");
+    fn walk(
+        &mut self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta> {
+        trace!(?cid, %parent_qid, %child, %uname, "handling walk request");
         self.buffer_nodes.update();
 
         match parent_qid {
@@ -202,54 +247,69 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
-        trace!(%qid, %uname, ?mode, "handling open request");
+    fn open(&mut self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+        trace!(?cid, %qid, %uname, ?mode, "handling open request");
         self.buffer_nodes.update();
 
-        if TOP_LEVEL_QIDS.contains(&qid) {
-            Ok(IO_UNIT)
-        } else {
-            match self.buffer_nodes.check_if_known_qid(qid) {
-                QidCheck::Unknown => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
-                QidCheck::OtherFile => Ok(IO_UNIT),
-                QidCheck::EventFile { buf_qid } => {
-                    match self.buffer_nodes.attach_input_filter(buf_qid) {
-                        Ok(_) => Ok(IO_UNIT),
-                        Err(e) => Err(e),
-                    }
+        if !TOP_LEVEL_QIDS.contains(&qid) {
+            if let QidCheck::Unknown = self.buffer_nodes.check_if_known_qid(qid) {
+                return Err(format!("{E_UNKNOWN_FILE}: {qid}"));
+            }
+        }
+
+        self.add_open_cid(qid, cid);
+
+        Ok(IO_UNIT)
+    }
+
+    fn clunk(&mut self, cid: ClientId, qid: u64) {
+        trace!(?cid, %qid, "handling clunk request");
+        if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
+            if self.read_locked_cid(qid) == Some(cid) {
+                self.buffer_nodes.clear_input_filter(buf_qid);
+            }
+        }
+        self.remove_open_cid(qid, cid); // also handles clearing the read lock
+    }
+
+    fn read(
+        &mut self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        count: usize,
+        uname: &str,
+    ) -> Result<ReadOutcome> {
+        trace!(?cid, %qid, %offset, %count, %uname, "handling read request");
+        self.buffer_nodes.update();
+
+        if qid == CONTROL_FILE_QID {
+            return Ok(ReadOutcome::Immediate(Vec::new()));
+        }
+
+        if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
+            match self.read_locked_cid(qid) {
+                Some(id) if id == cid => (),
+                Some(_) => return Ok(ReadOutcome::Immediate(Vec::new())),
+                None => {
+                    trace!("attaching filter qid={qid} cid={cid:?}");
+                    self.buffer_nodes.attach_input_filter(buf_qid)?;
+                    self.lock_qid_for_reading(qid, cid)?;
                 }
             }
         }
-    }
 
-    fn clunk(&mut self, _fid: u32, qid: u64) {
-        if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
-            self.buffer_nodes.clear_input_filter(buf_qid);
+        match self.buffer_nodes.get_file_content(qid) {
+            InternalRead::Unknown => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
+            InternalRead::Immediate(content) => Ok(ReadOutcome::Immediate(
+                content.into_iter().skip(offset).take(count).collect(),
+            )),
+            InternalRead::Blocked(tx) => Ok(ReadOutcome::Blocked(tx)),
         }
     }
 
-    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<ReadOutcome> {
-        trace!(%qid, %offset, %count, %uname, "handling read request");
-        self.buffer_nodes.update();
-
-        let data = match qid {
-            CONTROL_FILE_QID => Vec::new(),
-
-            qid => match self.buffer_nodes.get_file_content(qid) {
-                InternalRead::Unknown => return Err(format!("{E_UNKNOWN_FILE}: {qid}")),
-                InternalRead::Immediate(content) => {
-                    content.into_iter().skip(offset).take(count).collect()
-                }
-
-                InternalRead::Blocked(tx) => return Ok(ReadOutcome::Blocked(tx)),
-            },
-        };
-
-        Ok(ReadOutcome::Immediate(data))
-    }
-
-    fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        trace!(%qid, %uname, "handling read dir request");
+    fn read_dir(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+        trace!(?cid, %qid, %uname, "handling read dir request");
         self.buffer_nodes.update();
 
         match qid {
@@ -265,8 +325,15 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>, uname: &str) -> Result<usize> {
-        trace!(%qid, %offset, n_bytes=%data.len(), %uname, "handling write request");
+    fn write(
+        &mut self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        data: Vec<u8>,
+        uname: &str,
+    ) -> Result<usize> {
+        trace!(?cid, %qid, %offset, n_bytes=%data.len(), %uname, "handling write request");
         self.buffer_nodes.update();
 
         let n_bytes = data.len();
@@ -290,21 +357,22 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn remove(&mut self, qid: u64, uname: &str) -> Result<()> {
-        trace!(%qid, %uname, "handling remove request");
-        // TODO: allow remove of a buffer to close the buffer
+    // TODO: allow remove of a buffer to close the buffer
+    fn remove(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
+        trace!(?cid, %qid, %uname, "handling remove request");
         Err("remove not allowed".to_string())
     }
 
     fn create(
         &mut self,
+        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
         uname: &str,
     ) -> Result<(FileMeta, IoUnit)> {
-        trace!(%parent, %name, ?perm, ?mode, %uname, "handling create request");
+        trace!(?cid, %parent, %name, ?perm, ?mode, %uname, "handling create request");
         Err("create not allowed".to_string())
     }
 }

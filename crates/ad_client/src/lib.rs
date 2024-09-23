@@ -10,9 +10,12 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
+use ninep::client::{ReadLineIter, UnixClient};
+use std::{error::Error, io, os::unix::net::UnixStream};
 
-use ninep::client::UnixClient;
-use std::io;
+mod event;
+
+pub use event::{EventFilter, Outcome};
 
 /// A simple 9p client for ad
 #[derive(Debug)]
@@ -26,6 +29,16 @@ impl Client {
         Ok(Self {
             inner: UnixClient::new_unix("ad", "")?,
         })
+    }
+
+    pub(crate) fn event_lines(&mut self, buffer: &str) -> io::Result<ReadLineIter<UnixStream>> {
+        self.inner.iter_lines(format!("buffers/{buffer}/event"))
+    }
+
+    pub(crate) fn write_event(&mut self, buffer: &str, event_line: &str) -> io::Result<()> {
+        self.inner
+            .write_str(format!("buffers/{buffer}/event"), 0, event_line)?;
+        Ok(())
     }
 
     /// Get the currently active buffer id.
@@ -129,5 +142,13 @@ impl Client {
     /// Reload the currently active buffer.
     pub fn reload_current_buffer(&mut self) -> io::Result<()> {
         self._ctl("reload", "")
+    }
+
+    /// Run a provided [EventFilter] until it exits or errors
+    pub fn run_event_filter<F>(&mut self, buffer: &str, filter: F) -> Result<(), Box<dyn Error>>
+    where
+        F: EventFilter,
+    {
+        event::run_filter(buffer, filter, self)
     }
 }

@@ -1,0 +1,22 @@
+[package]
+name = "ad_event"
+version = "0.1.0"
+edition = "2021"
+authors = ["sminez <innes.andersonmorrison@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/sminez/ad/crates/ad_event"
+documentation = "https://docs.rs/ad-editor"
+readme = "README.md"
+description = "A shared event format for ad and its clients"
+include = [
+    "src/**/*",
+    "Cargo.toml",
+    "README.md"
+]
+keywords = [ "terminal", "editor", "text-editor", ]
+categories = [ "development-tools", "text-editors", "command-line-utilities" ]
+
+[dependencies]
+
+[dev-dependencies]
+simple_test_case = "1"

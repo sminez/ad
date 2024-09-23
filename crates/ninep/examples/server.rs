@@ -24,7 +24,7 @@
 //! ```
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{ReadOutcome, Serve9p, Server},
+    server::{ClientId, ReadOutcome, Serve9p, Server},
     Result,
 };
 use std::{
@@ -57,7 +57,14 @@ const RW: u64 = 4;
 const BLOCKING: u64 = 5;
 
 impl Serve9p for EchoServer {
-    fn write(&mut self, qid: u64, offset: usize, data: Vec<u8>, _uname: &str) -> Result<usize> {
+    fn write(
+        &mut self,
+        _cid: ClientId,
+        qid: u64,
+        offset: usize,
+        data: Vec<u8>,
+        _uname: &str,
+    ) -> Result<usize> {
         if qid != RW {
             return Err(format!("write not supported for {qid} @ {offset}"));
         }
@@ -71,6 +78,7 @@ impl Serve9p for EchoServer {
     #[allow(unused_variables)]
     fn create(
         &mut self,
+        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
@@ -81,16 +89,22 @@ impl Serve9p for EchoServer {
     }
 
     #[allow(unused_variables)]
-    fn remove(&mut self, qid: u64, uname: &str) -> Result<()> {
+    fn remove(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
         Err("remove not supported".to_string())
     }
 
     #[allow(unused_variables)]
-    fn write_stat(&mut self, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+    fn write_stat(&mut self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
         Err("write_stat not supported".to_string())
     }
 
-    fn walk(&mut self, parent_qid: u64, child: &str, _uname: &str) -> Result<FileMeta> {
+    fn walk(
+        &mut self,
+        _cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        _uname: &str,
+    ) -> Result<FileMeta> {
         println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
             (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),
@@ -102,7 +116,7 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn stat(&mut self, qid: u64, uname: &str) -> Result<Stat> {
+    fn stat(&mut self, _cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
         println!("handling stat request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(Stat {
@@ -175,7 +189,7 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn open(&mut self, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+    fn open(&mut self, _cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
         println!("handling open request: qid={qid} mode={mode:?} uname={uname}");
         match (qid, mode) {
             (FOO | BAZ | RW | BLOCKING, Mode::FILE) => Ok(8168),
@@ -185,7 +199,14 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn read(&mut self, qid: u64, offset: usize, count: usize, uname: &str) -> Result<ReadOutcome> {
+    fn read(
+        &mut self,
+        _cid: ClientId,
+        qid: u64,
+        offset: usize,
+        count: usize,
+        uname: &str,
+    ) -> Result<ReadOutcome> {
         println!("handling read request: qid={qid} offset={offset} count={count} uname={uname}");
         let chunk = |s: &str| {
             s.as_bytes()
@@ -221,7 +242,7 @@ impl Serve9p for EchoServer {
         Ok(ReadOutcome::Immediate(data))
     }
 
-    fn read_dir(&mut self, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+    fn read_dir(&mut self, _cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
         println!("handling read_dir request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(vec![
