@@ -9,9 +9,13 @@ use crate::{
     },
     input::Event,
 };
-use ninep::{fs::Stat, server::ReadOutcome};
+use ninep::{
+    fs::Stat,
+    server::{ClientId, ReadOutcome},
+};
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
+    mem::swap,
     sync::mpsc::{channel, Receiver, Sender},
     time::SystemTime,
 };
@@ -49,14 +53,114 @@ fn parent_and_fname(qid: u64) -> (u64, &'static str) {
 
 /// A message sent by the main editor thread to notify the fs thread that
 /// the current buffer list has changed.
-#[derive(Debug)]
-pub(crate) enum BufId {
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum LogEvent {
     /// A newly created buffer
     Add(usize),
     /// A buffer that has now been closed and needs removing from state
     Remove(usize),
     /// A change to the currently active buffer
     Current(usize),
+    /// A buffer was saved
+    Saved(usize),
+}
+
+impl LogEvent {
+    pub(crate) fn as_log_line_bytes(self) -> Vec<u8> {
+        let s = match self {
+            LogEvent::Add(id) => format!("{id} buffer opened\n"),
+            LogEvent::Remove(id) => format!("{id} buffer closed\n"),
+            LogEvent::Current(id) => format!("{id} buffer focused\n"),
+            LogEvent::Saved(id) => format!("{id} buffer saved\n"),
+        };
+
+        s.as_bytes().to_vec()
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum ClientLog {
+    Events(Vec<LogEvent>),
+    Pending,
+}
+
+impl ClientLog {
+    fn is_empty_events(&self) -> bool {
+        matches!(self, ClientLog::Events(v) if v.is_empty())
+    }
+}
+
+#[derive(Debug)]
+pub(super) struct Log {
+    events: HashMap<ClientId, ClientLog>,
+    tx: Sender<Sender<Vec<u8>>>,
+}
+
+impl Log {
+    fn new(tx: Sender<Sender<Vec<u8>>>) -> Self {
+        Self {
+            events: HashMap::default(),
+            tx,
+        }
+    }
+
+    #[inline]
+    fn push(&mut self, evt: LogEvent) {
+        for cl in self.events.values_mut() {
+            match cl {
+                ClientLog::Events(v) => v.push(evt),
+                ClientLog::Pending => {
+                    // Event will have been sent from the listener so drop this one and start
+                    // storing new ones as they arrive
+                    *cl = ClientLog::Events(Vec::new());
+                }
+            }
+        }
+    }
+
+    #[inline]
+    pub(super) fn add_client(&mut self, cid: ClientId) {
+        self.events.insert(cid, ClientLog::Events(Vec::new()));
+    }
+
+    #[inline]
+    pub(super) fn remove_client(&mut self, cid: ClientId) {
+        self.events.remove(&cid);
+    }
+
+    #[inline]
+    pub(super) fn events_since_last_read(&mut self, cid: ClientId) -> ReadOutcome {
+        match self.events.get_mut(&cid) {
+            Some(cl) if cl.is_empty_events() => {
+                let (tx, rx) = channel();
+                if self.tx.send(tx).is_err() {
+                    error!("log listener died");
+                    return ReadOutcome::Immediate(Vec::new());
+                }
+
+                *cl = ClientLog::Pending;
+
+                ReadOutcome::Blocked(rx)
+            }
+
+            Some(ClientLog::Events(events)) => {
+                let mut v = Vec::new();
+                swap(events, &mut v);
+
+                ReadOutcome::Immediate(v.into_iter().flat_map(|e| e.as_log_line_bytes()).collect())
+            }
+
+            Some(ClientLog::Pending) => {
+                debug!("got log read from {cid:?} while blocked read was outstanding");
+                ReadOutcome::Immediate(Vec::new())
+            }
+
+            None => {
+                error!("got log read from {cid:?} without initialising");
+                ReadOutcome::Immediate(Vec::new())
+            }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -69,19 +173,25 @@ pub(super) enum QidCheck {
 #[derive(Debug)]
 pub(super) struct BufferNodes {
     pub(super) known: BTreeMap<u64, BufferNode>,
+    pub(super) log: Log,
     next_qid: u64,
     current_buffid: usize,
     stat: Stat,
     current_buff_stat: Stat,
     index_stat: Stat,
     tx: Sender<Event>,
-    brx: Receiver<BufId>,
+    brx: Receiver<LogEvent>,
 }
 
 impl BufferNodes {
-    pub(super) fn new(tx: Sender<Event>, brx: Receiver<BufId>) -> Self {
+    pub(super) fn new(
+        tx: Sender<Event>,
+        brx: Receiver<LogEvent>,
+        log_tx: Sender<Sender<Vec<u8>>>,
+    ) -> Self {
         Self {
             known: BTreeMap::default(),
+            log: Log::new(log_tx),
             next_qid: CURRENT_BUFFER_QID + 1,
             current_buffid: 1,
             stat: empty_dir_stat(BUFFERS_QID, BUFFERS_DIR),
@@ -254,8 +364,9 @@ impl BufferNodes {
     /// Process any pending updates from the main thread for changes to the buffer set
     pub(super) fn update(&mut self) {
         for bid in self.brx.try_iter() {
+            self.log.push(bid);
             match bid {
-                BufId::Add(id) => {
+                LogEvent::Add(id) => {
                     debug!(%id, "adding buffer to fsys state");
                     let qid = self.next_qid;
                     self.next_qid += QID_OFFSET;
@@ -263,16 +374,18 @@ impl BufferNodes {
                 }
 
                 // TODO: handle closing defered reads of files associated with this buffer
-                BufId::Remove(id) => {
+                LogEvent::Remove(id) => {
                     debug!(%id, "removing buffer from fsys state");
                     self.known.retain(|_, v| v.id != id);
                 }
 
-                BufId::Current(id) => {
+                LogEvent::Current(id) => {
                     debug!(%id, "setting current buffer in fsys state");
                     self.current_buffid = id;
                     self.current_buff_stat.n_bytes = id.to_string().len() as u64;
                 }
+
+                LogEvent::Saved(_) => (), // only used in the log
             };
         }
     }
@@ -454,8 +567,8 @@ mod tests {
     use simple_test_case::test_case;
 
     #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
-    #[test_case(7, 5, DOT; "dot second buffer")]
-    #[test_case(20, 14, BODY; "body second buffer")]
+    #[test_case(8, 6, DOT; "dot second buffer")]
+    #[test_case(21, 15, BODY; "body second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);

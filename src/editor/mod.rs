@@ -5,7 +5,7 @@ use crate::{
     die,
     dot::{Cur, Dot, TextObject},
     exec::{Addr, Address},
-    fsys::{AdFs, BufId, InputFilter, Message, Req},
+    fsys::{AdFs, InputFilter, LogEvent, Message, Req},
     input::{Event, StdinInput},
     key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
@@ -58,8 +58,8 @@ pub struct Editor {
     buffers: Buffers,
     tx_events: Sender<Event>,
     rx_events: Receiver<Event>,
-    tx_fsys: Sender<BufId>,
-    rx_fsys: Option<Receiver<BufId>>,
+    tx_fsys: Sender<LogEvent>,
+    rx_fsys: Option<Receiver<LogEvent>>,
     mode: EditorMode,
     log_buffer: LogBuffer,
 }
@@ -123,8 +123,8 @@ impl Editor {
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
         if self.buffers.is_empty_scratch() {
-            self.tx_fsys.send(BufId::Add(0)).unwrap();
-            self.tx_fsys.send(BufId::Current(0)).unwrap();
+            self.tx_fsys.send(LogEvent::Add(0)).unwrap();
+            self.tx_fsys.send(LogEvent::Current(0)).unwrap();
         }
     }
 
@@ -227,7 +227,7 @@ impl Editor {
             Some(b) => tx.send(Ok((f)(b))).unwrap(),
             None => {
                 tx.send(Err("unknown buffer".to_string())).unwrap();
-                self.tx_fsys.send(BufId::Remove(id)).unwrap();
+                self.tx_fsys.send(LogEvent::Remove(id)).unwrap();
             }
         }
     }
@@ -247,7 +247,7 @@ impl Editor {
 
             None => {
                 tx.send(Err("unknown buffer".to_string())).unwrap();
-                self.tx_fsys.send(BufId::Remove(id)).unwrap();
+                self.tx_fsys.send(LogEvent::Remove(id)).unwrap();
             }
         }
     }
@@ -385,14 +385,14 @@ impl Editor {
             NextBuffer => {
                 self.buffers.next();
                 let id = self.buffers.active().id;
-                self.tx_fsys.send(BufId::Current(id)).unwrap();
+                self.tx_fsys.send(LogEvent::Current(id)).unwrap();
             }
             OpenFile { path } => self.open_file_relative_to_cwd(&path),
             Paste => self.paste_from_clipboard(),
             PreviousBuffer => {
                 self.buffers.previous();
                 let id = self.buffers.active().id;
-                self.tx_fsys.send(BufId::Current(id)).unwrap();
+                self.tx_fsys.send(LogEvent::Current(id)).unwrap();
             }
             ReloadActiveBuffer => self.reload_active_buffer(),
             ReloadBuffer { id } => self.reload_buffer(id),

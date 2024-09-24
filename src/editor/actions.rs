@@ -6,7 +6,7 @@ use crate::{
     dot::{Cur, Dot, TextObject},
     editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
-    fsys::BufId,
+    fsys::LogEvent,
     key::Input,
     mode::Mode,
     replace_config, update_config,
@@ -148,10 +148,10 @@ impl Editor {
 
             Ok(Some(new_id)) => {
                 if was_empty_scratch {
-                    self.tx_fsys.send(BufId::Remove(current_id)).unwrap();
+                    self.tx_fsys.send(LogEvent::Remove(current_id)).unwrap();
                 }
-                self.tx_fsys.send(BufId::Add(new_id)).unwrap();
-                self.tx_fsys.send(BufId::Current(new_id)).unwrap();
+                self.tx_fsys.send(LogEvent::Add(new_id)).unwrap();
+                self.tx_fsys.send(LogEvent::Current(new_id)).unwrap();
             }
 
             Ok(None) => {
@@ -167,7 +167,7 @@ impl Editor {
                     Err(e) => self.set_status_message(&e),
                 }
                 let id = self.buffers.active().id;
-                self.tx_fsys.send(BufId::Current(id)).unwrap();
+                self.tx_fsys.send(LogEvent::Current(id)).unwrap();
             }
         };
     }
@@ -224,7 +224,7 @@ impl Editor {
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 let is_last_buffer = self.buffers.len() == 1;
-                self.tx_fsys.send(BufId::Remove(id)).unwrap();
+                self.tx_fsys.send(LogEvent::Remove(id)).unwrap();
                 self.clear_input_filter(id);
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
@@ -241,6 +241,8 @@ impl Editor {
 
         let msg = self.buffers.active_mut().save_to_disk_at(p, force);
         self.set_status_message(&msg);
+        let id = self.active_buffer_id();
+        self.tx_fsys.send(LogEvent::Saved(id)).unwrap();
     }
 
     fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
@@ -389,7 +391,7 @@ impl Editor {
 
     pub(super) fn focus_buffer(&mut self, id: usize) {
         self.buffers.focus_id(id);
-        self.tx_fsys.send(BufId::Current(id)).unwrap();
+        self.tx_fsys.send(LogEvent::Current(id)).unwrap();
     }
 
     pub(super) fn debug_buffer_contents(&mut self) {
@@ -639,7 +641,7 @@ mod tests {
     macro_rules! assert_recv {
         ($brx:expr, $msg:ident, $expected:expr) => {
             match $brx.try_recv() {
-                Ok(BufId::$msg(id)) if id == $expected => (),
+                Ok(LogEvent::$msg(id)) if id == $expected => (),
                 Ok(msg) => panic!(
                     "expected {}({}) but got {msg:?}",
                     stringify!($msg),

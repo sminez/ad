@@ -17,6 +17,7 @@
 //! ```text
 //! $HOME/.ad/mnt/
 //!   ctrl
+//!   log
 //!   buffers/
 //!     [n]/
 //!       filename
@@ -35,8 +36,8 @@ use std::{
     collections::HashMap,
     env,
     fs::create_dir_all,
-    sync::mpsc::{Receiver, Sender},
-    thread::JoinHandle,
+    sync::mpsc::{channel, Receiver, Sender},
+    thread::{spawn, JoinHandle},
     time::SystemTime,
 };
 use tracing::trace;
@@ -45,7 +46,7 @@ mod buffer;
 mod event;
 mod message;
 
-pub(crate) use buffer::BufId;
+pub(crate) use buffer::LogEvent;
 pub(crate) use event::InputFilter;
 pub(crate) use message::{Message, Req};
 
@@ -61,14 +62,17 @@ const MOUNT_ROOT_QID: u64 = 0;
 ///   1.   /ctl         -> control file for issuing commands
 const CONTROL_FILE_QID: u64 = 1;
 const CONTROL_FILE: &str = "ctl";
-///   2    /buffers/    -> parent directory for buffers
-const BUFFERS_QID: u64 = 2;
+///   2.   /log         -> read only log of events in the editor
+const LOG_FILE_QID: u64 = 2;
+const LOG_FILE: &str = "log";
+///   3    /buffers/    -> parent directory for buffers
+const BUFFERS_QID: u64 = 3;
 const BUFFERS_DIR: &str = "buffers";
-//    3      /index     -> a listing of all of the currently open buffers
-const INDEX_BUFFER_QID: u64 = 3;
+//    4      /index     -> a listing of all of the currently open buffers
+const INDEX_BUFFER_QID: u64 = 4;
 const INDEX_BUFFER: &str = "index";
-//    4      /current   -> the fsys filename of the current buffer
-const CURRENT_BUFFER_QID: u64 = 4;
+//    5      /current   -> the fsys filename of the current buffer
+const CURRENT_BUFFER_QID: u64 = 5;
 const CURRENT_BUFFER: &str = "current";
 
 /// The number of qids required to serve both the directory and contents
@@ -85,15 +89,17 @@ const CURRENT_BUFFER: &str = "current";
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
 const QID_OFFSET: u64 = 9;
 
-const TOP_LEVEL_QIDS: [u64; 5] = [
+const TOP_LEVEL_QIDS: [u64; 6] = [
     MOUNT_ROOT_QID,
     CONTROL_FILE_QID,
+    LOG_FILE_QID,
     BUFFERS_QID,
     INDEX_BUFFER_QID,
     CURRENT_BUFFER_QID,
 ];
 
 const E_UNKNOWN_FILE: &str = "unknown file";
+const E_NOT_ALLOWED: &str = "not allowed";
 
 enum InternalRead {
     Immediate(Vec<u8>),
@@ -109,18 +115,6 @@ struct Cids {
     read_locked: Option<ClientId>,
 }
 
-/// The filesystem interface for ad
-#[derive(Debug)]
-pub(crate) struct AdFs {
-    tx: Sender<Event>,
-    buffer_nodes: BufferNodes,
-    /// map of qids to client IDs with that qid open
-    open_cids: HashMap<u64, Cids>,
-    // Root level files and directories
-    mount_dir_stat: Stat,
-    control_file_stat: Stat,
-}
-
 /// A join handle for the filesystem thread
 #[derive(Debug)]
 pub struct FsHandle(JoinHandle<()>);
@@ -132,14 +126,32 @@ impl FsHandle {
     }
 }
 
+/// The filesystem interface for ad
+#[derive(Debug)]
+pub(crate) struct AdFs {
+    tx: Sender<Event>,
+    buffer_nodes: BufferNodes,
+    /// map of qids to client IDs with that qid open
+    open_cids: HashMap<u64, Cids>,
+    // Root level files and directories
+    mount_dir_stat: Stat,
+    control_file_stat: Stat,
+    log_file_stat: Stat,
+}
+
 impl AdFs {
     /// Construct a new filesystem interface using channels held by the editor.
-    pub fn new(tx: Sender<Event>, brx: Receiver<BufId>) -> Self {
+    pub fn new(tx: Sender<Event>, brx: Receiver<LogEvent>) -> Self {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
 
         create_dir_all(&mount_path).expect("to be able to create our mount point");
-        let buffer_nodes = BufferNodes::new(tx.clone(), brx);
+
+        let (log_tx, log_rx) = channel();
+        let (listener_tx, listener_rx) = channel();
+        spawn_log_listener(brx, listener_tx, log_rx);
+
+        let buffer_nodes = BufferNodes::new(tx.clone(), listener_rx, log_tx);
 
         Self {
             tx,
@@ -147,6 +159,7 @@ impl AdFs {
             open_cids: HashMap::new(),
             mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
             control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
+            log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
         }
     }
 
@@ -179,7 +192,7 @@ impl AdFs {
         Ok(())
     }
 
-    fn read_locked_cid(&self, qid: u64) -> Option<ClientId> {
+    fn readlocked_cid(&self, qid: u64) -> Option<ClientId> {
         self.open_cids.get(&qid).and_then(|cids| cids.read_locked)
     }
 }
@@ -192,6 +205,7 @@ impl Serve9p for AdFs {
         match qid {
             MOUNT_ROOT_QID => Ok(self.mount_dir_stat.clone()),
             CONTROL_FILE_QID => Ok(self.control_file_stat.clone()),
+            LOG_FILE_QID => Ok(self.log_file_stat.clone()),
             BUFFERS_QID => Ok(self.buffer_nodes.stat().clone()),
             qid => match self.buffer_nodes.get_stat_for_qid(qid) {
                 Some(stat) => Ok(stat.clone()),
@@ -207,8 +221,7 @@ impl Serve9p for AdFs {
         if stat.n_bytes == 0 {
             trace!(%qid, %uname, "stat n_bytes=0, truncating file");
             match qid {
-                MOUNT_ROOT_QID => self.mount_dir_stat.n_bytes = 0,
-                CONTROL_FILE_QID => self.control_file_stat.n_bytes = 0,
+                MOUNT_ROOT_QID | CONTROL_FILE_QID | LOG_FILE_QID => (),
                 qid => self.buffer_nodes.truncate(qid),
             }
         }
@@ -229,6 +242,7 @@ impl Serve9p for AdFs {
         match parent_qid {
             MOUNT_ROOT_QID => match child {
                 CONTROL_FILE => Ok(self.control_file_stat.fm.clone()),
+                LOG_FILE => Ok(self.log_file_stat.fm.clone()),
                 BUFFERS_DIR => Ok(self.buffer_nodes.stat().fm.clone()),
                 _ => match self.buffer_nodes.lookup_file_stat(parent_qid, child) {
                     Some(stat) => Ok(stat.fm.clone()),
@@ -251,7 +265,9 @@ impl Serve9p for AdFs {
         trace!(?cid, %qid, %uname, ?mode, "handling open request");
         self.buffer_nodes.update();
 
-        if !TOP_LEVEL_QIDS.contains(&qid) {
+        if qid == LOG_FILE_QID {
+            self.buffer_nodes.log.add_client(cid);
+        } else if !TOP_LEVEL_QIDS.contains(&qid) {
             if let QidCheck::Unknown = self.buffer_nodes.check_if_known_qid(qid) {
                 return Err(format!("{E_UNKNOWN_FILE}: {qid}"));
             }
@@ -264,8 +280,11 @@ impl Serve9p for AdFs {
 
     fn clunk(&mut self, cid: ClientId, qid: u64) {
         trace!(?cid, %qid, "handling clunk request");
-        if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
-            if self.read_locked_cid(qid) == Some(cid) {
+
+        if qid == LOG_FILE_QID {
+            self.buffer_nodes.log.remove_client(cid);
+        } else if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
+            if self.readlocked_cid(qid) == Some(cid) {
                 self.buffer_nodes.clear_input_filter(buf_qid);
             }
         }
@@ -285,10 +304,12 @@ impl Serve9p for AdFs {
 
         if qid == CONTROL_FILE_QID {
             return Ok(ReadOutcome::Immediate(Vec::new()));
+        } else if qid == LOG_FILE_QID {
+            return Ok(self.buffer_nodes.log.events_since_last_read(cid));
         }
 
         if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
-            match self.read_locked_cid(qid) {
+            match self.readlocked_cid(qid) {
                 Some(id) if id == cid => (),
                 Some(_) => return Ok(ReadOutcome::Immediate(Vec::new())),
                 None => {
@@ -351,7 +372,7 @@ impl Serve9p for AdFs {
                 }
             }
 
-            CURRENT_BUFFER_QID | INDEX_BUFFER_QID => Err(E_UNKNOWN_FILE.to_string()),
+            CURRENT_BUFFER_QID | LOG_FILE_QID | INDEX_BUFFER_QID => Err(E_NOT_ALLOWED.to_string()),
 
             qid => self.buffer_nodes.write(qid, s, offset),
         }
@@ -401,4 +422,24 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
         group: "ad".into(),
         last_modified_by: "ad".into(),
     }
+}
+
+/// Spawn a log listener that handles immediately returning data to blocked readers of the log file
+/// as well as passing events to fsys itself so it can update its internal state.
+fn spawn_log_listener(
+    log_event_rx: Receiver<LogEvent>,
+    listener_tx: Sender<LogEvent>,
+    pending_rx: Receiver<Sender<Vec<u8>>>,
+) {
+    spawn(move || {
+        for event in log_event_rx.iter() {
+            // Handle ReadOutcome::Blocked responses first
+            for tx in pending_rx.try_iter() {
+                _ = tx.send(event.as_log_line_bytes());
+            }
+
+            // Lazy update of fsys state
+            _ = listener_tx.send(event);
+        }
+    });
 }
