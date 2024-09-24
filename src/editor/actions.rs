@@ -63,6 +63,7 @@ pub(crate) enum Action {
     JumpListForward,
     JumpListBack,
     LoadDot,
+    MarkClean { bufid: usize },
     NewEditLogTransaction,
     NextBuffer,
     OpenFile { path: String },
@@ -231,6 +232,12 @@ impl Editor {
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
             }
+        }
+    }
+
+    pub(crate) fn mark_clean(&mut self, bufid: usize) {
+        if let Some(b) = self.buffers.with_id_mut(bufid) {
+            b.dirty = false;
         }
     }
 

@@ -39,6 +39,21 @@ impl Editor {
                 }
             }
 
+            "clean" | "mark-clean" => {
+                let bufid = if args.is_empty() {
+                    self.active_buffer_id()
+                } else {
+                    match args.parse::<usize>() {
+                        Ok(bufid) => bufid,
+                        Err(_) => {
+                            self.set_status_message(&format!("'{args}' is not a valid buffer id"));
+                            return None;
+                        }
+                    }
+                };
+                Some(Single(MarkClean { bufid }))
+            }
+
             "db" | "delete-buffer" => Some(Single(DeleteBuffer { force: false })),
             "db!" | "delete-buffer!" => Some(Single(DeleteBuffer { force: true })),
 

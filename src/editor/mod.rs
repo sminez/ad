@@ -377,6 +377,7 @@ impl Editor {
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
             LoadDot => self.default_load_dot(),
+            MarkClean { bufid } => self.mark_clean(bufid),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();
