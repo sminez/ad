@@ -4,18 +4,15 @@ use crate::{
     fsys::{
         empty_dir_stat, empty_file_stat,
         event::{run_threaded_input_listener, send_event_to_editor, InputFilter, InputRequest},
+        log::{Log, LogEvent},
         InternalRead, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER,
         CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
     },
     input::Event,
 };
-use ninep::{
-    fs::Stat,
-    server::{ClientId, ReadOutcome},
-};
+use ninep::{fs::Stat, server::ReadOutcome};
 use std::{
-    collections::{BTreeMap, HashMap},
-    mem::swap,
+    collections::BTreeMap,
     sync::mpsc::{channel, Receiver, Sender},
     time::SystemTime,
 };
@@ -49,118 +46,6 @@ fn parent_and_fname(qid: u64) -> (u64, &'static str) {
     let fname = BUFFER_FILES[((qid - cur - 2) % off) as usize].1;
 
     (parent, fname)
-}
-
-/// A message sent by the main editor thread to notify the fs thread that
-/// the current buffer list has changed.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum LogEvent {
-    /// A newly created buffer
-    Open(usize),
-    /// A buffer that has now been closed and needs removing from state
-    Close(usize),
-    /// A change to the currently active buffer
-    Focus(usize),
-    /// A buffer was saved
-    Save(usize),
-}
-
-impl LogEvent {
-    pub(crate) fn as_log_line_bytes(self) -> Vec<u8> {
-        let s = match self {
-            LogEvent::Open(id) => format!("{id} open\n"),
-            LogEvent::Close(id) => format!("{id} close\n"),
-            LogEvent::Focus(id) => format!("{id} focus\n"),
-            LogEvent::Save(id) => format!("{id} save\n"),
-        };
-
-        s.as_bytes().to_vec()
-    }
-}
-
-#[derive(Debug)]
-pub(super) enum ClientLog {
-    Events(Vec<LogEvent>),
-    Pending,
-}
-
-impl ClientLog {
-    fn is_empty_events(&self) -> bool {
-        matches!(self, ClientLog::Events(v) if v.is_empty())
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct Log {
-    events: HashMap<ClientId, ClientLog>,
-    tx: Sender<Sender<Vec<u8>>>,
-}
-
-impl Log {
-    fn new(tx: Sender<Sender<Vec<u8>>>) -> Self {
-        Self {
-            events: HashMap::default(),
-            tx,
-        }
-    }
-
-    #[inline]
-    fn push(&mut self, evt: LogEvent) {
-        for cl in self.events.values_mut() {
-            match cl {
-                ClientLog::Events(v) => v.push(evt),
-                ClientLog::Pending => {
-                    // Event will have been sent from the listener so drop this one and start
-                    // storing new ones as they arrive
-                    *cl = ClientLog::Events(Vec::new());
-                }
-            }
-        }
-    }
-
-    #[inline]
-    pub(super) fn add_client(&mut self, cid: ClientId) {
-        self.events.insert(cid, ClientLog::Events(Vec::new()));
-    }
-
-    #[inline]
-    pub(super) fn remove_client(&mut self, cid: ClientId) {
-        self.events.remove(&cid);
-    }
-
-    #[inline]
-    pub(super) fn events_since_last_read(&mut self, cid: ClientId) -> ReadOutcome {
-        match self.events.get_mut(&cid) {
-            Some(cl) if cl.is_empty_events() => {
-                let (tx, rx) = channel();
-                if self.tx.send(tx).is_err() {
-                    error!("log listener died");
-                    return ReadOutcome::Immediate(Vec::new());
-                }
-
-                *cl = ClientLog::Pending;
-
-                ReadOutcome::Blocked(rx)
-            }
-
-            Some(ClientLog::Events(events)) => {
-                let mut v = Vec::new();
-                swap(events, &mut v);
-
-                ReadOutcome::Immediate(v.into_iter().flat_map(|e| e.as_log_line_bytes()).collect())
-            }
-
-            Some(ClientLog::Pending) => {
-                debug!("got log read from {cid:?} while blocked read was outstanding");
-                ReadOutcome::Immediate(Vec::new())
-            }
-
-            None => {
-                error!("got log read from {cid:?} without initialising");
-                ReadOutcome::Immediate(Vec::new())
-            }
-        }
-    }
 }
 
 #[derive(Debug)]

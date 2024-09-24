@@ -167,7 +167,9 @@ impl Editor {
                     Err(e) => self.set_status_message(&e),
                 }
                 let id = self.active_buffer_id();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
+                if id != current_id {
+                    _ = self.tx_fsys.send(LogEvent::Focus(id));
+                }
             }
         };
     }

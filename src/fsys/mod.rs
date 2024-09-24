@@ -37,20 +37,22 @@ use std::{
     env,
     fs::create_dir_all,
     sync::mpsc::{channel, Receiver, Sender},
-    thread::{spawn, JoinHandle},
+    thread::JoinHandle,
     time::SystemTime,
 };
 use tracing::trace;
 
 mod buffer;
 mod event;
+mod log;
 mod message;
 
-pub(crate) use buffer::LogEvent;
 pub(crate) use event::InputFilter;
+pub(crate) use log::LogEvent;
 pub(crate) use message::{Message, Req};
 
 use buffer::{BufferNodes, QidCheck};
+use log::spawn_log_listener;
 
 const DEFAULT_SOCKET_NAME: &str = "ad";
 const MOUNT_DIR: &str = ".ad/mnt";
@@ -422,24 +424,4 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
         group: "ad".into(),
         last_modified_by: "ad".into(),
     }
-}
-
-/// Spawn a log listener that handles immediately returning data to blocked readers of the log file
-/// as well as passing events to fsys itself so it can update its internal state.
-fn spawn_log_listener(
-    log_event_rx: Receiver<LogEvent>,
-    listener_tx: Sender<LogEvent>,
-    pending_rx: Receiver<Sender<Vec<u8>>>,
-) {
-    spawn(move || {
-        for event in log_event_rx.iter() {
-            // Handle ReadOutcome::Blocked responses first
-            for tx in pending_rx.try_iter() {
-                _ = tx.send(event.as_log_line_bytes());
-            }
-
-            // Lazy update of fsys state
-            _ = listener_tx.send(event);
-        }
-    });
 }
