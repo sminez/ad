@@ -56,22 +56,22 @@ fn parent_and_fname(qid: u64) -> (u64, &'static str) {
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum LogEvent {
     /// A newly created buffer
-    Add(usize),
+    Open(usize),
     /// A buffer that has now been closed and needs removing from state
-    Remove(usize),
+    Close(usize),
     /// A change to the currently active buffer
     Focus(usize),
     /// A buffer was saved
-    Saved(usize),
+    Save(usize),
 }
 
 impl LogEvent {
     pub(crate) fn as_log_line_bytes(self) -> Vec<u8> {
         let s = match self {
-            LogEvent::Add(id) => format!("{id} buffer opened\n"),
-            LogEvent::Remove(id) => format!("{id} buffer closed\n"),
-            LogEvent::Focus(id) => format!("{id} buffer focused\n"),
-            LogEvent::Saved(id) => format!("{id} buffer saved\n"),
+            LogEvent::Open(id) => format!("{id} open\n"),
+            LogEvent::Close(id) => format!("{id} close\n"),
+            LogEvent::Focus(id) => format!("{id} focus\n"),
+            LogEvent::Save(id) => format!("{id} save\n"),
         };
 
         s.as_bytes().to_vec()
@@ -366,7 +366,7 @@ impl BufferNodes {
         for bid in self.brx.try_iter() {
             self.log.push(bid);
             match bid {
-                LogEvent::Add(id) => {
+                LogEvent::Open(id) => {
                     debug!(%id, "adding buffer to fsys state");
                     let qid = self.next_qid;
                     self.next_qid += QID_OFFSET;
@@ -374,7 +374,7 @@ impl BufferNodes {
                 }
 
                 // TODO: handle closing defered reads of files associated with this buffer
-                LogEvent::Remove(id) => {
+                LogEvent::Close(id) => {
                     debug!(%id, "removing buffer from fsys state");
                     self.known.retain(|_, v| v.id != id);
                 }
@@ -385,7 +385,7 @@ impl BufferNodes {
                     self.current_buff_stat.n_bytes = id.to_string().len() as u64;
                 }
 
-                LogEvent::Saved(_) => (), // only used in the log
+                LogEvent::Save(_) => (), // only used in the log
             };
         }
     }

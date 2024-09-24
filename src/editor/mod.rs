@@ -123,7 +123,7 @@ impl Editor {
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
         if self.buffers.is_empty_scratch() {
-            _ = self.tx_fsys.send(LogEvent::Add(0));
+            _ = self.tx_fsys.send(LogEvent::Open(0));
             _ = self.tx_fsys.send(LogEvent::Focus(0));
         }
     }
@@ -227,7 +227,7 @@ impl Editor {
             Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
                 _ = tx.send(Err("unknown buffer".to_string()));
-                _ = self.tx_fsys.send(LogEvent::Remove(id));
+                _ = self.tx_fsys.send(LogEvent::Close(id));
             }
         }
     }
@@ -247,7 +247,7 @@ impl Editor {
 
             None => {
                 _ = tx.send(Err("unknown buffer".to_string()));
-                _ = self.tx_fsys.send(LogEvent::Remove(id));
+                _ = self.tx_fsys.send(LogEvent::Close(id));
             }
         }
     }

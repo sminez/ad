@@ -148,9 +148,9 @@ impl Editor {
 
             Ok(Some(new_id)) => {
                 if was_empty_scratch {
-                    _ = self.tx_fsys.send(LogEvent::Remove(current_id));
+                    _ = self.tx_fsys.send(LogEvent::Close(current_id));
                 }
-                _ = self.tx_fsys.send(LogEvent::Add(new_id));
+                _ = self.tx_fsys.send(LogEvent::Open(new_id));
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
             }
 
@@ -224,7 +224,7 @@ impl Editor {
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 let is_last_buffer = self.buffers.len() == 1;
-                _ = self.tx_fsys.send(LogEvent::Remove(id));
+                _ = self.tx_fsys.send(LogEvent::Close(id));
                 self.clear_input_filter(id);
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
@@ -242,7 +242,7 @@ impl Editor {
         let msg = self.buffers.active_mut().save_to_disk_at(p, force);
         self.set_status_message(&msg);
         let id = self.active_buffer_id();
-        _ = self.tx_fsys.send(LogEvent::Saved(id));
+        _ = self.tx_fsys.send(LogEvent::Save(id));
     }
 
     fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
@@ -664,13 +664,13 @@ mod tests {
         ed.open_file("foo");
 
         // The first open should also close our scratch buffer
-        assert_recv!(brx, Remove, 0);
-        assert_recv!(brx, Add, 1);
+        assert_recv!(brx, Close, 0);
+        assert_recv!(brx, Open, 1);
         assert_recv!(brx, Focus, 1);
 
         // Opening a second file should only notify for that file
         ed.open_file("bar");
-        assert_recv!(brx, Add, 2);
+        assert_recv!(brx, Open, 2);
         assert_recv!(brx, Focus, 2);
 
         // Opening the first file again should just notify for the current file
@@ -697,11 +697,11 @@ mod tests {
         ed.ensure_correct_fsys_state();
 
         if !files.is_empty() {
-            assert_recv!(brx, Remove, 0);
+            assert_recv!(brx, Close, 0);
         }
 
         for &expected in expected_ids {
-            assert_recv!(brx, Add, expected);
+            assert_recv!(brx, Open, expected);
             assert_recv!(brx, Focus, expected);
         }
     }
