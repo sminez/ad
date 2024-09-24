@@ -38,9 +38,9 @@ impl StdinInput {
     pub fn run_threaded(mut self) -> JoinHandle<()> {
         spawn(move || loop {
             if let Some(key) = self.try_read_input() {
-                self.tx.send(Event::Input(key)).unwrap();
+                _ = self.tx.send(Event::Input(key));
             } else if win_size_changed() {
-                self.tx.send(Event::WinsizeChanged).unwrap();
+                _ = self.tx.send(Event::WinsizeChanged);
             }
         })
     }

@@ -193,25 +193,51 @@ impl Buffers {
             .push(self.inner[0].id, self.inner[0].dot.active_cur());
     }
 
-    fn jump(&mut self, bufid: BufferId, cur: Cur, screen_rows: usize, screen_cols: usize) {
+    fn jump(
+        &mut self,
+        bufid: BufferId,
+        cur: Cur,
+        screen_rows: usize,
+        screen_cols: usize,
+    ) -> Option<BufferId> {
+        let prev_id = self.inner[0].id;
         self.remove_head_buffer_if_virtual();
         if let Some(idx) = self.inner.iter().position(|b| b.id == bufid) {
             self.inner.swap(0, idx);
             self.inner[0].dot = cur.into();
             self.inner[0].set_view_port(ViewPort::Center, screen_rows, screen_cols);
         }
-    }
 
-    pub fn jump_list_forward(&mut self, screen_rows: usize, screen_cols: usize) {
-        if let Some((bufid, cur)) = self.jump_list.forward() {
-            self.jump(bufid, cur, screen_rows, screen_cols);
+        let new_id = self.inner[0].id;
+        if new_id != prev_id {
+            Some(new_id)
+        } else {
+            None
         }
     }
 
-    pub fn jump_list_backward(&mut self, screen_rows: usize, screen_cols: usize) {
+    pub fn jump_list_forward(
+        &mut self,
+        screen_rows: usize,
+        screen_cols: usize,
+    ) -> Option<BufferId> {
+        if let Some((bufid, cur)) = self.jump_list.forward() {
+            self.jump(bufid, cur, screen_rows, screen_cols)
+        } else {
+            None
+        }
+    }
+
+    pub fn jump_list_backward(
+        &mut self,
+        screen_rows: usize,
+        screen_cols: usize,
+    ) -> Option<BufferId> {
         let (bufid, cur) = (self.inner[0].id, self.inner[0].dot.active_cur());
         if let Some((bufid, cur)) = self.jump_list.backward(bufid, cur) {
-            self.jump(bufid, cur, screen_rows, screen_cols);
+            self.jump(bufid, cur, screen_rows, screen_cols)
+        } else {
+            None
         }
     }
 

@@ -123,8 +123,8 @@ impl Editor {
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
         if self.buffers.is_empty_scratch() {
-            self.tx_fsys.send(LogEvent::Add(0)).unwrap();
-            self.tx_fsys.send(LogEvent::Current(0)).unwrap();
+            _ = self.tx_fsys.send(LogEvent::Add(0));
+            _ = self.tx_fsys.send(LogEvent::Focus(0));
         }
     }
 
@@ -224,10 +224,10 @@ impl Editor {
         f: fn(&Buffer) -> String,
     ) {
         match self.buffers.with_id(id) {
-            Some(b) => tx.send(Ok((f)(b))).unwrap(),
+            Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
-                tx.send(Err("unknown buffer".to_string())).unwrap();
-                self.tx_fsys.send(LogEvent::Remove(id)).unwrap();
+                _ = tx.send(Err("unknown buffer".to_string()));
+                _ = self.tx_fsys.send(LogEvent::Remove(id));
             }
         }
     }
@@ -242,12 +242,12 @@ impl Editor {
         match self.buffers.with_id_mut(id) {
             Some(b) => {
                 (f)(b, s);
-                tx.send(Ok("handled".to_string())).unwrap()
+                _ = tx.send(Ok("handled".to_string()))
             }
 
             None => {
-                tx.send(Err("unknown buffer".to_string())).unwrap();
-                self.tx_fsys.send(LogEvent::Remove(id)).unwrap();
+                _ = tx.send(Err("unknown buffer".to_string()));
+                _ = self.tx_fsys.send(LogEvent::Remove(id));
             }
         }
     }
@@ -256,7 +256,7 @@ impl Editor {
         use Req::*;
 
         debug!("received fys message: {req:?}");
-        let default_handled = || tx.send(Ok("handled".to_string())).unwrap();
+        let default_handled = || _ = tx.send(Ok("handled".to_string()));
 
         match req {
             ControlMessage { msg } => {
@@ -316,7 +316,7 @@ impl Editor {
                 } else {
                     Err("filter already in place".to_string())
                 };
-                tx.send(resp).unwrap()
+                _ = tx.send(resp);
             }
 
             RemoveInputEventFilter { id } => {
@@ -374,25 +374,21 @@ impl Editor {
             FindFile => self.find_file(),
             FindRepoFile => self.find_repo_file(),
             FocusBuffer { id } => self.focus_buffer(id),
-            JumpListForward => self
-                .buffers
-                .jump_list_forward(self.screen_rows, self.screen_cols),
-            JumpListBack => self
-                .buffers
-                .jump_list_backward(self.screen_rows, self.screen_cols),
+            JumpListForward => self.jump_forward(),
+            JumpListBack => self.jump_backward(),
             LoadDot => self.default_load_dot(),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();
-                let id = self.buffers.active().id;
-                self.tx_fsys.send(LogEvent::Current(id)).unwrap();
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
             OpenFile { path } => self.open_file_relative_to_cwd(&path),
             Paste => self.paste_from_clipboard(),
             PreviousBuffer => {
                 self.buffers.previous();
-                let id = self.buffers.active().id;
-                self.tx_fsys.send(LogEvent::Current(id)).unwrap();
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
             ReloadActiveBuffer => self.reload_active_buffer(),
             ReloadBuffer { id } => self.reload_buffer(id),
@@ -437,6 +433,24 @@ impl Editor {
             } => self.handle_mouse_event(evt),
 
             a => self.forward_action_to_active_buffer(a),
+        }
+    }
+
+    fn jump_forward(&mut self) {
+        let maybe_id = self
+            .buffers
+            .jump_list_forward(self.screen_rows, self.screen_cols);
+        if let Some(id) = maybe_id {
+            _ = self.tx_fsys.send(LogEvent::Focus(id));
+        }
+    }
+
+    fn jump_backward(&mut self) {
+        let maybe_id = self
+            .buffers
+            .jump_list_backward(self.screen_rows, self.screen_cols);
+        if let Some(id) = maybe_id {
+            _ = self.tx_fsys.send(LogEvent::Focus(id));
         }
     }
 

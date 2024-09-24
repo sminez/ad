@@ -60,7 +60,7 @@ pub(crate) enum LogEvent {
     /// A buffer that has now been closed and needs removing from state
     Remove(usize),
     /// A change to the currently active buffer
-    Current(usize),
+    Focus(usize),
     /// A buffer was saved
     Saved(usize),
 }
@@ -70,7 +70,7 @@ impl LogEvent {
         let s = match self {
             LogEvent::Add(id) => format!("{id} buffer opened\n"),
             LogEvent::Remove(id) => format!("{id} buffer closed\n"),
-            LogEvent::Current(id) => format!("{id} buffer focused\n"),
+            LogEvent::Focus(id) => format!("{id} buffer focused\n"),
             LogEvent::Saved(id) => format!("{id} buffer saved\n"),
         };
 
@@ -379,7 +379,7 @@ impl BufferNodes {
                     self.known.retain(|_, v| v.id != id);
                 }
 
-                LogEvent::Current(id) => {
+                LogEvent::Focus(id) => {
                     debug!(%id, "setting current buffer in fsys state");
                     self.current_buffid = id;
                     self.current_buff_stat.n_bytes = id.to_string().len() as u64;

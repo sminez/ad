@@ -141,17 +141,17 @@ impl Editor {
         let path = path.as_ref();
         debug!(?path, "opening file");
         let was_empty_scratch = self.buffers.is_empty_scratch();
-        let current_id = self.buffers.active().id;
+        let current_id = self.active_buffer_id();
 
         match self.buffers.open_or_focus(path) {
             Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
 
             Ok(Some(new_id)) => {
                 if was_empty_scratch {
-                    self.tx_fsys.send(LogEvent::Remove(current_id)).unwrap();
+                    _ = self.tx_fsys.send(LogEvent::Remove(current_id));
                 }
-                self.tx_fsys.send(LogEvent::Add(new_id)).unwrap();
-                self.tx_fsys.send(LogEvent::Current(new_id)).unwrap();
+                _ = self.tx_fsys.send(LogEvent::Add(new_id));
+                _ = self.tx_fsys.send(LogEvent::Focus(new_id));
             }
 
             Ok(None) => {
@@ -166,8 +166,8 @@ impl Editor {
                     Ok(false) => (),
                     Err(e) => self.set_status_message(&e),
                 }
-                let id = self.buffers.active().id;
-                self.tx_fsys.send(LogEvent::Current(id)).unwrap();
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
         };
     }
@@ -224,7 +224,7 @@ impl Editor {
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 let is_last_buffer = self.buffers.len() == 1;
-                self.tx_fsys.send(LogEvent::Remove(id)).unwrap();
+                _ = self.tx_fsys.send(LogEvent::Remove(id));
                 self.clear_input_filter(id);
                 self.buffers.close_buffer(id);
                 self.running = !is_last_buffer;
@@ -242,7 +242,7 @@ impl Editor {
         let msg = self.buffers.active_mut().save_to_disk_at(p, force);
         self.set_status_message(&msg);
         let id = self.active_buffer_id();
-        self.tx_fsys.send(LogEvent::Saved(id)).unwrap();
+        _ = self.tx_fsys.send(LogEvent::Saved(id));
     }
 
     fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
@@ -391,7 +391,7 @@ impl Editor {
 
     pub(super) fn focus_buffer(&mut self, id: usize) {
         self.buffers.focus_id(id);
-        self.tx_fsys.send(LogEvent::Current(id)).unwrap();
+        _ = self.tx_fsys.send(LogEvent::Focus(id));
     }
 
     pub(super) fn debug_buffer_contents(&mut self) {
@@ -666,16 +666,16 @@ mod tests {
         // The first open should also close our scratch buffer
         assert_recv!(brx, Remove, 0);
         assert_recv!(brx, Add, 1);
-        assert_recv!(brx, Current, 1);
+        assert_recv!(brx, Focus, 1);
 
         // Opening a second file should only notify for that file
         ed.open_file("bar");
         assert_recv!(brx, Add, 2);
-        assert_recv!(brx, Current, 2);
+        assert_recv!(brx, Focus, 2);
 
         // Opening the first file again should just notify for the current file
         ed.open_file("foo");
-        assert_recv!(brx, Current, 1);
+        assert_recv!(brx, Focus, 1);
     }
 
     #[test_case(&[], &[0]; "empty scratch")]
@@ -702,7 +702,7 @@ mod tests {
 
         for &expected in expected_ids {
             assert_recv!(brx, Add, expected);
-            assert_recv!(brx, Current, expected);
+            assert_recv!(brx, Focus, expected);
         }
     }
 }
