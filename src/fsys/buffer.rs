@@ -1,6 +1,5 @@
 //! Buffer state for the fuse filesystem
 use crate::{
-    die,
     fsys::{
         empty_dir_stat, empty_file_stat,
         event::{run_threaded_input_listener, send_event_to_editor, InputFilter, InputRequest},
@@ -199,7 +198,9 @@ impl BufferNodes {
         let mut entries = Vec::with_capacity(self.known.len());
 
         for b in self.known.values_mut() {
-            let filename = b.current_file_content_as_string(FILENAME, &self.tx);
+            let filename = b
+                .current_file_content_as_string(FILENAME, &self.tx)
+                .expect("FILENAME to be valid");
             let id = &b.str_id;
 
             entries.push(format!("{id}\t{filename}\n"));
@@ -363,7 +364,7 @@ impl BufferNode {
         }
 
         trace!(id=%self.id, %fname, "refreshing file stat");
-        let content = self.current_file_content_as_string(fname, tx);
+        let content = self.current_file_content_as_string(fname, tx)?;
         let stat = self.file_stats.get_mut(fname)?;
         stat.n_bytes = content.as_bytes().len() as u64;
 
@@ -371,7 +372,11 @@ impl BufferNode {
     }
 
     // Must not be called for the event file or unknown files
-    fn current_file_content_as_string(&mut self, fname: &str, tx: &Sender<Event>) -> String {
+    fn current_file_content_as_string(
+        &mut self,
+        fname: &str,
+        tx: &Sender<Event>,
+    ) -> Option<String> {
         let req = match fname {
             FILENAME => Req::ReadBufferName { id: self.id },
             DOT => Req::ReadBufferDot { id: self.id },
@@ -379,15 +384,15 @@ impl BufferNode {
             BODY => Req::ReadBufferBody { id: self.id },
             XDOT => Req::ReadBufferXDot { id: self.id },
             XADDR => Req::ReadBufferXAddr { id: self.id },
-            OUTPUT => return String::new(),
-            fname => die!("current_file_as_string called for {fname}"),
+            OUTPUT => return Some(String::new()),
+            _ => return None, // can hit this as part of walk for unknown files
         };
 
         match Message::send(req, tx) {
-            Ok(s) => s,
+            Ok(s) => Some(s),
             Err(e) => {
                 error!("fsys failed to read file content: {e}");
-                String::new()
+                Some(String::new())
             }
         }
     }
