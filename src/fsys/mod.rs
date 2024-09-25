@@ -322,11 +322,9 @@ impl Serve9p for AdFs {
             }
         }
 
-        match self.buffer_nodes.get_file_content(qid) {
+        match self.buffer_nodes.get_file_content(qid, offset, count) {
             InternalRead::Unknown => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
-            InternalRead::Immediate(content) => Ok(ReadOutcome::Immediate(
-                content.into_iter().skip(offset).take(count).collect(),
-            )),
+            InternalRead::Immediate(content) => Ok(ReadOutcome::Immediate(content)),
             InternalRead::Blocked(tx) => Ok(ReadOutcome::Blocked(tx)),
         }
     }
@@ -337,6 +335,7 @@ impl Serve9p for AdFs {
 
         match qid {
             MOUNT_ROOT_QID => Ok(vec![
+                self.log_file_stat.clone(),
                 self.control_file_stat.clone(),
                 self.buffer_nodes.stat().clone(),
             ]),

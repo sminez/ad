@@ -62,6 +62,7 @@ copy-rust-config: ensure-mountpoint backup-current-config
 .PHONY: copy-bin
 copy-bin: ensure-mountpoint
 	cp -r data/bin $$HOME/.ad
+	cp -r data/lib $$HOME/.ad
 
 .PHONY: setup-dotfiles
 setup-dotfiles: copy-default-config copy-bin

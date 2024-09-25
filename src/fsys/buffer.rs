@@ -172,16 +172,25 @@ impl BufferNodes {
             .refreshed_file_stat(fname, &self.tx)
     }
 
-    pub(super) fn get_file_content(&mut self, qid: u64) -> InternalRead {
+    pub(super) fn get_file_content(
+        &mut self,
+        qid: u64,
+        offset: usize,
+        count: usize,
+    ) -> InternalRead {
         if qid == CURRENT_BUFFER_QID {
-            return InternalRead::Immediate(self.current_buffid.to_string().as_bytes().to_vec());
+            return InternalRead::Immediate(apply_offset(
+                &self.current_buffid.to_string(),
+                offset,
+                count,
+            ));
         } else if qid == INDEX_BUFFER_QID {
-            return InternalRead::Immediate(self.index().as_bytes().to_vec());
+            return InternalRead::Immediate(apply_offset(&self.index(), offset, count));
         }
 
         let (parent, fname) = parent_and_fname(qid);
         match self.known.get_mut(&parent) {
-            Some(bn) => bn.current_file_content(fname, &self.tx),
+            Some(bn) => bn.current_file_content(fname, offset, count, &self.tx),
             None => InternalRead::Unknown,
         }
     }
@@ -383,7 +392,13 @@ impl BufferNode {
         }
     }
 
-    fn current_file_content(&mut self, fname: &str, tx: &Sender<Event>) -> InternalRead {
+    fn current_file_content(
+        &mut self,
+        fname: &str,
+        offset: usize,
+        count: usize,
+        tx: &Sender<Event>,
+    ) -> InternalRead {
         let req = match fname {
             FILENAME => Req::ReadBufferName { id: self.id },
             DOT => Req::ReadBufferDot { id: self.id },
@@ -393,20 +408,22 @@ impl BufferNode {
             XADDR => Req::ReadBufferXAddr { id: self.id },
             OUTPUT => return InternalRead::Immediate(Vec::new()),
             EVENT => {
+                // ignoring offset
                 return match self.pending_events() {
                     Ok(ir) => ir,
-                    Err(_) => {
+                    Err(e) => {
+                        error!("error reading events: {e}");
                         self.clear_input_filter(tx);
                         InternalRead::Unknown
                     }
-                }
+                };
             }
 
             _ => return InternalRead::Unknown,
         };
 
         match Message::send(req, tx) {
-            Ok(s) => InternalRead::Immediate(s.as_bytes().to_vec()),
+            Ok(s) => InternalRead::Immediate(apply_offset(&s, offset, count)),
             Err(e) => {
                 error!("fsys failed to read file content: {e}");
                 InternalRead::Unknown
@@ -444,6 +461,15 @@ fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {
     }
 
     m
+}
+
+fn apply_offset(s: &str, offset: usize, count: usize) -> Vec<u8> {
+    s.as_bytes()
+        .iter()
+        .skip(offset)
+        .take(count)
+        .copied()
+        .collect::<Vec<u8>>()
 }
 
 #[cfg(test)]
