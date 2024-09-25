@@ -13,11 +13,12 @@ updateCargoOutput() {
     clearBuffer "$1"
     output="$(cargo check --message-format=short 2>&1)"
     echo -n "$output" | 9p write "ad/buffers/$1/body"
-    echo -n "mark-clean $1" | 9p write ad/ctl
     if [[ "$output" =~ "error" ]]; then
         echo -n "buffer $1" | 9p write ad/ctl
-        echo -n 'Edit x/.*/ s/(.+):(\d+):\d+:/$1:$2/' | 9p write ad/ctl
+        echo -n 'Edit x/(.+):(\d+):(\d+):/ c/$1:$2:$3/' | 9p write ad/ctl
     fi
+    echo -n "0" | 9p write "ad/buffers/$1/addr"
+    echo -n "mark-clean $1" | 9p write ad/ctl
 }
 
 # Open the +cargo output buffer (would really need to track multiple?)

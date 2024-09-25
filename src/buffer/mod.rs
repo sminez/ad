@@ -805,7 +805,7 @@ impl Buffer {
     }
 
     pub(crate) fn cur_from_screen_coords(&self, y: usize, rx: usize) -> Cur {
-        let y = min(y + self.row_off - 1, self.len_lines() - 1);
+        let y = min(y + self.row_off, self.len_lines()).saturating_sub(1);
         let mut cur = Cur::from_yx(y, self.x_from_provided_rx(y, rx), self);
 
         cur.clamp_idx(self.txt.len_chars());
@@ -1468,6 +1468,7 @@ pub(crate) mod tests {
     #[test_case("not_a_real_file.rs", None; "file that does not exist")]
     #[test_case("README.md", Some("README.md"); "file that exists")]
     #[test_case("README.md:12,19", Some("README.md:12,19"); "file that exists with addr")]
+    #[test_case("README.md:12:19", Some("README.md:12:19"); "file that exists with addr containing colon")]
     #[test_case("/usr/bin/sh", Some("/usr/bin/sh"); "file that exists abs path")]
     #[test_case("/usr/bin/sh:12-+#", Some("/usr/bin/sh:12-+#"); "file that exists abs path with addr")]
     #[test_case("http://example.com", Some("http://example.com"); "http url")]
