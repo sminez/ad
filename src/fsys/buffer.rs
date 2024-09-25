@@ -218,7 +218,7 @@ impl BufferNodes {
         }
     }
 
-    pub(super) fn write(&mut self, qid: u64, s: String, offset: usize) -> Result<usize> {
+    pub(super) fn write(&mut self, qid: u64, s: String, _offset: usize) -> Result<usize> {
         let (parent, fname) = parent_and_fname(qid);
         let b = match self.known.get_mut(&parent) {
             Some(b) => b,
@@ -231,7 +231,7 @@ impl BufferNodes {
         let req = match fname {
             DOT => Req::SetBufferDot { id, s },
             ADDR => Req::SetBufferAddr { id, s },
-            BODY => Req::InsertBufferBody { id, s, offset },
+            BODY => Req::AppendBufferBody { id, s },
             XDOT => Req::SetBufferXDot { id, s },
             XADDR => Req::SetBufferXAddr { id, s },
             OUTPUT => Req::AppendOutput { id, s },

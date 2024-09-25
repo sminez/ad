@@ -47,7 +47,7 @@ pub(crate) enum Req {
     SetBufferAddr { id: usize, s: String },
     SetBufferXAddr { id: usize, s: String },
     ClearBufferBody { id: usize },
-    InsertBufferBody { id: usize, s: String, offset: usize },
+    AppendBufferBody { id: usize, s: String },
     AppendOutput { id: usize, s: String },
 
     AddInputEventFilter { id: usize, filter: InputFilter },

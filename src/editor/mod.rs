@@ -3,7 +3,7 @@ use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
     die,
-    dot::{Cur, Dot, TextObject},
+    dot::TextObject,
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
     input::{Event, StdinInput},
@@ -299,10 +299,8 @@ impl Editor {
                 b.handle_action(Action::Delete);
             }),
 
-            InsertBufferBody { id, s, offset } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                let idx = b.txt.byte_to_char(offset);
-                b.dot = Dot::Cur { c: Cur { idx } };
-                b.handle_action(Action::InsertString { s });
+            AppendBufferBody { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                b.append(s);
             }),
 
             AppendOutput { id, s } => {
