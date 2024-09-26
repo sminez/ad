@@ -8,6 +8,7 @@ addr=$(bufRead "$bufid" addr)
 maybext="${fname##*.}"
 
 case $maybext in
+  dart) formatted=$(bufRead "$bufid" body | dart format) ;;
   json) formatted=$(bufRead "$bufid" body | jq) ;;
   rs) formatted=$(bufRead "$bufid" body | rustfmt --edition 2021) ;;
   *) adError "no format rules found for '$maybext'" ;;
