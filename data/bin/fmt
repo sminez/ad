@@ -1,30 +1,21 @@
 #!/usr/bin/env bash
 # Attempt to format the current buffer based on the filetype
-set -eou pipefail
+source "$HOME/.ad/lib/ad.sh"
 
-[ -e "$HOME/.profile" ] && source ~/.profile
-fname=$(9p read "ad/buffers/$bufid/filename")
-addr=$(9p read "ad/buffers/$bufid/addr")
+requireAd
+fname=$(bufRead "$bufid" filename)
+addr=$(bufRead "$bufid" addr)
 maybext="${fname##*.}"
 
 case $maybext in
-  json)
-    formatted=$(9p read "ad/buffers/$bufid/body" | jq)
-    ;;
-
-  rs)
-    formatted=$(9p read "ad/buffers/$bufid/body" | rustfmt --edition 2021)
-    ;;
-
-  *)
-    echo "echo no format rules found for '$maybext'" | 9p write ad/ctl
-    exit 0
-    ;;
+  json) formatted=$(bufRead "$bufid" body | jq) ;;
+  rs) formatted=$(bufRead "$bufid" body | rustfmt --edition 2021) ;;
+  *) adError "no format rules found for '$maybext'" ;;
 esac
 
 if [[ -n "$formatted" ]]; then
-  echo ',' | 9p write "ad/buffers/$bufid/xaddr"
-  echo -n "$formatted" | 9p write "ad/buffers/$bufid/xdot"
-  echo "$addr" | 9p write "ad/buffers/$bufid/addr"
-  # echo -n "viewport-center" | 9p write "ad/ctl"
+  bufWrite "$bufid" xaddr ","
+  bufWrite "$bufid" xdot "$formatted"
+  bufWrite "$bufid" addr "$addr"
+  # adCtl "viewport-center"
 fi

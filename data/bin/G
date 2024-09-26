@@ -1,41 +1,17 @@
 #!/usr/bin/env bash
 # "grep open"
 #
-# Run ripgrep to search for a pattern under the current file directory and open
-# the selected match in ad
-set -eou pipefail
+# Run ripgrep to search for a pattern under the current file directory
+source "$HOME/.ad/lib/ad.sh"
 
-[ -e "$HOME/.profile" ] && source ~/.profile
-if [[ -z "$*" ]]; then
-  echo "echo Need a pattern to grep for" | 9p write ad/ctl
-  exit 1
-fi
-if [[ -z "$TMUX" ]]; then
-  echo "echo not running in tmux" | 9p write ad/ctl
-  exit 1
-fi
-
-dirname=$(dirname $(9p read "ad/buffers/$bufid/filename"))
-
-cd $dirname
-outfile="$(mktemp /tmp/ad-selection-XXX)"
+requireAd
+[[ -z "$*" ]] && adError "need a pattern to grep for"
 pat="$*"
 
-tmux split-window -v \
-  -e pat="$pat" \
-  -e outfile="$outfile" \
-    'rg $pat --column --line-number --no-heading |
-      fzf --delimiter : \
-        --preview "bat --color=always --style=numbers --highlight-line {2} {1}" \
-        --preview-window +{2}-/2 > $outfile'
-
-output=$(echo $outfile | entr -panz cat "$outfile" | tr -d '\n')
-rm "$outfile"
-
-if [[ -n $output ]]; then 
-  fname=$(echo $output | cut -d':' -f1)
-  lnum=$(echo $output | cut -d':' -f2)
-  echo -n "open $dirname/$fname" | 9p write ad/ctl
-  bufid=$(9p read "ad/buffers/current")
-  echo -n "$lnum" | 9p write ad/buffers/$bufid/addr
-fi
+dirname="$(dirname "$(bufRead "$bufid" filename)")"
+cd "$dirname" || exit
+rg "$pat" \
+  --column \
+  --line-number \
+  --no-heading |
+    sed 's/\(.\+\):\([0-9]\+\):\([0-9]\+\):/\1:\2:\3 /g'

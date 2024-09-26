@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # Set the colorscheme to either a light or dark theme
-set -eou pipefail
-
-[ -e "$HOME/.profile" ] && source ~/.profile
+source "$HOME/.ad/lib/ad.sh"
 
 lightTheme="\
 set bg-color=#ebdbb2
@@ -34,9 +32,7 @@ set string-color=#61DCA5"
 
 
 case "${1:-dark}" in
-  "light") message="$lightTheme" ;;
-   "dark") message="$darkTheme" ;;
-        *) message="echo invalid theme name" ;;
+  "light") adCtl "$lightTheme" ;;
+   "dark") adCtl "$darkTheme" ;;
+        *) adError "invalid theme name" ;;
 esac
-
-echo "$message" | 9p write ad/ctl

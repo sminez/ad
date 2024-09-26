@@ -1,9 +1,20 @@
 #!/usr/bin/env bash
 # Helper functions for writing scripts to interact with ad
 
+[ -e "$HOME/.profile" ] && source ~/.profile
+
 adCtl() { echo -n "$*" | 9p write ad/ctl; }
 adEdit() { adCtl "Edit $*"; }
 adIndex() { 9p read ad/buffers/index; }
+
+adError() {
+  adCtl "echo $*"
+  exit 1
+}
+
+requireAd() {
+  [[ -z "$bufid" ]] && adError "need to be run from inside of ad"
+}
 
 bufRead() { 9p read "ad/buffers/$1/$2"; }
 bufWrite() {
