@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# A simple control program for running text based presentations within ad
+# via an index file.
+#
+# To run the presentation within ad, execute 'Slide' in a directory with the
+# structure shown below. From there the NextSlide and PrevSlide commands can
+# be used to move between the slides.
+#
+# > Example directory structure:
+# .
+#   body
+#   conclusion
+#   index
+#   intro
+#
+# > Example index content:
+#   intro
+#   body
+#   conclusion 
+
+. "$HOME/.ad/lib/ad.sh"
+
+requireAd
+
+f="$(basename "$(bufRead "$bufid" filename)")"
+d="$(dirname "$fname")"
+
+[ ! -f "$d/index" ] && adError "not in a slideshow directory"
+index="$(cat "$d/index")"
+toLoad="$(cat "$d/index" | head -n1)"
+
+case "$1" in
+  next)
+    i="$(grep -n "^$f" "$d/index" | cut -d: -f1)"
+    j="$(( "$i" + 1 ))"
+    toLoad="$(nl "$d/index" | grep "$j" | cut -f2)"
+    [ -z "$toLoad" ] && adError "This is the last slide"
+    ;;
+
+  prev)
+    i="$(grep -n "^$f" "$d/index" | cut -d: -f1)"
+    j="$(( "$i" - 1 ))"
+    toLoad="$(nl "$d/index" | grep "$j" | cut -f2)"
+    [ -z "$toLoad" ] && adError "This is first slide"
+    ;;
+esac
+
+# TODO: being able to replace the current buffer with a new one
+#       rather than opening new buffers each time would be nice
+adCtl "open $toLoad"
+adCtl "Get"
+adEdit "0 i/[PrevSlide] [NextSlide]\n\n/"
+id="$(currentBufferId)"
+curToBof "$id"
+markClean "$id"

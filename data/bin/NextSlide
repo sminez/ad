@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Advance to the next slide in a 'Slide' presentation
+Slide next

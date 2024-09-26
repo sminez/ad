@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Return to the previous slide in a 'Slide' presentation
+Slide prev
