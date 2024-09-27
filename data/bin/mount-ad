@@ -3,4 +3,4 @@
 source "$HOME/.ad/lib/ad.sh"
 
 9pfuse "/tmp/ns.$USER.:0/ad" "$HOME/.ad/mnt"
-adCtl "mounted ad filesystem to $HOME/.ad/mnt"
+adCtl "echo mounted ad filesystem to $HOME/.ad/mnt"

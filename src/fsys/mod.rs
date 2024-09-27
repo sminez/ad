@@ -29,13 +29,14 @@
 use crate::input::Event;
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{ClientId, ReadOutcome, Serve9p, Server},
+    server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
     Result,
 };
 use std::{
     collections::HashMap,
     env,
     fs::create_dir_all,
+    process::Command,
     sync::mpsc::{channel, Receiver, Sender},
     thread::JoinHandle,
     time::SystemTime,
@@ -139,6 +140,19 @@ pub(crate) struct AdFs {
     mount_dir_stat: Stat,
     control_file_stat: Stat,
     log_file_stat: Stat,
+    mount_path: String,
+}
+
+impl Drop for AdFs {
+    fn drop(&mut self) {
+        let res = Command::new("fusermount")
+            .args(["-u", &self.mount_path])
+            .spawn();
+
+        if let Ok(mut child) = res {
+            _ = child.wait();
+        }
+    }
 }
 
 impl AdFs {
@@ -162,13 +176,27 @@ impl AdFs {
             mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
             control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
             log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
+            mount_path,
         }
     }
 
     /// Spawn a thread for running this filesystem and return a handle to it
     pub fn run_threaded(self) -> FsHandle {
+        let mount_path = self.mount_path.clone();
+        let socket_path = socket_path(DEFAULT_SOCKET_NAME);
+
         let s = Server::new(self);
-        FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()))
+        let handle = FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()));
+
+        let res = Command::new("9pfuse")
+            .args([socket_path, mount_path])
+            .spawn();
+
+        if let Ok(mut child) = res {
+            _ = child.wait();
+        }
+
+        handle
     }
 
     fn add_open_cid(&mut self, qid: u64, cid: ClientId) {

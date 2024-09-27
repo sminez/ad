@@ -30,6 +30,13 @@ impl Drop for Socket {
     }
 }
 
+/// The unix socket path that will be used for a given server name.
+pub fn socket_path(name: &str) -> String {
+    let uname = env::var("USER").unwrap();
+    let socket_dir = format!("/tmp/ns.{uname}.:0");
+    format!("{socket_dir}/{name}")
+}
+
 fn unix_socket(name: &str) -> Socket {
     let uname = env::var("USER").unwrap();
     let socket_dir = format!("/tmp/ns.{uname}.:0");
