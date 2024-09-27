@@ -50,7 +50,7 @@ impl LogEvent {
             LogEvent::Save(id) => format!("{id} save\n"),
         };
 
-        s.as_bytes().to_vec()
+        s.into_bytes()
     }
 }
 

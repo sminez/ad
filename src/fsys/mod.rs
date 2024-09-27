@@ -16,7 +16,8 @@
 //! ## Filesystem contents
 //! ```text
 //! $HOME/.ad/mnt/
-//!   ctrl
+//!   ctl
+//!   minibuffer
 //!   log
 //!   buffers/
 //!     [n]/
@@ -36,13 +37,14 @@ use std::{
     collections::HashMap,
     env,
     fs::create_dir_all,
+    mem::take,
     path::Path,
     process::Command,
     sync::mpsc::{channel, Receiver, Sender},
-    thread::JoinHandle,
+    thread::{spawn, JoinHandle},
     time::SystemTime,
 };
-use tracing::trace;
+use tracing::{error, trace};
 
 mod buffer;
 mod event;
@@ -69,14 +71,17 @@ const CONTROL_FILE: &str = "ctl";
 ///   2.   /log         -> read only log of events in the editor
 const LOG_FILE_QID: u64 = 2;
 const LOG_FILE: &str = "log";
-///   3    /buffers/    -> parent directory for buffers
-const BUFFERS_QID: u64 = 3;
+///   3    /minibuffer  -> control file for selecting text using the minibuffer
+const MINIBUFFER_QID: u64 = 3;
+const MINIBUFFER: &str = "minibuffer";
+///   4    /buffers/    -> parent directory for buffers
+const BUFFERS_QID: u64 = 4;
 const BUFFERS_DIR: &str = "buffers";
-//    4      /index     -> a listing of all of the currently open buffers
-const INDEX_BUFFER_QID: u64 = 4;
+//    5      /index     -> a listing of all of the currently open buffers
+const INDEX_BUFFER_QID: u64 = 5;
 const INDEX_BUFFER: &str = "index";
-//    5      /current   -> the fsys filename of the current buffer
-const CURRENT_BUFFER_QID: u64 = 5;
+//    6      /current   -> the fsys filename of the current buffer
+const CURRENT_BUFFER_QID: u64 = 6;
 const CURRENT_BUFFER: &str = "current";
 
 /// The number of qids required to serve both the directory and contents
@@ -93,9 +98,10 @@ const CURRENT_BUFFER: &str = "current";
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
 const QID_OFFSET: u64 = 9;
 
-const TOP_LEVEL_QIDS: [u64; 6] = [
+const TOP_LEVEL_QIDS: [u64; 7] = [
     MOUNT_ROOT_QID,
     CONTROL_FILE_QID,
+    MINIBUFFER_QID,
     LOG_FILE_QID,
     BUFFERS_QID,
     INDEX_BUFFER_QID,
@@ -111,8 +117,6 @@ enum InternalRead {
     Unknown,
 }
 
-// FIXME: using fids for this doesn't work as each client has its own space for them. We need to
-// identify the connected client instead.
 #[derive(Debug, Default)]
 struct Cids {
     cids: Vec<ClientId>,
@@ -130,16 +134,25 @@ impl FsHandle {
     }
 }
 
+#[derive(Debug)]
+enum MiniBufferContent {
+    Buffering(Vec<u8>),
+    Data(Vec<u8>),
+    Pending(Sender<Sender<Vec<u8>>>, Receiver<Vec<u8>>),
+}
+
 /// The filesystem interface for ad
 #[derive(Debug)]
 pub(crate) struct AdFs {
     tx: Sender<Event>,
     buffer_nodes: BufferNodes,
+    minibuffer_content: MiniBufferContent,
     /// map of qids to client IDs with that qid open
     open_cids: HashMap<u64, Cids>,
     // Root level files and directories
     mount_dir_stat: Stat,
     control_file_stat: Stat,
+    minibuffer_stat: Stat,
     log_file_stat: Stat,
     mount_path: String,
 }
@@ -176,8 +189,10 @@ impl AdFs {
             tx,
             buffer_nodes,
             open_cids: HashMap::new(),
+            minibuffer_content: MiniBufferContent::Data(Vec::new()),
             mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
             control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
+            minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
             log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
             mount_path,
         }
@@ -228,6 +243,97 @@ impl AdFs {
     fn readlocked_cid(&self, qid: u64) -> Option<ClientId> {
         self.open_cids.get(&qid).and_then(|cids| cids.read_locked)
     }
+
+    /// Writing data to the minibuffer causes fsys to buffer the writes internally until the client
+    /// is done. When a client then attempts to read back the selection the full buffer is sent to
+    /// the editor for rendering and the reads block until the user makes a selection.
+    fn minibuffer_write(&mut self, lines: String) -> Result<usize> {
+        let n_bytes = lines.len();
+        match &mut self.minibuffer_content {
+            MiniBufferContent::Buffering(buffer) => buffer.extend_from_slice(lines.as_bytes()),
+            _ => self.minibuffer_content = MiniBufferContent::Buffering(lines.into_bytes()),
+        }
+
+        Ok(n_bytes)
+    }
+
+    fn minibuffer_read(&mut self, offset: usize, count: usize) -> ReadOutcome {
+        match &mut self.minibuffer_content {
+            MiniBufferContent::Buffering(lines_bytes) => {
+                let lines = match String::from_utf8(take(lines_bytes)) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        error!("invalid minibuffer data: {e}");
+                        self.minibuffer_content = MiniBufferContent::Buffering(Vec::new());
+                        return ReadOutcome::Immediate(Vec::new());
+                    }
+                };
+
+                let (data_tx, data_rx) = channel();
+                let (fsys_tx, fsys_rx) = channel();
+                let (sub_tx, sub_rx) = channel();
+
+                self.minibuffer_stat.n_bytes = 0;
+                self.minibuffer_stat.last_modified = SystemTime::now();
+                spawn_minibuffer_listener(data_rx, fsys_tx, sub_rx);
+
+                let (tx, rx) = channel();
+                _ = sub_tx.send(tx);
+                self.minibuffer_content = MiniBufferContent::Pending(sub_tx, fsys_rx);
+
+                match Message::send(Req::MinibufferSelect { lines, tx: data_tx }, &self.tx) {
+                    Ok(_) => ReadOutcome::Blocked(rx),
+                    Err(e) => {
+                        error!("unable to open minibuffer: {e}");
+                        self.minibuffer_content = MiniBufferContent::Buffering(Vec::new());
+                        ReadOutcome::Immediate(Vec::new())
+                    }
+                }
+            }
+
+            MiniBufferContent::Data(data) => {
+                ReadOutcome::Immediate(apply_offset(data, offset, count))
+            }
+
+            MiniBufferContent::Pending(sub_tx, fsys_rx) => match fsys_rx.try_recv() {
+                Ok(data) => {
+                    self.minibuffer_stat.n_bytes = data.len() as u64;
+                    self.minibuffer_content = MiniBufferContent::Data(data.clone());
+                    ReadOutcome::Immediate(apply_offset(&data, offset, count))
+                }
+                _ => {
+                    let (tx, rx) = channel();
+                    _ = sub_tx.send(tx);
+                    ReadOutcome::Blocked(rx)
+                }
+            },
+        }
+    }
+}
+
+/// Spawn a listener to wait for a reply from the editor for our minibuffer selection
+fn spawn_minibuffer_listener(
+    data_rx: Receiver<String>,
+    fsys_tx: Sender<Vec<u8>>,
+    sub_rx: Receiver<Sender<Vec<u8>>>,
+) {
+    spawn(move || {
+        let data = match data_rx.recv() {
+            Ok(s) => s.into_bytes(),
+            Err(e) => {
+                error!("unable to read minibuffer output: {e}");
+                Vec::new()
+            }
+        };
+
+        // Reply to fsys first so the data is ready for incoming reads
+        _ = fsys_tx.send(data.clone());
+
+        // Any client currently blocked on a read then gets their own reply
+        for tx in sub_rx.try_iter() {
+            _ = tx.send(data.clone());
+        }
+    });
 }
 
 impl Serve9p for AdFs {
@@ -238,6 +344,7 @@ impl Serve9p for AdFs {
         match qid {
             MOUNT_ROOT_QID => Ok(self.mount_dir_stat.clone()),
             CONTROL_FILE_QID => Ok(self.control_file_stat.clone()),
+            MINIBUFFER_QID => Ok(self.minibuffer_stat.clone()),
             LOG_FILE_QID => Ok(self.log_file_stat.clone()),
             BUFFERS_QID => Ok(self.buffer_nodes.stat().clone()),
             qid => match self.buffer_nodes.get_stat_for_qid(qid) {
@@ -254,7 +361,7 @@ impl Serve9p for AdFs {
         if stat.n_bytes == 0 {
             trace!(%qid, %uname, "stat n_bytes=0, truncating file");
             match qid {
-                MOUNT_ROOT_QID | CONTROL_FILE_QID | LOG_FILE_QID => (),
+                MOUNT_ROOT_QID | CONTROL_FILE_QID | MINIBUFFER_QID | LOG_FILE_QID => (),
                 qid => self.buffer_nodes.truncate(qid),
             }
         }
@@ -275,6 +382,7 @@ impl Serve9p for AdFs {
         match parent_qid {
             MOUNT_ROOT_QID => match child {
                 CONTROL_FILE => Ok(self.control_file_stat.fm.clone()),
+                MINIBUFFER => Ok(self.minibuffer_stat.fm.clone()),
                 LOG_FILE => Ok(self.log_file_stat.fm.clone()),
                 BUFFERS_DIR => Ok(self.buffer_nodes.stat().fm.clone()),
                 _ => match self.buffer_nodes.lookup_file_stat(parent_qid, child) {
@@ -337,6 +445,8 @@ impl Serve9p for AdFs {
 
         if qid == CONTROL_FILE_QID {
             return Ok(ReadOutcome::Immediate(Vec::new()));
+        } else if qid == MINIBUFFER_QID {
+            return Ok(self.minibuffer_read(offset, count));
         } else if qid == LOG_FILE_QID {
             return Ok(self.buffer_nodes.log.events_since_last_read(cid));
         }
@@ -367,6 +477,7 @@ impl Serve9p for AdFs {
         match qid {
             MOUNT_ROOT_QID => Ok(vec![
                 self.log_file_stat.clone(),
+                self.minibuffer_stat.clone(),
                 self.control_file_stat.clone(),
                 self.buffer_nodes.stat().clone(),
             ]),
@@ -404,6 +515,8 @@ impl Serve9p for AdFs {
                 }
             }
 
+            MINIBUFFER_QID => self.minibuffer_write(s),
+
             CURRENT_BUFFER_QID | LOG_FILE_QID | INDEX_BUFFER_QID => Err(E_NOT_ALLOWED.to_string()),
 
             qid => self.buffer_nodes.write(qid, s, offset),
@@ -428,6 +541,14 @@ impl Serve9p for AdFs {
         trace!(?cid, %parent, %name, ?perm, ?mode, %uname, "handling create request");
         Err("create not allowed".to_string())
     }
+}
+
+fn apply_offset(data: &[u8], offset: usize, count: usize) -> Vec<u8> {
+    data.iter()
+        .skip(offset)
+        .take(count)
+        .copied()
+        .collect::<Vec<u8>>()
 }
 
 fn empty_dir_stat(qid: u64, name: &str) -> Stat {

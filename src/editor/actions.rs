@@ -18,6 +18,7 @@ use std::{
     env, fs,
     io::Write,
     path::{Path, PathBuf},
+    sync::mpsc::Sender,
 };
 use tracing::{debug, error, info, trace, warn};
 
@@ -388,6 +389,18 @@ impl Editor {
         }
     }
 
+    pub(super) fn fsys_minibuffer(&mut self, lines: String, tx: Sender<String>) {
+        let selection =
+            self.minibuffer_select_from("> ", lines.split('\n').map(|s| s.to_string()).collect());
+        let s = match selection {
+            MiniBufferSelection::Line { line, .. } => line,
+            MiniBufferSelection::UserInput { input } => input,
+            MiniBufferSelection::Cancelled => String::new(),
+        };
+
+        _ = tx.send(s);
+    }
+
     pub(super) fn select_buffer(&mut self) {
         let selection = self.minibuffer_select_from("> ", self.buffers.as_buf_list());
         if let MiniBufferSelection::Line { line, .. } = selection {
@@ -656,7 +669,12 @@ mod tests {
                     stringify!($msg),
                     $expected
                 ),
-                Err(e) => panic!("err={e}\nrecv {}({})", stringify!($msg), $expected),
+                Err(e) => panic!(
+                    "err={e}
+recv {}({})",
+                    stringify!($msg),
+                    $expected
+                ),
             }
         };
     }

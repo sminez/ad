@@ -264,6 +264,11 @@ impl Editor {
                 default_handled();
             }
 
+            MinibufferSelect { lines, tx } => {
+                self.fsys_minibuffer(lines, tx);
+                default_handled();
+            }
+
             ReadBufferName { id } => self.send_buffer_resp(id, tx, |b| b.full_name().to_string()),
             ReadBufferAddr { id } => self.send_buffer_resp(id, tx, |b| b.addr()),
             ReadBufferDot { id } => self.send_buffer_resp(id, tx, |b| b.dot_contents()),

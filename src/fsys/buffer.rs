@@ -1,7 +1,7 @@
 //! Buffer state for the fuse filesystem
 use crate::{
     fsys::{
-        empty_dir_stat, empty_file_stat,
+        apply_offset, empty_dir_stat, empty_file_stat,
         event::{run_threaded_input_listener, send_event_to_editor, InputFilter, InputRequest},
         log::{Log, LogEvent},
         InternalRead, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER,
@@ -179,12 +179,12 @@ impl BufferNodes {
     ) -> InternalRead {
         if qid == CURRENT_BUFFER_QID {
             return InternalRead::Immediate(apply_offset(
-                &self.current_buffid.to_string(),
+                self.current_buffid.to_string().as_bytes(),
                 offset,
                 count,
             ));
         } else if qid == INDEX_BUFFER_QID {
-            return InternalRead::Immediate(apply_offset(&self.index(), offset, count));
+            return InternalRead::Immediate(apply_offset(self.index().as_bytes(), offset, count));
         }
 
         let (parent, fname) = parent_and_fname(qid);
@@ -428,7 +428,7 @@ impl BufferNode {
         };
 
         match Message::send(req, tx) {
-            Ok(s) => InternalRead::Immediate(apply_offset(&s, offset, count)),
+            Ok(s) => InternalRead::Immediate(apply_offset(s.as_bytes(), offset, count)),
             Err(e) => {
                 error!("fsys failed to read file content: {e}");
                 InternalRead::Unknown
@@ -468,23 +468,14 @@ fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {
     m
 }
 
-fn apply_offset(s: &str, offset: usize, count: usize) -> Vec<u8> {
-    s.as_bytes()
-        .iter()
-        .skip(offset)
-        .take(count)
-        .copied()
-        .collect::<Vec<u8>>()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use simple_test_case::test_case;
 
     #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
-    #[test_case(8, 6, DOT; "dot second buffer")]
-    #[test_case(21, 15, BODY; "body second buffer")]
+    #[test_case(9, 7, DOT; "dot second buffer")]
+    #[test_case(22, 16, BODY; "body second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);

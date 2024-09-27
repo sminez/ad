@@ -34,6 +34,7 @@ impl Message {
 #[derive(Debug, Clone)]
 pub(crate) enum Req {
     ControlMessage { msg: String },
+    MinibufferSelect { lines: String, tx: Sender<String> },
 
     ReadBufferName { id: usize },
     ReadBufferDot { id: usize },

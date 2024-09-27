@@ -74,7 +74,7 @@ pub fn run_threaded_input_listener(event_rx: Receiver<FsysEvent>) -> Sender<Inpu
             .collect();
 
         if !content.is_empty() {
-            _ = tx.send(ReadOutcome::Immediate(content.as_bytes().to_vec()));
+            _ = tx.send(ReadOutcome::Immediate(content.into_bytes()));
             continue;
         }
 
@@ -82,7 +82,7 @@ pub fn run_threaded_input_listener(event_rx: Receiver<FsysEvent>) -> Sender<Inpu
         let (read_tx, read_rx) = channel();
         _ = tx.send(ReadOutcome::Blocked(read_rx));
         let data = match event_rx.recv() {
-            Ok(evt) => evt.as_event_file_line().as_bytes().to_vec(),
+            Ok(evt) => evt.as_event_file_line().into_bytes(),
             Err(_) => return,
         };
 
