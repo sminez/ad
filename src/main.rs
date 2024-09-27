@@ -43,7 +43,7 @@ fn main() {
 
     let mut e = Editor::new(config, EditorMode::Terminal, log_buffer);
     for fname in files.iter() {
-        e.open_file(fname);
+        e.open_file_relative_to_cwd(fname);
     }
 
     e.run()
