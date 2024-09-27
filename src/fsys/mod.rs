@@ -36,6 +36,7 @@ use std::{
     collections::HashMap,
     env,
     fs::create_dir_all,
+    path::Path,
     process::Command,
     sync::mpsc::{channel, Receiver, Sender},
     thread::JoinHandle,
@@ -161,7 +162,9 @@ impl AdFs {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
 
-        create_dir_all(&mount_path).expect("to be able to create our mount point");
+        if !Path::new(&mount_path).exists() {
+            create_dir_all(&mount_path).expect("to be able to create our mount point");
+        }
 
         let (log_tx, log_rx) = channel();
         let (listener_tx, listener_rx) = channel();

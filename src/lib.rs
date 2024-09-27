@@ -99,11 +99,12 @@ macro_rules! die {
 }
 
 /// Restore the terminal state to what we had originally before starting our UI.
-///
-/// # Panics
-/// This will panic if ORIGINAL_TERMIOS has not been set.
 pub(crate) fn restore_terminal_state(so: &mut Stdout) {
     disable_alternate_screen(so);
     disable_mouse_support(so);
-    set_termios(*ORIGINAL_TERMIOS.get().unwrap());
+    let t = match ORIGINAL_TERMIOS.get() {
+        Some(t) => t,
+        None => return,
+    };
+    set_termios(*t);
 }
