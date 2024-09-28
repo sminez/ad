@@ -40,16 +40,17 @@ handleErrorLoads() {
   done
 }
 
-CURRENT_ID="$(currentBufferId)"
-adCtl "open +cargo"
-ID="$(adIndex | grep "+cargo" | cut -f1)"
-focusBuffer "$CURRENT_ID"
-updateCargoOutput "$ID"
-handleErrorLoads "$ID" &
+currentId="$(currentBufferId)"
+root="$(git rev-parse --show-toplevel)"
+adCtl "open $root/+cargo"
+id="$(adIndex | grep "+cargo" | cut -f1)"
+focusBuffer "$currentId"
+updateCargoOutput "$id"
+handleErrorLoads "$id" &
 
 adLog | while read -r line; do
   action="$(echo "$line" | cut -d' ' -f2)"
   if [ "$action" = "save" ]; then
-    updateCargoOutput "$ID"
+    updateCargoOutput "$id"
   fi
 done

@@ -1,0 +1,7 @@
+src: bash
+dst: ad
+wdir: /home/foo/bar
+wdir: /home/foo/baz
+attrs: a=b c=d
+ndata: 13
+data: hello, world!

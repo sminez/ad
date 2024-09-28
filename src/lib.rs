@@ -28,6 +28,7 @@ pub mod input;
 pub mod key;
 pub mod log;
 pub mod mode;
+pub mod plumb;
 pub mod regex;
 pub mod term;
 pub mod trie;
