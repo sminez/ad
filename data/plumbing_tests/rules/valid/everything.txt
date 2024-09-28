@@ -1,0 +1,12 @@
+# this is a comment line
+attr add a=b
+attr delete c
+arg isfile $data
+arg isdir /var/lib
+src is ad
+dst is editor
+wdir set /foo/bar
+data matches (.+):(\d+):(\d+):
+data set $1:$2,$3
+plumb to editor
+plumb start ad $file

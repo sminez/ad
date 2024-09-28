@@ -1,0 +1,2 @@
+plumb to editor
+plumb start ad $file

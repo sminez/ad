@@ -1,0 +1,2 @@
+foo is bar
+plumb to editor

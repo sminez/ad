@@ -1,0 +1,3 @@
+# the trailing newline here is required for the test
+attr add 
+plumb to editor
