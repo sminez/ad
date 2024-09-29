@@ -31,16 +31,16 @@ toLoad="$(cat "$d/index" | head -n1)"
 
 case "$1" in
   next)
-    i="$(grep -n "^$f" "$d/index" | cut -d: -f1)"
+    i="$(grep -n "^$f\$" "$d/index" | cut -d: -f1)"
     j="$(( "$i" + 1 ))"
-    toLoad="$(nl "$d/index" | grep "$j" | cut -f2)"
+    toLoad="$(nl "$d/index" | grep "\s$j\s" | cut -f2)"
     [ -z "$toLoad" ] && adError "This is the last slide"
     ;;
 
   prev)
-    i="$(grep -n "^$f" "$d/index" | cut -d: -f1)"
+    i="$(grep -n "^$f\$" "$d/index" | cut -d: -f1)"
     j="$(( "$i" - 1 ))"
-    toLoad="$(nl "$d/index" | grep "$j" | cut -f2)"
+    toLoad="$(nl "$d/index" | grep "\s$j\s" | cut -f2)"
     [ -z "$toLoad" ] && adError "This is first slide"
     ;;
 esac
