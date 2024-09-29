@@ -16,7 +16,7 @@ esac
 
 if [[ -n "$formatted" ]]; then
   bufWrite "$bufid" xaddr ","
-  bufWrite "$bufid" xdot "$formatted"
+  bufWriteNoEscapes "$bufid" xdot "$formatted"
   bufWrite "$bufid" addr "$addr"
   # adCtl "viewport-center"
 fi

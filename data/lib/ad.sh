@@ -18,10 +18,16 @@ requireAd() {
 
 bufRead() { 9p read "ad/buffers/$1/$2"; }
 bufWrite() {
-  _p="ad/buffers/$1/$2"
+  _path="ad/buffers/$1/$2"
   shift
   shift
-  echo -en "$*" | 9p write "$_p"
+  echo -en "$*" | 9p write "$_path"
+}
+bufWriteNoEscapes() {
+  _path="ad/buffers/$1/$2"
+  shift
+  shift
+  echo -En "$*" | 9p write "$_path"
 }
 
 adLog() { 9p read ad/log; }
