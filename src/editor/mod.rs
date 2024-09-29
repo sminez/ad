@@ -1,7 +1,6 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
-    plumb::PlumbingRules,
     config::Config,
     die,
     dot::TextObject,
@@ -10,6 +9,7 @@ use crate::{
     input::{Event, StdinInput},
     key::{Arrow, Input, MouseButton, MouseEvent},
     mode::{modes, Mode},
+    plumb::PlumbingRules,
     restore_terminal_state, set_config,
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
@@ -76,7 +76,12 @@ impl Drop for Editor {
 
 impl Editor {
     /// Construct a new [Editor] with the provided config.
-    pub fn new(cfg: Config, plumbing_rules: PlumbingRules, mode: EditorMode, log_buffer: LogBuffer) -> Self {
+    pub fn new(
+        cfg: Config,
+        plumbing_rules: PlumbingRules,
+        mode: EditorMode,
+        log_buffer: LogBuffer,
+    ) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
@@ -104,7 +109,7 @@ impl Editor {
             rx_fsys: Some(rx_fsys),
             mode,
             log_buffer,
-            plumbing_rules
+            plumbing_rules,
         }
     }
 

@@ -5,15 +5,23 @@ addrelem = ((#?[0-9]+)|(/[A-Za-z0-9_\^]+/?)|[.$])
 addr = :($addrelem([,;+\-]$addrelem)*)
 
 # urls go to a web browser
-data matches (https?|ftp|file)://[a-zA-Z0-9_@\-]+([.:][a-zA-Z0-9_@\-]+)*/?[a-zA-Z0-9_?,%#~&/\-+=]+([:.][a-zA-Z0-9_?,%#~&/\-+=]+)*
+data matches https?://(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)
 plumb to web
-plumb start xdg-open $data
+plumb start xdg-open $0
 
 # image files go an image viewer
 data matches [a-zA-Z¡-￿0-9_\-./@]+
 data matches ([a-zA-Z¡-￿0-9_\-./@]+)\.(jpe?g|JPE?G|gif|GIF|tiff?|TIFF?|ppm|bit|png|PNG)
 arg isfile $0
 plumb to image
+plumb start xdg-open $0
+
+# pdfs go to a pdf viewer
+data matches [a-zA-Z¡-￿0-9_\-./@]+
+data matches ([a-zA-Z¡-￿0-9_\-./@]+)\.[Pp][Dd][Ff]
+arg isfile $0
+plumb to pdf
+plumb start zathura $0
 plumb start xdg-open $0
 
 # existing files tagged by line number:columnumber, go to editor
