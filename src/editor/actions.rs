@@ -581,9 +581,9 @@ impl Editor {
             return; // input filter in place
         }
 
-        let cmd = b.dot.content(b);
+        let cmd = b.dot.content(b).trim().to_string();
 
-        match self.parse_command(cmd.trim_end()) {
+        match self.parse_command(&cmd) {
             Some(actions) => self.handle_actions(actions),
             None => self.run_shell_cmd(&cmd),
         }
@@ -593,9 +593,9 @@ impl Editor {
         let current_id = self.active_buffer_id();
         self.buffers.focus_id_silent(bufid);
 
-        match self.parse_command(s.trim_end()) {
+        match self.parse_command(s.trim()) {
             Some(actions) => self.handle_actions(actions),
-            None => self.run_shell_cmd(&s),
+            None => self.run_shell_cmd(s.trim()),
         }
 
         self.buffers.focus_id_silent(current_id);
