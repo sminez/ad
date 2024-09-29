@@ -12,7 +12,7 @@ loading text within ad:
 
         ../../src/editor/actions.rs:/default_load_dot/
 
-    - the default plumbing rules (../plumbing.rules) support viewing man pages within ad
+    - the default plumbing rules (../../data/plumbing.rules) support viewing man pages within ad
 
         - try loading the following text to view the man page for ls.
         - you will need to highlight the text first before you can load it which can be done

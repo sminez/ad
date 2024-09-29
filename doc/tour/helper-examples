@@ -3,7 +3,7 @@ we have been using some helper programs already:
     - the NextSlide and PrevSlide commands we have been using to navigate this presentation
       are written using the shell script library shown on the previous slide
 
-    - a more advanced helper script is ../bin/rust-check
+    - a more advanced helper script is ../../data/bin/rust-check
 
     - this makes use of the buffer events file to intercept and re-interpret Load and Execute
       events to provide a custom text driven interface

@@ -4,7 +4,7 @@ you also have control over the minibuffer:
 
     - it can be used to interactively select from newline delimited text
 
-        ../lib/ad.sh:/minibufferSelect/
+        ../../data/lib/ad.sh:/minibufferSelect/
 
         minibuffer-demo.sh
 

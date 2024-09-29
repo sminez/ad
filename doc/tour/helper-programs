@@ -3,8 +3,8 @@ plugins for ad are written using the filesystem interface:
     - the ad GitHub repo contains some example scripts and library functions to help with writing
       shell scripts to interact with ad:
 
-        ../lib/ad.sh
-        ../bin
+        ../../data/lib/ad.sh
+        ../../data/bin
 
     - there is also the ad_client crate which provides a way to interact with ad from Rust:
 
