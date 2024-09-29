@@ -11,11 +11,12 @@ structural regular expressions:
       another plan 9 text editor, sam.
 
         http://sam.cat-v.org/
+        http://sam.cat-v.org/cheatsheet/
         http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf
 
     - try executing the Edit command below to see what it does:
 
-        Edit 21,31 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
+        Edit 24,34 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
 
 
 name: Alice

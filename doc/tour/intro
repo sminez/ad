@@ -6,7 +6,7 @@ welcome to ad: an adaptable text editor.
       - cargo install --path .
       - make setup-dotfiles
 
-    - from there you can run this presentation yourself by opening data/tour/intro
+    - from there you can run this presentation yourself by opening the doc/tour directory
       within ad and middle clicking the word "Slide" below or placing the cursor on
       it and typing "@".
 

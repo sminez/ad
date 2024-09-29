@@ -13,5 +13,5 @@ ad has a virtual filesystem interface:
         9p read ad/buffers/1/dot
 
     - if you have the fusermount(1) and 9pfuse(4) programs installed then you can set the
-      "auto-mount" property in ../init.conf to true in order to mount the virtual filesystem
-      directly at ~/.ad/mnt
+      "auto-mount" property in ../../data/init.conf to true in order to mount the virtual
+      filesystem directly at ~/.ad/mnt
