@@ -147,6 +147,7 @@ pub(crate) struct AdFs {
     tx: Sender<Event>,
     buffer_nodes: BufferNodes,
     minibuffer_content: MiniBufferContent,
+    minibuffer_prompt: Option<String>,
     /// map of qids to client IDs with that qid open
     open_cids: HashMap<u64, Cids>,
     // Root level files and directories
@@ -194,6 +195,7 @@ impl AdFs {
             buffer_nodes,
             open_cids: HashMap::new(),
             minibuffer_content: MiniBufferContent::Data(Vec::new()),
+            minibuffer_prompt: None,
             mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
             control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
             minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
@@ -276,6 +278,7 @@ impl AdFs {
                         return ReadOutcome::Immediate(Vec::new());
                     }
                 };
+                let prompt = self.minibuffer_prompt.take();
 
                 let (data_tx, data_rx) = channel();
                 let (fsys_tx, fsys_rx) = channel();
@@ -289,7 +292,7 @@ impl AdFs {
                 _ = sub_tx.send(tx);
                 self.minibuffer_content = MiniBufferContent::Pending(sub_tx, fsys_rx);
 
-                match Message::send(Req::MinibufferSelect { lines, tx: data_tx }, &self.tx) {
+                match Message::send(Req::MinibufferSelect { prompt, lines, tx: data_tx }, &self.tx) {
                     Ok(_) => ReadOutcome::Blocked(rx),
                     Err(e) => {
                         error!("unable to open minibuffer: {e}");
@@ -515,13 +518,19 @@ impl Serve9p for AdFs {
         };
 
         match qid {
-            CONTROL_FILE_QID => {
-                self.control_file_stat.last_modified = SystemTime::now();
-                match Message::send(Req::ControlMessage { msg: s }, &self.tx) {
-                    Ok(_) => Ok(n_bytes),
-                    Err(e) => Err(format!("unable to execute control message: {e}")),
+            CONTROL_FILE_QID => match s.strip_prefix("minibuffer-prompt ") {
+                Some(prompt) => {
+                    self.minibuffer_prompt = Some(prompt.to_string());
+                    Ok(n_bytes)
                 }
-            }
+                None => {
+                    self.control_file_stat.last_modified = SystemTime::now();
+                    match Message::send(Req::ControlMessage { msg: s }, &self.tx) {
+                        Ok(_) => Ok(n_bytes),
+                        Err(e) => Err(format!("unable to execute control message: {e}")),
+                    }
+                }
+            },
 
             MINIBUFFER_QID => self.minibuffer_write(s),
 

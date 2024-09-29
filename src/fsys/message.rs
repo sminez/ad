@@ -33,26 +33,72 @@ impl Message {
 
 #[derive(Debug, Clone)]
 pub(crate) enum Req {
-    ControlMessage { msg: String },
-    MinibufferSelect { lines: String, tx: Sender<String> },
-
-    ReadBufferName { id: usize },
-    ReadBufferDot { id: usize },
-    ReadBufferXDot { id: usize },
-    ReadBufferAddr { id: usize },
-    ReadBufferXAddr { id: usize },
-    ReadBufferBody { id: usize },
-
-    SetBufferDot { id: usize, s: String },
-    SetBufferXDot { id: usize, s: String },
-    SetBufferAddr { id: usize, s: String },
-    SetBufferXAddr { id: usize, s: String },
-    ClearBufferBody { id: usize },
-    AppendBufferBody { id: usize, s: String },
-    AppendOutput { id: usize, s: String },
-
-    AddInputEventFilter { id: usize, filter: InputFilter },
-    RemoveInputEventFilter { id: usize },
-    LoadInBuffer { id: usize, txt: String },
-    ExecuteInBuffer { id: usize, txt: String },
+    ControlMessage {
+        msg: String,
+    },
+    MinibufferSelect {
+        prompt: Option<String>,
+        lines: String,
+        tx: Sender<String>,
+    },
+    ReadBufferName {
+        id: usize,
+    },
+    ReadBufferDot {
+        id: usize,
+    },
+    ReadBufferXDot {
+        id: usize,
+    },
+    ReadBufferAddr {
+        id: usize,
+    },
+    ReadBufferXAddr {
+        id: usize,
+    },
+    ReadBufferBody {
+        id: usize,
+    },
+    SetBufferDot {
+        id: usize,
+        s: String,
+    },
+    SetBufferXDot {
+        id: usize,
+        s: String,
+    },
+    SetBufferAddr {
+        id: usize,
+        s: String,
+    },
+    SetBufferXAddr {
+        id: usize,
+        s: String,
+    },
+    ClearBufferBody {
+        id: usize,
+    },
+    AppendBufferBody {
+        id: usize,
+        s: String,
+    },
+    AppendOutput {
+        id: usize,
+        s: String,
+    },
+    AddInputEventFilter {
+        id: usize,
+        filter: InputFilter,
+    },
+    RemoveInputEventFilter {
+        id: usize,
+    },
+    LoadInBuffer {
+        id: usize,
+        txt: String,
+    },
+    ExecuteInBuffer {
+        id: usize,
+        txt: String,
+    },
 }

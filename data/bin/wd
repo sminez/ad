@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Use the users warprc to navigate to files in known projects
-set -eou pipefail
 
-[ -e "$HOME/.profile" ] && source ~/.profile
-opt=$(tmux-select -c "cat $HOME/.warprc | cut -d: -f1 | sort")
+. "$HOME/.ad/lib/ad.sh"
 
+requireAd
+
+opt="$(cat "$HOME/.warprc" | cut -d: -f1 | sort | minibufferSelect "project> ")"
 if [[ -n "$opt" ]]; then
   dirname=$(cat "$HOME/.warprc" | grep "^$opt" | cut -d: -f2 | sed "s:~/:$HOME/:g")
-  fname=$(tmux-select -c "cd $dirname && fd")
+  fname="$(cd "$dirname" && fd | minibufferSelect "file> ")"
   if [[ -n "$fname" ]]; then
-    echo -n "open $dirname/$fname" | 9p write ad/ctl
+    adCtl "open $dirname/$fname"
   fi
 fi

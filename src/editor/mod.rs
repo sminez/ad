@@ -272,8 +272,8 @@ impl Editor {
                 default_handled();
             }
 
-            MinibufferSelect { lines, tx } => {
-                self.fsys_minibuffer(lines, tx);
+            MinibufferSelect { prompt, lines, tx } => {
+                self.fsys_minibuffer(prompt, lines, tx);
                 default_handled();
             }
 

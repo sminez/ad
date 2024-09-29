@@ -391,9 +391,16 @@ impl Editor {
         }
     }
 
-    pub(super) fn fsys_minibuffer(&mut self, lines: String, tx: Sender<String>) {
-        let selection =
-            self.minibuffer_select_from("> ", lines.split('\n').map(|s| s.to_string()).collect());
+    pub(super) fn fsys_minibuffer(
+        &mut self,
+        prompt: Option<String>,
+        lines: String,
+        tx: Sender<String>,
+    ) {
+        let lines: Vec<String> = lines.split('\n').map(|s| s.to_string()).collect();
+        let prompt: &str = prompt.as_deref().unwrap_or("> ");
+
+        let selection = self.minibuffer_select_from(prompt, lines);
         let s = match selection {
             MiniBufferSelection::Line { line, .. } => line,
             MiniBufferSelection::UserInput { input } => input,
