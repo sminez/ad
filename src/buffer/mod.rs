@@ -166,8 +166,8 @@ pub struct Buffer {
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
     pub(super) fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
-        let tokenizer = try_tokenizer_for_path(&path);
-        let (kind, raw) = BufferKind::try_kind_and_content_from_path(path)?;
+        let (kind, raw) = BufferKind::try_kind_and_content_from_path(path.clone())?;
+        let tokenizer = try_tokenizer_for_path(&path, raw.lines().next());
 
         Ok(Self {
             id,
