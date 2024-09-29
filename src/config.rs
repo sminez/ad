@@ -7,6 +7,7 @@ use std::{collections::BTreeMap, env, fs, io};
 pub struct Config {
     pub(crate) tabstop: usize,
     pub(crate) expand_tab: bool,
+    pub(crate) auto_mount: bool,
     pub(crate) match_indent: bool,
     pub(crate) status_timeout: u64,
     pub(crate) minibuffer_lines: usize,
@@ -20,6 +21,7 @@ impl Default for Config {
         Self {
             tabstop: 4,
             expand_tab: true,
+            auto_mount: false,
             match_indent: true,
             status_timeout: 3,
             minibuffer_lines: 15,
@@ -153,6 +155,7 @@ impl Config {
 
             // Flags
             "expand-tab" => self.expand_tab = parse_bool(prop, val)?,
+            "auto-mount" => self.auto_mount = parse_bool(prop, val)?,
             "match-indent" => self.match_indent = parse_bool(prop, val)?,
 
             // Colors

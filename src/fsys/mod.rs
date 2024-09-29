@@ -27,7 +27,7 @@
 //!       body
 //!       event
 //! ```
-use crate::input::Event;
+use crate::{config_handle, input::Event};
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
@@ -155,16 +155,19 @@ pub(crate) struct AdFs {
     minibuffer_stat: Stat,
     log_file_stat: Stat,
     mount_path: String,
+    auto_mount: bool,
 }
 
 impl Drop for AdFs {
     fn drop(&mut self) {
-        let res = Command::new("fusermount")
-            .args(["-u", &self.mount_path])
-            .spawn();
+        if self.auto_mount {
+            let res = Command::new("fusermount")
+                .args(["-u", &self.mount_path])
+                .spawn();
 
-        if let Ok(mut child) = res {
-            _ = child.wait();
+            if let Ok(mut child) = res {
+                _ = child.wait();
+            }
         }
     }
 }
@@ -184,6 +187,7 @@ impl AdFs {
         spawn_log_listener(brx, listener_tx, log_rx);
 
         let buffer_nodes = BufferNodes::new(tx.clone(), listener_rx, log_tx);
+        let auto_mount = config_handle!().auto_mount;
 
         Self {
             tx,
@@ -195,23 +199,27 @@ impl AdFs {
             minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
             log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
             mount_path,
+            auto_mount,
         }
     }
 
     /// Spawn a thread for running this filesystem and return a handle to it
     pub fn run_threaded(self) -> FsHandle {
+        let auto_mount = self.auto_mount;
         let mount_path = self.mount_path.clone();
         let socket_path = socket_path(DEFAULT_SOCKET_NAME);
 
         let s = Server::new(self);
         let handle = FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()));
 
-        let res = Command::new("9pfuse")
-            .args([socket_path, mount_path])
-            .spawn();
+        if auto_mount {
+            let res = Command::new("9pfuse")
+                .args([socket_path, mount_path])
+                .spawn();
 
-        if let Ok(mut child) = res {
-            _ = child.wait();
+            if let Ok(mut child) = res {
+                _ = child.wait();
+            }
         }
 
         handle
