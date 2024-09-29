@@ -124,6 +124,7 @@ impl Buffers {
 
     pub(crate) fn open_virtual(&mut self, name: String, content: String) {
         let buf = Buffer::new_virtual(self.next_id, name, content);
+        self.record_jump_position();
         self.push_buffer(buf);
         self.next_id += 1;
     }
