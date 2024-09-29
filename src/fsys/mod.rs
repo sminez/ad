@@ -292,7 +292,14 @@ impl AdFs {
                 _ = sub_tx.send(tx);
                 self.minibuffer_content = MiniBufferContent::Pending(sub_tx, fsys_rx);
 
-                match Message::send(Req::MinibufferSelect { prompt, lines, tx: data_tx }, &self.tx) {
+                match Message::send(
+                    Req::MinibufferSelect {
+                        prompt,
+                        lines,
+                        tx: data_tx,
+                    },
+                    &self.tx,
+                ) {
                     Ok(_) => ReadOutcome::Blocked(rx),
                     Err(e) => {
                         error!("unable to open minibuffer: {e}");
