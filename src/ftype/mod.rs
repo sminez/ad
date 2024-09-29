@@ -32,7 +32,7 @@ pub(crate) const SHELL_SPEC: LangSpec = LangSpec {
     keywords: &["echo", "source", "shift", "read"],
     control_flow: &[
         "if", "fi", "elif", "else", "for", "then", "do", "done", "case", "esac", "in", "break",
-        "continue", "while"
+        "continue", "while",
     ],
     definitions: &[],
     punctuation: &[
@@ -40,13 +40,14 @@ pub(crate) const SHELL_SPEC: LangSpec = LangSpec {
     ],
 };
 
-
 pub(crate) const PLUMBING_SPEC: LangSpec = LangSpec {
     single_line_comment: Some("#"),
     multi_line_comment: None,
     string_delimiters: StringDelims::Both,
     keywords: &["src", "dst", "wdir", "attrs", "attr", "arg", "data"],
-    control_flow: &["matches", "is", "isfile", "isdir", "from", "set", "add", "delete", "start", "to"],
+    control_flow: &[
+        "matches", "is", "isfile", "isdir", "from", "set", "add", "delete", "start", "to",
+    ],
     definitions: &["plumb"],
     punctuation: &["=", "$"],
 };
