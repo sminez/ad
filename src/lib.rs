@@ -39,6 +39,7 @@ pub use config::Config;
 pub use editor::{Editor, EditorMode};
 pub use exec::{CachedStdin, Edit, Program};
 pub use log::LogBuffer;
+pub use plumb::PlumbingRules;
 
 use term::{disable_alternate_screen, disable_mouse_support, set_termios};
 

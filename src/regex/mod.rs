@@ -57,7 +57,7 @@ const fn init_escapes() -> [Option<char>; 256] {
 
     let mut escapes = [None; 256];
     escape!(escapes, '*', '+', '?', '.', '@', '(', ')', '[', ']', '{', '}', '|');
-    escape!(escapes, '\\', '\'', '"', '^', '$');
+    escape!(escapes, '\\', '\'', '"', '^', '$', '-');
     escape!(escapes, 'b', 'B', 'd', 'D', 'w', 'W', 's', 'S');
     escape!(escapes, 'n'=>'\n', 'r'=>'\r', 't'=>'\t');
 

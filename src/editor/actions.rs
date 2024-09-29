@@ -9,6 +9,7 @@ use crate::{
     fsys::LogEvent,
     key::Input,
     mode::Mode,
+    plumb::{MatchOutcome, PlumbingMessage},
     replace_config, update_config,
     util::{
         pipe_through_command, read_clipboard, run_command, run_command_blocking, set_clipboard,
@@ -18,6 +19,7 @@ use std::{
     env, fs,
     io::Write,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     sync::mpsc::Sender,
 };
 use tracing::{debug, error, info, trace, warn};
@@ -437,6 +439,8 @@ impl Editor {
     }
 
     /// Default semantics for attempting to load the current dot:
+    ///   - an event filter is in place -> pass to the event filter
+    ///   - a plumbing rule matches the load -> run the plumbing rule
     ///   - a relative path from the directory of the containing file -> open in ad
     ///   - an absolute path -> open in ad
     ///     - if either have a valid addr following a colon then set dot to that addr
@@ -456,7 +460,62 @@ impl Editor {
         let s = b.dot.content(b);
         let id = b.id;
 
-        self.load_explicit_string(id, s);
+        let m = PlumbingMessage {
+            src: Some("ad".to_string()),
+            dst: None,
+            wdir: b.dir().map(|p| p.display().to_string()),
+            attrs: Default::default(),
+            data: s.clone(),
+        };
+
+        match self.plumbing_rules.plumb(m) {
+            Some(MatchOutcome::Message(m)) => self.handle_plumbing_message(m),
+
+            Some(MatchOutcome::Run(cmd)) => {
+                let mut command = Command::new("sh");
+                command
+                    .args(["-c", cmd.as_str()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null());
+                if let Err(e) = command.spawn() {
+                    self.set_status_message(&format!("error spawning process: {e}"));
+                };
+            }
+
+            None => self.load_explicit_string(id, s),
+        }
+    }
+
+    /// Handling of plumbing messages that are sent to ad supports several attributes
+    /// which can be set in order to configure the behaviour:
+    ///   - by default the data will be treated as a filepath and opened
+    ///   - if the attr "addr" is set it will be parsed as an Addr and applied
+    ///   - if the attr "action" is set to "showdata" then a new buffer is created to hold the data
+    ///     - if the attr "filename" is set as well then it will be used as the name for the buffer
+    ///     - otherwise the filename will be "+plumbing-message"
+    fn handle_plumbing_message(&mut self, m: PlumbingMessage) {
+        let PlumbingMessage { attrs, data, .. } = m;
+        match attrs.get("action") {
+            Some(s) if s == "showdata" => {
+                let filename = attrs
+                    .get("filename")
+                    .cloned()
+                    .unwrap_or_else(|| "+plumbing-message".to_string());
+                self.open_virtual(filename, data);
+            }
+            _ => {
+                self.open_file(data);
+                if let Some(s) = attrs.get("addr") {
+                    match Addr::parse(&mut s.chars().peekable()) {
+                        Ok(mut addr) => {
+                            let b = self.buffers.active_mut();
+                            b.map_addr(&mut addr);
+                        }
+                        Err(e) => self.set_status_message(&format!("malformed addr: {e:?}")),
+                    }
+                }
+            }
+        }
     }
 
     pub(super) fn load_explicit_string(&mut self, bufid: usize, s: String) {
@@ -500,6 +559,7 @@ impl Editor {
     }
 
     /// Default semantics for attempting to execute the current dot:
+    ///   - an event filter is in place -> pass to the event filter
     ///   - a valid ad command -> execute the command
     ///   - attempt to run as a shell command with args
     ///
@@ -657,7 +717,7 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{editor::EditorMode, LogBuffer};
+    use crate::{editor::EditorMode, LogBuffer, PlumbingRules};
     use simple_test_case::test_case;
 
     macro_rules! assert_recv {
@@ -683,6 +743,7 @@ recv {}({})",
     fn opening_a_file_sends_the_correct_fsys_messages() {
         let mut ed = Editor::new(
             Config::default(),
+            PlumbingRules::default(),
             EditorMode::Headless,
             LogBuffer::default(),
         );
@@ -712,6 +773,7 @@ recv {}({})",
     fn ensure_correct_fsys_state_works(files: &[&str], expected_ids: &[usize]) {
         let mut ed = Editor::new(
             Config::default(),
+            PlumbingRules::default(),
             EditorMode::Headless,
             LogBuffer::default(),
         );

@@ -1,6 +1,7 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
+    plumb::PlumbingRules,
     config::Config,
     die,
     dot::TextObject,
@@ -62,6 +63,7 @@ pub struct Editor {
     rx_fsys: Option<Receiver<LogEvent>>,
     mode: EditorMode,
     log_buffer: LogBuffer,
+    plumbing_rules: PlumbingRules,
 }
 
 impl Drop for Editor {
@@ -74,7 +76,7 @@ impl Drop for Editor {
 
 impl Editor {
     /// Construct a new [Editor] with the provided config.
-    pub fn new(cfg: Config, mode: EditorMode, log_buffer: LogBuffer) -> Self {
+    pub fn new(cfg: Config, plumbing_rules: PlumbingRules, mode: EditorMode, log_buffer: LogBuffer) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
@@ -102,6 +104,7 @@ impl Editor {
             rx_fsys: Some(rx_fsys),
             mode,
             log_buffer,
+            plumbing_rules
         }
     }
 

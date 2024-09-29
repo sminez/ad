@@ -1,0 +1,31 @@
+# These are the default plumbing rules for ad
+
+editor = ad
+addrelem = ((#?[0-9]+)|(/[A-Za-z0-9_\^]+/?)|[.$])
+addr = :($addrelem([,;+\-]$addrelem)*)
+
+# urls go to a web browser
+data matches (https?|ftp|file)://[a-zA-Z0-9_@\-]+([.:][a-zA-Z0-9_@\-]+)*/?[a-zA-Z0-9_?,%#~&/\-+=]+([:.][a-zA-Z0-9_?,%#~&/\-+=]+)*
+plumb to web
+plumb start xdg-open $data
+
+# image files go an image viewer
+data matches [a-zA-Z¡-￿0-9_\-./@]+
+data matches ([a-zA-Z¡-￿0-9_\-./@]+)\.(jpe?g|JPE?G|gif|GIF|tiff?|TIFF?|ppm|bit|png|PNG)
+arg isfile $0
+plumb to image
+plumb start xdg-open $0
+
+# existing files tagged by line number:columnumber, go to editor
+# data matches ([.a-zA-Z¡-￿0-9_/\-@]*[a-zA-Z¡-￿0-9_/\-]):([0-9]+):([0-9]+):?
+data matches (.+):([0-9]+):([0-9]+):?
+arg isfile $1
+data set $file
+attr add addr=$2:$3
+plumb to edit
+
+# man index entries are synthesized
+data matches ([a-zA-Z¡-￿0-9_\-./]+)\(([1-8])\)
+data from man $2 $1
+attr add action=showdata filename=/man/$1($2)
+plumb to edit

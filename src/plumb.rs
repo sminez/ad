@@ -4,24 +4,131 @@
 //!   - http://doc.cat-v.org/plan_9/4th_edition/papers/plumb
 //!   - http://man.cat-v.org/plan_9_3rd_ed/1/plumb
 //!   - http://man.cat-v.org/plan_9_3rd_ed/2/plumb
-//!   - http://man.cat-v.org/plan_9_3rd_ed/4/plumb
+//!   - http://man.cat-v.org/plan_9_3rd_ed/4/plumber
 //!   - http://man.cat-v.org/plan_9_3rd_ed/6/plumb
 use crate::regex::Regex;
-use std::{collections::HashMap, str::FromStr};
+use std::{
+    collections::BTreeMap,
+    env, fs, io,
+    process::{Command, Stdio},
+    str::FromStr,
+};
+
+/// An ordered list of plumbing rules to use whenever something is "loaded" within the editor.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct PlumbingRules {
+    rules: Vec<Rule>,
+    vars: BTreeMap<String, String>,
+}
+
+impl FromStr for PlumbingRules {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut prs = Self::default();
+
+        for raw_block in s.split("\n\n") {
+            let lines: Vec<_> = raw_block
+                .trim()
+                .lines()
+                .filter(|l| !l.starts_with('#'))
+                .collect();
+
+            let block = lines.join("\n");
+            if block.is_empty() {
+                continue;
+            }
+
+            // Parse variable declaration blocks
+            match block.split_once(' ') {
+                Some((_, s)) if s.starts_with("=") => {
+                    for line in block.lines() {
+                        match line.split_once("=") {
+                            Some((var, val)) => {
+                                prs.vars.insert(
+                                    non_empty_string(var.trim(), line)?,
+                                    non_empty_string(val.trim(), line)?,
+                                );
+                            }
+                            _ => return Err(format!("malformed line: {line:?}")),
+                        }
+                    }
+                }
+
+                _ => prs.rules.push(Rule::from_str(&block)?),
+            }
+        }
+
+        Ok(prs)
+    }
+}
+
+impl PlumbingRules {
+    /// Attempt to load plumbing rules from the default location
+    pub fn try_load() -> Result<Self, String> {
+        let home = env::var("HOME").unwrap();
+
+        let s = match fs::read_to_string(format!("{home}/.ad/plumbing.rules")) {
+            Ok(s) => s,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
+            Err(e) => return Err(format!("Unable to load plumbing rules: {e}")),
+        };
+
+        match Self::from_str(&s) {
+            Ok(cfg) => Ok(cfg),
+            Err(e) => Err(format!("Invalid plumbing rules: {e}")),
+        }
+    }
+
+    /// Run the provided message through the plumbing rules to determine how it should be
+    /// handled. If no rules match then None is returned and default handling for a load
+    /// takes place instead. The returned message may differ from the one passed in if
+    /// rules carry out rewrites.
+    pub fn plumb(&mut self, msg: PlumbingMessage) -> Option<MatchOutcome> {
+        let vars = msg.initial_vars();
+
+        for rule in self.rules.iter_mut() {
+            let mut rule_vars = vars.clone();
+            if let Some(msg) = rule.try_match(msg.clone(), &mut rule_vars) {
+                return Some(msg);
+            }
+        }
+
+        None
+    }
+}
 
 /// The deserialized form of a plumbing message sent by a client.
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct PlumbingMessage {
     /// The application or service generating the message
-    src: Option<String>,
+    pub src: Option<String>,
     /// The destination "port" for the message
-    dst: Option<String>,
+    pub dst: Option<String>,
     /// The working directory (used when data is a filename)
-    wdir: Option<String>,
+    pub wdir: Option<String>,
     /// Name=value pairs. Must not contain newlines
-    attrs: HashMap<String, String>,
+    pub attrs: BTreeMap<String, String>,
     /// The string content of the message itself
-    data: String,
+    pub data: String,
+}
+
+impl PlumbingMessage {
+    fn initial_vars(&self) -> BTreeMap<String, String> {
+        let mut vars = BTreeMap::new();
+        if let Some(s) = self.src.clone() {
+            vars.insert("$src".to_string(), s);
+        }
+        if let Some(s) = self.dst.clone() {
+            vars.insert("$dst".to_string(), s);
+        }
+        if let Some(s) = self.wdir.clone() {
+            vars.insert("$wdir".to_string(), s);
+        }
+        vars.insert("$data".to_string(), self.data.clone());
+
+        vars
+    }
 }
 
 macro_rules! parse_field {
@@ -37,8 +144,8 @@ macro_rules! parse_field {
     };
 }
 
-fn parse_attr_list(s: &str) -> Result<HashMap<String, String>, String> {
-    let mut attrs = HashMap::new();
+fn parse_attr_list(s: &str) -> Result<BTreeMap<String, String>, String> {
+    let mut attrs = BTreeMap::new();
     for pair in s.split(' ') {
         match pair.split_once('=') {
             Some((k, v)) => {
@@ -110,13 +217,137 @@ impl FromStr for PlumbingMessage {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Pattern {
-    AddAttrs(HashMap<String, String>),
+    AddAttrs(BTreeMap<String, String>),
     DelAttr(String),
+    DataFrom(String),
     IsFile(String),
     IsDir(String),
     Is(Field, String),
     Matches(Field, Regex),
     Set(Field, String),
+}
+
+impl Pattern {
+    fn match_and_update(
+        &mut self,
+        msg: &mut PlumbingMessage,
+        vars: &mut BTreeMap<String, String>,
+    ) -> bool {
+        let apply_vars = |mut s: String| {
+            for (k, v) in vars.iter() {
+                s = s.replace(k, v);
+            }
+            s
+        };
+
+        let re_match_and_update =
+            |f: Field, re: &mut Regex, vars: &mut BTreeMap<String, String>| {
+                let opt = match f {
+                    Field::Src => msg.src.as_ref(),
+                    Field::Dst => msg.dst.as_ref(),
+                    Field::Wdir => msg.wdir.as_ref(),
+                    Field::Data => Some(&msg.data),
+                };
+                let s = match opt {
+                    Some(s) => s,
+                    None => return false,
+                };
+
+                if let Some(m) = re.match_str(s) {
+                    vars.insert("$0".to_string(), m.str_match_text(s));
+                    for n in 1..10 {
+                        match m.str_submatch_text(n, s) {
+                            Some(txt) => {
+                                vars.insert(format!("${}", n), txt);
+                            }
+                            None => return true,
+                        }
+                    }
+                    return true;
+                }
+
+                false
+            };
+
+        match self {
+            Self::AddAttrs(attrs) => msg.attrs.extend(
+                attrs
+                    .clone()
+                    .into_iter()
+                    .map(|(k, v)| (apply_vars(k), apply_vars(v))),
+            ),
+
+            Self::DelAttr(a) => {
+                msg.attrs.remove(a);
+            }
+
+            Self::IsFile(s) => {
+                let path = apply_vars(s.clone());
+                match fs::metadata(&path) {
+                    Ok(m) => {
+                        if m.is_file() {
+                            vars.insert("$file".to_string(), path);
+                        } else {
+                            return false;
+                        }
+                    }
+                    Err(_) => return false,
+                }
+            }
+
+            Self::IsDir(s) => {
+                let path = apply_vars(s.clone());
+                match fs::metadata(&path) {
+                    Ok(m) => {
+                        if m.is_dir() {
+                            vars.insert("$dir".to_string(), path);
+                        } else {
+                            return false;
+                        }
+                    }
+
+                    Err(_) => return false,
+                }
+            }
+
+            Self::Is(Field::Src, s) => return msg.src.as_ref() == Some(s),
+            Self::Is(Field::Dst, s) => return msg.dst.as_ref() == Some(s),
+            Self::Is(Field::Wdir, s) => return msg.wdir.as_ref() == Some(s),
+            Self::Is(Field::Data, s) => return &msg.data == s,
+
+            Self::Set(Field::Src, s) => {
+                msg.src = Some(apply_vars(s.clone()));
+                vars.insert("$src".to_string(), apply_vars(s.clone()));
+            }
+            Self::Set(Field::Dst, s) => {
+                msg.dst = Some(apply_vars(s.clone()));
+                vars.insert("$dst".to_string(), apply_vars(s.clone()));
+            }
+            Self::Set(Field::Wdir, s) => {
+                msg.wdir = Some(apply_vars(s.clone()));
+                vars.insert("$wdir".to_string(), apply_vars(s.clone()));
+            }
+            Self::Set(Field::Data, s) => {
+                msg.data = apply_vars(s.clone());
+                vars.insert("$data".to_string(), apply_vars(s.clone()));
+            }
+
+            Self::Matches(f, re) => return re_match_and_update(*f, re, vars),
+            Self::DataFrom(cmd) => {
+                let mut command = Command::new("sh");
+                command
+                    .args(["-c", apply_vars(cmd.clone()).as_str()])
+                    .stderr(Stdio::null());
+                let output = match command.output() {
+                    Ok(output) => output,
+                    Err(_) => return false,
+                };
+                msg.data = String::from_utf8(output.stdout).unwrap_or_default();
+            }
+        }
+
+        true
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -147,8 +378,18 @@ enum Action {
     Start(String),
 }
 
+/// The result of a successful rule match that should be handled by ad.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MatchOutcome {
+    /// A message that should be handled by ad
+    Message(PlumbingMessage),
+    /// A command that should be run instead of handling the message
+    Run(String),
+}
+
 /// A parsed plumbing rule for matching against incoming messages.
-/// If all patterns match then the resulting actions are run.
+/// If all patterns match then the resulting actions are run until
+/// one succeeds.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Rule {
     patterns: Vec<Pattern>,
@@ -178,6 +419,9 @@ impl FromStr for Rule {
             } else if let Some(s) = line.strip_prefix("arg isdir ") {
                 rule.patterns
                     .push(Pattern::IsDir(non_empty_string(s, line)?));
+            } else if let Some(s) = line.strip_prefix("data from ") {
+                rule.patterns
+                    .push(Pattern::DataFrom(non_empty_string(s, line)?));
             } else if let Some(s) = line.strip_prefix("plumb to ") {
                 rule.actions.push(Action::To(non_empty_string(s, line)?));
             } else if let Some(s) = line.strip_prefix("plumb start ") {
@@ -186,11 +430,11 @@ impl FromStr for Rule {
                 // patterns of the form $field $op $value
                 let (field, rest) = line
                     .split_once(' ')
-                    .ok_or_else(|| format!("malformed rule line: {line:?}"))?;
+                    .ok_or_else(|| format!("malformed rule line: {line}"))?;
                 let field = Field::from_str(field)?;
                 let (op, value) = rest
                     .split_once(' ')
-                    .ok_or_else(|| format!("malformed rule line: {line:?}"))?;
+                    .ok_or_else(|| format!("malformed rule line: {line}"))?;
                 let value = non_empty_string(value, line)?;
 
                 match op {
@@ -199,9 +443,9 @@ impl FromStr for Rule {
                     "matches" => rule.patterns.push(Pattern::Matches(
                         field,
                         Regex::compile(&value)
-                            .map_err(|_| format!("malformed regex: {value:?}"))?,
+                            .map_err(|e| format!("malformed regex ({e:?}): {value}"))?,
                     )),
-                    _ => return Err(format!("unknown rule operation {op:?}")),
+                    _ => return Err(format!("unknown rule operation: {op}")),
                 }
             }
         }
@@ -213,6 +457,38 @@ impl FromStr for Rule {
         } else {
             Ok(rule)
         }
+    }
+}
+
+impl Rule {
+    fn try_match(
+        &mut self,
+        mut msg: PlumbingMessage,
+        vars: &mut BTreeMap<String, String>,
+    ) -> Option<MatchOutcome> {
+        for p in self.patterns.iter_mut() {
+            if !p.match_and_update(&mut msg, vars) {
+                return None;
+            }
+        }
+
+        for a in self.actions.iter() {
+            match a {
+                // TODO: when other ports are supported they will need handling here!
+                Action::To(port) if port == "edit" => return Some(MatchOutcome::Message(msg)),
+                Action::Start(cmd) => {
+                    let mut s = cmd.clone();
+                    for (k, v) in vars.iter() {
+                        s = s.replace(k, v);
+                    }
+
+                    return Some(MatchOutcome::Run(s));
+                }
+                _ => continue,
+            }
+        }
+
+        None
     }
 }
 
@@ -228,6 +504,37 @@ fn non_empty_string(s: &str, line: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use simple_test_case::dir_cases;
+
+    #[test]
+    fn parse_default_rules_works() {
+        let rules = PlumbingRules::from_str(include_str!("../data/plumbing.rules"));
+        assert!(rules.is_ok(), "{rules:?}");
+    }
+
+    #[test]
+    fn happy_path_plumb_works() {
+        let mut rules = PlumbingRules::from_str(include_str!("../data/plumbing.rules")).unwrap();
+        let m = PlumbingMessage {
+            data: "data/plumbing.rules:5:17:".to_string(),
+            ..Default::default()
+        };
+
+        let outcome = rules.plumb(m);
+        let m = match outcome {
+            Some(MatchOutcome::Message(m)) => m,
+            _ => panic!("expected message, got {outcome:?}"),
+        };
+
+        let expected = PlumbingMessage {
+            data: "data/plumbing.rules".to_string(),
+            attrs: [("addr".to_string(), "5:17".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+
+        assert_eq!(m, expected);
+    }
 
     #[test]
     fn parse_message_works() {

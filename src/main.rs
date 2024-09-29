@@ -1,5 +1,6 @@
 use ad_editor::{
-    CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, Program, LOG_LEVEL_ENV_VAR,
+    CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, PlumbingRules, Program,
+    LOG_LEVEL_ENV_VAR,
 };
 use std::{
     env, fs,
@@ -41,7 +42,12 @@ fn main() {
         Err(s) => fatal(&s),
     };
 
-    let mut e = Editor::new(config, EditorMode::Terminal, log_buffer);
+    let plumbing_rules = match PlumbingRules::try_load() {
+        Ok(rules) => rules,
+        Err(s) => fatal(&s),
+    };
+
+    let mut e = Editor::new(config, plumbing_rules, EditorMode::Terminal, log_buffer);
     for fname in files.iter() {
         e.open_file_relative_to_cwd(fname);
     }

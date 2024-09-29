@@ -6,7 +6,7 @@
 
 updateCargoOutput() {
   clearBuffer "$1"
-  output="$(cargo check --message-format=short 2>&1)"
+  output="$(cargo check --all-targets --workspace --message-format=short 2>&1)"
   bufWrite "$1" body "$output\n\n>>>"
   if [[ "$output" =~ error|warning ]]; then
     focusBuffer "$1"
