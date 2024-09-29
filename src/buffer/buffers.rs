@@ -328,8 +328,12 @@ impl JumpList {
             return None;
         }
 
+        // Mark our current position so we can jump forward to it later.
+        // We need to move self.idx back after the push so we don't get stuck
+        // and no-op jump imediately after
         if self.idx == self.jumps.len() {
             self.push(id, cur);
+            self.idx -= 1;
         }
 
         self.idx -= 1;
