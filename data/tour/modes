@@ -1,0 +1,21 @@
+editor modes:
+
+    - ad supports a number of different modes which alter how you interact with the editor
+
+        - Normal mode, where typing selects and manipulates text
+
+        - Insert mode, where typing inserts text into the current buffer
+
+        - Command mode, where you can specify commands for the editor to execute
+
+        - Run mode, where you can run external programs
+
+        - Edit mode, where you can execute editing commands against the current buffer
+
+    - unlike vi, ad's motions in Normal mode follow a "noun + verb" model as in kakoune
+      rather than the "verb + noun" model you might expect.
+
+        - you can view the keymap in the ../../src/mode/normal.rs file by right clicking on
+          the filepath above or placing your cursor on it and pressing Enter.
+      
+        - press "ctrl-o" to return to the tour

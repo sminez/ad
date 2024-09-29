@@ -1,0 +1,19 @@
+ad takes inspiration from several sources to provide a rich
+"integrating development environment" experience.
+
+    - https://research.swtch.com/acme
+
+    - above is a link to Russ Cox's "A tour of acme" video.
+      it is a fantastic introduction to the power and flexability you can
+      achieve through pursuing the idea of a "text user interface".
+
+    - you can learn more about acme here: http://acme.cat-v.org/
+
+    - ad combines acme's approach to manipulating text, with modal editing
+      inspired by vi and kakoune:
+        - https://www.vim.org/
+        - https://neovim.io/
+        - https://kakoune.org/
+
+    - it also embeds a dynamic selection menu inspired by dmenu:
+        - https://tools.suckless.org/dmenu/

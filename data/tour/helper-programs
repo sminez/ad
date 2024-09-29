@@ -1,0 +1,16 @@
+plugins for ad are written using the filesystem interface:
+
+    - the ad GitHub repo contains some example scripts and library functions to help with writing
+      shell scripts to interact with ad:
+
+        ../lib/ad.sh
+        ../bin
+
+    - there is also the ad_client crate which provides a way to interact with ad from Rust:
+
+        ../../crates/ad_client
+
+    - so long as you have a 9p client you can use whatever language you wish to write programs that
+      interact with ad
+
+    - if you also mount ad via fuse, all you need is the ability to read and write files!

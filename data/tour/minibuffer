@@ -1,0 +1,13 @@
+you also have control over the minibuffer:
+
+    - ad's minibuffer is inspired by dmenu: https://tools.suckless.org/dmenu/
+
+    - it can be used to interactively select from newline delimited text
+
+        ../lib/ad.sh:/minibufferSelect/
+
+        minibuffer-demo.sh
+
+    - when combined with the rest of the filesystem interface you have a rich
+      starting point for writing your own text-based user interface extensions
+      for ad

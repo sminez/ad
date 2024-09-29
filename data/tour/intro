@@ -1,0 +1,19 @@
+welcome to ad: an adaptable text editor.
+
+    - https://github.com/sminez/ad
+
+    - you can get set up by cloning the repo and running the following commands:
+      - cargo install --path .
+      - make setup-dotfiles
+
+    - from there you can run this presentation yourself by opening data/tour/intro
+      within ad and middle clicking the word "Slide" below or placing the cursor on
+      it and typing "@".
+
+                            >> Slide <<
+
+    - middle click or type "@" on the NextSlide and PrevSlide "buttons" to navigate
+      the various pages of the tour.
+
+    - as we'll soon see, there isn't anything special about the "buttons" described
+      above. within ad buffers, every piece of text is part of your user interface.

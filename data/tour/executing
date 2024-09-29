@@ -1,0 +1,14 @@
+executing text within ad:
+
+    - there are two ways to "Execute" text:
+
+        - middle click on the selection with your mouse
+        - place the cursor on the selection and hit "@" on your keyboard
+
+    - some examples:
+
+          Edit , s/mouse/clicky thing/g
+          ls ../../
+          <date
+
+    - output from commands will go to a buffer named "$dir/+output" by default
