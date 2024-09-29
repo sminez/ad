@@ -4,6 +4,12 @@ editor = ad
 addrelem = ((#?[0-9]+)|(/[A-Za-z0-9_\^]+/?)|[.$])
 addr = :($addrelem([,;+\-]$addrelem)*)
 
+# git commits, inspired by https://alexkarle.com/blog/plan9-acme-git-gui.html
+data matches [a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9]+
+data from git -C $wdir show $0
+attr add action=showdata filename=/git/$0
+plumb to edit
+
 # urls go to a web browser
 data matches https?://(www\.)?[-a-zA-Z0-9@:%._\+~#=]{1,256}\.[a-zA-Z0-9()]{1,6}\b([-a-zA-Z0-9()@:%_\+.~#?&//=]*)
 plumb to web
