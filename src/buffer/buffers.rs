@@ -273,6 +273,7 @@ impl Buffers {
                 let id = self.next_id;
                 self.next_id += 1;
                 let b = Buffer::new_output(id, key, s);
+                self.record_jump_position();
                 self.inner.push_front(b);
 
                 id
