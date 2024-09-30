@@ -69,20 +69,22 @@ impl<'a> Token<'a> {
         }
     }
 
-    pub fn with_highlighted_dot(self, start: usize, end: usize) -> Vec<Token<'a>> {
-        let clamped_end = min(end, self.s.len());
+    fn with_highlighted_dot(self, start: usize, end: usize) -> Vec<Token<'a>> {
+        let (byte_start, _) = self.s.char_indices().nth(start).unwrap_or((0, 'a'));
+        let (byte_end, _) = self.s.char_indices().nth(end).unwrap_or((usize::MAX, 'a'));
+        let clamped_end = min(byte_end, self.s.len());
         let mut tks = Vec::with_capacity(3);
 
-        if start > 0 {
+        if byte_start > 0 {
             tks.push(Token {
                 ty: self.ty,
-                s: &self.s[..start],
+                s: &self.s[..byte_start],
             });
         }
 
         tks.push(Token {
             ty: TokenType::Dot,
-            s: &self.s[start..clamped_end],
+            s: &self.s[byte_start..clamped_end],
         });
 
         if clamped_end < self.s.len() {
@@ -119,10 +121,10 @@ impl<'a> Tokens<'a> {
                 let mut offset = 0;
 
                 for tk in tks.into_iter() {
-                    let len = tk.s.len();
+                    let len = tk.s.chars().count();
                     let token_end = offset + len;
 
-                    if start > token_end || end <= offset {
+                    if start >= token_end || end <= offset {
                         new_tks.push(tk);
                     } else {
                         new_tks.extend_from_slice(
@@ -334,10 +336,6 @@ mod tests {
         Token { ty: Default, s }
     }
 
-    fn t_com(s: &str) -> Token<'_> {
-        Token { ty: Comment, s }
-    }
-
     fn t_dot(s: &str) -> Token<'_> {
         Token { ty: Dot, s }
     }
@@ -357,23 +355,30 @@ mod tests {
     #[test]
     fn with_highlighted_dot_works_for_single_token() {
         let tk = t_def("hello, world!");
-        let tks = tk.with_highlighted_dot(2, 5);
+        let tks = tk.with_highlighted_dot(5, 9);
 
-        assert_eq!(tks, vec![t_def("he"), t_dot("llo"), t_def(", world!"),]);
+        assert_eq!(tks, vec![t_def("hello"), t_dot(", wo"), t_def("rld!"),]);
     }
 
     #[test]
-    fn with_highlighted_dot_works_for_tokens() {
-        let tks = vec![t_def("hello, world!"), t_com(" // this is a comment")];
-        let tks = Tokens::Multi(tks).with_highlighted_dot(9, 21);
+    fn with_highlighted_dot_works_on_boundaries() {
+        let tks = vec![t_def("hello"), t_cfl(","), t_def(" world!")];
+        let tks = Tokens::Multi(tks).with_highlighted_dot(5, 9);
+
+        assert_eq!(tks, vec![t_def("hello"), t_dot(","), t_dot(" wo"), t_def("rld!"),]);
+    }
+
+    #[test]
+    fn with_highlighted_dot_works_with_multibyte() {
+        let tks = vec![t_def("hello, world! [a-z"), t_cfl("¡-￿0-9_\\-./@]+")];
+        let tks = Tokens::Multi(tks).with_highlighted_dot(18, 21);
 
         assert_eq!(
             tks,
             vec![
-                t_def("hello, wo"),
-                t_dot("rld!"),
-                t_dot(" // this"),
-                t_com(" is a comment"),
+                t_def("hello, world! [a-z"),
+                t_dot("¡-￿"),
+                t_cfl("0-9_\\-./@]+"),
             ]
         );
     }

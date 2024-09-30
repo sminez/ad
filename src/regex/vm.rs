@@ -499,6 +499,7 @@ mod tests {
     #[test_case("\\b(in|for)\\b", "min", None; "word boundary for alt match at end of word")]
     #[test_case("\\b(in|for)\\b", "bob for", Some("for"); "word boundary for alt match not at BOF")]
     #[test_case("[a-zA-Z0-9_\\-./@]+\\.jpe?g", "glenda_space_medium.jpg", Some("glenda_space_medium.jpg"); "complex group")]
+    #[test_case("[a-zA-Z¡-￿0-9_\\-./@]+", "foo-bar_99.pdf", Some("foo-bar_99.pdf"); "multibyte group")]
     #[test]
     fn match_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = Regex::compile(re).unwrap();
