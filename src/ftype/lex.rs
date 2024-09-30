@@ -365,7 +365,10 @@ mod tests {
         let tks = vec![t_def("hello"), t_cfl(","), t_def(" world!")];
         let tks = Tokens::Multi(tks).with_highlighted_dot(5, 9);
 
-        assert_eq!(tks, vec![t_def("hello"), t_dot(","), t_dot(" wo"), t_def("rld!"),]);
+        assert_eq!(
+            tks,
+            vec![t_def("hello"), t_dot(","), t_dot(" wo"), t_def("rld!"),]
+        );
     }
 
     #[test]
