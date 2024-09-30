@@ -91,7 +91,7 @@ impl CharClass {
             match ch {
                 ']' if !escaped => break,
 
-                '-' => {
+                '-' if !escaped => {
                     let start = chars.pop().ok_or(Error::InvalidClass)?;
                     let (end, _) = next()?;
                     ranges.push((start, end));
@@ -144,5 +144,33 @@ fn next_char(it: &mut Peekable<Chars<'_>>) -> Result<Option<(char, bool)>, Error
     match ESCAPES[char_ix(ch)] {
         Some(ch) => Ok(Some((ch, true))),
         None => Err(Error::InvalidEscape(ch)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    #[test_case("_", &['_'], &[]; "single underscore")]
+    #[test_case("abc_", &['a', 'b', 'c', '_'], &[]; "chars")]
+    #[test_case("a-z", &[], &[('a', 'z')]; "single range")]
+    #[test_case("a-zA-Z", &[], &[('a', 'z'), ('A', 'Z')]; "multi range")]
+    #[test_case("a-z_./]", &['_', '.', '/'], &[('a', 'z')]; "compound")]
+    #[test_case("a-zA-Z_\\-.]", &['_', '-', '.'], &[('a', 'z'), ('A', 'Z')]; "compound escaped dash")]
+    #[test]
+    fn parsing_classes_works(raw: &str, chars: &[char], ranges: &[(char, char)]) {
+        // The outer regex parser consumes the initial '[' before passing through so test cases
+        // look a little lopsided due to missing this.
+        for (s, negated) in [(format!("{raw}]"), false), (format!("^{raw}]"), true)] {
+            let cls = CharClass::try_parse(&mut s.chars().peekable()).unwrap();
+            let expected = CharClass {
+                negated,
+                chars: chars.to_vec(),
+                ranges: ranges.to_vec(),
+            };
+
+            assert_eq!(cls, expected, "negated={negated}");
+        }
     }
 }
