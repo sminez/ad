@@ -27,23 +27,10 @@ requireAd() {
 # Read the contents of an fsys file for the specified buffer
 bufRead() { 9p read "ad/buffers/$1/$2"; }
 
-# Write a string to the specified buffer file handling backslash escape sequences
-bufWrite() {
-  _path="ad/buffers/$1/$2"
-  shift
-  shift
-  echo -en "$*" | 9p write "$_path"
-}
+# Write a string to the specified buffer file
+bufWrite() { 9p write "ad/buffers/$1/$2"; }
 
-# Write a string to the specified buffer file without handling backslash escape sequences
-bufWriteNoEscapes() {
-  _path="ad/buffers/$1/$2"
-  shift
-  shift
-  echo -En "$*" | 9p write "$_path"
-}
-
-# Follow the ad log stream of ongoing buffer events.
+# Follow the ad log stream of ongoing buffer events
 adLog() { 9p read ad/log; }
 
 # Fetch the id of the currently focused buffer
@@ -54,18 +41,18 @@ focusBuffer() { adCtl "buffer $1"; }
 
 # Clear the contents of the current buffer
 clearBuffer() {
-  bufWrite "$1" xaddr ","
-  bufWrite "$1" xdot ""
+  echo -n "," | bufWrite "$1" xaddr
+  echo -n "" | bufWrite "$1" xdot
 }
 
 # Mark the buffer with the specified id as clean
 markClean() { adCtl "mark-clean $1"; }
 
 # Set the cursor position for the specified buffer to the begining of the file
-curToBof() { bufWrite "$1" addr 0; }
+curToBof() { echo -n 0 | bufWrite "$1" addr; }
 
 # Set the cursor position for the specified buffer to the end of the file
-curToEof() { bufWrite "$1" addr '$'; }
+curToEof() { echo -n '$' | bufWrite "$1" addr; }
 
 # dmenu style selection from newline delimited input on stdin
 minibufferSelect() {

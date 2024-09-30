@@ -15,8 +15,8 @@ case $maybext in
 esac
 
 if [[ -n "$formatted" ]]; then
-  bufWrite "$bufid" xaddr ","
-  bufWriteNoEscapes "$bufid" xdot "$formatted"
-  bufWrite "$bufid" addr "$addr"
-  # adCtl "viewport-center"
+  echo -n "," | bufWrite "$bufid" xaddr
+  echo -n "$formatted" | bufWrite "$bufid" xdot
+  echo -n "$addr" | bufWrite "$bufid" addr
+  adCtl "viewport-center"
 fi
