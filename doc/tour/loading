@@ -1,21 +1,18 @@
 loading text within ad:
 
-    - as we saw on the last slide, it is possible to open files by interacting with paths found
-      inside of ad buffers.
+    - as we saw on the last slide, text can be interacted with inside of ad buffers
 
-    - there are two ways to "Load" a file in this way:
+    - there are two ways to "Load" text in this way:
 
         - right click on the path with your mouse
-        - place the cursor on the path and hit Enter on your keyboard
+        - place the cursor on the path and press Enter
 
-    - "Loading" within ad is a contextual operation that you have control over.
+    - "Loading" within ad is a contextual operation that you have control over
 
         ../../src/editor/actions.rs:/default_load_dot/
 
-    - the default plumbing rules (../../data/plumbing.rules) support viewing man pages within ad
+    - plumbing rules control how text is interpreted
 
-        - try loading the following text to view the man page for ls.
-        - you will need to highlight the text first before you can load it which can be done
-          using the "x" motion in Normal mode.
-        
-                    ls(1)
+        ../../data/plumbing.rules
+        ls(1)
+        glenda_space_medium.jpg

@@ -1,6 +1,6 @@
 you also have control over the minibuffer:
 
-    - ad's minibuffer is inspired by dmenu: https://tools.suckless.org/dmenu/
+    - ad's minibuffer is inspired by dmenu
 
     - it can be used to interactively select from newline delimited text
 

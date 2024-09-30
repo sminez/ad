@@ -1,17 +1,14 @@
-ad has a virtual filesystem interface:
+interacting with ad from other programs:
 
-    - ad makes use of the 9p file protocol to present a virtual filesystem interface
+    - ad uses the 9p file protocol to present a virtual filesystem interface
 
         http://man.cat-v.org/plan_9/5/
 
     - if you have the 9p(1) command line utility installed you can explore the filesystem
-      using the following commands from a shell. (Trying to read control files from within
-      ad itself can cause things to lock up)
       
         9p ls ad
         9p ls ad/buffers/1
         9p read ad/buffers/1/dot
 
     - if you have the fusermount(1) and 9pfuse(4) programs installed then you can set the
-      "auto-mount" property in ../../data/init.conf to true in order to mount the virtual
-      filesystem directly at ~/.ad/mnt
+      "auto-mount" property in ../../data/init.conf to true and mount the filesystem directly

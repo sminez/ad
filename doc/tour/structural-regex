@@ -1,22 +1,16 @@
 structural regular expressions:
 
-    - the Edit command from the last slide looked a lot like a standard sed expression:
+    - the Edit command from the last slide looked a lot like a normal sed expression:
 
           Edit , s/mouse/clicky thing/g
 
-    - but the syntax supported in ad is a lot richer than you might be expecting if
-      programs like sed and grep are what you had in mind.
+    - but the syntax supported in ad is a lot richer than you might expect
 
-    - the command language here is inspired by the one found in acme which originated in
-      another plan 9 text editor, sam.
+    - the command language here is inspired by the one found in another plan 9 text editor, sam
 
         http://sam.cat-v.org/
-        http://sam.cat-v.org/cheatsheet/
-        http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf
 
-    - try executing the Edit command below to see what it does:
-
-        Edit 24,34 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
+        Edit 18,28 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
 
 
 name: Alice

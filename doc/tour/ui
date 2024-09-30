@@ -1,15 +1,9 @@
 a quick UI overview:
 
-    - ad is currently a terminal only editor, but as we'll see you are able to customise
-      and run ad in pretty much however you see fit.
+    - ad is currently a terminal only editor
 
-    - the default user interface is modelled on vi, with line numbers to the left and a
-      status bar & command line at the bottom of the screen.
+    - the default user interface is modelled on vi (modes and all)
 
-    - like vi, ad is a modal editor with several default modes of operation
+    - the current mode is visible in the lower left corner
 
-    - the current mode is visible in the lower left corner of the window as part of the
-      status bar
-
-    - unlike vi, ad also makes use of a number of features from acme to make text within
-      each buffer truely powerful
+    - unlike vi, ad also makes use of features from acme to make text powerful

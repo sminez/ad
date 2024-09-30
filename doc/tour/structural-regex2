@@ -1,13 +1,11 @@
 structural regular expressions let you drill down:
 
-    - while the syntax is still regex (so no claims on being easy to read!) it allows you to
-      gradually narrow down the text you are searching through and manipulating
+    - rather than write a single expression, you describe the process to search
+      for the text you are looking for
 
-    - ad supports a scripted mode via "ad -e $EDIT_SCRIPT" or "ad -f $FILE_CONTAINING_EDIT_SCRIPT"
-      which allows you to use it in command line text processing
+    - ad supports a scripted mode:
 
-    - see the ../../examples/scripts/fancy_impl_blocks.ad script for an example of what is possible!
-
-    - you can run the script by executing the following line:
+        ad -e $EDIT_SCRIPT ...
+        ad -f $FILE_CONTAINING_EDIT_SCRIPT ...
 
         ad -f ../../examples/scripts/fancy_impl_blocks.ad ../../src/trie.rs

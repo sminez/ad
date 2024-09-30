@@ -11,9 +11,3 @@ welcome to ad: an adaptable text editor.
       it and typing "@".
 
                             >> Slide <<
-
-    - middle click or type "@" on the NextSlide and PrevSlide "buttons" to navigate
-      the various pages of the tour.
-
-    - as we'll soon see, there isn't anything special about the "buttons" described
-      above. within ad buffers, every piece of text is part of your user interface.
