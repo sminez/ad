@@ -69,9 +69,11 @@ handleEvents() {
           updateCargoOutput "$1"
         elif [[ "$target" = "$STOP_TESTS" ]]; then
           TEST_BUTTON="$WATCH_TESTS"
+          ARGS=""
           updateCargoOutput "$1"
         elif [[ "$target" = "Clear" ]]; then
-          adEdit "x/\n>>>@*/ c/\n>>>/"
+          clearOutput
+          markClean "$1"
         else
           echo -n "$line" | bufWrite "$1" event
         fi

@@ -3,7 +3,25 @@ structural regular expressions let you drill down:
     - rather than write a single expression, you describe the process to search
       for the text you are looking for
 
-    - ad supports a scripted mode:
+    - the command language here is inspired by the one found in another plan 9 text editor, sam
+
+        http://sam.cat-v.org/
+
+        Edit 14,24 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
+
+            name: Alice
+            occupation: programmer
+            language of choice: Rust
+
+            name: Bob
+            occupation: programmer
+            language of choice: Go
+
+            name: Claire
+            occupation: linguist
+            language of choice: French
+
+    - ad also supports a command line scripted mode:
 
         ad -e $EDIT_SCRIPT ...
         ad -f $FILE_CONTAINING_EDIT_SCRIPT ...

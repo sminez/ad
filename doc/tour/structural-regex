@@ -6,21 +6,14 @@ structural regular expressions:
 
     - but the syntax supported in ad is a lot richer than you might expect
 
-    - the command language here is inspired by the one found in another plan 9 text editor, sam
-
-        http://sam.cat-v.org/
-
-        Edit 18,28 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
-
-
-name: Alice
-occupation: programmer
-language of choice: Rust
-
-name: Bob
-occupation: programmer
-language of choice: Go
-
-name: Claire
-occupation: linguist
-language of choice: French
+        - s/re/template/         substitute (equivalent to "x/re/ c/template/")
+        - x/re/                  loop over matches
+        - y/re/                  loop between matches ("split on re")
+        - g/re/                  filter matching
+        - v/re/                  filter non-matching
+        - i/template/            insert before each match
+        - a/template/            insert after each match
+        - c/template/            replace each match
+        - d                      delete each match
+        - p/template/            print with a string template
+        - P                      print the match
