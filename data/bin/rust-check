@@ -8,10 +8,10 @@ CARGO_FORMAT="short"
 WATCH_TESTS="WatchTests"
 STOP_TESTS="StopTests"
 TEST_BUTTON="$WATCH_TESTS"
-FILTER=""
+ARGS=""
 
 header() {
-  [[ -z "$FILTER" ]] || s=" test-filter='$FILTER'"
+  [[ -z "$ARGS" ]] || s=" args='$ARGS'"
   echo -e "(Clear) (SetCargoFormat) ($TEST_BUTTON$s)\n"
 }
 
@@ -19,14 +19,14 @@ clearOutput() { adEdit "x/\n>>>@*/ c/\n>>>/"; }
 
 updateTestOutput() {
   clearOutput
-  cargo test "$FILTER" | bufWrite "$1" body
+  cargo test "$ARGS" | bufWrite "$1" body
 }
 
 updateCargoOutput() {
   clearBuffer "$1"
   header | bufWrite "$1" body
   # ensure that the output from cargo streams rather than buffering
-  cargo check --all-targets --workspace --message-format="$CARGO_FORMAT" 2>&1 | bufWrite "$1" body
+  cargo clippy --all-targets --workspace --message-format="$CARGO_FORMAT" 2>&1 | bufWrite "$1" body
   echo -en "\n\n>>>" | bufWrite "$1" body
   content="$(bufRead "$1" body)"
   if [[ "$content" =~ error|warning ]]; then
@@ -64,7 +64,7 @@ handleEvents() {
             updateCargoOutput "$1"
           fi
         elif [[ "$target" = "$WATCH_TESTS" ]]; then
-          FILTER="$(echo "$FILTER" | minibufferSelect "test filter> ")"
+          ARGS="$(echo -n "$ARGS" | minibufferSelect "args> ")"
           TEST_BUTTON="$STOP_TESTS"
           updateCargoOutput "$1"
         elif [[ "$target" = "$STOP_TESTS" ]]; then
