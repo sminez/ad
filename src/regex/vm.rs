@@ -169,7 +169,7 @@ impl Regex {
     /// The `return_on_first_match` flag is used to early return a dummy Match as soon as we
     /// can tell that the given regular expression matches the input (rather than looking for
     /// the leftmost-longest match).
-    /// >> The Match returned in this case will always point to the null string at the start
+    ///  - The Match returned in this case will always point to the null string at the start
     ///    of the string and should only be used for conversion to a bool in `matches_*`
     ///    methods.
     fn _match_iter<I>(&mut self, input: &mut I, mut sp: usize) -> Option<Match>

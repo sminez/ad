@@ -8,7 +8,7 @@ use lex::{LangSpec, StringDelims, Tokenizer};
 pub(crate) const RUST_SPEC: LangSpec = LangSpec {
     single_line_comment: Some("//"),
     multi_line_comment: Some(("/*", "*/")),
-    string_delimiters: StringDelims::Both,
+    string_delimiters: StringDelims::Double,
     keywords: &[
         "pub", "return", "crate", "super", "use", "mod", "where", "mut", "unsafe", "self", "async",
         "await", "ref",
