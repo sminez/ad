@@ -3,9 +3,12 @@
 [![Build](https://github.com/sminez/ad/workflows/Build/badge.svg)](https://github.com/sminez/ad/actions?query=workflow%3ABuild) [![crates.io version](https://img.shields.io/crates/v/ad-editor)](https://crates.io/crates/ad-editor) [![docs.rs](https://img.shields.io/docsrs/ad-editor?logo=rust)](https://docs.rs/ad-editor)
 
 `ad` (pronounced A.D.) is an attempt at combining a modal editing interface of likes of `vi`
-and `kakoune` with the approach to extensibility of Plan9's `Acme`. It is primarily intended
-as playground for experimenting with implementing various text editor features and currently
-is not at all optimised or feature complete enough for use as your main text editor.
+and `kakoune` with the approach to extensibility of Plan9's `Acme`. Inside of `ad` text is
+something you can execute as well as edit.
+
+It is primarily intended as playground for experimenting with implementing various text editor
+features and currently is not at all optimised or feature complete enough for use as your main
+text editor.
 
 That said, if this sounds like something you might find interesting then please to take a
 look and see what you think! For now there isn't a whole lot of user facing documentation so
@@ -14,14 +17,16 @@ you will need to read through the source code to learn about what is and is not 
 
 ## Project Status
 
-This is not even remotely usable or stable enough for real world day-to-day use yet. All aspects of
-the code are changing constantly as I hack on things and try to work out how I want my ideal text
-editor to work.
+`ad` is stable enough and feature complete enough that you can try it out and see what you
+think. That said, there is currently very little documentation and there are likely to be
+a variety of bugs and crashes in places that I've not managed to fully track down yet. If
+you do try it out and spot something that is broken, please raise an issue on GitHub so I
+can look into it.
 
 You have been warned!
 
 
-![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
+[![tour](https://img.youtube.com/vi/jb2pAi5hLUg/0.jpg)](https://www.youtube.com/watch?v=jb2pAi5hLUg)
 
 
 ## The design of ad
@@ -30,9 +35,9 @@ You have been warned!
   - vim style modal editing to allow for convenient key bindings
   - convenient text navigation and selection from vim/kakoune
   - mini-buffer based user defined minor modes from emacs
-  - vim/sam/acme style editing commands for larger editing actions
+  - sam/acme style editing commands for larger editing actions
   - acme style extension through exposing editor state and functionality for
-    external client programs (though not as the _only_ way to add functionality).
+    external client programs.
   - support for mouse based navigation and selection but not requiring that as the main
     way of using the editor like in acme. That's fine for desktop but most of the time
     I'm working with a laptop which makes that far too clunky.
