@@ -62,6 +62,8 @@ impl Editor {
                 None
             }
 
+            "expand-dot" => Some(Single(ExpandDot)),
+
             "E" | "Edit" => {
                 if args.is_empty() {
                     self.set_status_message("No edit script provided");

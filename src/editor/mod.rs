@@ -382,6 +382,7 @@ impl Editor {
             EditCommand { cmd } => self.execute_edit_command(&cmd),
             ExecuteDot => self.default_execute_dot(),
             Exit { force } => self.exit(force),
+            ExpandDot => self.expand_current_dot(),
             FindFile => self.find_file(),
             FindRepoFile => self.find_repo_file(),
             FocusBuffer { id } => self.focus_buffer(id),

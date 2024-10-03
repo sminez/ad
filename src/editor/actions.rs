@@ -58,6 +58,7 @@ pub(crate) enum Action {
     EditCommand { cmd: String },
     ExecuteDot,
     Exit { force: bool },
+    ExpandDot,
     FindFile,
     FindRepoFile,
     FocusBuffer { id: usize },
@@ -443,6 +444,10 @@ impl Editor {
 
     pub(super) fn debug_edit_log(&mut self) {
         self.minibuffer_select_from("<EDIT LOG> ", self.buffers.active().debug_edit_log());
+    }
+
+    pub(super) fn expand_current_dot(&mut self) {
+        self.buffers.active_mut().expand_cur_dot();
     }
 
     /// Default semantics for attempting to load the current dot:

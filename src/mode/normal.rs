@@ -50,7 +50,6 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('b') ] => [ DotExtendBackward(Word, 1), DotCollapseFirst ],
         [ Char('x') ] => [ DotSet(Line, 1) ],
         [ Char('X') ] => [ DotSet(Paragraph, 1) ],
-        [ Char('*') ] => [ DotSet(Word, 1) ],
         [ Char('%') ] => [ DotSet(BufferStart, 1), DotExtendForward(BufferEnd, 1) ],
         [ Char('g'), Char('g') ] => [ DotSet(BufferStart, 1) ],
         [ Char('g'), Char('e') ] => [ DotSet(BufferEnd, 1) ],
@@ -110,6 +109,7 @@ pub(crate) fn normal_mode() -> Mode {
 
         [ Return ] => [ LoadDot ],
         [ Char('@') ] => [ ExecuteDot ],
+        [ Char('*') ] => [ ExpandDot ],
 
     };
 
