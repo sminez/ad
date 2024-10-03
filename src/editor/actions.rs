@@ -516,7 +516,7 @@ impl Editor {
                     match Addr::parse(&mut s.chars().peekable()) {
                         Ok(mut addr) => {
                             let b = self.buffers.active_mut();
-                            b.map_addr(&mut addr);
+                            b.dot = b.map_addr(&mut addr);
                         }
                         Err(e) => self.set_status_message(&format!("malformed addr: {e:?}")),
                     }
