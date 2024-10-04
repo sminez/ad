@@ -200,14 +200,14 @@ where
 
             Input::Arrow(Arrow::Right) => self.x = min(self.x + 1, self.input.len()),
             Input::Arrow(Arrow::Left) => self.x = self.x.saturating_sub(1),
-            Input::Alt('k') | Input::Arrow(Arrow::Up) => {
+            Input::Alt('k') | Input::Arrow(Arrow::Up) | Input::Ctrl('p') => {
                 if self.selected_line_idx == 0 {
                     self.b.set_dot(TextObject::BufferEnd, 1);
                 } else {
                     self.b.set_dot(TextObject::Arr(Arrow::Up), 1);
                 }
             }
-            Input::Alt('j') | Input::Arrow(Arrow::Down) => {
+            Input::Alt('j') | Input::Arrow(Arrow::Down) | Input::Ctrl('n') => {
                 if self.selected_line_idx == self.n_visible_lines - 1 {
                     self.b.set_dot(TextObject::BufferStart, 1);
                 } else {
