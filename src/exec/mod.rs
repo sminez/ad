@@ -347,7 +347,7 @@ impl Program {
         }
     }
 
-    /// When looping over disjoint matches in the input we need to determin all of the initial
+    /// When looping over disjoint matches in the input we need to determine all of the initial
     /// match points before we start making any edits as the edits may alter the semantics of
     /// future matches.
     fn apply_matches<E, W>(
@@ -363,23 +363,20 @@ impl Program {
         E: Edit,
         W: Write,
     {
-        let (mut from, to) = m.loc();
         let mut offset: isize = 0;
+        let (from, to) = m.loc();
+        let mut dot = Dot::from_char_indices(from, to);
 
         for mut m in initial_matches.into_iter() {
             m.apply_offset(offset);
 
             let cur_len = ed.len_chars();
-            from = self.step(ed, &m, pc + 1, fname, out)?.last_cur().idx;
+            dot = self.step(ed, &m, pc + 1, fname, out)?;
             let new_len = ed.len_chars();
-
             offset += new_len as isize - cur_len as isize;
         }
 
-        Ok(Dot::from_char_indices(
-            from,
-            (to as isize + offset) as usize,
-        ))
+        Ok(dot)
     }
 }
 
@@ -481,18 +478,20 @@ mod tests {
         assert_eq!(res, Err(expected));
     }
 
-    #[test_case(Insert("X".to_string()), "Xfoo foo foo", (0, 12); "insert")]
-    #[test_case(Append("X".to_string()), "foo foo fooX", (0, 12); "append")]
-    #[test_case(Change("X".to_string()), "X", (0, 1); "change")]
-    #[test_case(Delete, "", (0, 0); "delete")]
-    #[test_case(Sub(re("oo"), "X".to_string()), "fX foo foo", (0, 10); "sub single")]
-    #[test_case(LoopMatches(re("foo")), "  ", (2, 2); "loop delete")]
-    #[test_case(LoopBetweenMatches(re("foo")), "foofoofoo", (6, 9); "loop between delete")]
+    #[test_case(vec![Insert("X".to_string())], "Xfoo foo foo", (0, 12); "insert")]
+    #[test_case(vec![Append("X".to_string())], "foo foo fooX", (0, 12); "append")]
+    #[test_case(vec![Change("X".to_string())], "X", (0, 1); "change")]
+    #[test_case(vec![Delete], "", (0, 0); "delete")]
+    #[test_case(vec![Sub(re("oo"), "X".to_string())], "fX foo foo", (0, 10); "sub single")]
+    #[test_case(vec![LoopMatches(re("foo")), Delete], "  ", (2, 2); "loop delete")]
+    #[test_case(vec![LoopBetweenMatches(re("foo")), Delete], "foofoofoo", (6, 6); "loop between delete")]
+    #[test_case(vec![LoopMatches(re("foo")), Append("X".to_string())], "fooX fooX fooX", (10, 14); "loop change")]
+    #[test_case(vec![LoopBetweenMatches(re("foo")), Append("X".to_string())], "foo Xfoo Xfoo", (8, 10); "loop between change")]
     #[test]
-    fn step_works(expr: Expr, expected: &str, expected_dot: (usize, usize)) {
+    fn step_works(exprs: Vec<Expr>, expected: &str, expected_dot: (usize, usize)) {
         let mut prog = Program {
             initial_dot: Addr::full(),
-            exprs: vec![expr, Delete],
+            exprs,
         };
         let mut b = Buffer::new_unnamed(0, "foo foo foo");
         let dot = prog
@@ -513,6 +512,20 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, "this is a test string");
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         assert_eq!(&b.txt.to_string(), expected);
+    }
+
+    #[test]
+    fn loop_between_generates_the_correct_blocks() {
+        let mut prog = Program::try_parse(", y/ / p/>$0</").unwrap();
+        let mut b = Buffer::new_unnamed(0, "this and that");
+        let mut output = Vec::new();
+        let dot = prog.execute(&mut b, "test", &mut output).unwrap();
+
+        let s = String::from_utf8(output).unwrap();
+        assert_eq!(s, ">this<\n>and<\n>that<\n");
+
+        let dot_content = dot.content(&b);
+        assert_eq!(dot_content, "that");
     }
 
     #[test_case("/oo.fo/ d", "fo│foo"; "regex dot delete")]
