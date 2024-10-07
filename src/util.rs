@@ -90,9 +90,6 @@ where
     S: AsRef<OsStr>,
 {
     let mut command = prepare_command(cmd, args, cwd, bufid);
-    _ = tx.send(Event::Action(Action::SetStatusMessage {
-        message: format!("running '{cmd}' ..."),
-    }));
 
     spawn(move || {
         let output = match command.output() {
