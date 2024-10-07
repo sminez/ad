@@ -633,7 +633,8 @@ impl Editor {
 
         if !buf.is_empty() {
             let id = self.active_buffer_id();
-            self.buffers.write_output_for_buffer(id, String::from_utf8(buf).unwrap());
+            self.buffers
+                .write_output_for_buffer(id, String::from_utf8(buf).unwrap());
         }
     }
 
