@@ -199,7 +199,9 @@ where
             }
 
             Input::Alt('h') | Input::Arrow(Arrow::Left) => self.x = self.x.saturating_sub(1),
-            Input::Alt('l') | Input::Arrow(Arrow::Right) => self.x = min(self.x + 1, self.input.len()),
+            Input::Alt('l') | Input::Arrow(Arrow::Right) => {
+                self.x = min(self.x + 1, self.input.len())
+            }
             Input::Alt('k') | Input::Arrow(Arrow::Up) => {
                 if self.selected_line_idx == 0 {
                     self.b.set_dot(TextObject::BufferEnd, 1);
