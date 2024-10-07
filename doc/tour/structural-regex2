@@ -7,7 +7,7 @@ structural regular expressions let you drill down:
 
         http://sam.cat-v.org/
 
-        Edit 14,24 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer/
+        Edit 14,24 y/\n\n/ x/@*occupation: programmer@*/ x/name: (.*)/ p/$1 is a programmer\n/
 
             name: Alice
             occupation: programmer

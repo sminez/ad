@@ -303,7 +303,7 @@ impl Program {
 
             Expr::Print(pat) => {
                 let s = template_match(&pat, m, ed.contents(), fname)?;
-                writeln!(out, "{s}").expect("to be able to write");
+                write!(out, "{s}").expect("to be able to write");
                 Ok(Dot::from_char_indices(from, to))
             }
 
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn loop_between_generates_the_correct_blocks() {
-        let mut prog = Program::try_parse(", y/ / p/>$0</").unwrap();
+        let mut prog = Program::try_parse(", y/ / p/>$0<\n/").unwrap();
         let mut b = Buffer::new_unnamed(0, "this and that");
         let mut output = Vec::new();
         let dot = prog.execute(&mut b, "test", &mut output).unwrap();
