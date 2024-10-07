@@ -11,16 +11,17 @@ use crate::{
 pub(crate) fn insert_mode() -> Mode {
     let mut keymap = keymap! {
         [ Esc ] => [ SetMode { m: "NORMAL" }, NewEditLogTransaction ],
-        // [ Char('f'), Char('d') ] => [ SetMode { m: "NORMAL" }, NewEditLogTransaction ],
         [ Backspace ] => [ DotSet(Arr(Left), 1), Delete ],
         [ Del ] => [ Delete ],
         [ Home ] => [ DotSet(LineStart, 1) ],
         [ End ] => [ DotSet(LineEnd, 1) ],
 
-        [ Alt('h') ] => [ DotSet(Arr(Left), 1) ],
-        [ Alt('j') ] => [ DotSet(Arr(Down), 1) ],
-        [ Alt('k') ] => [ DotSet(Arr(Up), 1) ],
-        [ Alt('l') ] => [ DotSet(Arr(Right), 1) ],
+        // following vim here: alt-hjkl will move the cursor the same as normal mode hjkl
+        // with the added effect of moving you to normal mode.
+        [ Alt('h') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Left), 1) ],
+        [ Alt('j') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Down), 1) ],
+        [ Alt('k') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Up), 1) ],
+        [ Alt('l') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Right), 1) ],
 
         // readline style bindings
         [ Ctrl('a') ] => [ DotSet(LineStart, 1) ],

@@ -44,6 +44,12 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('j') ] => [ DotSet(Arr(Down), 1) ],
         [ Char('k') ] => [ DotSet(Arr(Up), 1) ],
         [ Char('l') ] => [ DotSet(Arr(Right), 1) ],
+        // matching the bindings in insert mode so that repeated alt-hjkl will just navigate
+        // through the buffer without needing to switch bindings
+        [ Alt('h') ] => [ DotSet(Arr(Left), 1) ],
+        [ Alt('j') ] => [ DotSet(Arr(Down), 1) ],
+        [ Alt('k') ] => [ DotSet(Arr(Up), 1) ],
+        [ Alt('l') ] => [ DotSet(Arr(Right), 1) ],
         [ Home ] => [ DotSet(LineStart, 1) ],
         [ End ] => [ DotSet(LineEnd, 1) ],
         [ Char('w') ] => [ DotExtendForward(Word, 1), DotCollapseLast ],
@@ -81,8 +87,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ Alt('{') ] => [ DotExtendBackward(Paragraph, 1) ],
         [ Alt('}') ] => [ DotExtendForward(Paragraph, 1) ],
 
-        [ Alt('h') ] => [ DotExtendBackward(LineStart, 1) ],
-        [ Alt('l') ] => [ DotExtendForward(LineEnd, 1) ],
+        [ Ctrl('h') ] => [ DotExtendBackward(LineStart, 1) ],
+        [ Ctrl('l') ] => [ DotExtendForward(LineEnd, 1) ],
 
         // Manipulate dot
         [ Char(';') ] => [ DotFlip ],
