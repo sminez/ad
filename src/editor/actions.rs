@@ -631,18 +631,9 @@ impl Editor {
             Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
         }
 
-        // FIXME: this is just using a selection mini-buffer for now to test things out. Ideally
-        // this should be a scratchpad that we can dismiss and bring back but that will require
-        // support in the main Buffers struct and a new way of creating a MiniBuffer.
         if !buf.is_empty() {
-            self.minibuffer_select_from(
-                "%>",
-                String::from_utf8(buf)
-                    .unwrap()
-                    .lines()
-                    .map(|l| l.to_string())
-                    .collect(),
-            );
+            let id = self.active_buffer_id();
+            self.buffers.write_output_for_buffer(id, String::from_utf8(buf).unwrap());
         }
     }
 
@@ -683,10 +674,7 @@ impl Editor {
         };
 
         let id = self.active_buffer_id();
-        let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => pipe_through_command(cmd, rest.split_whitespace(), &s, d, id),
-            None => pipe_through_command(raw_cmd_str, std::iter::empty::<&str>(), &s, d, id),
-        };
+        let res = pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
@@ -697,10 +685,7 @@ impl Editor {
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        let res = match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => run_command_blocking(cmd, rest.split_whitespace(), d, id),
-            None => run_command_blocking(raw_cmd_str, std::iter::empty::<&str>(), d, id),
-        };
+        let res = run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
@@ -711,18 +696,7 @@ impl Editor {
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        match raw_cmd_str.split_once(' ') {
-            Some((cmd, rest)) => {
-                run_command(cmd, rest.split_whitespace(), d, id, self.tx_events.clone())
-            }
-            None => run_command(
-                raw_cmd_str,
-                std::iter::empty::<&str>(),
-                d,
-                id,
-                self.tx_events.clone(),
-            ),
-        }
+        run_command("sh", ["-c", raw_cmd_str], d, id, self.tx_events.clone());
     }
 }
 
