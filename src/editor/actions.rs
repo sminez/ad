@@ -564,9 +564,11 @@ impl Editor {
             if let Some(mut addr) = maybe_addr {
                 let b = self.buffers.active_mut();
                 b.dot = b.map_addr(&mut addr);
+                self.handle_action(Action::SetViewPort(ViewPort::Center));
             }
         } else {
             b.find_forward(&s);
+            self.handle_action(Action::SetViewPort(ViewPort::Center));
         }
     }
 
@@ -627,7 +629,12 @@ impl Editor {
         let mut buf = Vec::new();
         let fname = self.buffers.active().full_name().to_string();
         match prog.execute(self.buffers.active_mut(), &fname, &mut buf) {
-            Ok(new_dot) => self.buffers.active_mut().dot = new_dot,
+            Ok(new_dot) => {
+                self.buffers.record_jump_position();
+                self.buffers.active_mut().dot = new_dot;
+                self.handle_action(Action::SetViewPort(ViewPort::Center));
+            }
+
             Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
         }
 
