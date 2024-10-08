@@ -205,6 +205,10 @@ impl Buffer {
     }
 
     pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> String {
+        if !self.dirty {
+            return "Nothing to save".to_string();
+        }
+
         if !force {
             match self.state_changed_on_disk() {
                 Ok(false) => (),
@@ -655,10 +659,8 @@ impl Buffer {
         buf
     }
 
-    pub(crate) fn sign_col_dims(&self, screen_rows: usize) -> (usize, usize) {
-        let n_lines = self.len_lines();
-        let max_linum = min(n_lines, screen_rows + self.row_off);
-        let w_lnum = n_digits(max_linum);
+    pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
+        let w_lnum = n_digits(self.len_lines());
         let w_sgncol = w_lnum + 2;
 
         (w_lnum, w_sgncol)
@@ -794,13 +796,13 @@ impl Buffer {
     }
 
     #[inline]
-    fn set_rx_from_screen_rows(&mut self, x: usize, screen_rows: usize) {
-        self.rx = self.rx_from_screen_rows(x, screen_rows);
+    fn set_rx_from_screen_rows(&mut self, x: usize) {
+        self.rx = self.rx_from_screen_rows(x);
     }
 
     #[inline]
-    pub(crate) fn rx_from_screen_rows(&self, x: usize, screen_rows: usize) -> usize {
-        let (_, w_sgncol) = self.sign_col_dims(screen_rows);
+    pub(crate) fn rx_from_screen_rows(&self, x: usize) -> usize {
+        let (_, w_sgncol) = self.sign_col_dims();
         x.saturating_sub(1).saturating_sub(w_sgncol)
     }
 
@@ -817,25 +819,24 @@ impl Buffer {
         &mut self,
         x: usize,
         y: usize,
-        screen_rows: usize,
     ) {
-        self.set_rx_from_screen_rows(x, screen_rows);
+        self.set_rx_from_screen_rows(x);
         let mouse_cur = self.cur_from_screen_coords(y, self.rx);
         if !self.dot.contains(&mouse_cur) {
-            self.set_dot_from_screen_coords(x, y, screen_rows);
+            self.set_dot_from_screen_coords(x, y);
         }
     }
 
-    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
-        self.set_rx_from_screen_rows(x, screen_rows);
+    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) {
+        self.set_rx_from_screen_rows(x);
         self.dot = Dot::Cur {
             c: self.cur_from_screen_coords(y, self.rx),
         };
     }
 
-    pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize, screen_rows: usize) {
+    pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize) {
         let mut r = self.dot.as_range();
-        self.set_rx_from_screen_rows(x, screen_rows);
+        self.set_rx_from_screen_rows(x);
         let c = self.cur_from_screen_coords(y, self.rx);
         r.set_active_cursor(c);
 
@@ -1185,12 +1186,6 @@ impl Buffer {
             self.dot = dot;
         }
     }
-
-    // fn find_backward<M: Matcher>(&mut self, m: M) {
-    //     if let Some(dot) = m.match_backward_from_wrapping(self.dot.active_cur(), self) {
-    //         self.dot = dot;
-    //     }
-    // }
 }
 
 fn n_digits(mut n: usize) -> usize {

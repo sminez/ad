@@ -1,0 +1,294 @@
+>> Using the ad text editor
+
++-------------------------------------------------------------------------------------+
+| Welcome to the help page for the ad text editor. Viewing this file within ad itself |
+| is recommended as it will allow you to use Load and Execute the text it contains    |
+| in order to navigate the contents and explore the functionality of the editor.      |
++-------------------------------------------------------------------------------------+
+              \  ,,  __
+                ("\ ( (
+                -)>\ )/
+                ('( )'
+                -'-'
+
+You can either read things from top to bottom or make use of the Index below to jump
+to a particular section that you care about. To do this, highlight one of the lines
+in the Index below by placing the cursor on it and pressing "x" in NORMAL mode. Once
+the line is highlighted, hit enter to jump to that section of the file. (See the
+"Loading Text" section for more information on how this works.)
+
+  NOTE: pressing "gg" while you are in NORMAL mode will jump you to back to the top
+        of the file so you can quickly find the index again.
+
+---
+
+>> Index
+About
+The Tour
+Editor Modes
+Loading Text
+Executing Text
+Running Built In Commands
+Running External Commands
+Running Edit Commands
+The Filesystem Interface
+
+---
+
+>> About
+
+"ad" is a text oriented user interface and editor for programmers. Getting the most out
+of ad involves writing your own scripts and helper programs to customise its behaviour
+to your needs. The design of ad is heavily inspired by the text editors "acme" and "sam"
+from the Plan 9 operating system along with the modal interface of vi and the dmenu tool
+from suckless.
+
+    http://acme.cat-v.org/
+    http://doc.cat-v.org/plan_9/4th_edition/papers/acme/
+    http://sam.cat-v.org/
+    http://doc.cat-v.org/plan_9/4th_edition/papers/sam/
+    https://en.wikipedia.org/wiki/Vi_(text_editor)
+    https://tools.suckless.org/dmenu/
+
+  NOTE: Right clicking on the URLs above will open them in your browser
+
+Rather than attempt to provide built-in implementations of all the functionality you might
+need (or be used to) from other editors, ad instead makes it easy for your existing tools
+to interact with the state of the editor directly. Approaching things this way round
+turns ad into a "glue layer" for the tooling you already have. In the words of Russ Cox
+describing acme, it is an IDE done right: an integratING development environment instead
+of an integratED one.
+
+At its simplest ad is a minimal text editor with a modal interface inspired by vi, but
+within ad text is something you can read, edit, load and execute. An ad buffer can be a
+file you are working on, the output of commands you are running, a custom user interface
+you have written or even all three at once. If you've used acme before then you should feel
+right at home, and if not you'll quickly discover that you have a lot of power and control
+over the contents of your buffers as you read through the rest of this guide.
+
+---
+
+>> The Tour
+
+The ad git repo contains a tour that can be run using the Slide script located in data/bin.
+The tour does not aim to cover every aspect of ad in detail but it is a good place to start
+if you are wanting to learn a bit about how everything works in a more guided setting.
+
+You can clone the repo and start the tour by running the following from your shell (assuming
+that you already have ad installed):
+
+  git clone https://github.com/sminez/ad.git
+  cd ad
+  ad docs/tour/intro
+
+Once ad is open the "intro" file will instruct you on how to start the tour. Middle clicking
+(or pressing the "@" key) on the PrevSlide and NextSlide "buttons" on each slide will
+navigate through the tour. Refer to the "Executing Text" section of this help file to learn
+more about how that works.
+
+---
+
+>> Editor Modes
+
+ad provides a number of distinct "modes" for interacting with the editor. Depending on the
+mode you are in you will find that the keys that you press have a different effect.
+
+  NORMAL mode
+    This is the default mode that ad will open in. Key bindings in this mode are primarily
+    focused on selecting and manipulating text but you are also able to specify your own
+    key bindings that will run external commands. If you are familiar with the NORMAL mode
+    of editors like Vim and Kakoune then things should feel broadly familiar.
+
+    Note that ad follows the "noun verb" approach to motions used in Kakoune rather than the
+    traditional "verb noun" approach used by Vi and its decendants. So you will "select a word
+    to delete" (Wd) rather than "delete a word" (dw). As a general rule pressing a key on
+    its own will set the dot based based on the motion used and pressing the same key while
+    holding down shift will extend the existing dot to that position instead.
+
+    The default key map for NORMAL mode can be viewed here:
+      https://github.com/sminez/ad/blob/develop/src/mode/normal.rs
+
+    To return to NORMAL mode from any other mode, press Escape.
+
+  INSERT mode
+    For the most part, key presses in INSERT mode will directly insert and remove text from
+    current buffer at the current cursor position. There are also some convenience bindings
+    for quickly jumping to the start and end of the current line as well as support for using
+    Alt-h/j/k/l to move the cursor while simultaneously returning to NORMAL mode.
+
+    The default key map for INSERT mode can be viewed here:
+      https://github.com/sminez/ad/blob/develop/src/mode/insert.rs
+
+    To enter INSERT mode from NORMAL mode,
+      press "i" to keep the cursor at its current position
+      press "a" to place the cursor one character after its current position
+      press "I" to place the cursor at the start of the current line
+      press "A" to place the cursor at the end of the current line 
+
+  COMMAND mode
+    This is a special mode that focuses the status line instead of the active buffer, allowing
+    you to execute built in editor commands. For the list of supported commands please refer
+    to the "Running Built In Commands" section below.
+
+    To enter COMMAND mode from NORMAL mode, type ":"
+
+  RUN mode
+    Another special mode that focuses the status line. In this mode you are able to execute
+    external commands as if you had typed them at a shell prompt. Standard output and error
+    from commands run in this way will be redirected to a buffer named "$DIR/+output" where
+    "$DIR" is the directory containing the active buffer.
+
+    You can place scripts and binaries that you wish to execute only from inside of ad within
+    the ~/.ad/bin directory which is automatically added to $PATH for all commands executed
+    from within the editor.
+
+    To enter RUN mode from NORMAL mode, type "!"
+
+  EDIT mode
+    The last special mode is focused around applying structural regular expressions to the
+    contents of the current buffer. The "Running Edit Commands" section below provides more
+    information on the syntax and functionality of Edit commands and the following links are
+    a useful reference for the history behind the concept of structural regular expressions
+    and their implementation within the Sam text editor:
+
+    https://doc.cat-v.org/bell_labs/structural_regexps/se.pdf
+    https://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf
+
+    To enter EDIT mode from NORMAL mode, type "."
+
+---
+
+>> Loading Text
+
+Along with "Executing" text, the idea of "Loading" text is taken from the Plan 9 text editor
+acme as a way of providing a form of programmable hyperlinking within arbitrary text files.
+Unlike HTML links where the target of the link is defined within the source text, ad Loading
+makes use of centrally defined "plumbing" rules in order to determine what the outcome of a
+given Load should be.
+
+To "Load" text, highlight the text you wish to Load and hit Enter from within NORMAL mode.
+Alternatively, right clicking the mouse within your current selection will work in any mode.
+If your current selection is a single character cursor, Loading will first expand to the
+surrounding word, filepath or URL before attempting to interpret the selected text.
+
+By default, if no rules are matched then a Load of a file path is defined to be opening that
+file within ad and a Load of any other text will search for the next occurance of that text
+within the current buffer. Rules are defined in ~/.ad/plumbing.rules with the default ruleset
+being viewable here:
+
+  https://github.com/sminez/ad/blob/develop/data/plumbing.rules
+
+  TODO: write up the syntax for plumbing rules
+
+---
+
+>> Executing Text
+
+Executing text within ad is a way of running both built in and external commands by name
+from within a buffer. ad will prefer internal commands over external ones in the event of
+duplicate command names. Standard output and error from commands run in this way will be
+redirected to a buffer named "$DIR/+output" where "$DIR" is the directory containing the
+active buffer.
+
+To "Execute" text, highlight the text you wish to Execute and hit "@" from within NORMAL
+mode. Alternatively, middle clicking the mouse within your current selection will work in
+any mode. If your current selection is a single character cursor, Loading will first
+expand to the surrounding whitespace delimited word before attempting to interpret the
+selected text.
+
+If the selection being executed begins with a "<" character then the output of running
+the command will replace the selection within the buffer it was executed in rather than
+being redirected to a +output buffer.
+
+  <date
+
+---
+
+>> Running Built In Commands
+
+The following commands are all built into ad and are runnable via the COMMAND mode
+which can be opened using the ":" key from NORMAL mode. Each of the commands can also
+be executed directly from any buffer (including this one) or written as a command
+string to the "ctl" file in the filesystem interface.
+
+b | buffer            -- switch to the buffer with the given ID ("buffer 5")
+bn | buffer-next      -- switch to the next available open buffer in the buffer list
+bp | buffer-prev      -- switch to the previous available open buffer in the buffer list
+cd | change-directory -- change ad's working directory ("cd ../src")
+db | delete-buffer    -- delete the active buffer as long as there are no pending changes
+db! | delete-buffer!  -- delete the active buffer discarding all pending changes
+echo                  -- display the given string in the status line ("echo hello, world!")
+E | Edit              -- run an Edit command (See "Running Edit Commands")
+expand-dot            -- smart expand the current cursor position into a range
+help                  -- display this help file
+mark-clean            -- mark the current buffer as being clean to prevent saving changes
+o | open              -- open the given file path in a new buffer ("open README.md")
+pwd                   -- print the current editor working directory
+q | quit              -- quit ad as long as there are no buffers with pending changes
+q! | quit!            -- quit ad discarding all pending changes for open buffers
+reload-buffer | Get   -- refresh the current buffer's content from the state of the file on disk
+reload-config         -- reload the editor config file located at ~/.ad/init.conf
+set                   -- set a config property ("set bg-color=#ebdbb2")
+view-logs             -- open ad's internal logs in a new buffer
+viewport-bottom       -- place the current line at the bottom of the window
+viewport-center       -- place the current line at the center of the window
+viewport-top          -- place the current line at the top of the window
+wq | write-quit       -- save the current buffer to disk and exit, blocking if other buffers are dirty
+wq! | write-quit!     -- save the current buffer to disk and exit, discarding other changes
+w | write             -- save the current buffer to disk. (Blocked if the file has been modified on disk)
+w! | write!           -- save the current buffer to disk ignoring external changes
+
+---
+
+>> Running External Commands
+
+All commands available on the user's $PATH are executable from within ad in addition to anything
+located in the ~/.ad/bin directory. The $bufid environment variable will be set to the id of the
+buffer that the command was run from (the active buffer if run from RUN mode) and the working
+directory will be set to the directory containing the active buffer.
+
+---
+
+>> Running Edit Commands
+
+ad supports running a form of the structural regular expression syntax first introduced in the
+Sam text editor as part of the Plan 9 operating system. The current supported syntax covers most
+use cases but it does not include some of the features found within Sam and Acme:
+
+  s/re/template/         substitute (equivalent to "x/re/ c/template/")
+  x/re/                  loop over matches
+  y/re/                  loop between matches ("split on re")
+  g/re/                  filter matching
+  v/re/                  filter non-matching
+  i/template/            insert before each match
+  a/template/            insert after each match
+  c/template/            replace each match
+  d                      delete each match
+  p/template/            print with a string template
+  P                      print the match
+
+---
+
+>> The Filesystem Interface
+
+ad uses the 9p protocol to present a virtual filesystem interface as an API for extending
+the functionality of the editor, allowing you to read and manipulate the state of the editor
+using any language you wish.
+
+  http://man.cat-v.org/plan_9/5/
+
+If you have the 9p(1) command line utility installed you can use it to explore the filesystem:
+
+  9p ls ad
+  9p ls ad/buffers/1
+  9p read ad/buffers/1/dot
+
+If you have the fusermount(1) and 9pfuse(4) programs installed then you can set the "auto-mount"
+property in ~/.ad/init.conf to true and mount the filesystem directly at ~/.ad/mnt when ad starts.
+The default scripts provided in the ad GitHub repo serve as a useful reference for the sorts of
+interactions that are possible through this interface:
+
+  https://github.com/sminez/ad/tree/develop/data/bin
+  https://github.com/sminez/ad/blob/develop/data/lib/ad.sh
+
+---

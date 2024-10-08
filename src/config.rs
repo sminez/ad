@@ -24,7 +24,7 @@ impl Default for Config {
             auto_mount: false,
             match_indent: true,
             status_timeout: 3,
-            minibuffer_lines: 15,
+            minibuffer_lines: 8,
             find_command: "fd -t f".to_string(),
             colorscheme: ColorScheme::default(),
             bindings: BTreeMap::new(),

@@ -422,6 +422,7 @@ impl Editor {
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
+            ShowHelp => self.show_help(),
             UpdateConfig { input } => self.update_config(&input),
             ViewLogs => self.view_logs(),
             Yank => self.set_clipboard(self.buffers.active().dot_contents()),
@@ -481,29 +482,25 @@ impl Editor {
 
         match evt {
             MouseEvent::Press { b: Left, x, y } => {
-                self.buffers
-                    .active_mut()
-                    .set_dot_from_screen_coords(x, y, self.screen_rows);
+                self.buffers.active_mut().set_dot_from_screen_coords(x, y);
             }
 
             MouseEvent::Press { b: Right, x, y } => {
                 self.buffers
                     .active_mut()
-                    .set_dot_from_screen_coords_if_outside_current_range(x, y, self.screen_rows);
+                    .set_dot_from_screen_coords_if_outside_current_range(x, y);
                 self.default_load_dot();
             }
 
             MouseEvent::Press { b: Middle, x, y } => {
                 self.buffers
                     .active_mut()
-                    .set_dot_from_screen_coords_if_outside_current_range(x, y, self.screen_rows);
+                    .set_dot_from_screen_coords_if_outside_current_range(x, y);
                 self.default_execute_dot();
             }
 
             MouseEvent::Hold { x, y } => {
-                self.buffers
-                    .active_mut()
-                    .extend_dot_to_screen_coords(x, y, self.screen_rows);
+                self.buffers.active_mut().extend_dot_to_screen_coords(x, y);
             }
 
             MouseEvent::Press { b: WheelUp, .. } => {

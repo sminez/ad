@@ -91,6 +91,7 @@ pub(crate) enum Action {
     ShellReplace { cmd: String },
     ShellRun { cmd: String },
     ShellSend { cmd: String },
+    ShowHelp,
     Undo,
     UpdateConfig { input: String },
     ViewLogs,
@@ -440,6 +441,10 @@ impl Editor {
 
     pub(super) fn view_logs(&mut self) {
         self.open_virtual("+logs", self.log_buffer.content())
+    }
+
+    pub(super) fn show_help(&mut self) {
+        self.open_virtual("+help", include_str!("../../data/help.txt"))
     }
 
     pub(super) fn debug_edit_log(&mut self) {

@@ -89,7 +89,14 @@ impl Editor {
         let b = self.buffers.active_mut();
 
         // Sort out dimensions of the sign/number column
-        let (w_lnum, w_sgncol) = b.sign_col_dims(screen_rows);
+        let (w_lnum, w_sgncol) = b.sign_col_dims();
+        let y_banner = self.screen_rows / 3;
+        let push_banner_line = |mut banner: String, buf: &mut String| {
+            banner.truncate(self.screen_cols - w_sgncol);
+            let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
+            buf.push_str(&" ".repeat(padding));
+            buf.push_str(&banner);
+        };
 
         for y in 0..screen_rows {
             let file_row = y + b.row_off;
@@ -103,12 +110,12 @@ impl Editor {
                     width = w_lnum
                 ));
 
-                if is_empty_scratch && y == self.screen_rows / 3 && y < screen_rows {
-                    let mut banner = format!("ad editor :: version {VERSION}");
-                    banner.truncate(self.screen_cols - w_sgncol);
-                    let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
-                    buf.push_str(&" ".repeat(padding));
-                    buf.push_str(&banner);
+                if is_empty_scratch {
+                    if y == y_banner && y < screen_rows {
+                        push_banner_line(format!("ad editor :: version {VERSION}"), buf);
+                    } else if y == y_banner + 1 && y + 1 < screen_rows {
+                        push_banner_line("type :help to view help".to_string(), buf);
+                    }
                 }
             } else {
                 // +2 for the leading space and vline chars
