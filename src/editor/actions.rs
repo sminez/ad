@@ -639,7 +639,6 @@ impl Editor {
             Ok(new_dot) => {
                 self.buffers.record_jump_position();
                 self.buffers.active_mut().dot = new_dot;
-                self.handle_action(Action::SetViewPort(ViewPort::Center));
             }
 
             Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
