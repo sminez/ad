@@ -600,4 +600,21 @@ mod tests {
 
         assert_eq!(&final_content, initial_content);
     }
+
+    // regression test: gh#30
+    #[test]
+    fn regression_edit_landing_on_gap_end() {
+        // This is line 1 of the test file
+        let s = r#"6,32 x/.*\n/ y/\s+-- / x/(.+)/ c/"$1"/"#;
+        let mut prog = Program::try_parse(s).unwrap();
+        let mut b = Buffer::new_unnamed(
+            0,
+            include_str!("../../data/regression/edit-landing-on-gap-end.txt"),
+        );
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+
+        let expected = r#""w | write"             -- "save the current buffer to disk. (Blocked if the file has been modified on disk)""#;
+        let final_content = String::from_utf8(b.contents()).unwrap();
+        assert_eq!(final_content.lines().nth(29).unwrap(), expected);
+    }
 }

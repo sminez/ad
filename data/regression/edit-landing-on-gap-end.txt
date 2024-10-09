@@ -1,0 +1,32 @@
+Edit 6,32 x/.*\n/ y/\s+-- / x/(.+)/ c/"$1"/
+Edit 6,32 x/"(.+)"\s+--/ c/vec!["$1"],/
+Edit 6,32 x/"(.+) \| (.+)"/ c/"$1", "$2"/
+Edit 6,32 x/(.+)\n/ c/($1),\n/
+
+b | buffer            -- switch to the buffer with the given ID ('buffer 5')
+bn | buffer-next      -- switch to the next available open buffer in the buffer list
+bp | buffer-prev      -- switch to the previous available open buffer in the buffer list
+cd | change-directory -- change ad's working directory ('cd ../src')
+db | delete-buffer    -- delete the active buffer as long as there are no pending changes
+db! | delete-buffer!  -- delete the active buffer discarding all pending changes
+echo                  -- display the given string in the status line ('echo hello, world!')
+E | Edit              -- run an Edit command (See 'Running Edit Commands')
+expand-dot            -- smart expand the current cursor position into a range
+help                  -- display this help file
+mark-clean            -- mark the current buffer as being clean to prevent saving changes
+o | open              -- open the given file path in a new buffer ('open README.md')
+pwd                   -- print the current editor working directory
+q | quit              -- quit ad as long as there are no buffers with pending changes
+q! | quit!            -- quit ad discarding all pending changes for open buffers
+reload-buffer | Get   -- refresh the current buffer's content from the state of the file on disk
+reload-config         -- reload the editor config file located at ~/.ad/init.conf
+set                   -- set a config property ('set bg-color=#ebdbb2')
+view-logs             -- open ad's internal logs in a new buffer
+viewport-bottom       -- place the current line at the bottom of the window
+viewport-center       -- place the current line at the center of the window
+viewport-top          -- place the current line at the top of the window
+wq | write-quit       -- save the current buffer to disk and exit, blocking if other buffers are dirty
+wq! | write-quit!     -- save the current buffer to disk and exit, discarding other changes
+w | write             -- save the current buffer to disk. (Blocked if the file has been modified on disk)
+w! | write!           -- save the current buffer to disk ignoring external changes
+

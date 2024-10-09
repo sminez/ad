@@ -15,14 +15,16 @@ use std::{
 };
 
 // The internal data is [u8] so the values here are in terms of bytes
-const MIN_GAP: usize = 64;
-const MAX_GAP: usize = 1024 * 8;
+
+const MIN_GAP: usize = 32;
+const MIN_GAP_GROW: usize = 64;
+const MAX_GAP_GROW: usize = 1024 * 8;
 
 /// For a given buffer length, calculate the new size of the gap we need when reallocating.
 /// This is set to 5% of the length of our data buffer but bounded by MIN_GAP and MAX_GAP.
 #[inline]
 fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
-    min(max(len / 20, min_gap), MAX_GAP)
+    min(max(len / 20, min_gap), MAX_GAP_GROW)
 }
 
 #[inline]
@@ -85,7 +87,7 @@ fn compute_line_endings(s: &str) -> (usize, BTreeMap<ByteOffset, CharOffset>) {
 impl From<String> for GapBuffer {
     fn from(s: String) -> Self {
         let gap_start = s.len();
-        let next_gap = clamp_gap_size(gap_start, MIN_GAP);
+        let next_gap = clamp_gap_size(gap_start, MIN_GAP_GROW);
         let cap = gap_start + next_gap;
         let (n_chars, line_endings) = compute_line_endings(&s);
         let mut v = s.into_bytes();
@@ -109,7 +111,7 @@ impl From<String> for GapBuffer {
 impl From<&str> for GapBuffer {
     fn from(s: &str) -> Self {
         let gap_start = s.len();
-        let next_gap = clamp_gap_size(gap_start, MIN_GAP);
+        let next_gap = clamp_gap_size(gap_start, MIN_GAP_GROW);
         let cap = gap_start + next_gap;
         let (n_chars, line_endings) = compute_line_endings(s);
         let mut v = Vec::with_capacity(cap);
@@ -436,7 +438,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_char(&mut self, char_idx: usize, ch: char) {
         let len = ch.len_utf8();
-        if len >= self.gap().saturating_sub(1) {
+        if self.gap().saturating_sub(len) < MIN_GAP {
             self.grow_gap(len);
         }
 
@@ -469,7 +471,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_str(&mut self, char_idx: usize, s: &str) {
         let len = s.len();
-        if len >= self.gap().saturating_sub(1) {
+        if self.gap().saturating_sub(len) < MIN_GAP {
             self.grow_gap(len);
         }
 
@@ -1136,8 +1138,8 @@ mod tests {
         assert_eq!("世".len(), 3);
         gb.move_gap_to(cur);
 
-        let char_idx = gb.char_to_byte(char_idx);
-        assert_eq!(char_idx, expected, "{:?}", debug_buffer_content(&gb));
+        let byte_idx = gb.char_to_byte(char_idx);
+        assert_eq!(byte_idx, expected, "{:?}", debug_buffer_content(&gb));
     }
 
     #[test_case(0, 0, 0; "BOF cur at BOF")]
