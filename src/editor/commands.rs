@@ -179,57 +179,8 @@ fn try_parse_single_char_command(input: &str) -> Option<Actions> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::built_in_commands::built_in_commands;
     use std::path::PathBuf;
-
-    /// The current command set accepted by the "Command" mode opened using ":".
-    ///
-    /// See the "known_commands_parse" test below which is used to ensure that the
-    /// full command list is valid.
-    const COMMANDS: [&str; 43] = [
-        "b",
-        "bn",
-        "bp",
-        "buffer",
-        "buffer-next",
-        "buffer-prev",
-        "cd",
-        "change-directory",
-        "db!",
-        "db",
-        "delete-buffer!",
-        "delete-buffer",
-        "E",
-        "echo",
-        "Edit",
-        "Exit!",
-        "Exit",
-        "expand-dot",
-        "Get",
-        "help",
-        "mark-clean",
-        "o",
-        "open",
-        "pwd",
-        "q!",
-        "q",
-        "quit!",
-        "quit",
-        "reload-buffer",
-        "reload-config",
-        "set",
-        "view-logs",
-        "viewport-bottom",
-        "viewport-center",
-        "viewport-top",
-        "w!",
-        "w",
-        "wq!",
-        "wq",
-        "write!",
-        "write",
-        "write-quit!",
-        "write-quit",
-    ];
 
     // The current behaviour of the command parser ignores additional input rather than erroring
     // which means we can always have the '1' argument here for all commands rather than needing
@@ -237,10 +188,12 @@ mod tests {
     // test will need updating.
     #[test]
     fn known_commands_parse() {
-        for raw_cmd in COMMANDS {
-            let cmd = format!("{raw_cmd} 1");
-            if let Err(msg) = parse_command(&cmd, 0, &PathBuf::new()) {
-                panic!("{cmd:?} failed to parse: {msg:?}");
+        for (cmds, _) in built_in_commands().into_iter() {
+            for raw_cmd in cmds.into_iter() {
+                let cmd = format!("{raw_cmd} 1");
+                if let Err(msg) = parse_command(&cmd, 0, &PathBuf::new()) {
+                    panic!("{cmd:?} failed to parse: {msg:?}");
+                }
             }
         }
 

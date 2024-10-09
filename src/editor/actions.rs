@@ -444,7 +444,9 @@ impl Editor {
     }
 
     pub(super) fn show_help(&mut self) {
-        self.open_virtual("+help", include_str!("../../data/help.txt"))
+        // Auto-generated in build.rs
+        let help = include_str!(concat!(env!("OUT_DIR"), "/help.txt"));
+        self.open_virtual("+help", help)
     }
 
     pub(super) fn debug_edit_log(&mut self) {
@@ -664,6 +666,7 @@ impl Editor {
         self.modes.insert(0, Mode::ephemeral_mode("RUN"));
 
         if let Some(input) = self.minibuffer_prompt("!") {
+            self.set_status_message(&format!("running {input:?}..."));
             self.run_shell_cmd(&input);
         }
 

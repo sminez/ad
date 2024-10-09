@@ -28,6 +28,7 @@ use std::{
 use tracing::{debug, trace, warn};
 
 mod actions;
+mod built_in_commands;
 mod commands;
 mod minibuffer;
 mod render;
