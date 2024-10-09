@@ -318,7 +318,7 @@ impl Editor {
             }),
 
             AppendOutput { id, s } => {
-                self.buffers.write_output_for_buffer(id, s);
+                self.buffers.write_output_for_buffer(id, s, &self.cwd);
                 default_handled();
             }
 
@@ -374,9 +374,9 @@ impl Editor {
         use Action::*;
 
         match action {
-            AppendToOutputBuffer { bufid, content } => {
-                self.buffers.write_output_for_buffer(bufid, content)
-            }
+            AppendToOutputBuffer { bufid, content } => self
+                .buffers
+                .write_output_for_buffer(bufid, content, &self.cwd),
             ChangeDirectory { path } => self.change_directory(path),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),

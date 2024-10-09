@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur, DEFAULT_OUTPUT_BUFFER},
+    buffer::{Buffer, BufferKind, Cur},
     dot::TextObject,
     editor::ViewPort,
 };
@@ -253,10 +253,10 @@ impl Buffers {
     }
 
     /// Append to the +output buffer assigned to the buffer with provided id.
-    pub(crate) fn write_output_for_buffer(&mut self, id: usize, s: String) {
+    pub(crate) fn write_output_for_buffer(&mut self, id: usize, s: String, cwd: &Path) {
         let key = match self.with_id(id) {
-            Some(b) => b.output_file_key(),
-            None => DEFAULT_OUTPUT_BUFFER.to_string(),
+            Some(b) => b.output_file_key(cwd),
+            None => format!("{}/DEFAULT_OUTPUT_BUFFER", cwd.display()),
         };
 
         let id = match self

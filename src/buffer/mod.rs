@@ -101,11 +101,9 @@ impl BufferKind {
 
     /// The key for the +output buffer that output from command run from this buffer should be
     /// redirected to
-    pub fn output_file_key(&self) -> String {
-        match self.dir() {
-            Some(path) => format!("{}/{DEFAULT_OUTPUT_BUFFER}", path.display()),
-            None => DEFAULT_OUTPUT_BUFFER.to_string(),
-        }
+    pub fn output_file_key(&self, cwd: &Path) -> String {
+        let path = self.dir().unwrap_or(cwd);
+        format!("{}/{DEFAULT_OUTPUT_BUFFER}", path.display())
     }
 
     fn try_kind_and_content_from_path(path: PathBuf) -> io::Result<(Self, String)> {
@@ -376,8 +374,8 @@ impl Buffer {
 
     /// The key for the +output buffer that output from command run from this buffer should be
     /// redirected to
-    pub fn output_file_key(&self) -> String {
-        self.kind.output_file_key()
+    pub fn output_file_key(&self, cwd: &Path) -> String {
+        self.kind.output_file_key(cwd)
     }
 
     /// Check whether or not this is an unnamed buffer

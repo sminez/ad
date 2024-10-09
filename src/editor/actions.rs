@@ -478,11 +478,15 @@ impl Editor {
 
         let s = b.dot.content(b);
         let id = b.id;
+        let wdir = b
+            .dir()
+            .map(|p| p.display().to_string())
+            .or_else(|| Some(self.cwd.display().to_string()));
 
         let m = PlumbingMessage {
             src: Some("ad".to_string()),
             dst: None,
-            wdir: b.dir().map(|p| p.display().to_string()),
+            wdir,
             attrs: Default::default(),
             data: s.clone(),
         };
@@ -647,7 +651,7 @@ impl Editor {
         if !buf.is_empty() {
             let id = self.active_buffer_id();
             self.buffers
-                .write_output_for_buffer(id, String::from_utf8(buf).unwrap());
+                .write_output_for_buffer(id, String::from_utf8(buf).unwrap(), &self.cwd);
         }
     }
 
