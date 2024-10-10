@@ -139,7 +139,7 @@ impl Match {
         self.sub_loc(n + 1)
     }
 
-    fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
+    pub(crate) fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
         if 2 * n + 1 >= N_SLOTS {
             return None;
         }

@@ -19,8 +19,8 @@ v/^(?:impl<.*?>|impl).*? for @*?\{/
         g/->/
         x/fn (\w+)@*?-> (.*?) \{/
         {
-            g/&('. )?mut self/ p/  mut $1 -> $2/;
-            v/&('. )?mut self/ p/      $1 -> $2/;
+            g/&('. )?mut self/ p/  mut $1 -> $2\n/;
+            v/&('. )?mut self/ p/      $1 -> $2\n/;
         };
 
 # In the case where there is not a '->' ("there is not a return type")
@@ -30,8 +30,8 @@ v/^(?:impl<.*?>|impl).*? for @*?\{/
         v/->/
         x/fn (\w+)@*\{/
         {
-            g/&('. )?mut self/ p/  mut $1 -> ()/;
-            v/&('. )?mut self/ p/      $1 -> ()/;
+            g/&('. )?mut self/ p/  mut $1 -> ()\n/;
+            v/&('. )?mut self/ p/      $1 -> ()\n/;
         };
     };
 }

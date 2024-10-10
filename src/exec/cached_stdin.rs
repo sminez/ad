@@ -122,10 +122,6 @@ impl Address for CachedStdin {
 }
 
 impl Edit for CachedStdin {
-    fn contents(&self) -> String {
-        self.gb.borrow().to_string()
-    }
-
     fn insert(&mut self, ix: usize, s: &str) {
         self.gb.borrow_mut().insert_str(ix, s)
     }

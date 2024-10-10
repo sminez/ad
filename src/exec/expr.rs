@@ -48,7 +48,7 @@ impl Expr {
             Some('d') => Ok(Single(Delete)),
 
             Some('p') => Ok(Single(Print(parse_delimited_str(it, "p")?))),
-            Some('P') => Ok(Single(Print("$0".to_string()))),
+            Some('P') => Ok(Single(Print("$0\n".to_string()))),
 
             Some('{') => Ok(Single(Group(parse_group(it)?))),
 
@@ -182,12 +182,12 @@ mod tests {
     #[test_case("s/.*/foo/", s(Sub(re(".*"), "foo".to_string())); "substitute")]
     #[test_case("s/.*/foo/g", p(LoopMatches(re(".*")), Change("foo".to_string())); "substitute all")]
     #[test_case("p/$0/", s(Print("$0".to_string())); "print")]
-    #[test_case("P", s(Print("$0".to_string())); "print full match")]
+    #[test_case("P", s(Print("$0\n".to_string())); "print full match")]
     #[test_case("d", s(Delete); "delete")]
     #[test_case(
         "{P; g/bar/ a/foo/;}",
         s(Group(vec![
-            vec![Print("$0".to_string())],
+            vec![Print("$0\n".to_string())],
             vec![IfContains(re("bar")), Append("foo".to_string())]
         ]));
         "group"

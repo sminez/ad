@@ -1,5 +1,5 @@
-,                              # set dot to be the full input (not required as this is the default)
-x/fn@*?\{/                     # select all Rust function signatures up to the opening brace
-g/->.*Result.*\{/              # keep those that return some form of Result
-x/fn (\w+)@*?-> (.*?) \{/      # extract the function name and return type from the signature
-p/($FILENAME) $1 returns $2/   # print them along with the filename using a template
+,                                # set dot to be the full input (not required as this is the default)
+x/fn@*?\{/                       # select all Rust function signatures up to the opening brace
+g/->.*Result.*\{/                # keep those that return some form of Result
+x/fn (\w+)@*?-> (.*?) \{/        # extract the function name and return type from the signature
+p/($FILENAME) $1 returns $2\n/   # print them along with the filename using a template

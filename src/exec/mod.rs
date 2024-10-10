@@ -61,8 +61,11 @@ impl From<regex::Error> for Error {
 
 /// Something that can be edited by a Program
 pub trait Edit: Address {
-    /// The the full contents of the Edit
-    fn contents(&self) -> String;
+    /// Extract the content of a previous submatch so it can be used in templating
+    fn submatch(&self, m: &Match, n: usize) -> Option<String> {
+        let (from, to) = m.sub_loc(n)?;
+        Some(self.iter_between(from, to).map(|(_, ch)| ch).collect())
+    }
 
     /// Insert a string at the specified index
     fn insert(&mut self, ix: usize, s: &str);
@@ -78,10 +81,6 @@ pub trait Edit: Address {
 }
 
 impl Edit for GapBuffer {
-    fn contents(&self) -> String {
-        self.to_string()
-    }
-
     fn insert(&mut self, idx: usize, s: &str) {
         self.insert_str(idx, s)
     }
@@ -92,10 +91,6 @@ impl Edit for GapBuffer {
 }
 
 impl Edit for Buffer {
-    fn contents(&self) -> String {
-        self.txt.to_string()
-    }
-
     fn insert(&mut self, idx: usize, s: &str) {
         self.dot = Dot::Cur { c: Cur { idx } };
         self.handle_action(Action::InsertString { s: s.to_string() });
@@ -302,25 +297,25 @@ impl Program {
             }
 
             Expr::Print(pat) => {
-                let s = template_match(&pat, m, ed.contents(), fname)?;
+                let s = template_match(&pat, m, ed, fname)?;
                 write!(out, "{s}").expect("to be able to write");
                 Ok(Dot::from_char_indices(from, to))
             }
 
             Expr::Insert(pat) => {
-                let s = template_match(&pat, m, ed.contents(), fname)?;
+                let s = template_match(&pat, m, ed, fname)?;
                 ed.insert(from, &s);
                 Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
             Expr::Append(pat) => {
-                let s = template_match(&pat, m, ed.contents(), fname)?;
+                let s = template_match(&pat, m, ed, fname)?;
                 ed.insert(to, &s);
                 Ok(Dot::from_char_indices(from, to + s.chars().count()))
             }
 
             Expr::Change(pat) => {
-                let s = template_match(&pat, m, ed.contents(), fname)?;
+                let s = template_match(&pat, m, ed, fname)?;
                 ed.remove(from, to);
                 ed.insert(from, &s);
                 Ok(Dot::from_char_indices(from, from + s.chars().count()))
@@ -334,7 +329,7 @@ impl Program {
             Expr::Sub(mut re, pat) => match re.match_iter(&mut ed.iter_between(from, to), from) {
                 Some(m) => {
                     let (mfrom, mto) = m.loc();
-                    let s = template_match(&pat, &m, ed.contents(), fname)?;
+                    let s = template_match(&pat, &m, ed, fname)?;
                     ed.remove(mfrom, mto);
                     ed.insert(mfrom, &s);
                     Ok(Dot::from_char_indices(
@@ -420,7 +415,10 @@ fn validate(exprs: &[Expr]) -> Result<(), Error> {
 
 // FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
 // then we end up attempting to template THAT in a later iteration of the loop.
-fn template_match(s: &str, m: &Match, content: String, fname: &str) -> Result<String, Error> {
+fn template_match<E>(s: &str, m: &Match, ed: &E, fname: &str) -> Result<String, Error>
+where
+    E: Edit,
+{
     let mut output = if s.contains(FNAME_VAR) {
         s.replace(FNAME_VAR, fname)
     } else {
@@ -435,7 +433,7 @@ fn template_match(s: &str, m: &Match, content: String, fname: &str) -> Result<St
         if !s.contains(var) {
             continue;
         }
-        match m.str_submatch_text(n, &content) {
+        match ed.submatch(m, n) {
             Some(sm) => output = output.replace(var, &sm.to_string()),
             None => return Err(Error::InvalidSubstitution(n)),
         }
