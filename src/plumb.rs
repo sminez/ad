@@ -245,7 +245,7 @@ impl Pattern {
             Self::Set(_, _) => "set",
         }
     }
-    
+
     fn match_and_update(
         &mut self,
         msg: &mut PlumbingMessage,
