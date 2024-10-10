@@ -233,6 +233,19 @@ enum Pattern {
 }
 
 impl Pattern {
+    fn kind_str(&self) -> &'static str {
+        match self {
+            Self::AddAttrs(_) => "add-attrs",
+            Self::DelAttr(_) => "del-attr",
+            Self::DataFrom(_) => "data-from",
+            Self::IsFile(_) => "is-file",
+            Self::IsDir(_) => "is-dir",
+            Self::Is(_, _) => "is",
+            Self::Matches(_, _) => "matches",
+            Self::Set(_, _) => "set",
+        }
+    }
+    
     fn match_and_update(
         &mut self,
         msg: &mut PlumbingMessage,
@@ -247,6 +260,7 @@ impl Pattern {
 
         let re_match_and_update =
             |f: Field, re: &mut Regex, vars: &mut BTreeMap<String, String>| {
+                debug!("regex match against {}", f.name());
                 let opt = match f {
                     Field::Src => msg.src.as_ref(),
                     Field::Dst => msg.dst.as_ref(),
@@ -256,7 +270,7 @@ impl Pattern {
                 let s = match opt {
                     Some(s) => s,
                     None => {
-                        debug!("unable to match against {f:?} (not set in message)");
+                        debug!("unable to match against {} (not set in message)", f.name());
                         return false;
                     }
                 };
@@ -279,7 +293,7 @@ impl Pattern {
                 false
             };
 
-        debug!("attempting to match {self:?}");
+        debug!("checking {} pattern", self.kind_str());
         match self {
             Self::AddAttrs(attrs) => {
                 debug!("adding attrs: {attrs:?}");
@@ -409,6 +423,17 @@ enum Field {
     Dst,
     Wdir,
     Data,
+}
+
+impl Field {
+    fn name(&self) -> &'static str {
+        match self {
+            Self::Src => "src",
+            Self::Dst => "dst",
+            Self::Wdir => "wdir",
+            Self::Data => "data",
+        }
+    }
 }
 
 impl FromStr for Field {
