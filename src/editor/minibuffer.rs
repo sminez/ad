@@ -210,7 +210,7 @@ where
                 }
             }
             Input::Alt('j') | Input::Arrow(Arrow::Down) => {
-                if self.selected_line_idx == self.n_visible_lines - 1 {
+                if self.selected_line_idx == self.b.len_lines() - 1 {
                     self.b.set_dot(TextObject::BufferStart, 1);
                 } else {
                     self.b.set_dot(TextObject::Arr(Arrow::Down), 1);
