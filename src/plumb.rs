@@ -13,6 +13,7 @@ use std::{
     process::{Command, Stdio},
     str::FromStr,
 };
+use tracing::debug;
 
 /// An ordered list of plumbing rules to use whenever something is "loaded" within the editor.
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -86,14 +87,18 @@ impl PlumbingRules {
     /// rules carry out rewrites.
     pub fn plumb(&mut self, msg: PlumbingMessage) -> Option<MatchOutcome> {
         let vars = msg.initial_vars();
+        debug!("plumbing message: {msg:?}");
 
-        for rule in self.rules.iter_mut() {
+        for (n, rule) in self.rules.iter_mut().enumerate() {
+            debug!("checking rule {n}");
             let mut rule_vars = vars.clone();
             if let Some(msg) = rule.try_match(msg.clone(), &mut rule_vars) {
+                debug!("rule matched");
                 return Some(msg);
             }
         }
 
+        debug!("no matching rules");
         None
     }
 }
@@ -250,10 +255,14 @@ impl Pattern {
                 };
                 let s = match opt {
                     Some(s) => s,
-                    None => return false,
+                    None => {
+                        debug!("unable to match against {f:?} (not set in message)");
+                        return false;
+                    }
                 };
 
                 if let Some(m) = re.match_str(s) {
+                    debug!("matched: updating vars");
                     vars.insert("$0".to_string(), m.str_match_text(s));
                     for n in 1..10 {
                         match m.str_submatch_text(n, s) {
@@ -266,74 +275,118 @@ impl Pattern {
                     return true;
                 }
 
+                debug!("message data did not match the provided regex");
                 false
             };
 
+        debug!("attempting to match {self:?}");
         match self {
-            Self::AddAttrs(attrs) => msg.attrs.extend(
-                attrs
-                    .clone()
-                    .into_iter()
-                    .map(|(k, v)| (apply_vars(k), apply_vars(v))),
-            ),
+            Self::AddAttrs(attrs) => {
+                debug!("adding attrs: {attrs:?}");
+                msg.attrs.extend(
+                    attrs
+                        .clone()
+                        .into_iter()
+                        .map(|(k, v)| (apply_vars(k), apply_vars(v))),
+                );
+            }
 
             Self::DelAttr(a) => {
+                debug!("removing attr: {a}");
                 msg.attrs.remove(a);
             }
 
             Self::IsFile(s) => {
+                debug!("checking if {s:?} is a file");
                 let path = apply_vars(s.clone());
                 match fs::metadata(&path) {
                     Ok(m) => {
                         if m.is_file() {
+                            debug!("{path:?} exists and is a file");
                             vars.insert("$file".to_string(), path);
                         } else {
+                            debug!("{path:?} exists but is not a file");
                             return false;
                         }
                     }
-                    Err(_) => return false,
+
+                    Err(e) => {
+                        debug!("unable to check {path:?}: {e}");
+                        return false;
+                    }
                 }
             }
 
             Self::IsDir(s) => {
+                debug!("checking if {s:?} is a directory");
                 let path = apply_vars(s.clone());
                 match fs::metadata(&path) {
                     Ok(m) => {
                         if m.is_dir() {
+                            debug!("{path:?} exists and is a directory");
                             vars.insert("$dir".to_string(), path);
                         } else {
+                            debug!("{path:?} exists but is not a directory");
                             return false;
                         }
                     }
 
-                    Err(_) => return false,
+                    Err(e) => {
+                        debug!("unable to check {path:?}: {e}");
+                        return false;
+                    }
                 }
             }
 
-            Self::Is(Field::Src, s) => return msg.src.as_ref() == Some(s),
-            Self::Is(Field::Dst, s) => return msg.dst.as_ref() == Some(s),
-            Self::Is(Field::Wdir, s) => return msg.wdir.as_ref() == Some(s),
-            Self::Is(Field::Data, s) => return &msg.data == s,
+            Self::Is(Field::Src, s) => {
+                let res = msg.src.as_ref() == Some(s);
+                debug!("checking src == {s:?}: {res}");
+                return res;
+            }
+            Self::Is(Field::Dst, s) => {
+                let res = msg.dst.as_ref() == Some(s);
+                debug!("checking dst == {s:?}: {res}");
+                return res;
+            }
+            Self::Is(Field::Wdir, s) => {
+                let res = msg.wdir.as_ref() == Some(s);
+                debug!("checking wdir == {s:?}: {res}");
+                return res;
+            }
+            Self::Is(Field::Data, s) => {
+                let res = &msg.data == s;
+                debug!("checking data == {s:?}: {res}");
+                return res;
+            }
 
             Self::Set(Field::Src, s) => {
-                msg.src = Some(apply_vars(s.clone()));
-                vars.insert("$src".to_string(), apply_vars(s.clone()));
+                let updated = apply_vars(s.clone());
+                debug!("setting src to {updated:?}");
+                msg.src = Some(updated.clone());
+                vars.insert("$src".to_string(), updated);
             }
             Self::Set(Field::Dst, s) => {
-                msg.dst = Some(apply_vars(s.clone()));
-                vars.insert("$dst".to_string(), apply_vars(s.clone()));
+                let updated = apply_vars(s.clone());
+                debug!("setting dst to {updated:?}");
+                msg.dst = Some(updated.clone());
+                vars.insert("$dst".to_string(), updated);
             }
             Self::Set(Field::Wdir, s) => {
-                msg.wdir = Some(apply_vars(s.clone()));
-                vars.insert("$wdir".to_string(), apply_vars(s.clone()));
+                let updated = apply_vars(s.clone());
+                debug!("setting wdir to {updated:?}");
+                msg.wdir = Some(updated.clone());
+                vars.insert("$wdir".to_string(), updated);
             }
             Self::Set(Field::Data, s) => {
-                msg.data = apply_vars(s.clone());
-                vars.insert("$data".to_string(), apply_vars(s.clone()));
+                let updated = apply_vars(s.clone());
+                debug!("setting data to {updated:?}");
+                msg.data = updated.clone();
+                vars.insert("$data".to_string(), updated);
             }
 
             Self::Matches(f, re) => return re_match_and_update(*f, re, vars),
             Self::DataFrom(cmd) => {
+                debug!("running {cmd:?} to set message data");
                 let mut command = Command::new("sh");
                 command
                     .args(["-c", apply_vars(cmd.clone()).as_str()])
@@ -468,6 +521,7 @@ impl Rule {
     ) -> Option<MatchOutcome> {
         for p in self.patterns.iter_mut() {
             if !p.match_and_update(&mut msg, vars) {
+                debug!("pattern failed to match");
                 return None;
             }
         }
