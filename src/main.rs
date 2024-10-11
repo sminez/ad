@@ -7,7 +7,7 @@ use std::{
     io::{self, Write},
     process::exit,
 };
-use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
+use tracing::{error, level_filters::LevelFilter, subscriber::set_global_default};
 
 const USAGE: &str = "\
 usage:
@@ -39,12 +39,18 @@ fn main() {
 
     let config = match Config::try_load() {
         Ok(config) => config,
-        Err(s) => fatal(&s),
+        Err(s) => {
+            error!("unable to load config: {s}");
+            Config::default()
+        }
     };
 
     let plumbing_rules = match PlumbingRules::try_load() {
         Ok(rules) => rules,
-        Err(s) => fatal(&s),
+        Err(s) => {
+            error!("unable to load plumbing rules: {s}");
+            PlumbingRules::default() // Empty plumbing rules
+        }
     };
 
     let mut e = Editor::new(config, plumbing_rules, EditorMode::Terminal, log_buffer);
