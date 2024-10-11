@@ -883,16 +883,16 @@ impl Buffer {
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
-                let (c, deleted) = self.insert_char(self.dot, c, Some(Source::Fsys));
+                let (c, _) = self.insert_char(self.dot, c, Some(Source::Fsys));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
-                return deleted.map(ActionOutcome::SetClipboard);
+                return None;
             }
             Action::InsertString { s } => {
-                let (c, deleted) = self.insert_string(self.dot, s, Some(Source::Fsys));
+                let (c, _) = self.insert_string(self.dot, s, Some(Source::Fsys));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
-                return deleted.map(ActionOutcome::SetClipboard);
+                return None;
             }
 
             Action::Redo => return self.redo(),
@@ -931,31 +931,31 @@ impl Buffer {
                     None
                 };
 
-                let (c, deleted) = self.insert_char(self.dot, '\n', Some(Source::Keyboard));
+                let (c, _) = self.insert_char(self.dot, '\n', Some(Source::Keyboard));
                 let c = match prefix {
                     Some(s) => self.insert_string(Dot::Cur { c }, s, None).0,
                     None => c,
                 };
 
                 self.dot = Dot::Cur { c };
-                return deleted.map(ActionOutcome::SetClipboard);
+                return None;
             }
 
             Input::Tab => {
-                let (c, deleted) = if expand_tab {
+                let (c, _) = if expand_tab {
                     self.insert_string(self.dot, " ".repeat(tabstop), Some(Source::Keyboard))
                 } else {
                     self.insert_char(self.dot, '\t', Some(Source::Keyboard))
                 };
 
                 self.dot = Dot::Cur { c };
-                return deleted.map(ActionOutcome::SetClipboard);
+                return None;
             }
 
             Input::Char(ch) => {
-                let (c, deleted) = self.insert_char(self.dot, ch, Some(Source::Keyboard));
+                let (c, _) = self.insert_char(self.dot, ch, Some(Source::Keyboard));
                 self.dot = Dot::Cur { c };
-                return deleted.map(ActionOutcome::SetClipboard);
+                return None;
             }
 
             Input::Arrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
@@ -1278,11 +1278,23 @@ pub(crate) mod tests {
         assert_eq!(b.txt.to_string(), "hello, world!");
     }
 
+    #[test_case(
+        Action::InsertChar { c: 'x' },
+        in_c(LINE_1.len() + 1, 'x');
+        "char"
+    )]
+    #[test_case(
+        Action::InsertString { s: "x".to_string() },
+        in_s(LINE_1.len() + 1, "x");
+        "string"
+    )]
     #[test]
-    fn insert_char_w_range_dot_works() {
+    fn insert_w_range_dot_works(a: Action, edit: Edit) {
         let mut b = simple_initial_buffer();
         b.handle_action(Action::DotSet(TextObject::Line, 1));
-        b.handle_action(Action::InsertChar { c: 'x' });
+
+        let outcome = b.handle_action(a);
+        assert_eq!(outcome, None);
 
         let lines = b.string_lines();
         assert_eq!(lines.len(), 2);
@@ -1297,7 +1309,7 @@ pub(crate) mod tests {
             vec![vec![
                 in_s(0, &format!("{LINE_1}\n{LINE_2}")),
                 del_s(LINE_1.len() + 1, LINE_2),
-                in_c(LINE_1.len() + 1, 'x'),
+                edit,
             ]]
         );
     }
