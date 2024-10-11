@@ -12,7 +12,7 @@ use crate::{
     },
     key::Input,
     term::Style,
-    util::relative_path_from,
+    util::{normalize_line_endings, relative_path_from},
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ad_event::Source;
@@ -128,7 +128,7 @@ impl BufferKind {
 
             _ => {
                 let mut raw = match fs::read_to_string(&path) {
-                    Ok(contents) => contents,
+                    Ok(contents) => normalize_line_endings(contents),
                     Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
                     Err(e) => return Err(e),
                 };
@@ -289,7 +289,7 @@ impl Buffer {
             kind: BufferKind::Unnamed,
             dot: Dot::default(),
             xdot: Dot::default(),
-            txt: GapBuffer::from(content),
+            txt: GapBuffer::from(normalize_line_endings(content.to_string())),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -306,7 +306,7 @@ impl Buffer {
     /// The buffer will not be included in the virtual filesystem and it will be removed when it
     /// loses focus.
     pub fn new_virtual(id: usize, name: impl Into<String>, content: impl Into<String>) -> Self {
-        let mut content = content.into();
+        let mut content = normalize_line_endings(content.into());
         if content.ends_with('\n') {
             content.pop();
         }
@@ -336,7 +336,7 @@ impl Buffer {
             kind: BufferKind::Output(name),
             dot: Dot::default(),
             xdot: Dot::default(),
-            txt: GapBuffer::from(content),
+            txt: GapBuffer::from(normalize_line_endings(content)),
             rx: 0,
             row_off: 0,
             col_off: 0,
@@ -1083,6 +1083,7 @@ impl Buffer {
     }
 
     fn insert_char(&mut self, dot: Dot, ch: char, source: Option<Source>) -> (Cur, Option<String>) {
+        let ch = if ch == '\r' { '\n' } else { ch };
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
             Dot::Range { r } => self.delete_range(r, source),
@@ -1107,6 +1108,7 @@ impl Buffer {
         s: String,
         source: Option<Source>,
     ) -> (Cur, Option<String>) {
+        let s = normalize_line_endings(s);
         let (mut cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
             Dot::Range { r } => self.delete_range(r, source),
@@ -1490,5 +1492,31 @@ pub(crate) mod tests {
                 )
             }
         }
+    }
+
+    #[test_case("\r", "\n"; "CR")]
+    #[test_case("\n", "\n"; "LF")]
+    #[test_case("\r\n", "\n"; "CRLF")]
+    #[test_case("foo\rbar", "foo\nbar"; "text either side of CR")]
+    #[test_case("foo\nbar", "foo\nbar"; "text either side of LF")]
+    #[test_case("foo\r\nbar", "foo\nbar"; "text either side of CRLF")]
+    #[test_case("foo\rbar\nbaz\r\nquux", "foo\nbar\nbaz\nquux"; "mixed line endings")]
+    #[test]
+    fn normalizes_line_endings_insert_string(s: &str, expected: &str) {
+        let mut b = Buffer::new_virtual(0, "test", "");
+        b.insert_string(Dot::Cur { c: c(0) }, s.to_string(), None);
+        // we force a trailing newline so account for that as well
+        assert_eq!(b.str_contents(), format!("{expected}\n"));
+    }
+
+    #[test_case('\r', "\n"; "CR")]
+    #[test_case('\n', "\n"; "LF")]
+    #[test_case('a', "a"; "ascii")]
+    #[test]
+    fn normalizes_line_endings_insert_char(ch: char, expected: &str) {
+        let mut b = Buffer::new_virtual(0, "test", "");
+        b.insert_char(Dot::Cur { c: c(0) }, ch, None);
+        // we force a trailing newline so account for that as well
+        assert_eq!(b.str_contents(), format!("{expected}\n"));
     }
 }

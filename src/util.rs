@@ -11,6 +11,7 @@ use std::{
     sync::mpsc::Sender,
     thread::spawn,
 };
+use tracing::warn;
 
 #[cfg(target_os = "linux")]
 /// Set the current system clipboard state using xclip.
@@ -79,7 +80,7 @@ where
     let stderr = String::from_utf8(output.stderr).unwrap_or_default();
     stdout.push_str(&stderr);
 
-    Ok(stdout)
+    Ok(normalize_line_endings(stdout))
 }
 
 /// Run an external command and append its output to the output buffer for `bufid` from a
@@ -110,7 +111,7 @@ where
         }
         _ = tx.send(Event::Action(Action::AppendToOutputBuffer {
             bufid,
-            content,
+            content: normalize_line_endings(content),
         }));
     });
 }
@@ -139,7 +140,7 @@ where
     child.stderr.take().unwrap().read_to_string(&mut buf)?;
     _ = child.wait();
 
-    Ok(buf)
+    Ok(normalize_line_endings(buf))
 }
 
 /// Both the base path and p must be absolute paths and base must be a directory
@@ -186,6 +187,16 @@ pub(crate) fn parse_num(initial: char, it: &mut Peekable<Chars<'_>>) -> usize {
             _ => return s.parse().unwrap(),
         }
     }
+}
+
+pub(crate) fn normalize_line_endings(mut s: String) -> String {
+    if !s.contains('\r') {
+        return s;
+    }
+
+    warn!("normalizing \\r characters to \\n");
+    s = s.replace("\r\n", "\n");
+    s.replace("\r", "\n")
 }
 
 #[cfg(test)]
