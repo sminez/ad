@@ -585,10 +585,10 @@ impl Buffer {
                 Some('\n') | None => break,
                 Some('\t') => {
                     if rline.len() < start {
-                        start += tabstop;
+                        start += tabstop - 1;
                     }
                     if rline.len() < end {
-                        end = end.saturating_add(tabstop);
+                        end = end.saturating_add(tabstop - 1);
                     }
                     rline.append(&mut [' '].repeat(tabstop));
                 }
@@ -1449,8 +1449,9 @@ pub(crate) mod tests {
     #[test_case("simple line", Some((0, usize::MAX)), 0, "simple line", Some((0, 11)); "simple line full")]
     #[test_case("simple line", Some((0, 2)), 4, "le line", None; "scrolled past dot")]
     #[test_case("simple line", Some((0, 9)), 4, "le line", Some((0, 5)); "scrolled updating dot")]
-    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs", Some((7, 13)); "with tabs")]
+    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs", Some((6, 13)); "with tabs")]
     #[test_case("\twith tabs", Some((0, usize::MAX)), 0, "    with tabs", Some((0, 13)); "with tabs full")]
+    #[test_case("\t\twith tabs", Some((4, usize::MAX)), 0, "        with tabs", Some((10, 17)); "with multiple tabs")]
     #[test]
     fn raw_line_unchecked_updates_dot_correctly(
         line: &str,
