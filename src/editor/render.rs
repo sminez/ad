@@ -16,7 +16,7 @@ const VLINE: char = '│';
 
 impl<S> Editor<S>
 where
-    S: System
+    S: System,
 {
     /// Refresh the TUI state
     pub fn refresh_screen(&mut self) {

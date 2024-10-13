@@ -11,11 +11,11 @@ use crate::{
     mode::{modes, Mode},
     plumb::PlumbingRules,
     restore_terminal_state, set_config,
+    system::{DefaultSystem, System},
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler,
     },
-    system::{System, DefaultSystem},
     LogBuffer, ORIGINAL_TERMIOS,
 };
 use std::{
@@ -48,7 +48,7 @@ pub enum EditorMode {
 
 /// Transient state that we hold to track the last mouse click we saw while
 /// we wait for it to be released or if the buffer changes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Click {
     /// The button being held down
     btn: MouseButton,
@@ -62,7 +62,7 @@ pub(crate) struct Click {
 #[derive(Debug)]
 pub struct Editor<S>
 where
-    S: System
+    S: System,
 {
     system: S,
     screen_rows: usize,
@@ -87,7 +87,7 @@ where
 
 impl<S> Drop for Editor<S>
 where
-    S: System
+    S: System,
 {
     fn drop(&mut self) {
         if self.mode == EditorMode::Terminal {
@@ -104,6 +104,22 @@ impl Editor<DefaultSystem> {
         mode: EditorMode,
         log_buffer: LogBuffer,
     ) -> Self {
+        Self::new_with_system(cfg, plumbing_rules, mode, log_buffer, DefaultSystem)
+    }
+}
+
+impl<S> Editor<S>
+where
+    S: System,
+{
+    /// Construct a new [Editor] with the provided config and System.
+    pub fn new_with_system(
+        cfg: Config,
+        plumbing_rules: PlumbingRules,
+        mode: EditorMode,
+        log_buffer: LogBuffer,
+        system: S,
+    ) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
@@ -115,7 +131,7 @@ impl Editor<DefaultSystem> {
         set_config(cfg);
 
         Self {
-            system: DefaultSystem,
+            system,
             screen_rows: 0,
             screen_cols: 0,
             stdout,
@@ -136,12 +152,7 @@ impl Editor<DefaultSystem> {
             held_click: None,
         }
     }
-}
 
-impl<S> Editor<S>
-where
-    S: System
-{
     /// The id of the currently active buffer
     pub fn active_buffer_id(&self) -> usize {
         self.buffers.active().id
@@ -521,13 +532,15 @@ where
         use MouseButton::*;
 
         match self.held_click {
-            Some(click) => {
+            Some(mut click) => {
                 // Mouse chords execute on the click of the second button rather than the release
                 if click.btn == Left {
                     if is_right {
                         self.paste_from_clipboard();
                     } else {
                         self.forward_action_to_active_buffer(Action::Delete);
+                        click.selection = self.buffers.active().dot.as_range();
+                        self.held_click = Some(click);
                     }
                 } else if (is_right && click.btn == Middle) || (!is_right && click.btn == Right) {
                     self.held_click = None;
@@ -652,10 +665,10 @@ where
                 click.selection.set_active_cursor(cur);
 
                 match click.btn {
+                    Left | WheelUp | WheelDown => (),
                     Right | Middle => {
                         self.handle_right_or_middle_release(click.btn == Right, click)
                     }
-                    Left | WheelUp | WheelDown => (),
                 }
             }
         }
@@ -683,5 +696,306 @@ where
         if let Some(b) = self.buffers.with_id_mut(bufid) {
             b.input_filter = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        dot::Cur,
+        key::{MouseButton::*, MouseEvent::*},
+    };
+    use ad_event::{FsysEvent, Kind, Source};
+    use simple_test_case::test_case;
+
+    #[derive(Debug, Default)]
+    struct TestSystem {
+        clipboard: String,
+    }
+
+    impl System for TestSystem {
+        fn set_clipboard(&mut self, s: &str) -> io::Result<()> {
+            self.clipboard = s.to_string();
+
+            Ok(())
+        }
+
+        fn read_clipboard(&self) -> io::Result<String> {
+            Ok(self.clipboard.clone())
+        }
+    }
+
+    fn r(start: usize, end: usize, start_active: bool) -> Range {
+        Range {
+            start: Cur { idx: start },
+            end: Cur { idx: end },
+            start_active,
+        }
+    }
+
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[];
+        "left click drag selection complete"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
+        ];
+        "right click drag selection complete"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+        ];
+        "middle click drag selection complete"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+        ],
+        Some(Click { btn: Left, selection: r(0, 3, false) }),
+        "some",
+        "some text to test with\n",
+        "X",
+        &[];
+        "left click drag selection without release"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+        ],
+        Some(Click { btn: Right, selection: r(0, 3, false) }),
+        "t",  // default dot position
+        "some text to test with\n",
+        "X",
+        &[];
+        "right click drag selection without release"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+        ],
+        Some(Click { btn: Middle, selection: r(0, 3, false) }),
+        "t",  // default dot position
+        "some text to test with\n",
+        "X",
+        &[];
+        "middle click drag selection without release"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 4, y: 0 },
+            Release { b: Right, x: 4, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
+        ];
+        "right click expand in existing selection"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 4, y: 0 },
+            Release { b: Middle, x: 4, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+        ];
+        "middle click expand in existing selection"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 9, y: 0 },
+            Hold { b: Left, x: 12, y: 0 },
+            Release { b: Left, x: 12, y: 0 },
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "text",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::ChordedArgument, 5, 8, "text"),
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+        ];
+        "middle click with dot arg"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        " text to test with\n",
+        "some",
+        &[
+            FsysEvent::new(Source::Fsys, Kind::DeleteBody, 0, 4, ""),
+        ];
+        "chord cut"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        "X text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Fsys, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Fsys, Kind::InsertBody, 0, 1, "X"),
+        ];
+        "chord paste"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+            Press { b: Left, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "right click cancel with left"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "right click cancel with middle"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Press { b: Left, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "middle click cancel with left"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "middle click cancel with right"
+    )]
+    #[test]
+    fn mouse_interactions_work(
+        evts: &[MouseEvent],
+        click: Option<Click>,
+        dot: &str,
+        content: &str,
+        clipboard: &str,
+        fsys_events: &[FsysEvent],
+    ) {
+        let mut ed = Editor::new_with_system(
+            Default::default(),
+            Default::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+            TestSystem {
+                clipboard: "X".to_string(),
+            },
+        );
+        ed.open_virtual("test", "some text to test with");
+        ed.buffers.active_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
+
+        // attach an input filter so we can intercept load and execute events
+        let (tx, rx) = channel();
+        let filter = InputFilter::new(tx);
+        ed.try_set_input_filter(ed.active_buffer_id(), filter);
+
+        for evt in evts.iter() {
+            ed.handle_mouse_event(*evt);
+        }
+
+        let recvd_fsys_events: Vec<_> = rx.try_iter().collect();
+        let b = ed.buffers.active();
+
+        assert_eq!(ed.held_click, click, "click");
+        assert_eq!(b.dot.content(b), dot, "dot content");
+        assert_eq!(b.str_contents(), content, "buffer content");
+        assert_eq!(ed.system.clipboard, clipboard, "clipboard content");
+        assert_eq!(fsys_events, &recvd_fsys_events, "fsys events");
     }
 }

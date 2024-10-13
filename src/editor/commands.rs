@@ -149,7 +149,7 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
 
 impl<S> Editor<S>
 where
-    S: System
+    S: System,
 {
     pub(super) fn parse_command(&mut self, input: &str) -> Option<Actions> {
         match parse_command(input, self.active_buffer_id(), &self.cwd) {

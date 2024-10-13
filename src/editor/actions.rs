@@ -10,8 +10,9 @@ use crate::{
     key::Input,
     mode::Mode,
     plumb::{MatchOutcome, PlumbingMessage},
-    replace_config, update_config,
+    replace_config,
     system::System,
+    update_config,
 };
 use std::{
     env, fs,
@@ -101,7 +102,7 @@ pub enum Action {
 
 impl<S> Editor<S>
 where
-    S: System
+    S: System,
 {
     pub(crate) fn change_directory(&mut self, opt_path: Option<String>) {
         let p = match opt_path {
@@ -698,7 +699,9 @@ where
         };
 
         let id = self.active_buffer_id();
-        let res = self.system.pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
+        let res = self
+            .system
+            .pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
@@ -709,7 +712,9 @@ where
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        let res = self.system.run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
+        let res = self
+            .system
+            .run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
@@ -720,7 +725,8 @@ where
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        self.system.run_command("sh", ["-c", raw_cmd_str], d, id, self.tx_events.clone());
+        self.system
+            .run_command("sh", ["-c", raw_cmd_str], d, id, self.tx_events.clone());
     }
 }
 

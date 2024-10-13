@@ -22,7 +22,7 @@ pub struct InputFilter {
 }
 
 impl InputFilter {
-    pub(super) fn new(tx: Sender<FsysEvent>) -> Self {
+    pub(crate) fn new(tx: Sender<FsysEvent>) -> Self {
         Self { tx }
     }
 
