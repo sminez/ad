@@ -3,7 +3,7 @@ use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
     die,
-    dot::TextObject,
+    dot::{Dot, Range, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
     input::{Event, StdinInput},
@@ -11,6 +11,7 @@ use crate::{
     mode::{modes, Mode},
     plumb::PlumbingRules,
     restore_terminal_state, set_config,
+    system::{DefaultSystem, System},
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler,
@@ -45,9 +46,25 @@ pub enum EditorMode {
     Headless,
 }
 
+/// Transient state that we hold to track the last mouse click we saw while
+/// we wait for it to be released or if the buffer changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Click {
+    /// The button being held down
+    btn: MouseButton,
+    /// The current state of the dot associated with this click. This is updated
+    /// by Hold events and matches the buffer Dot for Left clicks. For Right and
+    /// Middle clicks this is a separate selection that is used on release.
+    selection: Range,
+}
+
 /// The main editor state.
 #[derive(Debug)]
-pub struct Editor {
+pub struct Editor<S>
+where
+    S: System,
+{
+    system: S,
     screen_rows: usize,
     screen_cols: usize,
     stdout: Stdout,
@@ -65,9 +82,13 @@ pub struct Editor {
     mode: EditorMode,
     log_buffer: LogBuffer,
     plumbing_rules: PlumbingRules,
+    held_click: Option<Click>,
 }
 
-impl Drop for Editor {
+impl<S> Drop for Editor<S>
+where
+    S: System,
+{
     fn drop(&mut self) {
         if self.mode == EditorMode::Terminal {
             restore_terminal_state(&mut self.stdout);
@@ -75,13 +96,29 @@ impl Drop for Editor {
     }
 }
 
-impl Editor {
+impl Editor<DefaultSystem> {
     /// Construct a new [Editor] with the provided config.
     pub fn new(
         cfg: Config,
         plumbing_rules: PlumbingRules,
         mode: EditorMode,
         log_buffer: LogBuffer,
+    ) -> Self {
+        Self::new_with_system(cfg, plumbing_rules, mode, log_buffer, DefaultSystem)
+    }
+}
+
+impl<S> Editor<S>
+where
+    S: System,
+{
+    /// Construct a new [Editor] with the provided config and System.
+    pub fn new_with_system(
+        cfg: Config,
+        plumbing_rules: PlumbingRules,
+        mode: EditorMode,
+        log_buffer: LogBuffer,
+        system: S,
     ) -> Self {
         let cwd = match env::current_dir() {
             Ok(cwd) => cwd,
@@ -94,6 +131,7 @@ impl Editor {
         set_config(cfg);
 
         Self {
+            system,
             screen_rows: 0,
             screen_cols: 0,
             stdout,
@@ -111,6 +149,7 @@ impl Editor {
             mode,
             log_buffer,
             plumbing_rules,
+            held_click: None,
         }
     }
 
@@ -381,7 +420,7 @@ impl Editor {
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
-            ExecuteDot => self.default_execute_dot(),
+            ExecuteDot => self.default_execute_dot(None),
             Exit { force } => self.exit(force),
             ExpandDot => self.expand_current_dot(),
             FindFile => self.find_file(),
@@ -478,40 +517,160 @@ impl Editor {
         }
     }
 
+    #[inline]
+    fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
+        let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+
+        Click {
+            btn,
+            selection: Range::from_cursors(cur, cur, false),
+        }
+    }
+
+    #[inline]
+    fn handle_right_or_middle_click(&mut self, is_right: bool, x: usize, y: usize) {
+        use MouseButton::*;
+
+        match self.held_click {
+            Some(mut click) => {
+                // Mouse chords execute on the click of the second button rather than the release
+                if click.btn == Left {
+                    if is_right {
+                        self.paste_from_clipboard();
+                    } else {
+                        self.forward_action_to_active_buffer(Action::Delete);
+                        click.selection = self.buffers.active().dot.as_range();
+                        self.held_click = Some(click);
+                    }
+                } else if (is_right && click.btn == Middle) || (!is_right && click.btn == Right) {
+                    self.held_click = None;
+                }
+            }
+
+            None => {
+                let btn = if is_right { Right } else { Middle };
+                self.held_click = Some(self.click_from_button(btn, x, y));
+            }
+        };
+    }
+
+    #[inline]
+    fn handle_right_or_middle_release(&mut self, is_right: bool, click: Click) {
+        if click.selection.start != click.selection.end {
+            // In the case where the click selection is a range we Load/Execute it directly.
+            // For Middle clicks, if there is also a range dot in the buffer then that is
+            // used as an argument to the command being executed.
+            if is_right {
+                self.buffers.active_mut().dot = Dot::from(click.selection);
+                self.default_load_dot();
+            } else {
+                let dot = self.buffers.active().dot;
+                self.buffers.active_mut().dot = Dot::from(click.selection);
+
+                if dot.is_range() {
+                    // Execute as if the click selection was dot then reset dot
+                    let arg = dot.content(self.buffers.active()).trim().to_string();
+                    self.default_execute_dot(Some((dot.as_range(), arg)));
+                    self.buffers.active_mut().dot = dot;
+                } else {
+                    self.default_execute_dot(None);
+                }
+            }
+        } else {
+            // In the case where the click selection was a Cur rather than a Range we
+            // set the buffer dot to the click location if it is outside of the current buffer
+            // dot (and allow smart expand to handle generating the selection) before we Load/Execute
+            if !self.buffers.active().dot.contains(&click.selection.start) {
+                self.buffers.active_mut().dot = Dot::from(click.selection.start);
+            }
+
+            if is_right {
+                self.default_load_dot();
+            } else {
+                self.default_execute_dot(None);
+            }
+        }
+    }
+
+    /// The outcome of a mouse event depends on any prior mouse state that is being held:
+    ///   - Left   (click+release):      set Cur Dot at the location of the click
+    ///   - Left   (click+hold+release): set Range Dot from click->release with click active
+    ///   - Right  (click+release):      Load Dot (expanding current dot from Cur if needed)
+    ///   - Right  (click+hold+release): Load click->release
+    ///   - Middle (click+release):      Execute Dot (expanding current dot from Cur if needed)
+    ///   - Middle (click+hold+release): Execute click->release
+    ///
+    ///   -> For Execute actions, if the current Dot is a Range then it is used as an
+    ///      argument to the command being executed
+    ///
+    /// The chording behaviour we implement follows that of acme: http://acme.cat-v.org/mouse
+    ///   - Hold Left + click Right:    Paste into selection
+    ///   - Hold Left + click Middle:   Delete selection (cut)
+    ///   - Hold Right + click either:  cancel Load
+    ///   - Hold Middle + click either: cancel Execute
     fn handle_mouse_event(&mut self, evt: MouseEvent) {
         use MouseButton::*;
 
         match evt {
             MouseEvent::Press { b: Left, x, y } => {
-                self.buffers.active_mut().set_dot_from_screen_coords(x, y);
+                // Left clicking while Right or Middle is held is always a cancel
+                if self.held_click.is_some() {
+                    self.held_click = None;
+                    return;
+                }
+
+                let b = self.buffers.active_mut();
+                b.set_dot_from_screen_coords(x, y);
+                self.held_click = Some(Click {
+                    btn: Left,
+                    selection: b.dot.as_range(),
+                });
             }
 
-            MouseEvent::Press { b: Right, x, y } => {
-                self.buffers
-                    .active_mut()
-                    .set_dot_from_screen_coords_if_outside_current_range(x, y);
-                self.default_load_dot();
-            }
+            MouseEvent::Press { b: Right, x, y } => self.handle_right_or_middle_click(true, x, y),
+            MouseEvent::Press { b: Middle, x, y } => self.handle_right_or_middle_click(false, x, y),
 
-            MouseEvent::Press { b: Middle, x, y } => {
-                self.buffers
-                    .active_mut()
-                    .set_dot_from_screen_coords_if_outside_current_range(x, y);
-                self.default_execute_dot();
-            }
+            MouseEvent::Hold { x, y, .. } => {
+                if let Some(click) = &mut self.held_click {
+                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                    click.selection.set_active_cursor(cur);
 
-            MouseEvent::Hold { x, y } => {
-                self.buffers.active_mut().extend_dot_to_screen_coords(x, y);
+                    if click.btn == Left {
+                        self.buffers.active_mut().dot = Dot::from(click.selection);
+                    }
+                }
             }
 
             MouseEvent::Press { b: WheelUp, .. } => {
                 self.buffers.active_mut().scroll_up(self.screen_rows);
             }
+
             MouseEvent::Press { b: WheelDown, .. } => {
                 self.buffers.active_mut().scroll_down();
             }
 
-            _ => (),
+            MouseEvent::Release { b, x, y } => {
+                if let Some(click) = self.held_click {
+                    if click.btn == Left && (b == Right || b == Middle) {
+                        return; // paste and cut are handled on click
+                    }
+                }
+
+                let mut click = match self.held_click.take() {
+                    Some(click) => click,
+                    None => return,
+                };
+
+                let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                click.selection.set_active_cursor(cur);
+
+                match click.btn {
+                    Left | WheelUp | WheelDown => (),
+                    Right | Middle => {
+                        self.handle_right_or_middle_release(click.btn == Right, click)
+                    }
+                }
+            }
         }
     }
 
@@ -537,5 +696,306 @@ impl Editor {
         if let Some(b) = self.buffers.with_id_mut(bufid) {
             b.input_filter = None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        dot::Cur,
+        key::{MouseButton::*, MouseEvent::*},
+    };
+    use ad_event::{FsysEvent, Kind, Source};
+    use simple_test_case::test_case;
+
+    #[derive(Debug, Default)]
+    struct TestSystem {
+        clipboard: String,
+    }
+
+    impl System for TestSystem {
+        fn set_clipboard(&mut self, s: &str) -> io::Result<()> {
+            self.clipboard = s.to_string();
+
+            Ok(())
+        }
+
+        fn read_clipboard(&self) -> io::Result<String> {
+            Ok(self.clipboard.clone())
+        }
+    }
+
+    fn r(start: usize, end: usize, start_active: bool) -> Range {
+        Range {
+            start: Cur { idx: start },
+            end: Cur { idx: end },
+            start_active,
+        }
+    }
+
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[];
+        "left click drag selection complete"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
+        ];
+        "right click drag selection complete"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+        ];
+        "middle click drag selection complete"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+        ],
+        Some(Click { btn: Left, selection: r(0, 3, false) }),
+        "some",
+        "some text to test with\n",
+        "X",
+        &[];
+        "left click drag selection without release"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+        ],
+        Some(Click { btn: Right, selection: r(0, 3, false) }),
+        "t",  // default dot position
+        "some text to test with\n",
+        "X",
+        &[];
+        "right click drag selection without release"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+        ],
+        Some(Click { btn: Middle, selection: r(0, 3, false) }),
+        "t",  // default dot position
+        "some text to test with\n",
+        "X",
+        &[];
+        "middle click drag selection without release"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 4, y: 0 },
+            Release { b: Right, x: 4, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
+        ];
+        "right click expand in existing selection"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 4, y: 0 },
+            Release { b: Middle, x: 4, y: 0 },
+        ],
+        None,
+        "some",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+        ];
+        "middle click expand in existing selection"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 9, y: 0 },
+            Hold { b: Left, x: 12, y: 0 },
+            Release { b: Left, x: 12, y: 0 },
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "text",
+        "some text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::ChordedArgument, 5, 8, "text"),
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+        ];
+        "middle click with dot arg"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        " text to test with\n",
+        "some",
+        &[
+            FsysEvent::new(Source::Fsys, Kind::DeleteBody, 0, 4, ""),
+        ];
+        "chord cut"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        "X text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Fsys, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Fsys, Kind::InsertBody, 0, 1, "X"),
+        ];
+        "chord paste"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+            Press { b: Left, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "right click cancel with left"
+    )]
+    #[test_case(
+        &[
+            Press { b: Right, x: 3, y: 0 },
+            Hold { b: Right, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "right click cancel with middle"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Press { b: Left, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "middle click cancel with left"
+    )]
+    #[test_case(
+        &[
+            Press { b: Middle, x: 3, y: 0 },
+            Hold { b: Middle, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "some text to test with\n",
+        "X",
+        &[];
+        "middle click cancel with right"
+    )]
+    #[test]
+    fn mouse_interactions_work(
+        evts: &[MouseEvent],
+        click: Option<Click>,
+        dot: &str,
+        content: &str,
+        clipboard: &str,
+        fsys_events: &[FsysEvent],
+    ) {
+        let mut ed = Editor::new_with_system(
+            Default::default(),
+            Default::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+            TestSystem {
+                clipboard: "X".to_string(),
+            },
+        );
+        ed.open_virtual("test", "some text to test with");
+        ed.buffers.active_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
+
+        // attach an input filter so we can intercept load and execute events
+        let (tx, rx) = channel();
+        let filter = InputFilter::new(tx);
+        ed.try_set_input_filter(ed.active_buffer_id(), filter);
+
+        for evt in evts.iter() {
+            ed.handle_mouse_event(*evt);
+        }
+
+        let recvd_fsys_events: Vec<_> = rx.try_iter().collect();
+        let b = ed.buffers.active();
+
+        assert_eq!(ed.held_click, click, "click");
+        assert_eq!(b.dot.content(b), dot, "dot content");
+        assert_eq!(b.str_contents(), content, "buffer content");
+        assert_eq!(ed.system.clipboard, clipboard, "clipboard content");
+        assert_eq!(fsys_events, &recvd_fsys_events, "fsys events");
     }
 }

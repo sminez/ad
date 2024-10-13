@@ -8,7 +8,7 @@ use crate::{
     dot::TextObject,
     editor::Editor,
     key::{Arrow, Input},
-    util::run_command_blocking,
+    system::System,
 };
 use std::{cmp::min, ffi::OsStr, fmt, path::Path};
 use tracing::trace;
@@ -224,7 +224,10 @@ where
     }
 }
 
-impl Editor {
+impl<S> Editor<S>
+where
+    S: System,
+{
     fn prompt_w_callback<F: Fn(&str) -> Option<Vec<String>>>(
         &mut self,
         prompt: &str,
@@ -275,7 +278,7 @@ impl Editor {
     }
 
     /// Use a [MiniBuffer] to select from the newline delimited output of running a shell command.
-    pub(crate) fn minibuffer_select_from_command_output<S, I>(
+    pub(crate) fn minibuffer_select_from_command_output<T, I>(
         &mut self,
         prompt: &str,
         cmd: &str,
@@ -283,16 +286,20 @@ impl Editor {
         dir: &Path,
     ) -> MiniBufferSelection
     where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
+        I: IntoIterator<Item = T>,
+        T: AsRef<OsStr>,
     {
-        let initial_lines = match run_command_blocking(cmd, args, dir, self.active_buffer_id()) {
-            Ok(s) => s.lines().map(String::from).collect(),
-            Err(e) => {
-                self.set_status_message(&format!("unable to get minibuffer input: {e}"));
-                return MiniBufferSelection::Cancelled;
-            }
-        };
+        let initial_lines =
+            match self
+                .system
+                .run_command_blocking(cmd, args, dir, self.active_buffer_id())
+            {
+                Ok(s) => s.lines().map(String::from).collect(),
+                Err(e) => {
+                    self.set_status_message(&format!("unable to get minibuffer input: {e}"));
+                    return MiniBufferSelection::Cancelled;
+                }
+            };
 
         self.prompt_w_callback(prompt, initial_lines, |_| None)
     }

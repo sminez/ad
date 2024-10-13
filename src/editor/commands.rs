@@ -1,8 +1,11 @@
 //! Command mode commands for ad
-use crate::editor::{
-    Action::*,
-    Actions::{self, *},
-    Editor, ViewPort,
+use crate::{
+    editor::{
+        Action::*,
+        Actions::{self, *},
+        Editor, ViewPort,
+    },
+    system::System,
 };
 use std::path::Path;
 
@@ -144,7 +147,10 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
     }
 }
 
-impl Editor {
+impl<S> Editor<S>
+where
+    S: System,
+{
     pub(super) fn parse_command(&mut self, input: &str) -> Option<Actions> {
         match parse_command(input, self.active_buffer_id(), &self.cwd) {
             Ok(actions) => Some(actions),

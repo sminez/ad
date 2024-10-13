@@ -4,7 +4,7 @@ use crate::{buffer::Buffer, dot::Cur};
 pub struct Range {
     pub start: Cur,
     pub end: Cur,
-    pub(super) start_active: bool,
+    pub start_active: bool,
 }
 
 impl Range {
@@ -75,14 +75,12 @@ impl Range {
             } else {
                 self.start = c;
             }
+        } else if c <= self.start {
+            self.end = self.start;
+            self.start = c;
+            self.start_active = true;
         } else {
-            if c <= self.start {
-                self.end = self.start;
-                self.start = c;
-                self.start_active = true;
-            } else {
-                self.end = c;
-            }
+            self.end = c;
         }
     }
 

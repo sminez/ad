@@ -3,8 +3,10 @@ use crate::{
     buffer::Buffer,
     config::ColorScheme,
     config_handle, die,
+    dot::Range,
     editor::{Editor, MiniBufferState},
-    key::Input,
+    key::{Input, MouseButton},
+    system::System,
     term::{Cursor, Style},
     VERSION,
 };
@@ -12,7 +14,10 @@ use std::{cmp::min, io::Write, time::Instant};
 
 const VLINE: char = '│';
 
-impl Editor {
+impl<S> Editor<S>
+where
+    S: System,
+{
     /// Refresh the TUI state
     pub fn refresh_screen(&mut self) {
         self.refresh_screen_w_minibuffer(None);
@@ -46,8 +51,15 @@ impl Editor {
             (conf.colorscheme, conf.status_timeout)
         };
 
+        let load_exec_range = match self.held_click {
+            Some(click) if click.btn == MouseButton::Right || click.btn == MouseButton::Middle => {
+                Some((click.btn == MouseButton::Right, click.selection))
+            }
+            _ => None,
+        };
+
         let mut buf = format!("{}{}", Cursor::Hide, Cursor::ToStart);
-        let w_sgncol = self.render_rows(&mut buf, effective_screen_rows, &cs);
+        let w_sgncol = self.render_rows(&mut buf, effective_screen_rows, load_exec_range, &cs);
         self.render_status_bar(&mut buf, &cs);
 
         if w_minibuffer {
@@ -84,7 +96,13 @@ impl Editor {
     }
 
     /// Returns the width of the sign column
-    fn render_rows(&mut self, buf: &mut String, screen_rows: usize, cs: &ColorScheme) -> usize {
+    fn render_rows(
+        &mut self,
+        buf: &mut String,
+        screen_rows: usize,
+        load_exec_range: Option<(bool, Range)>,
+        cs: &ColorScheme,
+    ) -> usize {
         let is_empty_scratch = self.buffers.is_empty_scratch();
         let b = self.buffers.active_mut();
 
@@ -126,7 +144,13 @@ impl Editor {
                     Style::Bg(cs.bg),
                     file_row + 1,
                     Style::Fg(cs.fg),
-                    b.styled_rline_unchecked(file_row, padding, self.screen_cols, cs),
+                    b.styled_rline_unchecked(
+                        file_row,
+                        padding,
+                        self.screen_cols,
+                        load_exec_range,
+                        cs
+                    ),
                     width = w_lnum
                 ));
             }

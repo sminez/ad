@@ -55,6 +55,7 @@ pub enum Kind {
     DeleteTag,
     ExecuteTag,
     LoadTag,
+    ChordedArgument,
 }
 
 impl_charconv! {
@@ -67,6 +68,7 @@ impl_charconv! {
     DeleteTag <=> 'd',
     ExecuteTag <=> 'x',
     LoadTag <=> 'l',
+    ChordedArgument <=> 'A',
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,12 +84,18 @@ pub struct FsysEvent {
 impl FsysEvent {
     /// Construct a new [FsysEvent].
     ///
-    /// The `txt` field of events is limited to [MAX_CHARS] and will be truncated if larger. Delete
-    /// events are always truncated to zero length.
+    /// The `txt` field of events is limited to [MAX_CHARS] or up until the first newline character
+    /// and will be truncated if larger. Delete events are always truncated to zero length.
     pub fn new(source: Source, kind: Kind, ch_from: usize, ch_to: usize, txt: &str) -> Self {
         let txt = match kind {
             Kind::DeleteTag | Kind::DeleteBody => String::new(),
-            _ => txt.chars().take(MAX_CHARS).collect(),
+            _ => txt
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .chars()
+                .take(MAX_CHARS)
+                .collect(),
         };
         let n_chars = txt.chars().count();
 

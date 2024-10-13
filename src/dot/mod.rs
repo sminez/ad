@@ -109,6 +109,11 @@ impl Dot {
         }
     }
 
+    /// Whether or not this dot contains all of `rng` within it.
+    pub fn contains_range(&self, rng: &Range) -> bool {
+        self.contains(&rng.start) && self.contains(&rng.end)
+    }
+
     /// The address representation of this dot in the form that is enterable by the user.
     /// Indices are 1-based rather than their internal 0-based representation.
     pub fn addr(&self, b: &Buffer) -> String {
