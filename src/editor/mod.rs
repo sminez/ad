@@ -241,6 +241,7 @@ where
         // SAFETY: we only register our signal handler once
         unsafe { register_signal_handler() };
         self.update_window_size();
+        self.set_mode("NORMAL");
         StdinInput::new(tx).run_threaded();
     }
 
