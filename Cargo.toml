@@ -1,6 +1,6 @@
 [package]
 name = "ad-editor"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
@@ -36,7 +36,7 @@ name = "bench_main"
 harness = false
 
 [dependencies]
-ad_event = { version = "0.1", path = "crates/ad_event" }
+ad_event = { version = "0.1.1", path = "crates/ad_event" }
 ninep = { version = "0.2", path = "crates/ninep" }
 libc = "0.2.159"
 tracing = "0.1.40"

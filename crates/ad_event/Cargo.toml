@@ -1,6 +1,6 @@
 [package]
 name = "ad_event"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
