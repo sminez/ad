@@ -10,6 +10,7 @@ readme = "README.md"
 description = "An adaptable text editor"
 include = [
     "src/**/*",
+    "data/**/*",
     "Cargo.toml",
     "README.md"
 ]
