@@ -1068,12 +1068,12 @@ impl Buffer {
     }
 
     /// Returns true if a filter was present and the notification was sent
-    pub(crate) fn notify_execute(&self) -> bool {
+    pub(crate) fn notify_execute(&self, arg: Option<(Range, String)>) -> bool {
         match self.input_filter.as_ref() {
             Some(f) => {
                 let (ch_from, ch_to) = self.dot.as_char_indices();
                 let txt = self.dot.content(self);
-                f.notify_execute(Source::Mouse, ch_from, ch_to, &txt);
+                f.notify_execute(Source::Mouse, ch_from, ch_to, &txt, arg);
                 true
             }
             None => false,

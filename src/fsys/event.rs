@@ -1,5 +1,6 @@
 //! Message formats for the events file
 use crate::{
+    dot::Range,
     fsys::{
         message::{Message, Req},
         Result,
@@ -40,9 +41,21 @@ impl InputFilter {
         _ = self.tx.send(evt);
     }
 
-    pub fn notify_execute(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
+    pub fn notify_execute(
+        &self,
+        source: Source,
+        ch_from: usize,
+        ch_to: usize,
+        txt: &str,
+        arg: Option<(Range, String)>,
+    ) {
         let evt = FsysEvent::new(source, Kind::ExecuteBody, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
+        if let Some((rng, arg)) = arg {
+            let (from, to) = (rng.start.idx, rng.end.idx);
+            let evt = FsysEvent::new(source, Kind::ChordedArgument, from, to, &arg);
+            _ = self.tx.send(evt);
+        }
     }
 }
 

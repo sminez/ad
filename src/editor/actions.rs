@@ -3,7 +3,7 @@ use crate::{
     buffer::BufferKind,
     config::Config,
     config_handle, die,
-    dot::{Cur, Dot, TextObject},
+    dot::{Cur, Dot, Range, TextObject},
     editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
     fsys::LogEvent,
@@ -592,14 +592,18 @@ impl Editor {
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_execute_dot(&mut self) {
+    pub(super) fn default_execute_dot(&mut self, arg: Option<(Range, String)>) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
-        if b.notify_execute() {
+        if b.notify_execute(arg.clone()) {
             return; // input filter in place
         }
 
-        let cmd = b.dot.content(b).trim().to_string();
+        let mut cmd = b.dot.content(b).trim().to_string();
+        if let Some((_, arg)) = arg {
+            cmd.push(' ');
+            cmd.push_str(&arg);
+        }
 
         match self.parse_command(&cmd) {
             Some(actions) => self.handle_actions(actions),

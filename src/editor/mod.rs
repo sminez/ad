@@ -395,7 +395,7 @@ impl Editor {
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
-            ExecuteDot => self.default_execute_dot(),
+            ExecuteDot => self.default_execute_dot(None),
             Exit { force } => self.exit(force),
             ExpandDot => self.expand_current_dot(),
             FindFile => self.find_file(),
@@ -538,20 +538,15 @@ impl Editor {
                 self.default_load_dot();
             } else {
                 let dot = self.buffers.active().dot;
+                self.buffers.active_mut().dot = Dot::from(click.selection);
+
                 if dot.is_range() {
-                    // FIXME: this is currently bypassing any event filters that are in place
-                    //        as ad doesn't implement the acme behaviour of sending chorded
-                    //        arguments in a follow on event.
-                    let (id, cmd, args) = {
-                        let b = self.buffers.active();
-                        let args = dot.content(b).trim().to_string();
-                        let cmd = Dot::from(click.selection).content(b).trim().to_string();
-                        (b.id, cmd, args)
-                    };
-                    self.execute_explicit_string(id, format!("{cmd} {args}"));
+                    // Execute as if the click selection was dot then reset dot
+                    let arg = dot.content(self.buffers.active()).trim().to_string();
+                    self.default_execute_dot(Some((dot.as_range(), arg)));
+                    self.buffers.active_mut().dot = dot;
                 } else {
-                    self.buffers.active_mut().dot = Dot::from(click.selection);
-                    self.default_execute_dot();
+                    self.default_execute_dot(None);
                 }
             }
         } else {
@@ -565,7 +560,7 @@ impl Editor {
             if is_right {
                 self.default_load_dot();
             } else {
-                self.default_execute_dot();
+                self.default_execute_dot(None);
             }
         }
     }
@@ -586,10 +581,6 @@ impl Editor {
     ///   - Hold Left + click Middle:   Delete selection (cut)
     ///   - Hold Right + click either:  cancel Load
     ///   - Hold Middle + click either: cancel Execute
-    ///
-    /// Due to limitations of how we receive mouse events from the terminal, the acme idiom of
-    /// holding Left and clicking Middle, Right to copy doesn't work. You need to release Left
-    /// after clicking Middle.
     fn handle_mouse_event(&mut self, evt: MouseEvent) {
         use MouseButton::*;
 
