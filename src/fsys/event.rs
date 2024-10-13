@@ -49,13 +49,14 @@ impl InputFilter {
         txt: &str,
         arg: Option<(Range, String)>,
     ) {
-        let evt = FsysEvent::new(source, Kind::ExecuteBody, ch_from, ch_to, txt);
-        _ = self.tx.send(evt);
         if let Some((rng, arg)) = arg {
             let (from, to) = (rng.start.idx, rng.end.idx);
             let evt = FsysEvent::new(source, Kind::ChordedArgument, from, to, &arg);
             _ = self.tx.send(evt);
         }
+
+        let evt = FsysEvent::new(source, Kind::ExecuteBody, ch_from, ch_to, txt);
+        _ = self.tx.send(evt);
     }
 }
 
