@@ -5,7 +5,7 @@ use tracing::error;
 
 /// A wrapper around a [Req] that can be sent to the main editor event loop
 #[derive(Debug)]
-pub(crate) struct Message {
+pub struct Message {
     pub req: Req,
     pub tx: Sender<Result<String, String>>,
 }
@@ -32,7 +32,7 @@ impl Message {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Req {
+pub enum Req {
     ControlMessage {
         msg: String,
     },

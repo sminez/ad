@@ -6,6 +6,7 @@ use crate::{
     dot::Range,
     editor::{Editor, MiniBufferState},
     key::{Input, MouseButton},
+    system::System,
     term::{Cursor, Style},
     VERSION,
 };
@@ -13,7 +14,10 @@ use std::{cmp::min, io::Write, time::Instant};
 
 const VLINE: char = '│';
 
-impl Editor {
+impl<S> Editor<S>
+where
+    S: System
+{
     /// Refresh the TUI state
     pub fn refresh_screen(&mut self) {
         self.refresh_screen_w_minibuffer(None);

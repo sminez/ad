@@ -5,7 +5,7 @@
     clippy::style,
     future_incompatible,
     missing_debug_implementations,
-    missing_docs,
+    // missing_docs,
     rust_2018_idioms,
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
@@ -30,6 +30,7 @@ pub mod log;
 pub mod mode;
 pub mod plumb;
 pub mod regex;
+pub mod system;
 pub mod term;
 pub mod trie;
 pub mod util;

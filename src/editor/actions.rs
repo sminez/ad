@@ -11,9 +11,7 @@ use crate::{
     mode::Mode,
     plumb::{MatchOutcome, PlumbingMessage},
     replace_config, update_config,
-    util::{
-        pipe_through_command, read_clipboard, run_command, run_command_blocking, set_clipboard,
-    },
+    system::System,
 };
 use std::{
     env, fs,
@@ -43,7 +41,7 @@ pub enum ViewPort {
 
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Action {
+pub enum Action {
     AppendToOutputBuffer { bufid: usize, content: String },
     ChangeDirectory { path: Option<String> },
     CommandMode,
@@ -101,7 +99,10 @@ pub(crate) enum Action {
     DebugEditLog,
 }
 
-impl Editor {
+impl<S> Editor<S>
+where
+    S: System
+{
     pub(crate) fn change_directory(&mut self, opt_path: Option<String>) {
         let p = match opt_path {
             Some(p) => p,
@@ -209,7 +210,7 @@ impl Editor {
     /// This shells out to the git and fd command line programs
     pub(crate) fn find_repo_file(&mut self) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        let s = match run_command_blocking(
+        let s = match self.system.run_command_blocking(
             "git",
             ["rev-parse", "--show-toplevel"],
             &d,
@@ -359,7 +360,7 @@ impl Editor {
 
     pub(super) fn set_clipboard(&mut self, s: String) {
         trace!("setting clipboard content");
-        match set_clipboard(&s) {
+        match self.system.set_clipboard(&s) {
             Ok(_) => self.set_status_message("Yanked selection to system clipboard"),
             Err(e) => self.set_status_message(&format!("Error setting system clipboard: {e}")),
         }
@@ -367,7 +368,7 @@ impl Editor {
 
     pub(super) fn paste_from_clipboard(&mut self) {
         trace!("pasting from clipboard");
-        match read_clipboard() {
+        match self.system.read_clipboard() {
             Ok(s) => self.handle_action(Action::InsertString { s }),
             Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
         }
@@ -697,7 +698,7 @@ impl Editor {
         };
 
         let id = self.active_buffer_id();
-        let res = pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
+        let res = self.system.pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
@@ -708,7 +709,7 @@ impl Editor {
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        let res = run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
+        let res = self.system.run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }),
@@ -719,7 +720,7 @@ impl Editor {
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        run_command("sh", ["-c", raw_cmd_str], d, id, self.tx_events.clone());
+        self.system.run_command("sh", ["-c", raw_cmd_str], d, id, self.tx_events.clone());
     }
 }
 

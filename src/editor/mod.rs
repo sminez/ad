@@ -15,6 +15,7 @@ use crate::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler,
     },
+    system::{System, DefaultSystem},
     LogBuffer, ORIGINAL_TERMIOS,
 };
 use std::{
@@ -59,7 +60,11 @@ pub(crate) struct Click {
 
 /// The main editor state.
 #[derive(Debug)]
-pub struct Editor {
+pub struct Editor<S>
+where
+    S: System
+{
+    system: S,
     screen_rows: usize,
     screen_cols: usize,
     stdout: Stdout,
@@ -80,7 +85,10 @@ pub struct Editor {
     held_click: Option<Click>,
 }
 
-impl Drop for Editor {
+impl<S> Drop for Editor<S>
+where
+    S: System
+{
     fn drop(&mut self) {
         if self.mode == EditorMode::Terminal {
             restore_terminal_state(&mut self.stdout);
@@ -88,7 +96,7 @@ impl Drop for Editor {
     }
 }
 
-impl Editor {
+impl Editor<DefaultSystem> {
     /// Construct a new [Editor] with the provided config.
     pub fn new(
         cfg: Config,
@@ -107,6 +115,7 @@ impl Editor {
         set_config(cfg);
 
         Self {
+            system: DefaultSystem,
             screen_rows: 0,
             screen_cols: 0,
             stdout,
@@ -127,7 +136,12 @@ impl Editor {
             held_click: None,
         }
     }
+}
 
+impl<S> Editor<S>
+where
+    S: System
+{
     /// The id of the currently active buffer
     pub fn active_buffer_id(&self) -> usize {
         self.buffers.active().id
@@ -614,21 +628,11 @@ impl Editor {
                 }
             }
 
-            MouseEvent::Press { b: WheelUp, x, y } => {
-                if let Some(click) = &mut self.held_click {
-                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
-                    click.selection.set_active_cursor(cur);
-                }
-
+            MouseEvent::Press { b: WheelUp, .. } => {
                 self.buffers.active_mut().scroll_up(self.screen_rows);
             }
 
-            MouseEvent::Press { b: WheelDown, x, y } => {
-                if let Some(click) = &mut self.held_click {
-                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
-                    click.selection.set_active_cursor(cur);
-                }
-
+            MouseEvent::Press { b: WheelDown, .. } => {
                 self.buffers.active_mut().scroll_down();
             }
 
