@@ -102,8 +102,8 @@ mode you are in you will find that the keys that you press have a different effe
     Note that ad follows the "noun verb" approach to motions used in Kakoune rather than the
     traditional "verb noun" approach used by Vi and its decendants. So you will "select a word
     to delete" (Wd) rather than "delete a word" (dw). As a general rule pressing a key on
-    its own will set the dot based based on the motion used and pressing the same key while
-    holding down shift will extend the existing dot to that position instead.
+    its own will set the dot based on the motion used and pressing the same key while holding
+    down shift will extend the existing dot to that position instead.
 
     The default key map for NORMAL mode can be viewed here:
       https://github.com/sminez/ad/blob/develop/src/mode/normal.rs
