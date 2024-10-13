@@ -18,6 +18,7 @@ use crate::{
     },
     LogBuffer, ORIGINAL_TERMIOS,
 };
+use ad_event::Source;
 use std::{
     env,
     io::{self, Stdout, Write},
@@ -192,7 +193,7 @@ where
     fn handle_event(&mut self, event: Event) {
         match event {
             Event::Input(i) => self.handle_input(i),
-            Event::Action(a) => self.handle_action(a),
+            Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Message(msg) => self.handle_message(msg),
             Event::WinsizeChanged => self.update_window_size(),
         }
@@ -253,7 +254,7 @@ where
         loop {
             match self.rx_events.recv().unwrap() {
                 Event::Input(k) => return k,
-                Event::Action(a) => self.handle_action(a),
+                Event::Action(a) => self.handle_action(a, Source::Fsys),
                 Event::Message(msg) => self.handle_message(msg),
                 Event::WinsizeChanged => self.update_window_size(),
             }
@@ -330,7 +331,7 @@ where
                 };
             }),
             SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                b.handle_action(Action::InsertString { s });
+                b.handle_action(Action::InsertString { s }, Source::Fsys);
             }),
             SetBufferXAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
@@ -340,20 +341,23 @@ where
             SetBufferXDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 let dot = b.dot;
                 b.dot = b.xdot;
-                b.handle_action(Action::InsertString { s });
+                b.handle_action(Action::InsertString { s }, Source::Fsys);
                 (b.xdot, b.dot) = (b.dot, dot);
                 b.dot.clamp_idx(b.txt.len_chars());
                 b.xdot.clamp_idx(b.txt.len_chars());
             }),
 
             ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
-                b.handle_action(Action::DotSet(TextObject::BufferStart, 1));
-                b.handle_action(Action::DotExtendForward(TextObject::BufferEnd, 1));
-                b.handle_action(Action::Delete);
+                b.handle_action(Action::DotSet(TextObject::BufferStart, 1), Source::Fsys);
+                b.handle_action(
+                    Action::DotExtendForward(TextObject::BufferEnd, 1),
+                    Source::Fsys,
+                );
+                b.handle_action(Action::Delete, Source::Fsys);
             }),
 
             AppendBufferBody { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                b.append(s);
+                b.append(s, Source::Fsys);
             }),
 
             AppendOutput { id, s } => {
@@ -381,7 +385,7 @@ where
             }
 
             ExecuteInBuffer { id, txt } => {
-                self.execute_explicit_string(id, txt);
+                self.execute_explicit_string(id, txt, Source::Fsys);
                 default_handled();
             }
         }
@@ -391,16 +395,16 @@ where
         self.pending_keys.push(input);
 
         if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {
-            self.handle_actions(actions);
+            self.handle_actions(actions, Source::Keyboard);
         }
     }
 
-    fn handle_actions(&mut self, actions: Actions) {
+    fn handle_actions(&mut self, actions: Actions, source: Source) {
         match actions {
-            Actions::Single(action) => self.handle_action(action),
+            Actions::Single(action) => self.handle_action(action, source),
             Actions::Multi(actions) => {
                 for action in actions.into_iter() {
-                    self.handle_action(action);
+                    self.handle_action(action, source);
                     if !self.running {
                         break;
                     };
@@ -409,7 +413,7 @@ where
         }
     }
 
-    fn handle_action(&mut self, action: Action) {
+    fn handle_action(&mut self, action: Action, source: Source) {
         use Action::*;
 
         match action {
@@ -420,7 +424,7 @@ where
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
-            ExecuteDot => self.default_execute_dot(None),
+            ExecuteDot => self.default_execute_dot(None, source),
             Exit { force } => self.exit(force),
             ExpandDot => self.expand_current_dot(),
             FindFile => self.find_file(),
@@ -428,7 +432,7 @@ where
             FocusBuffer { id } => self.focus_buffer(id),
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
-            LoadDot => self.default_load_dot(),
+            LoadDot => self.default_load_dot(source),
             MarkClean { bufid } => self.mark_clean(bufid),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
@@ -437,7 +441,7 @@ where
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
             OpenFile { path } => self.open_file_relative_to_cwd(&path),
-            Paste => self.paste_from_clipboard(),
+            Paste => self.paste_from_clipboard(source),
             PreviousBuffer => {
                 self.buffers.previous();
                 let id = self.active_buffer_id();
@@ -477,16 +481,16 @@ where
                     Arrow::Down
                 };
 
-                self.forward_action_to_active_buffer(DotSet(
-                    TextObject::Arr(arr),
-                    self.screen_rows,
-                ));
+                self.forward_action_to_active_buffer(
+                    DotSet(TextObject::Arr(arr), self.screen_rows),
+                    Source::Keyboard,
+                );
             }
             RawInput {
                 i: Input::Mouse(evt),
             } => self.handle_mouse_event(evt),
 
-            a => self.forward_action_to_active_buffer(a),
+            a => self.forward_action_to_active_buffer(a, source),
         }
     }
 
@@ -508,8 +512,8 @@ where
         }
     }
 
-    fn forward_action_to_active_buffer(&mut self, a: Action) {
-        if let Some(o) = self.buffers.active_mut().handle_action(a) {
+    fn forward_action_to_active_buffer(&mut self, a: Action, source: Source) {
+        if let Some(o) = self.buffers.active_mut().handle_action(a, source) {
             match o {
                 ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
@@ -536,9 +540,9 @@ where
                 // Mouse chords execute on the click of the second button rather than the release
                 if click.btn == Left {
                     if is_right {
-                        self.paste_from_clipboard();
+                        self.paste_from_clipboard(Source::Mouse);
                     } else {
-                        self.forward_action_to_active_buffer(Action::Delete);
+                        self.forward_action_to_active_buffer(Action::Delete, Source::Mouse);
                         click.selection = self.buffers.active().dot.as_range();
                         self.held_click = Some(click);
                     }
@@ -562,7 +566,7 @@ where
             // used as an argument to the command being executed.
             if is_right {
                 self.buffers.active_mut().dot = Dot::from(click.selection);
-                self.default_load_dot();
+                self.default_load_dot(Source::Mouse);
             } else {
                 let dot = self.buffers.active().dot;
                 self.buffers.active_mut().dot = Dot::from(click.selection);
@@ -570,10 +574,10 @@ where
                 if dot.is_range() {
                     // Execute as if the click selection was dot then reset dot
                     let arg = dot.content(self.buffers.active()).trim().to_string();
-                    self.default_execute_dot(Some((dot.as_range(), arg)));
+                    self.default_execute_dot(Some((dot.as_range(), arg)), Source::Mouse);
                     self.buffers.active_mut().dot = dot;
                 } else {
-                    self.default_execute_dot(None);
+                    self.default_execute_dot(None, Source::Mouse);
                 }
             }
         } else {
@@ -585,9 +589,9 @@ where
             }
 
             if is_right {
-                self.default_load_dot();
+                self.default_load_dot(Source::Mouse);
             } else {
-                self.default_execute_dot(None);
+                self.default_execute_dot(None, Source::Mouse);
             }
         }
     }
@@ -877,7 +881,7 @@ mod tests {
         " text to test with\n",
         "some",
         &[
-            FsysEvent::new(Source::Fsys, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
         ];
         "chord cut"
     )]
@@ -894,8 +898,8 @@ mod tests {
         "X text to test with\n",
         "X",
         &[
-            FsysEvent::new(Source::Fsys, Kind::DeleteBody, 0, 4, ""),
-            FsysEvent::new(Source::Fsys, Kind::InsertBody, 0, 1, "X"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
         ];
         "chord paste"
     )]

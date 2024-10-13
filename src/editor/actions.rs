@@ -14,6 +14,7 @@ use crate::{
     system::System,
     update_config,
 };
+use ad_event::Source;
 use std::{
     env, fs,
     io::Write,
@@ -367,10 +368,10 @@ where
         }
     }
 
-    pub(super) fn paste_from_clipboard(&mut self) {
+    pub(super) fn paste_from_clipboard(&mut self, source: Source) {
         trace!("pasting from clipboard");
         match self.system.read_clipboard() {
-            Ok(s) => self.handle_action(Action::InsertString { s }),
+            Ok(s) => self.handle_action(Action::InsertString { s }, source),
             Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
         }
     }
@@ -390,8 +391,8 @@ where
             self.buffers.active_mut().dot = Dot::Cur {
                 c: Cur::from_yx(cy, 0, self.buffers.active()),
             };
-            self.handle_action(Action::DotSet(TextObject::Line, 1));
-            self.handle_action(Action::SetViewPort(ViewPort::Center));
+            self.handle_action(Action::DotSet(TextObject::Line, 1), Source::Fsys);
+            self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
         }
     }
 
@@ -471,10 +472,10 @@ where
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_load_dot(&mut self) {
+    pub(super) fn default_load_dot(&mut self, source: Source) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
-        if b.notify_load() {
+        if b.notify_load(source) {
             return; // input filter in place
         }
 
@@ -577,11 +578,11 @@ where
             if let Some(mut addr) = maybe_addr {
                 let b = self.buffers.active_mut();
                 b.dot = b.map_addr(&mut addr);
-                self.handle_action(Action::SetViewPort(ViewPort::Center));
+                self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
             }
         } else {
             b.find_forward(&s);
-            self.handle_action(Action::SetViewPort(ViewPort::Center));
+            self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
         }
     }
 
@@ -594,10 +595,10 @@ where
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_execute_dot(&mut self, arg: Option<(Range, String)>) {
+    pub(super) fn default_execute_dot(&mut self, arg: Option<(Range, String)>, source: Source) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
-        if b.notify_execute(arg.clone()) {
+        if b.notify_execute(source, arg.clone()) {
             return; // input filter in place
         }
 
@@ -608,17 +609,17 @@ where
         }
 
         match self.parse_command(&cmd) {
-            Some(actions) => self.handle_actions(actions),
+            Some(actions) => self.handle_actions(actions, source),
             None => self.run_shell_cmd(&cmd),
         }
     }
 
-    pub(super) fn execute_explicit_string(&mut self, bufid: usize, s: String) {
+    pub(super) fn execute_explicit_string(&mut self, bufid: usize, s: String, source: Source) {
         let current_id = self.active_buffer_id();
         self.buffers.focus_id_silent(bufid);
 
         match self.parse_command(s.trim()) {
-            Some(actions) => self.handle_actions(actions),
+            Some(actions) => self.handle_actions(actions, source),
             None => self.run_shell_cmd(s.trim()),
         }
 
@@ -628,7 +629,7 @@ where
     pub(super) fn execute_command(&mut self, cmd: &str) {
         debug!(%cmd, "executing command");
         if let Some(actions) = self.parse_command(cmd.trim_end()) {
-            self.handle_actions(actions);
+            self.handle_actions(actions, Source::Fsys);
         }
     }
 
@@ -704,7 +705,7 @@ where
             .pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
 
         match res {
-            Ok(s) => self.handle_action(Action::InsertString { s }),
+            Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
     }
@@ -717,7 +718,7 @@ where
             .run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
 
         match res {
-            Ok(s) => self.handle_action(Action::InsertString { s }),
+            Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
             Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
         }
     }

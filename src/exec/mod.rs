@@ -5,6 +5,7 @@ use crate::{
     editor::Action,
     regex::{self, Match},
 };
+use ad_event::Source;
 use std::{cmp::min, io::Write, iter::Peekable, str::Chars};
 
 mod addr;
@@ -93,7 +94,7 @@ impl Edit for GapBuffer {
 impl Edit for Buffer {
     fn insert(&mut self, idx: usize, s: &str) {
         self.dot = Dot::Cur { c: Cur { idx } };
-        self.handle_action(Action::InsertString { s: s.to_string() });
+        self.handle_action(Action::InsertString { s: s.to_string() }, Source::Fsys);
     }
 
     fn remove(&mut self, from: usize, to: usize) {
@@ -101,7 +102,7 @@ impl Edit for Buffer {
             return;
         }
         self.dot = Dot::from_char_indices(from, to.saturating_sub(1)).collapse_null_range();
-        self.handle_action(Action::Delete);
+        self.handle_action(Action::Delete, Source::Fsys);
     }
 
     fn begin_edit_transaction(&mut self) {
@@ -592,7 +593,7 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content);
 
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
-        while b.handle_action(Action::Undo).is_none() {}
+        while b.handle_action(Action::Undo, Source::Keyboard).is_none() {}
         let mut final_content = String::from_utf8(b.contents()).unwrap();
         final_content.pop(); // The newline that we append
 

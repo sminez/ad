@@ -864,30 +864,30 @@ impl Buffer {
         self.row_off += 1;
     }
 
-    pub(crate) fn append(&mut self, s: String) {
+    pub(crate) fn append(&mut self, s: String, source: Source) {
         let dot = self.dot;
         self.set_dot(TextObject::BufferEnd, 1);
-        self.handle_action(Action::InsertString { s });
+        self.handle_action(Action::InsertString { s }, source);
         self.dot = dot;
     }
 
     /// The error result of this function is an error string that should be displayed to the user
-    pub(crate) fn handle_action(&mut self, a: Action) -> Option<ActionOutcome> {
+    pub(crate) fn handle_action(&mut self, a: Action, source: Source) -> Option<ActionOutcome> {
         match a {
             Action::Delete => {
-                let (c, deleted) = self.delete_dot(self.dot, Some(Source::Fsys));
+                let (c, deleted) = self.delete_dot(self.dot, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
-                let (c, _) = self.insert_char(self.dot, c, Some(Source::Fsys));
+                let (c, _) = self.insert_char(self.dot, c, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 return None;
             }
             Action::InsertString { s } => {
-                let (c, _) = self.insert_string(self.dot, s, Some(Source::Fsys));
+                let (c, _) = self.insert_string(self.dot, s, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 return None;
@@ -1055,12 +1055,12 @@ impl Buffer {
     }
 
     /// Returns true if a filter was present and the notification was sent
-    pub(crate) fn notify_load(&self) -> bool {
+    pub(crate) fn notify_load(&self, source: Source) -> bool {
         match self.input_filter.as_ref() {
             Some(f) => {
                 let (ch_from, ch_to) = self.dot.as_char_indices();
                 let txt = self.dot.content(self);
-                f.notify_load(Source::Mouse, ch_from, ch_to, &txt);
+                f.notify_load(source, ch_from, ch_to, &txt);
                 true
             }
             None => false,
@@ -1068,12 +1068,12 @@ impl Buffer {
     }
 
     /// Returns true if a filter was present and the notification was sent
-    pub(crate) fn notify_execute(&self, arg: Option<(Range, String)>) -> bool {
+    pub(crate) fn notify_execute(&self, source: Source, arg: Option<(Range, String)>) -> bool {
         match self.input_filter.as_ref() {
             Some(f) => {
                 let (ch_from, ch_to) = self.dot.as_char_indices();
                 let txt = self.dot.content(self);
-                f.notify_execute(Source::Mouse, ch_from, ch_to, &txt, arg);
+                f.notify_execute(source, ch_from, ch_to, &txt, arg);
                 true
             }
             None => false,
@@ -1227,7 +1227,7 @@ pub(crate) mod tests {
         let s = lines.join("\n");
 
         for c in s.chars() {
-            b.handle_action(Action::InsertChar { c });
+            b.handle_action(Action::InsertChar { c }, Source::Keyboard);
         }
 
         b
@@ -1259,17 +1259,20 @@ pub(crate) mod tests {
 
         // Insert from the start of the buffer
         for c in "hello w".chars() {
-            b.handle_action(Action::InsertChar { c });
+            b.handle_action(Action::InsertChar { c }, Source::Keyboard);
         }
 
         // move back to insert a character inside of the text we already have
-        b.handle_action(Action::DotSet(TextObject::Arr(Arrow::Left), 2));
-        b.handle_action(Action::InsertChar { c: ',' });
+        b.handle_action(
+            Action::DotSet(TextObject::Arr(Arrow::Left), 2),
+            Source::Keyboard,
+        );
+        b.handle_action(Action::InsertChar { c: ',' }, Source::Keyboard);
 
         // move forward to the end of the line to finish inserting
-        b.handle_action(Action::DotSet(TextObject::LineEnd, 1));
+        b.handle_action(Action::DotSet(TextObject::LineEnd, 1), Source::Keyboard);
         for c in "orld!".chars() {
-            b.handle_action(Action::InsertChar { c });
+            b.handle_action(Action::InsertChar { c }, Source::Keyboard);
         }
 
         // inserted characters should be in the correct positions
@@ -1289,9 +1292,9 @@ pub(crate) mod tests {
     #[test]
     fn insert_w_range_dot_works(a: Action, edit: Edit) {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line, 1));
+        b.handle_action(Action::DotSet(TextObject::Line, 1), Source::Keyboard);
 
-        let outcome = b.handle_action(a);
+        let outcome = b.handle_action(a, Source::Keyboard);
         assert_eq!(outcome, None);
 
         let lines = b.string_lines();
@@ -1324,7 +1327,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_in_empty_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "");
-        b.handle_action(Action::Delete);
+        b.handle_action(Action::Delete, Source::Keyboard);
         let c = Cur { idx: 0 };
         let lines = b.string_lines();
 
@@ -1337,8 +1340,11 @@ pub(crate) mod tests {
     #[test]
     fn simple_delete_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Arr(Arrow::Left), 1));
-        b.handle_action(Action::Delete);
+        b.handle_action(
+            Action::DotSet(TextObject::Arr(Arrow::Left), 1),
+            Source::Keyboard,
+        );
+        b.handle_action(Action::Delete, Source::Keyboard);
 
         let c = Cur::from_yx(1, LINE_2.len() - 1, &b);
         let lines = b.string_lines();
@@ -1359,8 +1365,8 @@ pub(crate) mod tests {
     #[test]
     fn delete_range_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line, 1));
-        b.handle_action(Action::Delete);
+        b.handle_action(Action::DotSet(TextObject::Line, 1), Source::Keyboard);
+        b.handle_action(Action::Delete, Source::Keyboard);
 
         let c = Cur::from_yx(1, 0, &b);
         let lines = b.string_lines();
@@ -1384,14 +1390,20 @@ pub(crate) mod tests {
         let original_lines = b.string_lines();
         b.new_edit_log_transaction();
 
-        b.handle_action(Action::DotExtendBackward(TextObject::Word, 1));
-        b.handle_action(Action::Delete);
+        b.handle_action(
+            Action::DotExtendBackward(TextObject::Word, 1),
+            Source::Keyboard,
+        );
+        b.handle_action(Action::Delete, Source::Keyboard);
 
         b.set_dot(TextObject::BufferStart, 1);
-        b.handle_action(Action::DotExtendForward(TextObject::Word, 1));
-        b.handle_action(Action::Delete);
+        b.handle_action(
+            Action::DotExtendForward(TextObject::Word, 1),
+            Source::Keyboard,
+        );
+        b.handle_action(Action::Delete, Source::Keyboard);
 
-        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo, Source::Keyboard);
 
         let lines = b.string_lines();
 
@@ -1408,7 +1420,7 @@ pub(crate) mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content);
 
         b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string(), None);
-        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -1420,7 +1432,7 @@ pub(crate) mod tests {
 
         let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r }, None);
-        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -1436,8 +1448,8 @@ pub(crate) mod tests {
 
         assert_eq!(b.string_lines(), vec!["bar foo foo", ""]);
 
-        b.handle_action(Action::Undo);
-        b.handle_action(Action::Undo);
+        b.handle_action(Action::Undo, Source::Keyboard);
+        b.handle_action(Action::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }

@@ -3,6 +3,7 @@ use crate::{
     dot::TextObject,
     editor::ViewPort,
 };
+use ad_event::Source;
 use std::{
     collections::VecDeque,
     io::{self, ErrorKind},
@@ -265,7 +266,7 @@ impl Buffers {
             .find(|b| b.kind == BufferKind::Output(key.clone()))
         {
             Some(b) => {
-                b.append(s);
+                b.append(s, Source::Fsys);
 
                 b.id
             }
