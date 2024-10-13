@@ -97,8 +97,8 @@ pub(crate) enum MouseButton {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum MouseEvent {
     Press { b: MouseButton, x: usize, y: usize },
-    Hold { x: usize, y: usize },
-    Release { x: usize, y: usize },
+    Hold { b: MouseButton, x: usize, y: usize },
+    Release { b: MouseButton, x: usize, y: usize },
 }
 
 impl MouseEvent {
@@ -111,8 +111,15 @@ impl MouseEvent {
             (2, 'M') => Some(Self::Press { b: Right, x, y }),
             (64, 'M') => Some(Self::Press { b: WheelUp, x, y }),
             (65, 'M') => Some(Self::Press { b: WheelDown, x, y }),
-            (0..=2 | 64..=65, 'm') | (3, _) => Some(Self::Release { x, y }),
-            (32, _) => Some(Self::Hold { x, y }),
+            // (0..=2 | 64..=65, 'm') | (3, _) => Some(Self::Release { x, y }),
+            (0, 'm') | (3, _) => Some(Self::Release { b: Left, x, y }),
+            (1, 'm') => Some(Self::Release { b: Middle, x, y }),
+            (2, 'm') => Some(Self::Release { b: Right, x, y }),
+            (64, 'm') => Some(Self::Release { b: WheelUp, x, y }),
+            (65, 'm') => Some(Self::Release { b: WheelDown, x, y }),
+            (32, _) => Some(Self::Hold { b: Left, x, y }),
+            (33, _) => Some(Self::Hold { b: Middle, x, y }),
+            (34, _) => Some(Self::Hold { b: Right, x, y }),
             _ => None,
         }
     }

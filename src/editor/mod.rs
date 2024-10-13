@@ -3,7 +3,7 @@ use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
     die,
-    dot::TextObject,
+    dot::{Dot, Range, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
     input::{Event, StdinInput},
@@ -45,6 +45,18 @@ pub enum EditorMode {
     Headless,
 }
 
+/// Transient state that we hold to track the last mouse click we saw while
+/// we wait for it to be released or if the buffer changes.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Click {
+    /// The button being held down
+    btn: MouseButton,
+    /// The current state of the dot associated with this click. This is updated
+    /// by Hold events and matches the buffer Dot for Left clicks. For Right and
+    /// Middle clicks this is a separate selection that is used on release.
+    selection: Range,
+}
+
 /// The main editor state.
 #[derive(Debug)]
 pub struct Editor {
@@ -65,6 +77,7 @@ pub struct Editor {
     mode: EditorMode,
     log_buffer: LogBuffer,
     plumbing_rules: PlumbingRules,
+    held_click: Option<Click>,
 }
 
 impl Drop for Editor {
@@ -111,6 +124,7 @@ impl Editor {
             mode,
             log_buffer,
             plumbing_rules,
+            held_click: None,
         }
     }
 
@@ -478,40 +492,177 @@ impl Editor {
         }
     }
 
+    #[inline]
+    fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
+        let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+
+        Click {
+            btn,
+            selection: Range::from_cursors(cur, cur, false),
+        }
+    }
+
+    #[inline]
+    fn handle_right_or_middle_click(&mut self, is_right: bool, x: usize, y: usize) {
+        use MouseButton::*;
+
+        match self.held_click {
+            Some(click) => {
+                // Mouse chords execute on the click of the second button rather than the release
+                if click.btn == Left {
+                    if is_right {
+                        self.paste_from_clipboard();
+                    } else {
+                        self.forward_action_to_active_buffer(Action::Delete);
+                    }
+                } else if (is_right && click.btn == Middle) || (!is_right && click.btn == Right) {
+                    self.held_click = None;
+                }
+            }
+
+            None => {
+                let btn = if is_right { Right } else { Middle };
+                self.held_click = Some(self.click_from_button(btn, x, y));
+            }
+        };
+    }
+
+    #[inline]
+    fn handle_right_or_middle_release(&mut self, is_right: bool, click: Click) {
+        if click.selection.start != click.selection.end {
+            // In the case where the click selection is a range we Load/Execute it directly.
+            // For Middle clicks, if there is also a range dot in the buffer then that is
+            // used as an argument to the command being executed.
+            if is_right {
+                self.buffers.active_mut().dot = Dot::from(click.selection);
+                self.default_load_dot();
+            } else {
+                let dot = self.buffers.active().dot;
+                if dot.is_range() {
+                    // FIXME: this is currently bypassing any event filters that are in place
+                    //        as ad doesn't implement the acme behaviour of sending chorded
+                    //        arguments in a follow on event.
+                    let (id, cmd, args) = {
+                        let b = self.buffers.active();
+                        let args = dot.content(b).trim().to_string();
+                        let cmd = Dot::from(click.selection).content(b).trim().to_string();
+                        (b.id, cmd, args)
+                    };
+                    self.execute_explicit_string(id, format!("{cmd} {args}"));
+                } else {
+                    self.buffers.active_mut().dot = Dot::from(click.selection);
+                    self.default_execute_dot();
+                }
+            }
+        } else {
+            // In the case where the click selection was a Cur rather than a Range we
+            // set the buffer dot to the click location if it is outside of the current buffer
+            // dot (and allow smart expand to handle generating the selection) before we Load/Execute
+            if !self.buffers.active().dot.contains(&click.selection.start) {
+                self.buffers.active_mut().dot = Dot::from(click.selection.start);
+            }
+
+            if is_right {
+                self.default_load_dot();
+            } else {
+                self.default_execute_dot();
+            }
+        }
+    }
+
+    /// The outcome of a mouse event depends on any prior mouse state that is being held:
+    ///   - Left   (click+release):      set Cur Dot at the location of the click
+    ///   - Left   (click+hold+release): set Range Dot from click->release with click active
+    ///   - Right  (click+release):      Load Dot (expanding current dot from Cur if needed)
+    ///   - Right  (click+hold+release): Load click->release
+    ///   - Middle (click+release):      Execute Dot (expanding current dot from Cur if needed)
+    ///   - Middle (click+hold+release): Execute click->release
+    ///
+    ///   -> For Execute actions, if the current Dot is a Range then it is used as an
+    ///      argument to the command being executed
+    ///
+    /// The chording behaviour we implement follows that of acme: http://acme.cat-v.org/mouse
+    ///   - Hold Left + click Right:    Paste into selection
+    ///   - Hold Left + click Middle:   Delete selection (cut)
+    ///   - Hold Right + click either:  cancel Load
+    ///   - Hold Middle + click either: cancel Execute
+    ///
+    /// Due to limitations of how we receive mouse events from the terminal, the acme idiom of
+    /// holding Left and clicking Middle, Right to copy doesn't work. You need to release Left
+    /// after clicking Middle.
     fn handle_mouse_event(&mut self, evt: MouseEvent) {
         use MouseButton::*;
 
         match evt {
             MouseEvent::Press { b: Left, x, y } => {
-                self.buffers.active_mut().set_dot_from_screen_coords(x, y);
+                // Left clicking while Right or Middle is held is always a cancel
+                if self.held_click.is_some() {
+                    self.held_click = None;
+                    return;
+                }
+
+                let b = self.buffers.active_mut();
+                b.set_dot_from_screen_coords(x, y);
+                self.held_click = Some(Click {
+                    btn: Left,
+                    selection: b.dot.as_range(),
+                });
             }
 
-            MouseEvent::Press { b: Right, x, y } => {
-                self.buffers
-                    .active_mut()
-                    .set_dot_from_screen_coords_if_outside_current_range(x, y);
-                self.default_load_dot();
+            MouseEvent::Press { b: Right, x, y } => self.handle_right_or_middle_click(true, x, y),
+            MouseEvent::Press { b: Middle, x, y } => self.handle_right_or_middle_click(false, x, y),
+
+            MouseEvent::Hold { x, y, .. } => {
+                if let Some(click) = &mut self.held_click {
+                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                    click.selection.set_active_cursor(cur);
+
+                    if click.btn == Left {
+                        self.buffers.active_mut().dot = Dot::from(click.selection);
+                    }
+                }
             }
 
-            MouseEvent::Press { b: Middle, x, y } => {
-                self.buffers
-                    .active_mut()
-                    .set_dot_from_screen_coords_if_outside_current_range(x, y);
-                self.default_execute_dot();
-            }
+            MouseEvent::Press { b: WheelUp, x, y } => {
+                if let Some(click) = &mut self.held_click {
+                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                    click.selection.set_active_cursor(cur);
+                }
 
-            MouseEvent::Hold { x, y } => {
-                self.buffers.active_mut().extend_dot_to_screen_coords(x, y);
-            }
-
-            MouseEvent::Press { b: WheelUp, .. } => {
                 self.buffers.active_mut().scroll_up(self.screen_rows);
             }
-            MouseEvent::Press { b: WheelDown, .. } => {
+
+            MouseEvent::Press { b: WheelDown, x, y } => {
+                if let Some(click) = &mut self.held_click {
+                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                    click.selection.set_active_cursor(cur);
+                }
+
                 self.buffers.active_mut().scroll_down();
             }
 
-            _ => (),
+            MouseEvent::Release { b, x, y } => {
+                if let Some(click) = self.held_click {
+                    if click.btn == Left && (b == Right || b == Middle) {
+                        return; // paste and cut are handled on click
+                    }
+                }
+
+                let mut click = match self.held_click.take() {
+                    Some(click) => click,
+                    None => return,
+                };
+
+                let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                click.selection.set_active_cursor(cur);
+
+                match click.btn {
+                    Right | Middle => {
+                        self.handle_right_or_middle_release(click.btn == Right, click)
+                    }
+                    Left | WheelUp | WheelDown => (),
+                }
+            }
         }
     }
 

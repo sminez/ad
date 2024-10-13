@@ -75,14 +75,12 @@ impl Range {
             } else {
                 self.start = c;
             }
+        } else if c <= self.start {
+            self.end = self.start;
+            self.start = c;
+            self.start_active = true;
         } else {
-            if c <= self.start {
-                self.end = self.start;
-                self.start = c;
-                self.start_active = true;
-            } else {
-                self.end = c;
-            }
+            self.end = c;
         }
     }
 

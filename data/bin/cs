@@ -3,14 +3,16 @@
 source "$HOME/.ad/lib/ad.sh"
 
 lightTheme="\
-set bg-color=#ebdbb2
+set bg-color=#EBDBB2
 set fg-color=#282828
-set dot-bg-color=#d5c4a1
+set dot-bg-color=#d5C4A1
+set load-bg-color=#957FB8
+set exec-bg-color=#BF616A
 set bar-bg-color=#83a598
 set signcol-fg-color=#458488
 set minibuffer-hl-color=#458488
 set comment-color=#624354
-set keyword-color=#Bf616A
+set keyword-color=#BF616A
 set control-flow-color=#7E9CD8
 set definition-color=#957FB8
 set punctuation-color=#DCA561
@@ -20,11 +22,13 @@ darkTheme="\
 set bg-color=#1B1720
 set fg-color=#E6D29E
 set dot-bg-color=#336677
+set load-bg-color=#957FB8
+set exec-bg-color=#BF616A
 set bar-bg-color=#4E415C
 set signcol-fg-color=#544863
 set minibuffer-hl-color=#3E3549
 set comment-color=#624354
-set keyword-color=#Bf616A
+set keyword-color=#BF616A
 set control-flow-color=#7E9CD8
 set definition-color=#957FB8
 set punctuation-color=#DCA561

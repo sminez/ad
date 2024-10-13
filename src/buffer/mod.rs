@@ -618,17 +618,19 @@ impl Buffer {
         y: usize,
         lpad: usize,
         screen_cols: usize,
+        load_exec_range: Option<(bool, Range)>,
         cs: &ColorScheme,
     ) -> String {
-        let dot_range = self.dot.line_range(y, self).map(|lr| match lr {
+        let map_line_range = |lr| match lr {
             // LineRange is an inclusive range so we need to insert after `end` if its
             // not the end of the line
             LineRange::Partial { start, end, .. } => (start, end + 1),
             LineRange::FromStart { end, .. } => (0, end + 1),
             LineRange::ToEnd { start, .. } => (start, usize::MAX),
             LineRange::Full { .. } => (0, usize::MAX),
-        });
+        };
 
+        let dot_range = self.dot.line_range(y, self).map(map_line_range);
         let (rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
 
         let raw_tks = match &self.tokenizer {
@@ -639,13 +641,32 @@ impl Buffer {
             }),
         };
 
-        let tks = match dot_range {
-            Some((start, end)) => raw_tks.with_highlighted_dot(start, end),
+        let mut tks = match dot_range {
+            Some((start, end)) => raw_tks.with_highlighted_dot(start, end, TokenType::Dot),
             None => match raw_tks {
                 Tokens::Single(tk) => vec![tk],
                 Tokens::Multi(tks) => tks,
             },
         };
+
+        match load_exec_range {
+            Some((is_load, rng)) if !self.dot.contains_range(&rng) => {
+                if let Some(lr) = rng.line_range(y, self).map(map_line_range) {
+                    if let (_, Some((start, end))) =
+                        self.raw_rline_unchecked(y, lpad, screen_cols, Some(lr))
+                    {
+                        let ty = if is_load {
+                            TokenType::Load
+                        } else {
+                            TokenType::Execute
+                        };
+                        tks = Tokens::Multi(tks).with_highlighted_dot(start, end, ty);
+                    }
+                }
+            }
+
+            _ => (),
+        }
 
         let mut buf = String::new();
         for tk in tks.into_iter() {
@@ -804,43 +825,20 @@ impl Buffer {
         x.saturating_sub(1).saturating_sub(w_sgncol)
     }
 
-    pub(crate) fn cur_from_screen_coords(&self, y: usize, rx: usize) -> Cur {
+    pub(crate) fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> Cur {
+        self.set_rx_from_screen_rows(x);
         let y = min(y + self.row_off, self.len_lines()).saturating_sub(1);
-        let mut cur = Cur::from_yx(y, self.x_from_provided_rx(y, rx), self);
+        let mut cur = Cur::from_yx(y, self.x_from_provided_rx(y, self.rx), self);
 
         cur.clamp_idx(self.txt.len_chars());
 
         cur
     }
 
-    pub(crate) fn set_dot_from_screen_coords_if_outside_current_range(
-        &mut self,
-        x: usize,
-        y: usize,
-    ) {
-        self.set_rx_from_screen_rows(x);
-        let mouse_cur = self.cur_from_screen_coords(y, self.rx);
-        if !self.dot.contains(&mouse_cur) {
-            self.set_dot_from_screen_coords(x, y);
-        }
-    }
-
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) {
-        self.set_rx_from_screen_rows(x);
         self.dot = Dot::Cur {
-            c: self.cur_from_screen_coords(y, self.rx),
+            c: self.cur_from_screen_coords(x, y),
         };
-    }
-
-    pub(crate) fn extend_dot_to_screen_coords(&mut self, x: usize, y: usize) {
-        let mut r = self.dot.as_range();
-        self.set_rx_from_screen_rows(x);
-        let c = self.cur_from_screen_coords(y, self.rx);
-        r.set_active_cursor(c);
-
-        let mut dot = Dot::Range { r };
-        dot.clamp_idx(self.txt.len_chars());
-        self.dot = dot;
     }
 
     pub(crate) fn scroll_up(&mut self, screen_rows: usize) {
