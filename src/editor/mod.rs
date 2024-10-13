@@ -36,6 +36,7 @@ mod minibuffer;
 mod render;
 
 pub(crate) use actions::{Action, Actions, ViewPort};
+pub(crate) use built_in_commands::built_in_commands;
 pub(crate) use minibuffer::{MiniBufferSelection, MiniBufferState};
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].

@@ -13,6 +13,7 @@ use crate::{
     replace_config,
     system::System,
     update_config,
+    util::gen_help_docs,
 };
 use ad_event::Source;
 use std::{
@@ -447,9 +448,7 @@ where
     }
 
     pub(super) fn show_help(&mut self) {
-        // Auto-generated in build.rs
-        let help = include_str!(concat!(env!("OUT_DIR"), "/help.txt"));
-        self.open_virtual("+help", help)
+        self.open_virtual("+help", gen_help_docs())
     }
 
     pub(super) fn debug_edit_log(&mut self) {

@@ -1,10 +1,37 @@
 //! Utility functions
+use crate::editor::built_in_commands;
 use std::{
     iter::Peekable,
     path::{Component, Path, PathBuf},
     str::Chars,
 };
 use tracing::warn;
+
+/// Pull in data from the ad crate itself to auto-generate the docs on the functionality
+/// available in the editor.
+pub(crate) fn gen_help_docs() -> String {
+    let help_template = include_str!("../data/help-template.txt");
+
+    help_template.replace("{{BUILT_IN_COMMANDS}}", &commands_section())
+}
+
+fn commands_section() -> String {
+    let commands = built_in_commands();
+    let mut buf = Vec::with_capacity(commands.len());
+
+    for (cmds, desc) in commands.into_iter() {
+        buf.push((cmds.join(" | "), desc));
+    }
+
+    let w_max = buf.iter().map(|(s, _)| s.len()).max().unwrap();
+    let mut s = String::new();
+
+    for (cmds, desc) in buf.into_iter() {
+        s.push_str(&format!("{:width$} -- {desc}\n", cmds, width = w_max));
+    }
+
+    s
+}
 
 /// Both the base path and p must be absolute paths and base must be a directory
 pub(crate) fn relative_path_from(base: &Path, p: &Path) -> PathBuf {
