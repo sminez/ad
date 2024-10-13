@@ -63,17 +63,26 @@ impl Range {
     }
 
     pub fn set_active_cursor(&mut self, c: Cur) {
+        if c == self.start && c == self.end {
+            return;
+        }
+
         if self.start_active {
-            if c >= self.start {
-                self.end = self.start;
+            if c >= self.end {
+                self.start = self.end;
+                self.end = c;
+                self.start_active = false;
+            } else {
+                self.start = c;
             }
-            self.start = c;
-        } else if c <= self.start {
-            self.end = self.start;
-            self.start = c;
-            self.start_active = true;
         } else {
-            self.end = c;
+            if c <= self.start {
+                self.end = self.start;
+                self.start = c;
+                self.start_active = true;
+            } else {
+                self.end = c;
+            }
         }
     }
 
@@ -114,4 +123,44 @@ pub(crate) enum LineRange {
     ToEnd { y: usize, start: usize },
     FromStart { y: usize, end: usize },
     Partial { y: usize, start: usize, end: usize },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    fn c(idx: usize) -> Cur {
+        Cur { idx }
+    }
+
+    fn r(start: usize, end: usize, start_active: bool) -> Range {
+        Range {
+            start: c(start),
+            end: c(end),
+            start_active,
+        }
+    }
+
+    #[test_case(r(2, 2, true), c(0), r(0, 2, true); "null range start active new before")]
+    #[test_case(r(2, 2, true), c(2), r(2, 2, true); "null range start active new equal")]
+    #[test_case(r(2, 2, true), c(5), r(2, 5, false); "null range start active new after")]
+    #[test_case(r(2, 2, false), c(0), r(0, 2, true); "null range end active new before")]
+    #[test_case(r(2, 2, false), c(2), r(2, 2, false); "null range end active new equal")]
+    #[test_case(r(2, 2, false), c(5), r(2, 5, false); "null range end active new after")]
+    #[test_case(r(3, 5, true), c(1), r(1, 5, true); "start active new before")]
+    #[test_case(r(3, 5, true), c(3), r(3, 5, true); "start active new at start")]
+    #[test_case(r(3, 5, true), c(4), r(4, 5, true); "start active new in between")]
+    #[test_case(r(3, 5, true), c(5), r(5, 5, false); "start active new at end")]
+    #[test_case(r(3, 5, true), c(7), r(5, 7, false); "start active new after")]
+    #[test_case(r(3, 5, false), c(1), r(1, 3, true); "end active new before")]
+    #[test_case(r(3, 5, false), c(3), r(3, 3, true); "end active new at start")]
+    #[test_case(r(3, 5, false), c(4), r(3, 4, false); "end active new in between")]
+    #[test_case(r(3, 5, false), c(5), r(3, 5, false); "end active new at end")]
+    #[test_case(r(3, 5, false), c(7), r(3, 7, false); "end active new after")]
+    #[test]
+    fn set_active_cursor_works(mut rng: Range, cur: Cur, expected: Range) {
+        rng.set_active_cursor(cur);
+        assert_eq!(rng, expected);
+    }
 }
