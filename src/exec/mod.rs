@@ -193,7 +193,7 @@ impl Program {
         }
 
         let (from, to) = initial_dot.as_char_indices();
-        let initial = &Match::synthetic(from, to);
+        let initial = &Match::synthetic(from, to + 1);
 
         ed.begin_edit_transaction();
         let (from, to) = self.step(ed, initial, 0, fname, out)?.as_char_indices();
@@ -527,32 +527,33 @@ mod tests {
         assert_eq!(dot_content, "that");
     }
 
-    #[test_case("/oo.fo/ d", "fo│foo"; "regex dot delete")]
-    #[test_case("/oo/,/oo/ d", "f│foo"; "regex dot range delete")]
-    #[test_case(", x/foo/ p/$0/", "foo│foo│foo"; "x print")]
-    #[test_case(", x/foo/ i/X/", "Xfoo│Xfoo│Xfoo"; "x insert")]
-    #[test_case(", x/foo/ a/X/", "fooX│fooX│fooX"; "x append")]
-    #[test_case(", x/foo/ c/X/", "X│X│X"; "x change")]
-    #[test_case(", x/foo/ c/XX/", "XX│XX│XX"; "x change 2")]
-    #[test_case(", x/foo/ d", "││"; "x delete")]
-    #[test_case(", x/foo/ s/o/X/", "fXo│fXo│fXo"; "x substitute")]
-    #[test_case(", y/foo/ p/>$0</", "foo│foo│foo"; "y print")]
-    #[test_case(", y/foo/ i/X/", "fooX│fooX│foo"; "y insert")]
-    #[test_case(", y/foo/ a/X/", "foo│Xfoo│Xfoo"; "y append")]
-    #[test_case(", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
-    #[test_case(", y/foo/ d", "foofoofoo"; "y delete")]
-    #[test_case(", y/│/ d", "││"; "y delete 2")]
-    #[test_case(", s/oo/X/", "fX│foo│foo"; "sub single")]
-    #[test_case(", s/\\w+/X/", "X│foo│foo"; "sub word single")]
-    #[test_case(", s/oo/X/g", "fX│fX│fX"; "sub all")]
-    #[test_case(", s/.*/X/g", "X"; "sub all dot star")]
-    #[test_case(", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
-    #[test_case(", x/foo/ s/o/X/g", "fXX│fXX│fXX"; "nested loop x substitute all")]
-    #[test_case(", x/oo/ s/.*/X/g", "fX│fX│fX"; "nested loop x sub all dot star")]
+    #[test_case(0, "/oo.fo/ d", "fo│foo"; "regex dot delete")]
+    #[test_case(2, "-/f/,/f/ d", "oo│foo"; "regex dot range delete")]
+    #[test_case(0, ", x/foo/ p/$0/", "foo│foo│foo"; "x print")]
+    #[test_case(0, ", x/foo/ i/X/", "Xfoo│Xfoo│Xfoo"; "x insert")]
+    #[test_case(0, ", x/foo/ a/X/", "fooX│fooX│fooX"; "x append")]
+    #[test_case(0, ", x/foo/ c/X/", "X│X│X"; "x change")]
+    #[test_case(0, ", x/foo/ c/XX/", "XX│XX│XX"; "x change 2")]
+    #[test_case(0, ", x/foo/ d", "││"; "x delete")]
+    #[test_case(0, ", x/foo/ s/o/X/", "fXo│fXo│fXo"; "x substitute")]
+    #[test_case(0, ", y/foo/ p/>$0</", "foo│foo│foo"; "y print")]
+    #[test_case(0, ", y/foo/ i/X/", "fooX│fooX│fooX"; "y insert")]
+    #[test_case(0, ", y/foo/ a/X/", "foo│Xfoo│XfooX"; "y append")]
+    #[test_case(0, ", y/foo/ c/X/", "fooXfooXfooX"; "y change")]
+    #[test_case(0, ", y/foo/ d", "foofoofoo"; "y delete")]
+    #[test_case(0, ", y/│/ d", "││"; "y delete 2")]
+    #[test_case(0, ", s/oo/X/", "fX│foo│foo"; "sub single")]
+    #[test_case(0, ", s/\\w+/X/", "X│foo│foo"; "sub word single")]
+    #[test_case(0, ", s/oo/X/g", "fX│fX│fX"; "sub all")]
+    #[test_case(0, ", s/.*/X/g", "X"; "sub all dot star")]
+    #[test_case(0, ", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
+    #[test_case(0, ", x/foo/ s/o/X/g", "fXX│fXX│fXX"; "nested loop x substitute all")]
+    #[test_case(0, ", x/oo/ s/.*/X/g", "fX│fX│fX"; "nested loop x sub all dot star")]
     #[test]
-    fn execute_produces_the_correct_string(s: &str, expected: &str) {
+    fn execute_produces_the_correct_string(idx: usize, s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
         let mut b = Buffer::new_unnamed(0, "foo│foo│foo");
+        b.dot = Cur::new(idx).into();
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
         assert_eq!(&b.txt.to_string(), expected, "buffer");

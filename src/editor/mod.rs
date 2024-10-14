@@ -239,6 +239,7 @@ where
             // the cause of the panic is visible before we exit isn't _too_ bad.
             std::thread::sleep(std::time::Duration::from_millis(300));
             eprintln!("Fatal error:\n{panic_info}");
+            _ = std::fs::write("/tmp/ad.panic", &format!("{panic_info}"));
         }));
 
         enable_mouse_support(&mut self.stdout);
