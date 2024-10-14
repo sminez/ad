@@ -259,10 +259,13 @@ map G G => my-prog
     #[test]
     fn parse_of_example_config_works() {
         let cfg = Config::parse(EXAMPLE_CONFIG).unwrap();
-        let bindings: BTreeMap<Vec<Input>, String> =
-            [(vec![Input::Char(' '), Input::Char('F')], "fmt".to_string())]
-                .into_iter()
-                .collect();
+        let bindings: BTreeMap<Vec<Input>, String> = [
+            (vec![Input::Char(' '), Input::Char('F')], "fmt".to_string()),
+            (vec![Input::Char('>')], "indent".to_string()),
+            (vec![Input::Char('<')], "unindent".to_string()),
+        ]
+        .into_iter()
+        .collect();
 
         let expected = Config {
             bindings,
