@@ -25,7 +25,7 @@ pub(super) const N_SLOTS: usize = 30;
 /// optimisations and runs reasonably quickly. It is not at all designed to
 /// be robust against mallicious input and it does not attempt to support
 /// full PCRE syntax or functionality.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Regex {
     /// The compiled instructions for running the VM
     prog: Prog,
@@ -49,6 +49,12 @@ pub struct Regex {
     prev: Option<char>,
     /// Next character in the input after the one currently being processed
     next: Option<char>,
+}
+
+impl std::fmt::Debug for Regex {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fmt.debug_tuple("Regex").field(&self.prog).finish()
+    }
 }
 
 impl Regex {

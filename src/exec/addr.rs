@@ -69,13 +69,13 @@ impl Addr {
             Some(',') => {
                 it.next();
                 let start = start.unwrap_or(AddrBase::Bof.into());
-                let end = match AddrBase::parse(it) {
+                let end = match SimpleAddr::parse(it) {
                     Ok(exp) => exp,
-                    Err(ParseError::NotAnAddress) => AddrBase::Eof,
+                    Err(ParseError::NotAnAddress) => AddrBase::Eof.into(),
                     Err(e) => return Err(e),
                 };
 
-                Ok(Addr::Compound(start, end.into()))
+                Ok(Addr::Compound(start, end))
             }
 
             _ => Err(ParseError::NotAnAddress),
@@ -86,35 +86,28 @@ impl Addr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SimpleAddr {
     base: AddrBase,
-    to_eol: bool,
-    to_bol: bool,
+    suffixes: Vec<AddrBase>, // restricted to variants that return true for is_valid_suffix
 }
 
 impl SimpleAddr {
     fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
         let base = AddrBase::parse(it)?;
-        let mut suffix = String::with_capacity(2);
+        let mut suffixes = Vec::new();
 
-        for _ in 0..2 {
-            if let Some(c @ '-' | c @ '+') = it.peek() {
-                suffix.push(*c);
-                it.next();
+        loop {
+            match it.peek() {
+                Some('-' | '+') => {
+                    let a = AddrBase::parse(it)?;
+                    if !a.is_valid_suffix() {
+                        return Err(ParseError::InvalidSuffix);
+                    }
+                    suffixes.push(a);
+                }
+                _ => break,
             }
         }
 
-        let (to_eol, to_bol) = match suffix.as_str() {
-            "++" | "--" => return Err(ParseError::InvalidSuffix),
-            "-+" | "+-" => (true, true),
-            "-" => (false, true),
-            "+" => (true, false),
-            _ => (false, false),
-        };
-
-        Ok(Self {
-            base,
-            to_eol,
-            to_bol,
-        })
+        Ok(Self { base, suffixes })
     }
 }
 
@@ -123,6 +116,12 @@ impl SimpleAddr {
 pub enum AddrBase {
     /// .
     Current,
+    /// -+ | +-
+    CurrentLine,
+    /// -
+    Bol,
+    /// +
+    Eol,
     /// 0
     Bof,
     /// $
@@ -147,8 +146,7 @@ impl From<AddrBase> for SimpleAddr {
     fn from(base: AddrBase) -> Self {
         Self {
             base,
-            to_eol: false,
-            to_bol: false,
+            suffixes: Vec::new(),
         }
     }
 }
@@ -159,6 +157,14 @@ enum Dir {
 }
 
 impl AddrBase {
+    fn is_valid_suffix(&self) -> bool {
+        use AddrBase::*;
+        matches!(
+            self,
+            Bol | Eol | CurrentLine | RelativeLine(_) | RelativeChar(_) | Regex(_) | RegexBack(_)
+        )
+    }
+
     pub(crate) fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
         let dir = match it.peek() {
             Some('-') => {
@@ -174,6 +180,11 @@ impl AddrBase {
 
         match (it.peek(), dir) {
             (Some('.' | '0' | '$'), Some(_)) => Err(ParseError::NotAnAddress),
+
+            (Some('-'), Some(Dir::Fwd)) | (Some('+'), Some(Dir::Bck)) => {
+                it.next();
+                Ok(Self::CurrentLine)
+            }
 
             (Some('.'), None) => {
                 it.next();
@@ -237,6 +248,9 @@ impl AddrBase {
                 parse_delimited_regex(it, dir.unwrap_or(Dir::Fwd))
             }
 
+            (_, Some(Dir::Fwd)) => Ok(Self::Eol),
+            (_, Some(Dir::Bck)) => Ok(Self::Bol),
+
             _ => Err(ParseError::NotAnAddress),
         }
     }
@@ -297,13 +311,32 @@ pub trait Address: IterBoundedChars {
         Some(Dot::from_char_indices(from, to))
     }
 
-    fn map_simple_addr(&self, addr: &mut SimpleAddr, cur_dot: Dot) -> Option<Dot> {
+    fn map_addr_base(&self, addr_base: &mut AddrBase, cur_dot: Dot) -> Option<Dot> {
         use AddrBase::*;
 
-        let mut dot = match &mut addr.base {
+        let dot = match addr_base {
             Current => cur_dot,
             Bof => Cur { idx: 0 }.into(),
             Eof => Cur::new(self.max_iter()).into(),
+
+            Bol => {
+                let Range { start, end, .. } = cur_dot.as_range();
+                let from = self.char_to_line_start(start.idx)?;
+                Dot::from_char_indices(from, end.idx)
+            }
+
+            Eol => {
+                let Range { start, end, .. } = cur_dot.as_range();
+                let to = self.char_to_line_end(end.idx)?;
+                Dot::from_char_indices(start.idx, to)
+            }
+
+            CurrentLine => {
+                let Range { start, end, .. } = cur_dot.as_range();
+                let from = self.char_to_line_start(start.idx)?;
+                let to = self.char_to_line_end(end.idx)?;
+                Dot::from_char_indices(from, to)
+            }
 
             Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
@@ -329,33 +362,25 @@ pub trait Address: IterBoundedChars {
                 let to = self.max_iter();
                 let m = re.match_iter(&mut self.iter_between(from, to), from)?;
                 let (from, to) = m.loc();
-                Dot::from_char_indices(from, to)
+                Dot::from_char_indices(from, to.saturating_sub(1))
             }
 
             RegexBack(re) => {
                 let from = cur_dot.first_cur().idx;
                 let m = re.match_iter(&mut self.rev_iter_between(from, 0), from)?;
                 let (from, to) = m.loc();
-                Dot::from_char_indices(from, to)
+                Dot::from_char_indices(from, to.saturating_sub(1))
             }
         };
 
-        if addr.to_eol || addr.to_bol {
-            let Range { start, end, .. } = dot.as_range();
+        Some(dot)
+    }
 
-            let from = if addr.to_bol {
-                self.char_to_line_start(start.idx)?
-            } else {
-                start.idx
-            };
+    fn map_simple_addr(&self, addr: &mut SimpleAddr, cur_dot: Dot) -> Option<Dot> {
+        let mut dot = self.map_addr_base(&mut addr.base, cur_dot)?;
 
-            let to = if addr.to_eol {
-                self.char_to_line_end(end.idx)?
-            } else {
-                end.idx
-            };
-
-            dot = Dot::from_char_indices(from, to);
+        for suffix in addr.suffixes.iter_mut() {
+            dot = self.map_addr_base(suffix, dot)?;
         }
 
         Some(dot)
@@ -364,7 +389,7 @@ pub trait Address: IterBoundedChars {
     fn map_compound_addr(&self, from: &mut SimpleAddr, to: &mut SimpleAddr) -> Option<Dot> {
         let d = self.map_simple_addr(from, self.current_dot())?;
         let c1 = d.first_cur();
-        let c2 = self.map_simple_addr(to, d)?.last_cur();
+        let c2 = self.map_simple_addr(to, self.current_dot())?.last_cur();
 
         Some(Range::from_cursors(c1, c2, false).into())
     }
@@ -443,8 +468,16 @@ mod tests {
         Regex::compile(s).unwrap()
     }
 
+    fn re_rev(s: &str) -> Regex {
+        Regex::compile_reverse(s).unwrap()
+    }
+
     //  Simple
     #[test_case(".", Simple(Current.into()); "current dot")]
+    #[test_case("-", Simple(Bol.into()); "beginning of line")]
+    #[test_case("+", Simple(Eol.into()); "end of line")]
+    #[test_case("-+", Simple(CurrentLine.into()); "current line minus plus")]
+    #[test_case("+-", Simple(CurrentLine.into()); "current line plus minus")]
     #[test_case("0", Simple(Bof.into()); "begining of file")]
     #[test_case("$", Simple(Eof.into()); "end of file")]
     #[test_case("3", Simple(Line(2).into()); "single line")]
@@ -459,24 +492,24 @@ mod tests {
     #[test_case("-/bar/", Simple(RegexBack(Regex::compile_reverse("bar").unwrap()).into()); "regex back")]
     // Simple with suffix
     #[test_case(
-        "#3+",
-        Simple(SimpleAddr { base: Char(3), to_eol: true, to_bol: false });
+        "#5+",
+        Simple(SimpleAddr { base: Char(5), suffixes: vec![Eol] });
         "char to eol"
     )]
     #[test_case(
-        "#3-",
-        Simple(SimpleAddr { base: Char(3), to_eol: false, to_bol: true });
+        "#5-",
+        Simple(SimpleAddr { base: Char(5), suffixes: vec![Bol] });
         "char to bol"
     )]
     #[test_case(
-        "#3-+",
-        Simple(SimpleAddr { base: Char(3), to_eol: true, to_bol: true });
-        "char full line minus plus"
+        "5+#3",
+        Simple(SimpleAddr { base: Line(4), suffixes: vec![RelativeChar(3)] });
+        "line plus char"
     )]
     #[test_case(
-        "#3+-",
-        Simple(SimpleAddr { base: Char(3), to_eol: true, to_bol: true });
-        "char full line plus minus"
+        "5-#3",
+        Simple(SimpleAddr { base: Line(4), suffixes: vec![RelativeChar(-3)] });
+        "line minus char"
     )]
     // Compound
     #[test_case(",", Compound(Bof.into(), Eof.into()); "full")]
@@ -485,20 +518,31 @@ mod tests {
     #[test_case("5,9", Compound(Line(4).into(), Line(8).into()); "from n to m")]
     #[test_case("25,90", Compound(Line(24).into(), Line(89).into()); "from n to m multi digit")]
     #[test_case("/foo/,/bar/", Compound(Regex(re("foo")).into(), Regex(re("bar")).into()); "regex range")]
+    // Compound with suffix
+    #[test_case(
+        "-/\\s/+#1,/\\s/-#1",
+        Compound(
+            SimpleAddr { base: RegexBack(re_rev("\\s")), suffixes: vec![RelativeChar(1)] },
+            SimpleAddr { base: Regex(re("\\s")), suffixes: vec![RelativeChar(-1)] },
+        );
+        "regex range with suffixes"
+    )]
     #[test]
     fn parse_works(s: &str, expected: Addr) {
         let addr = Addr::parse(&mut s.chars().peekable()).expect("valid input");
         assert_eq!(addr, expected);
     }
 
-    #[test_case("0", Dot::default(); "bof")]
-    #[test_case("2", Dot::from_char_indices(15, 26); "line 2")]
-    #[test_case("-1", Dot::from_char_indices(0, 14); "line 1 relative to 2")]
-    #[test_case("/something/", Dot::from_char_indices(33, 42); "regex forward")]
-    #[test_case("-/line/", Dot::from_char_indices(10, 14); "regex back")]
-    #[test_case("-/his/", Dot::from_char_indices(1, 4); "regex back 2")]
+    #[test_case("0", Dot::default(), "t"; "bof")]
+    #[test_case("2", Dot::from_char_indices(15, 26), "and another\n"; "line 2")]
+    #[test_case("-1", Dot::from_char_indices(0, 14), "this is a line\n"; "line 1 relative to 2")]
+    #[test_case("/something/", Dot::from_char_indices(33, 41), "something"; "regex forward")]
+    #[test_case("-/line/", Dot::from_char_indices(10, 13), "line"; "regex back")]
+    #[test_case("-/his/", Dot::from_char_indices(1, 3), "his"; "regex back 2")]
+    #[test_case("-/a/,/a/", Dot::from_char_indices(15, 19), "and a"; "regex range")]
+    #[test_case("-/\\s/+#1,/\\s/-#1", Dot::from_char_indices(15, 17), "and"; "regex range boundaries")]
     #[test]
-    fn map_addr_works(s: &str, expected: Dot) {
+    fn map_addr_works(s: &str, expected: Dot, expected_contents: &str) {
         let mut b = Buffer::new_unnamed(0, "this is a line\nand another\n- [ ] something to do\n");
         b.dot = Cur::new(16).into();
 
@@ -506,5 +550,6 @@ mod tests {
         b.dot = b.map_addr(&mut addr);
 
         assert_eq!(b.dot, expected, ">{}<", b.dot_contents());
+        assert_eq!(b.dot_contents(), expected_contents);
     }
 }
