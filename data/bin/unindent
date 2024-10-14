@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+source "$HOME/.ad/lib/ad.sh"
+
+requireAd
+id="$(currentBufferId)"
+addr="$(bufRead "$id" addr | sed -E 's/(.+):.+,(.+):.+/\1,\2/')"
+adEdit '. x/.+/ s/^    //'
+echo "$addr" | bufWrite "$id" addr
