@@ -238,9 +238,13 @@ where
 
         enable_mouse_support(&mut self.stdout);
         enable_alternate_screen(&mut self.stdout);
+
         // SAFETY: we only register our signal handler once
         unsafe { register_signal_handler() };
+
         self.update_window_size();
+        self.set_cursor_shape_for_active_mode();
+
         StdinInput::new(tx).run_threaded();
     }
 
