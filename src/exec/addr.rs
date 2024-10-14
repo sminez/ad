@@ -116,6 +116,12 @@ impl SimpleAddr {
 pub enum AddrBase {
     /// .
     Current,
+    /// -+ | +-
+    CurrentLine,
+    /// -
+    Bol,
+    /// +
+    Eol,
     /// 0
     Bof,
     /// $
@@ -155,7 +161,7 @@ impl AddrBase {
         use AddrBase::*;
         matches!(
             self,
-            RelativeLine(_) | RelativeChar(_) | Regex(_) | RegexBack(_)
+            Bol | Eol | CurrentLine | RelativeLine(_) | RelativeChar(_) | Regex(_) | RegexBack(_)
         )
     }
 
@@ -174,6 +180,11 @@ impl AddrBase {
 
         match (it.peek(), dir) {
             (Some('.' | '0' | '$'), Some(_)) => Err(ParseError::NotAnAddress),
+
+            (Some('-'), Some(Dir::Fwd)) | (Some('+'), Some(Dir::Bck)) => {
+                it.next();
+                Ok(Self::CurrentLine)
+            }
 
             (Some('.'), None) => {
                 it.next();
@@ -236,6 +247,9 @@ impl AddrBase {
                 it.next();
                 parse_delimited_regex(it, dir.unwrap_or(Dir::Fwd))
             }
+
+            (_, Some(Dir::Fwd)) => Ok(Self::Eol),
+            (_, Some(Dir::Bck)) => Ok(Self::Bol),
 
             _ => Err(ParseError::NotAnAddress),
         }
@@ -304,6 +318,25 @@ pub trait Address: IterBoundedChars {
             Current => cur_dot,
             Bof => Cur { idx: 0 }.into(),
             Eof => Cur::new(self.max_iter()).into(),
+
+            Bol => {
+                let Range { start, end, .. } = cur_dot.as_range();
+                let from = self.char_to_line_start(start.idx)?;
+                Dot::from_char_indices(from, end.idx)
+            }
+
+            Eol => {
+                let Range { start, end, .. } = cur_dot.as_range();
+                let to = self.char_to_line_end(end.idx)?;
+                Dot::from_char_indices(start.idx, to)
+            }
+
+            CurrentLine => {
+                let Range { start, end, .. } = cur_dot.as_range();
+                let from = self.char_to_line_start(start.idx)?;
+                let to = self.char_to_line_end(end.idx)?;
+                Dot::from_char_indices(from, to)
+            }
 
             Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
@@ -439,9 +472,12 @@ mod tests {
         Regex::compile_reverse(s).unwrap()
     }
 
-
     //  Simple
     #[test_case(".", Simple(Current.into()); "current dot")]
+    #[test_case("-", Simple(Bol.into()); "beginning of line")]
+    #[test_case("+", Simple(Eol.into()); "end of line")]
+    #[test_case("-+", Simple(CurrentLine.into()); "current line minus plus")]
+    #[test_case("+-", Simple(CurrentLine.into()); "current line plus minus")]
     #[test_case("0", Simple(Bof.into()); "begining of file")]
     #[test_case("$", Simple(Eof.into()); "end of file")]
     #[test_case("3", Simple(Line(2).into()); "single line")]
@@ -455,6 +491,16 @@ mod tests {
     #[test_case("+/baz/", Simple(Regex(re("baz")).into()); "regex explicit forward")]
     #[test_case("-/bar/", Simple(RegexBack(Regex::compile_reverse("bar").unwrap()).into()); "regex back")]
     // Simple with suffix
+    #[test_case(
+        "#5+",
+        Simple(SimpleAddr { base: Char(5), suffixes: vec![Eol] });
+        "char to eol"
+    )]
+    #[test_case(
+        "#5-",
+        Simple(SimpleAddr { base: Char(5), suffixes: vec![Bol] });
+        "char to bol"
+    )]
     #[test_case(
         "5+#3",
         Simple(SimpleAddr { base: Line(4), suffixes: vec![RelativeChar(3)] });
@@ -507,4 +553,3 @@ mod tests {
         assert_eq!(b.dot_contents(), expected_contents);
     }
 }
-

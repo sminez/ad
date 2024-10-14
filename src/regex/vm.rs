@@ -53,9 +53,7 @@ pub struct Regex {
 
 impl std::fmt::Debug for Regex {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.debug_tuple("Regex")
-            .field(&self.prog)
-            .finish()
+        fmt.debug_tuple("Regex").field(&self.prog).finish()
     }
 }
 
