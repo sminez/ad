@@ -2,8 +2,7 @@
 use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
-    config_handle,
-    die,
+    config_handle, die,
     dot::{Dot, Range, TextObject},
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
@@ -647,11 +646,11 @@ where
                 b.set_dot_from_screen_coords(x, y);
 
                 if self.last_click_was_left {
-                     let delta = (self.last_click_time - last_click_time).as_millis();
-                     if delta < config_handle!().double_click_ms {
-                         b.try_expand_delimited();
-                         return;
-                     }
+                    let delta = (self.last_click_time - last_click_time).as_millis();
+                    if delta < config_handle!().double_click_ms {
+                        b.try_expand_delimited();
+                        return;
+                    }
                 }
 
                 self.held_click = Some(Click {
