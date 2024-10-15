@@ -138,7 +138,7 @@ impl<'a> Find for &'a str {
         I: Iterator<Item = (usize, char)>,
     {
         let chars: Vec<char> = self.chars().collect();
-        let last = chars.len() - 1;
+        let last = chars.len().saturating_sub(1);
         let mut cix = 0;
         let mut start = 0;
 

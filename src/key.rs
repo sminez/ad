@@ -105,21 +105,24 @@ impl MouseEvent {
     pub(crate) fn try_from_raw(b: usize, x: usize, y: usize, m: char) -> Option<Self> {
         use MouseButton::*;
 
+        // 16,48 are ctl+Left, 18,50 are ctl+Right
         match (b, m) {
             (0, 'M') => Some(Self::Press { b: Left, x, y }),
-            (1, 'M') => Some(Self::Press { b: Middle, x, y }),
-            (2, 'M') => Some(Self::Press { b: Right, x, y }),
+            (1 | 16, 'M') => Some(Self::Press { b: Middle, x, y }),
+            (2 | 18, 'M') => Some(Self::Press { b: Right, x, y }),
             (64, 'M') => Some(Self::Press { b: WheelUp, x, y }),
             (65, 'M') => Some(Self::Press { b: WheelDown, x, y }),
-            // (0..=2 | 64..=65, 'm') | (3, _) => Some(Self::Release { x, y }),
+
             (0, 'm') | (3, _) => Some(Self::Release { b: Left, x, y }),
-            (1, 'm') => Some(Self::Release { b: Middle, x, y }),
-            (2, 'm') => Some(Self::Release { b: Right, x, y }),
+            (1 | 16, 'm') => Some(Self::Release { b: Middle, x, y }),
+            (2 | 18, 'm') => Some(Self::Release { b: Right, x, y }),
             (64, 'm') => Some(Self::Release { b: WheelUp, x, y }),
             (65, 'm') => Some(Self::Release { b: WheelDown, x, y }),
+
             (32, _) => Some(Self::Hold { b: Left, x, y }),
-            (33, _) => Some(Self::Hold { b: Middle, x, y }),
-            (34, _) => Some(Self::Hold { b: Right, x, y }),
+            (33 | 48, _) => Some(Self::Hold { b: Middle, x, y }),
+            (34 | 50, _) => Some(Self::Hold { b: Right, x, y }),
+
             _ => None,
         }
     }
