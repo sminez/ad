@@ -685,6 +685,35 @@ impl Buffer {
         (w_lnum, w_sgncol)
     }
 
+    /// Attempt to expand from the given cursor position so long as either the previous or next
+    /// character in the buffer is a known delimiter.
+    pub(crate) fn try_expand_delimited(&mut self) {
+        let current_index = match self.dot {
+            Dot::Cur { c: Cur { idx } } => idx,
+            Dot::Range { .. } => return,
+        };
+
+        let prev = self.txt.get_char(current_index - 1);
+        let next = self.txt.get_char(current_index + 1);
+
+        let chars = match (prev, next) {
+            (Some('\n'), _) | (_, Some('\n')) => Some(('\n', '\n')),
+            (Some('('), _) | (_, Some(')')) => Some(('(', ')')),
+            (Some('['), _) | (_, Some(']')) => Some(('[', ']')),
+            (Some('{'), _) | (_, Some('}')) => Some(('{', '}')),
+            (Some('<'), _) | (_, Some('>')) => Some(('<', '>')),
+            (Some('"'), _) | (_, Some('"')) => Some(('"', '"')),
+            (Some('\''), _) | (_, Some('\'')) => Some(('\'', '\'')),
+            (Some(' '), _) | (_, Some(' ')) => Some((' ', ' ')),
+
+            _ => None,
+        };
+
+        if let Some((l, r)) = chars {
+            self.set_dot(TextObject::Delimited(l, r), 1);
+        }
+    }
+
     /// If the current dot is a cursor rather than a range, expand it to a sensible range.
     ///
     /// This is modeled after (but not identical to) the behaviour in acme's `expand` function

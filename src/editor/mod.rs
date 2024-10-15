@@ -2,6 +2,7 @@
 use crate::{
     buffer::{ActionOutcome, Buffer, Buffers},
     config::Config,
+    config_handle,
     die,
     dot::{Dot, Range, TextObject},
     exec::{Addr, Address},
@@ -85,6 +86,8 @@ where
     log_buffer: LogBuffer,
     plumbing_rules: PlumbingRules,
     held_click: Option<Click>,
+    last_click_was_left: bool,
+    last_click_time: Instant,
 }
 
 impl<S> Drop for Editor<S>
@@ -152,6 +155,8 @@ where
             log_buffer,
             plumbing_rules,
             held_click: None,
+            last_click_was_left: false,
+            last_click_time: Instant::now(),
         }
     }
 
@@ -239,7 +244,7 @@ where
             // the cause of the panic is visible before we exit isn't _too_ bad.
             std::thread::sleep(std::time::Duration::from_millis(300));
             eprintln!("Fatal error:\n{panic_info}");
-            _ = std::fs::write("/tmp/ad.panic", &format!("{panic_info}"));
+            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}"));
         }));
 
         enable_mouse_support(&mut self.stdout);
@@ -546,6 +551,7 @@ where
     fn handle_right_or_middle_click(&mut self, is_right: bool, x: usize, y: usize) {
         use MouseButton::*;
 
+        self.last_click_was_left = false;
         match self.held_click {
             Some(mut click) => {
                 // Mouse chords execute on the click of the second button rather than the release
@@ -626,6 +632,9 @@ where
     fn handle_mouse_event(&mut self, evt: MouseEvent) {
         use MouseButton::*;
 
+        let last_click_time = self.last_click_time;
+        self.last_click_time = Instant::now();
+
         match evt {
             MouseEvent::Press { b: Left, x, y } => {
                 // Left clicking while Right or Middle is held is always a cancel
@@ -636,10 +645,20 @@ where
 
                 let b = self.buffers.active_mut();
                 b.set_dot_from_screen_coords(x, y);
+
+                if self.last_click_was_left {
+                     let delta = (self.last_click_time - last_click_time).as_millis();
+                     if delta < config_handle!().double_click_ms {
+                         b.try_expand_delimited();
+                         return;
+                     }
+                }
+
                 self.held_click = Some(Click {
                     btn: Left,
                     selection: b.dot.as_range(),
                 });
+                self.last_click_was_left = true;
             }
 
             MouseEvent::Press { b: Right, x, y } => self.handle_right_or_middle_click(true, x, y),
@@ -657,10 +676,12 @@ where
             }
 
             MouseEvent::Press { b: WheelUp, .. } => {
+                self.last_click_was_left = false;
                 self.buffers.active_mut().scroll_up(self.screen_rows);
             }
 
             MouseEvent::Press { b: WheelDown, .. } => {
+                self.last_click_was_left = false;
                 self.buffers.active_mut().scroll_down();
             }
 

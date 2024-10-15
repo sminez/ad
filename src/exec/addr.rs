@@ -94,17 +94,12 @@ impl SimpleAddr {
         let base = AddrBase::parse(it)?;
         let mut suffixes = Vec::new();
 
-        loop {
-            match it.peek() {
-                Some('-' | '+') => {
-                    let a = AddrBase::parse(it)?;
-                    if !a.is_valid_suffix() {
-                        return Err(ParseError::InvalidSuffix);
-                    }
-                    suffixes.push(a);
-                }
-                _ => break,
+        while let Some('-' | '+') = it.peek() {
+            let a = AddrBase::parse(it)?;
+            if !a.is_valid_suffix() {
+                return Err(ParseError::InvalidSuffix);
             }
+            suffixes.push(a);
         }
 
         Ok(Self { base, suffixes })

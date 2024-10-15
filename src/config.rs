@@ -10,6 +10,7 @@ pub struct Config {
     pub(crate) auto_mount: bool,
     pub(crate) match_indent: bool,
     pub(crate) status_timeout: u64,
+    pub(crate) double_click_ms: u128,
     pub(crate) minibuffer_lines: usize,
     pub(crate) find_command: String,
     pub(crate) colorscheme: ColorScheme,
@@ -24,6 +25,7 @@ impl Default for Config {
             auto_mount: false,
             match_indent: true,
             status_timeout: 3,
+            double_click_ms: 200,
             minibuffer_lines: 8,
             find_command: "fd -t f".to_string(),
             colorscheme: ColorScheme::default(),
@@ -156,6 +158,7 @@ impl Config {
             "tabstop" => self.tabstop = parse_usize(prop, val)?,
             "minibuffer-lines" => self.minibuffer_lines = parse_usize(prop, val)?,
             "status-timeout" => self.status_timeout = parse_usize(prop, val)? as u64,
+            "double-click-ms" => self.double_click_ms = parse_usize(prop, val)? as u128,
 
             // Flags
             "expand-tab" => self.expand_tab = parse_bool(prop, val)?,
