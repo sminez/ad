@@ -58,6 +58,26 @@ pub(crate) struct Click {
     /// by Hold events and matches the buffer Dot for Left clicks. For Right and
     /// Middle clicks this is a separate selection that is used on release.
     selection: Range,
+    cut_handled: bool,
+    paste_handled: bool,
+}
+
+impl Click {
+    fn new(btn: MouseButton, selection: Range) -> Self {
+        Self {
+            btn,
+            selection,
+            cut_handled: false,
+            paste_handled: false,
+        }
+    }
+
+    /// Only needed for Left clicks. Used to ensure that once the user has made
+    /// a chorded action we still support the other remaining action but we
+    /// stop setting the buffer Dot.
+    fn chord_handled(&self) -> bool {
+        self.btn == MouseButton::Left && (self.cut_handled || self.paste_handled)
+    }
 }
 
 /// The main editor state.
@@ -540,10 +560,7 @@ where
     fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
         let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
 
-        Click {
-            btn,
-            selection: Range::from_cursors(cur, cur, false),
-        }
+        Click::new(btn, Range::from_cursors(cur, cur, false))
     }
 
     #[inline]
@@ -555,11 +572,14 @@ where
             Some(mut click) => {
                 // Mouse chords execute on the click of the second button rather than the release
                 if click.btn == Left {
-                    if is_right {
+                    if is_right && !click.paste_handled {
                         self.paste_from_clipboard(Source::Mouse);
-                    } else {
+                        click.paste_handled = true;
+                        self.held_click = Some(click);
+                    } else if !is_right && !click.cut_handled {
                         self.forward_action_to_active_buffer(Action::Delete, Source::Mouse);
                         click.selection = self.buffers.active().dot.as_range();
+                        click.cut_handled = true;
                         self.held_click = Some(click);
                     }
                 } else if (is_right && click.btn == Middle) || (!is_right && click.btn == Right) {
@@ -653,10 +673,7 @@ where
                     }
                 }
 
-                self.held_click = Some(Click {
-                    btn: Left,
-                    selection: b.dot.as_range(),
-                });
+                self.held_click = Some(Click::new(Left, b.dot.as_range()));
                 self.last_click_was_left = true;
             }
 
@@ -665,6 +682,10 @@ where
 
             MouseEvent::Hold { x, y, .. } => {
                 if let Some(click) = &mut self.held_click {
+                    if click.chord_handled() {
+                        return;
+                    }
+
                     let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
                     click.selection.set_active_cursor(cur);
 
@@ -817,7 +838,7 @@ mod tests {
             Press { b: Left, x: 3, y: 0 },
             Hold { b: Left, x: 7, y: 0 },
         ],
-        Some(Click { btn: Left, selection: r(0, 3, false) }),
+        Some(Click::new(Left, r(0, 3, false))),
         "some",
         "some text to test with\n",
         "X",
@@ -829,7 +850,7 @@ mod tests {
             Press { b: Right, x: 3, y: 0 },
             Hold { b: Right, x: 7, y: 0 },
         ],
-        Some(Click { btn: Right, selection: r(0, 3, false) }),
+        Some(Click::new(Right, r(0, 3, false))),
         "t",  // default dot position
         "some text to test with\n",
         "X",
@@ -841,7 +862,7 @@ mod tests {
             Press { b: Middle, x: 3, y: 0 },
             Hold { b: Middle, x: 7, y: 0 },
         ],
-        Some(Click { btn: Middle, selection: r(0, 3, false) }),
+        Some(Click::new(Middle, r(0, 3, false))),
         "t",  // default dot position
         "some text to test with\n",
         "X",
@@ -933,6 +954,125 @@ mod tests {
             FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
         ];
         "chord paste"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        "some text to test with\n",
+        "some",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 4, "some"),
+        ];
+        "chord cut then paste"
+    )]
+    // not 100% sure this is correct at the moment in terms of what the
+    // selection and clipboard end up as
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        "t",
+        "Xtext to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 1, 2, " "),
+        ];
+        "chord paste then cut"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        " text to test with\n",
+        "some",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+        ];
+        "repeated chord cut"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Release { b: Left, x: 7, y: 0 },
+        ],
+        None,
+        " ",
+        "X text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
+        ];
+        "repeated chord paste"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Right, x: 7, y: 0 },
+            Release { b: Right, x: 7, y: 0 },
+            Hold { b: Left, x: 3, y: 0 },
+            Release { b: Left, x: 3, y: 0 },
+        ],
+        None,
+        " ",
+        "X text to test with\n",
+        "X",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
+        ];
+        "motion after chord paste is ignored"
+    )]
+    #[test_case(
+        &[
+            Press { b: Left, x: 3, y: 0 },
+            Hold { b: Left, x: 7, y: 0 },
+            Press { b: Middle, x: 7, y: 0 },
+            Release { b: Middle, x: 7, y: 0 },
+            Hold { b: Left, x: 2, y: 0 },
+            Release { b: Left, x: 2, y: 0 },
+        ],
+        None,
+        " ",
+        " text to test with\n",
+        "some",
+        &[
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+        ];
+        "motion after chord cut is ignored"
     )]
     #[test_case(
         &[
