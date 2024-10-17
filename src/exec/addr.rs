@@ -290,13 +290,16 @@ pub trait Address: IterBoundedChars {
     }
 
     fn map_addr(&self, a: &mut Addr) -> Dot {
-        let dot = match a {
+        let maybe_dot = match a {
             Addr::Explicit(d) => Some(*d),
             Addr::Simple(a) => self.map_simple_addr(a, self.current_dot()),
             Addr::Compound(from, to) => self.map_compound_addr(from, to),
         };
 
-        dot.unwrap_or_default()
+        let mut dot = maybe_dot.unwrap_or_default();
+        dot.clamp_idx(self.len_chars());
+
+        dot
     }
 
     fn full_line(&self, line_idx: usize) -> Option<Dot> {
