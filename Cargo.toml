@@ -42,6 +42,7 @@ ninep = { version = "0.2", path = "crates/ninep" }
 libc = "0.2.159"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = [ "fmt" ] }
+unicode-width = "0.2.0"
 
 [dev-dependencies]
 simple_test_case = "1.2.0"

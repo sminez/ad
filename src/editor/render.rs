@@ -59,7 +59,7 @@ where
         };
 
         let mut buf = format!("{}{}", Cursor::Hide, Cursor::ToStart);
-        let w_sgncol = self.render_rows(&mut buf, effective_screen_rows, load_exec_range, &cs);
+        self.render_rows(&mut buf, effective_screen_rows, load_exec_range, &cs);
         self.render_status_bar(&mut buf, &cs);
 
         if w_minibuffer {
@@ -76,12 +76,10 @@ where
             self.render_message_bar(&mut buf, &cs, status_timeout);
         }
 
-        let active = self.buffers.active();
         let (x, y) = if w_minibuffer {
             (cx, cy)
         } else {
-            let (y, _) = active.dot.active_cur().as_yx(active);
-            (active.rx - active.col_off + w_sgncol, y - active.row_off)
+            self.buffers.active().ui_xy()
         };
 
         buf.push_str(&format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
@@ -102,7 +100,7 @@ where
         screen_rows: usize,
         load_exec_range: Option<(bool, Range)>,
         cs: &ColorScheme,
-    ) -> usize {
+    ) {
         let is_empty_scratch = self.buffers.is_empty_scratch();
         let b = self.buffers.active_mut();
 
@@ -157,8 +155,6 @@ where
 
             buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
         }
-
-        w_sgncol
     }
 
     fn render_status_bar(&self, buf: &mut String, cs: &ColorScheme) {

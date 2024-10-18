@@ -24,6 +24,7 @@ use std::{
     time::SystemTime,
 };
 use tracing::debug;
+use unicode_width::UnicodeWidthChar;
 
 mod buffers;
 mod edit;
@@ -502,7 +503,7 @@ impl Buffer {
             if c == '\t' {
                 rx += (tabstop - 1) - (rx % tabstop);
             }
-            rx += 1;
+            rx += UnicodeWidthChar::width(c).unwrap_or(1);
         }
 
         rx
@@ -538,6 +539,13 @@ impl Buffer {
         }
 
         cx
+    }
+
+    pub(crate) fn ui_xy(&self) -> (usize, usize) {
+        let (_, w_sgncol) = self.sign_col_dims();
+        let (y, _) = self.dot.active_cur().as_yx(self);
+
+        (self.rx - self.col_off + w_sgncol, y - self.row_off)
     }
 
     /// The line at the requested index returned as a [Slice].
@@ -1570,5 +1578,34 @@ pub(crate) mod tests {
         b.insert_char(Dot::Cur { c: c(0) }, ch, None);
         // we force a trailing newline so account for that as well
         assert_eq!(b.str_contents(), format!("{expected}\n"));
+    }
+
+    // NOTE: there was a bug around misunderstanding terminal "cells" in relation to
+    //       wide unicode characters
+    //       - https://github.com/crossterm-rs/crossterm/issues/458
+    //       - https://github.com/unicode-rs/unicode-width
+    #[test]
+    fn ui_xy_correctly_handles_multibyte_characters() {
+        let s = "abc 世界 🦊";
+        // unicode display width for each character
+        let widths = &[1, 1, 1, 1, 2, 2, 1, 2];
+        let mut b = Buffer::new_virtual(0, "test", s);
+        let mut offset = 0;
+
+        // sign column offset is 3
+        for (idx, ch) in s.chars().enumerate() {
+            assert_eq!(b.dot_contents(), ch.to_string());
+            assert_eq!(b.dot, Dot::Cur { c: Cur { idx } });
+            assert_eq!(
+                b.ui_xy(),
+                (3 + offset, 0),
+                "idx={idx} content={:?}",
+                b.dot_contents()
+            );
+
+            b.set_dot(TextObject::Arr(Arrow::Right), 1);
+            b.clamp_scroll(80, 80);
+            offset += widths[idx];
+        }
     }
 }
