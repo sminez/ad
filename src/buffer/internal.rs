@@ -142,7 +142,12 @@ impl fmt::Display for GapBuffer {
     }
 }
 
-#[cfg(test)]
+/// One of the most common "hard to find" bugs I encounter around the GapBuffer is detecting
+/// when and where the tracking of line endings becomes corrupted. This macro is called at
+/// points where the line_endings map is modified guarded by #[cfg(test)] so that it does not
+/// affect the performance of the editor when it is in use. It is also called in situations
+/// where we are already panicing in order to check to see if the reason for the panic was
+/// because there is a bug around line endings that the current test suite didn't catch.
 macro_rules! assert_line_endings {
     ($self:expr) => {{
         let true_endings: Vec<usize> = $self
@@ -301,6 +306,7 @@ impl GapBuffer {
     #[inline]
     pub fn line(&self, line_idx: usize) -> Slice<'_> {
         if line_idx >= self.len_lines() {
+            assert_line_endings!(self);
             panic!(
                 "line index was {line_idx} but buffer has {} lines",
                 self.len_lines()
@@ -328,6 +334,7 @@ impl GapBuffer {
     #[inline]
     pub fn line_len_chars(&self, line_idx: usize) -> usize {
         if line_idx >= self.len_lines() {
+            assert_line_endings!(self);
             panic!(
                 "line index was {line_idx} but buffer has {} lines",
                 self.len_lines()
@@ -378,10 +385,13 @@ impl GapBuffer {
     pub fn char_to_line(&self, char_idx: usize) -> usize {
         match self.try_char_to_line(char_idx) {
             Some(line_idx) => line_idx,
-            None => panic!(
-                "char index was {char_idx} but the buffer length is {}",
-                self.len()
-            ),
+            None => {
+                assert_line_endings!(self);
+                panic!(
+                    "char index was {char_idx} but the buffer char length is {}",
+                    self.len_chars()
+                );
+            }
         }
     }
 
@@ -411,10 +421,13 @@ impl GapBuffer {
     pub fn line_to_char(&self, line_idx: usize) -> usize {
         match self.try_line_to_char(line_idx) {
             Some(char_idx) => char_idx,
-            None => panic!(
-                "line index was {line_idx} but the buffer has {} lines",
-                self.len_lines()
-            ),
+            None => {
+                assert_line_endings!(self);
+                panic!(
+                    "line index was {line_idx} but the buffer has {} lines",
+                    self.len_lines()
+                );
+            }
         }
     }
 
@@ -471,6 +484,7 @@ impl GapBuffer {
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_str(&mut self, char_idx: usize, s: &str) {
         let len = s.len();
+        let len_chars = s.chars().count();
         if self.gap().saturating_sub(len) < MIN_GAP {
             self.grow_gap(len);
         }
@@ -490,7 +504,7 @@ impl GapBuffer {
 
         self.update_line_endings(|(&bidx, &cidx)| {
             if bidx >= idx + len {
-                (bidx, cidx + len)
+                (bidx, cidx + len_chars)
             } else {
                 (bidx, cidx)
             }
@@ -1549,6 +1563,45 @@ mod tests {
 
             let n_chars = gb.chars_in_raw_range(0, gb.char_to_raw_byte(gb.n_chars));
             assert_eq!(n_chars, gb.n_chars, "gap at {i}");
+        }
+    }
+
+    fn _insert_chars(gb: &mut GapBuffer, s: &str) {
+        for (idx, ch) in s.chars().enumerate() {
+            gb.insert_char(idx + 4, ch);
+        }
+    }
+
+    fn _insert_str(gb: &mut GapBuffer, s: &str) {
+        gb.insert_str(4, s);
+    }
+
+    #[test_case(_insert_chars; "individual chars")]
+    #[test_case(_insert_str; "whole string")]
+    #[test]
+    fn insert_with_multibyte_chars_preserves_line_endings(insert: fn(&mut GapBuffer, &str)) {
+        let slice_str = |gb: &GapBuffer| gb.slice(0, gb.len_chars()).to_string();
+
+        let mut gb = GapBuffer::from("foo\nbar\nbaz\n");
+        let s = "世\n界 🦊\n ";
+
+        insert(&mut gb, s);
+
+        assert_eq!(slice_str(&gb), "foo\n世\n界 🦊\n bar\nbaz\n");
+
+        assert_eq!(gb.char(8), '🦊');
+        gb.remove_char(8);
+
+        assert_eq!(slice_str(&gb), "foo\n世\n界 \n bar\nbaz\n");
+    }
+
+    #[test]
+    fn char_works_with_multibyte_characters() {
+        let s = "世\n界 🦊\n ";
+        let gb = GapBuffer::from(s);
+
+        for (idx, ch) in s.chars().enumerate() {
+            assert_eq!(gb.char(idx), ch);
         }
     }
 }
