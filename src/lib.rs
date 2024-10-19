@@ -33,6 +33,7 @@ pub mod regex;
 pub mod system;
 pub mod term;
 pub mod trie;
+pub mod ui;
 pub mod util;
 
 pub use buffer::GapBuffer;

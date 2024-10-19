@@ -6,22 +6,20 @@ use crate::{
     dot::TextObject,
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
-    input::{Event, StdinInput},
+    input::Event,
     key::{Arrow, Input},
     mode::{modes, Mode},
     plumb::PlumbingRules,
     restore_terminal_state, set_config,
     system::{DefaultSystem, System},
-    term::{
-        clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
-        get_termsize, register_signal_handler,
-    },
-    LogBuffer, ORIGINAL_TERMIOS,
+    term::CurShape,
+    ui::{Tui, Ui},
+    LogBuffer,
 };
 use ad_event::Source;
 use std::{
     env,
-    io::{self, Stdout, Write},
+    io::{self, Stdout},
     panic,
     path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
@@ -157,10 +155,8 @@ where
 
     /// Update the stored window size, accounting for the status and message bars
     /// This will panic if the available screen rows are 0 or 1
-    fn update_window_size(&mut self) {
-        let (screen_rows, screen_cols) = get_termsize();
+    pub(crate) fn update_window_size(&mut self, screen_rows: usize, screen_cols: usize) {
         trace!("window size updated: rows={screen_rows} cols={screen_cols}");
-
         self.screen_rows = screen_rows - 2;
         self.screen_cols = screen_cols;
     }
@@ -180,7 +176,7 @@ where
         self.ensure_correct_fsys_state();
 
         match self.mode {
-            EditorMode::Terminal => self.run_event_loop_with_screen_refresh(self.tx_events.clone()),
+            EditorMode::Terminal => self.run_tui_event_loop(),
             EditorMode::Headless => self.run_event_loop(),
         }
     }
@@ -191,11 +187,11 @@ where
             Event::Input(i) => self.handle_input(i),
             Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Message(msg) => self.handle_message(msg),
-            Event::WinsizeChanged => self.update_window_size(),
+            Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
         }
     }
 
-    fn run_event_loop(&mut self) {
+    fn run_event_loop(mut self) {
         while self.running {
             match self.rx_events.recv() {
                 Ok(next_event) => self.handle_event(next_event),
@@ -204,49 +200,20 @@ where
         }
     }
 
-    fn run_event_loop_with_screen_refresh(&mut self, tx: Sender<Event>) {
-        self.init_tui(tx);
+    fn run_tui_event_loop(mut self) {
+        let mut ui = Tui::new();
+        let tx = self.tx_events.clone();
+        ui.init(&mut self, tx);
 
         while self.running {
-            self.refresh_screen();
+            ui.refresh(&mut self, None);
             match self.rx_events.recv() {
                 Ok(next_event) => self.handle_event(next_event),
                 _ => break,
             }
         }
 
-        clear_screen(&mut self.stdout);
-    }
-
-    fn init_tui(&mut self, tx: Sender<Event>) {
-        let original_termios = get_termios();
-        enable_raw_mode(original_termios);
-        _ = ORIGINAL_TERMIOS.set(original_termios);
-
-        panic::set_hook(Box::new(|panic_info| {
-            let mut stdout = io::stdout();
-            restore_terminal_state(&mut stdout);
-            _ = stdout.flush();
-
-            // Restoring the terminal state to move us off of the alternate screen
-            // can race with our attempt to print the panic info so given that we
-            // are already in a fatal situation, sleeping briefly to ensure that
-            // the cause of the panic is visible before we exit isn't _too_ bad.
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            eprintln!("Fatal error:\n{panic_info}");
-            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}"));
-        }));
-
-        enable_mouse_support(&mut self.stdout);
-        enable_alternate_screen(&mut self.stdout);
-
-        // SAFETY: we only register our signal handler once
-        unsafe { register_signal_handler() };
-
-        self.update_window_size();
-        self.set_cursor_shape_for_active_mode();
-
-        StdinInput::new(tx).run_threaded();
+        ui.shutdown();
     }
 
     /// Update the status line to contain the given message.
@@ -256,13 +223,17 @@ where
         self.status_time = Instant::now();
     }
 
+    pub(crate) fn current_cursor_shape(&self) -> CurShape {
+        self.modes[0].cur_shape
+    }
+
     pub(crate) fn block_for_input(&mut self) -> Input {
         loop {
             match self.rx_events.recv().unwrap() {
                 Event::Input(k) => return k,
                 Event::Action(a) => self.handle_action(a, Source::Fsys),
                 Event::Message(msg) => self.handle_message(msg),
-                Event::WinsizeChanged => self.update_window_size(),
+                Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
             }
         }
     }
