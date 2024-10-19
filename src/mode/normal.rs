@@ -40,27 +40,30 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('O') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" }, NewEditLogTransaction, InsertChar { c: '\n' }, DotSet(Arr(Up), 1) ],
 
         // Setting dot
+        // >> character positions
         [ Char('h') ] => [ DotSet(Arr(Left), 1) ],
         [ Char('j') ] => [ DotSet(Arr(Down), 1) ],
         [ Char('k') ] => [ DotSet(Arr(Up), 1) ],
         [ Char('l') ] => [ DotSet(Arr(Right), 1) ],
-        // matching the bindings in insert mode so that repeated alt-hjkl will just navigate
-        // through the buffer without needing to switch bindings
-        [ Alt('h') ] => [ DotSet(Arr(Left), 1) ],
-        [ Alt('j') ] => [ DotSet(Arr(Down), 1) ],
-        [ Alt('k') ] => [ DotSet(Arr(Up), 1) ],
-        [ Alt('l') ] => [ DotSet(Arr(Right), 1) ],
+        // >> line anchors
+        [ Ctrl('h') ] => [ DotSet(LineStart, 1) ],
+        [ Ctrl('l') ] => [ DotSet(LineEnd, 1) ],
         [ Home ] => [ DotSet(LineStart, 1) ],
         [ End ] => [ DotSet(LineEnd, 1) ],
+        // >> objects
         [ Char('w') ] => [ DotExtendForward(Word, 1), DotCollapseLast ],
         [ Char('b') ] => [ DotExtendBackward(Word, 1), DotCollapseFirst ],
         [ Char('x') ] => [ DotSet(Line, 1) ],
         [ Char('X') ] => [ DotSet(Paragraph, 1) ],
         [ Char('%') ] => [ DotSet(BufferStart, 1), DotExtendForward(BufferEnd, 1) ],
+        [ Char('{') ] => [ DotExtendBackward(Paragraph, 1), DotCollapseFirst ],
+        [ Char('}') ] => [ DotExtendForward(Paragraph, 1), DotCollapseLast ],
+
         [ Char('g'), Char('g') ] => [ DotSet(BufferStart, 1) ],
         [ Char('g'), Char('e') ] => [ DotSet(BufferEnd, 1) ],
         [ Char('g'), Char('h') ] => [ DotSet(LineStart, 1) ],
         [ Char('g'), Char('l') ] => [ DotSet(LineEnd, 1) ],
+
         // Delimited pairs
         [ Alt('i'), Char('(') ] => [ DotSet(Delimited('(', ')'), 1) ],
         [ Alt('i'), Char(')') ] => [ DotSet(Delimited('(', ')'), 1) ],
@@ -75,20 +78,21 @@ pub(crate) fn normal_mode() -> Mode {
         [ Alt('i'), Char('/') ] => [ DotSet(Delimited('/', '/'), 1) ],
 
         // Extending dot
+        // >> character positions
         [ Char('H') ] => [ DotExtendBackward(Character, 1) ],
         [ Char('J') ] => [ DotExtendForward(Line, 1) ],
         [ Char('K') ] => [ DotExtendBackward(Line, 1) ],
         [ Char('L') ] => [ DotExtendForward(Character, 1) ],
+        // >> lines
+        [ Alt('h') ] => [ DotExtendBackward(LineStart, 1) ],
+        [ Alt('j') ] => [ DotExtendForward(Line, 1) ],
+        [ Alt('k') ] => [ DotExtendBackward(Line, 1) ],
+        [ Alt('l') ] => [ DotExtendForward(LineEnd, 1) ],
+        // >> objects
         [ Char('W') ] => [ DotExtendForward(Word, 1) ],
         [ Char('B') ] => [ DotExtendBackward(Word, 1) ],
-
-        [ Char('{') ] => [ DotExtendBackward(Paragraph, 1), DotCollapseFirst ],
-        [ Char('}') ] => [ DotExtendForward(Paragraph, 1), DotCollapseLast ],
         [ Alt('{') ] => [ DotExtendBackward(Paragraph, 1) ],
         [ Alt('}') ] => [ DotExtendForward(Paragraph, 1) ],
-
-        [ Ctrl('h') ] => [ DotExtendBackward(LineStart, 1) ],
-        [ Ctrl('l') ] => [ DotExtendForward(LineEnd, 1) ],
 
         // Manipulate dot
         [ Char(';') ] => [ DotFlip ],
