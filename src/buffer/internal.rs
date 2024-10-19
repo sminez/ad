@@ -359,7 +359,7 @@ impl GapBuffer {
     /// An exclusive range of characters from the buffer
     pub fn slice(&self, char_from: usize, char_to: usize) -> Slice<'_> {
         let from = self.char_to_raw_byte(char_from);
-        let to = self.char_to_raw_byte(char_to);
+        let to = self.offset_char_to_raw_byte(char_to, from, char_from);
 
         Slice::from_raw_offsets(from, to, self)
     }
@@ -540,7 +540,10 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
-    /// Remove the requested range (from..to) from the visible region of the buffer
+    /// Remove the requested range (from..to) from the visible region of the buffer.
+    ///
+    /// # Panics
+    /// This method will panic if `char_from < char_to`
     pub fn remove_range(&mut self, char_from: usize, char_to: usize) {
         if char_from == char_to {
             return;
@@ -551,15 +554,14 @@ impl GapBuffer {
             "invalid range: from={char_from} > to={char_to}"
         );
 
-        let from = self.char_to_byte(char_from);
-        let to = self.char_to_byte(char_to);
+        let raw_from = self.char_to_raw_byte(char_from);
+        let from = self.raw_byte_to_byte(raw_from);
+        let to = self.offset_char_to_byte(char_to, raw_from, char_from);
         debug_assert!(from < to, "invalid byte range: from={from} > to={to}");
         self.move_gap_to(from);
 
         let n_bytes = to - from;
-        let byte_from = self.char_to_raw_byte(char_from);
-        let byte_to = self.char_to_raw_byte(char_to);
-        let n_chars = self.chars_in_raw_range(byte_from, byte_to);
+        let n_chars = char_to - char_from;
 
         self.gap_end += n_bytes;
         self.n_chars -= n_chars;
@@ -625,6 +627,9 @@ impl GapBuffer {
     /// We do not require that the data within the gap region is valid utf-8 so it is fine for this
     /// offset to land in the middle of existing multi-byte characters so long as the regions
     /// outside of the gap stay valid utf-8.
+    ///
+    /// # Panics
+    /// This method will panic if the given index is out of bounds
     fn move_gap_to(&mut self, byte_idx: usize) {
         // we need space to fit the current gap size
         assert!(
@@ -675,32 +680,62 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
+    /// Convert a character offset within the logical buffer to a byte offset
+    /// within the logical buffer. This is used to account for multi-byte characters
+    /// within the buffer and is treated as a String-like index but it does not
+    /// account for the position of the gap.
+    #[inline]
     fn char_to_byte(&self, char_idx: usize) -> usize {
-        self.char_to_byte_impl(char_idx, |raw| {
-            if raw > self.gap_start {
-                raw - self.gap()
-            } else {
-                raw
-            }
-        })
+        self.offset_char_to_byte(char_idx, 0, 0)
     }
 
+    #[inline]
+    fn raw_byte_to_byte(&self, raw: usize) -> usize {
+        if raw > self.gap_start {
+            raw - self.gap()
+        } else {
+            raw
+        }
+    }
+
+    #[inline]
+    fn offset_char_to_byte(
+        &self,
+        char_idx: usize,
+        byte_offset: usize,
+        char_offset: usize,
+    ) -> usize {
+        let raw = self.offset_char_to_raw_byte(char_idx, byte_offset, char_offset);
+
+        self.raw_byte_to_byte(raw)
+    }
+
+    /// Convert a character offset within the logical buffer to a raw byte offset
+    /// within the underlying allocation we maintain. This is an absolute index
+    /// into our allocated array that accounts for the position of the gap.
+    #[inline]
     fn char_to_raw_byte(&self, char_idx: usize) -> usize {
-        self.char_to_byte_impl(char_idx, |raw| raw)
+        self.offset_char_to_raw_byte(char_idx, 0, 0)
     }
 
-    fn char_to_byte_impl<F>(&self, char_idx: usize, mut map_raw: F) -> usize
-    where
-        F: FnMut(usize) -> usize,
-    {
-        let mut byte_offset = 0;
-        let mut char_offset = 0;
+    /// Allow for skipping to a given byte index before starting the search as an optimisation when we
+    /// are searching for multiple positions in sequence (e.g. the start and end of a range).
+    fn offset_char_to_raw_byte(
+        &self,
+        char_idx: usize,
+        mut byte_offset: usize,
+        mut char_offset: usize,
+    ) -> usize {
         let mut to = usize::MAX;
 
-        for (&b, &c) in self.line_endings.iter() {
+        for (&b, &c) in self
+            .line_endings
+            .iter()
+            .skip_while(move |(b, _)| **b < byte_offset)
+        {
             match c.cmp(&char_idx) {
                 Ordering::Less => (byte_offset, char_offset) = (b, c),
-                Ordering::Equal => return (map_raw)(b),
+                Ordering::Equal => return b,
                 Ordering::Greater => {
                     to = b;
                     break;
@@ -717,10 +752,10 @@ impl GapBuffer {
         }
 
         if cur > self.gap_start && cur < self.gap_end {
-            (map_raw)(cur + self.gap())
-        } else {
-            (map_raw)(cur)
+            cur += self.gap()
         }
+
+        cur
     }
 }
 
