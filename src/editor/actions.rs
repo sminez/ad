@@ -2,7 +2,7 @@
 use crate::{
     buffer::BufferKind,
     config::Config,
-    config_handle, die,
+    config_handle, 
     dot::{Cur, Dot, Range, TextObject},
     editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
@@ -13,12 +13,12 @@ use crate::{
     replace_config,
     system::System,
     update_config,
+    ui::UserInterface,
     util::gen_help_docs,
 };
 use ad_event::Source;
 use std::{
     env, fs,
-    io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc::Sender,
@@ -336,20 +336,10 @@ where
         }
     }
 
-    pub(super) fn set_cursor_shape_for_active_mode(&mut self) {
-        // FIXME: This should be a message to the UI rather than the editor itself writing to stdout
-        let cur_shape = self.modes[0].cur_shape.to_string();
-        if let Err(e) = self.stdout.write_all(cur_shape.as_bytes()) {
-            // In this situation we're probably not going to be able to do all that much
-            // but we might as well try
-            die!("Unable to write to stdout: {e}");
-        };
-    }
-
     pub(super) fn set_mode(&mut self, name: &str) {
         if let Some((i, _)) = self.modes.iter().enumerate().find(|(_, m)| m.name == name) {
             self.modes.swap(0, i);
-            self.set_cursor_shape_for_active_mode();
+            self.ui.set_cursor_shape(self.current_cursor_shape());
         }
     }
 

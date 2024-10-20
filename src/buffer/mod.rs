@@ -1,18 +1,13 @@
 //! A [Buffer] represents a single file or in memory text buffer open within the editor.
 use crate::{
-    config::ColorScheme,
     config_handle,
-    dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
+    dot::{find::find_forward_wrapping, Cur, Dot, Range, TextObject},
     editor::{Action, ViewPort},
     exec::IterBoundedChars,
     fsys::InputFilter,
-    ftype::{
-        lex::{Token, TokenType, Tokenizer, Tokens},
-        try_tokenizer_for_path,
-    },
+    ftype::{lex::Tokenizer, try_tokenizer_for_path},
     key::Input,
-    term::Style,
-    util::{normalize_line_endings, relative_path_from},
+    util::normalize_line_endings,
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ad_event::Source;
@@ -71,10 +66,13 @@ impl Default for BufferKind {
 }
 
 impl BufferKind {
-    fn display_name(&self, cwd: &Path) -> String {
+    fn display_name(&self) -> String {
         match self {
-            BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
-            BufferKind::Directory(p) => relative_path_from(cwd, p).display().to_string(),
+            // FIXME: remove these
+            // BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
+            // BufferKind::Directory(p) => relative_path_from(cwd, p).display().to_string(),
+            BufferKind::File(p) => p.display().to_string(),
+            BufferKind::Directory(p) => p.display().to_string(),
             BufferKind::Virtual(s) => s.clone(),
             BufferKind::Output(s) => s.clone(),
             BufferKind::Unnamed => UNNAMED_BUFFER.to_string(),
@@ -158,8 +156,8 @@ pub struct Buffer {
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     pub(crate) input_filter: Option<InputFilter>,
+    pub(crate) tokenizer: Option<Tokenizer>,
     edit_log: EditLog,
-    tokenizer: Option<Tokenizer>,
 }
 
 impl Buffer {
@@ -350,8 +348,8 @@ impl Buffer {
     }
 
     /// Short name for displaying in the status line
-    pub fn display_name(&self, cwd: &Path) -> String {
-        let s = self.kind.display_name(cwd);
+    pub fn display_name(&self) -> String {
+        let s = self.kind.display_name();
 
         s[0..min(MAX_NAME_LEN, s.len())].to_string()
     }
@@ -555,135 +553,6 @@ impl Buffer {
         } else {
             Some(self.txt.line(y))
         }
-    }
-
-    /// The render representation of a given line, truncated to fit within the
-    /// available screen space.
-    /// This includes tab expansion but not any styling that might be applied,
-    /// trailing \r\n or screen clearing escape codes.
-    /// If a dot range is provided then the character offsets used will be adjusted
-    /// to account for expanded tab characters, returning None if self.col_off would
-    /// mean that the requested range is not currently visible.
-    pub(crate) fn raw_rline_unchecked(
-        &self,
-        y: usize,
-        lpad: usize,
-        screen_cols: usize,
-        dot_range: Option<(usize, usize)>,
-    ) -> (String, Option<(usize, usize)>) {
-        let max_chars = screen_cols - lpad;
-        let tabstop = config_handle!().tabstop;
-        let mut rline = Vec::with_capacity(max_chars);
-        // Iterating over characters not bytes as we need to account for multi-byte utf8
-        let line = self.txt.line(y);
-        let mut it = line.chars().skip(self.col_off);
-
-        let mut update_dot = dot_range.is_some();
-        let (mut start, mut end) = dot_range.unwrap_or_default();
-
-        if update_dot && self.col_off > end {
-            update_dot = false; // we're past the requested range
-        } else {
-            start = start.saturating_sub(self.col_off);
-            end = end.saturating_sub(self.col_off);
-        }
-
-        while rline.len() <= max_chars {
-            match it.next() {
-                Some('\n') | None => break,
-                Some('\t') => {
-                    if rline.len() < start {
-                        start += tabstop - 1;
-                    }
-                    if rline.len() < end {
-                        end = end.saturating_add(tabstop - 1);
-                    }
-                    rline.append(&mut [' '].repeat(tabstop));
-                }
-                Some(c) => rline.push(c),
-            }
-        }
-
-        rline.truncate(max_chars); // noop if max_chars > rline.len()
-        let n_chars = rline.len();
-        let s = rline.into_iter().collect();
-
-        if update_dot {
-            start = min(start, n_chars);
-            end = min(end, n_chars);
-            (s, Some((start, end)))
-        } else {
-            (s, None)
-        }
-    }
-
-    /// The render representation of a given line, truncated to fit within the
-    /// available screen space.
-    /// This includes tab expansion and any styling that might be applied but not
-    /// trailing \r\n or screen clearing escape codes.
-    pub(crate) fn styled_rline_unchecked(
-        &self,
-        y: usize,
-        lpad: usize,
-        screen_cols: usize,
-        load_exec_range: Option<(bool, Range)>,
-        cs: &ColorScheme,
-    ) -> String {
-        let map_line_range = |lr| match lr {
-            // LineRange is an inclusive range so we need to insert after `end` if its
-            // not the end of the line
-            LineRange::Partial { start, end, .. } => (start, end + 1),
-            LineRange::FromStart { end, .. } => (0, end + 1),
-            LineRange::ToEnd { start, .. } => (start, usize::MAX),
-            LineRange::Full { .. } => (0, usize::MAX),
-        };
-
-        let dot_range = self.dot.line_range(y, self).map(map_line_range);
-        let (rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
-
-        let raw_tks = match &self.tokenizer {
-            Some(t) => t.tokenize(&rline),
-            None => Tokens::Single(Token {
-                ty: TokenType::Default,
-                s: &rline,
-            }),
-        };
-
-        let mut tks = match dot_range {
-            Some((start, end)) => raw_tks.with_highlighted_dot(start, end, TokenType::Dot),
-            None => match raw_tks {
-                Tokens::Single(tk) => vec![tk],
-                Tokens::Multi(tks) => tks,
-            },
-        };
-
-        match load_exec_range {
-            Some((is_load, rng)) if !self.dot.contains_range(&rng) => {
-                if let Some(lr) = rng.line_range(y, self).map(map_line_range) {
-                    if let (_, Some((start, end))) =
-                        self.raw_rline_unchecked(y, lpad, screen_cols, Some(lr))
-                    {
-                        let ty = if is_load {
-                            TokenType::Load
-                        } else {
-                            TokenType::Execute
-                        };
-                        tks = Tokens::Multi(tks).with_highlighted_dot(start, end, ty);
-                    }
-                }
-            }
-
-            _ => (),
-        }
-
-        let mut buf = String::new();
-        for tk in tks.into_iter() {
-            buf.push_str(&tk.render(cs));
-        }
-
-        buf.push_str(&Style::Bg(cs.bg).to_string());
-
-        buf
     }
 
     pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
@@ -1489,31 +1358,6 @@ pub(crate) mod tests {
         b.handle_action(Action::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
-    }
-
-    #[test_case("simple line", None, 0, "simple line", None; "simple line no dot")]
-    #[test_case("simple line", Some((1, 5)), 0, "simple line", Some((1, 5)); "simple line partial")]
-    #[test_case("simple line", Some((0, usize::MAX)), 0, "simple line", Some((0, 11)); "simple line full")]
-    #[test_case("simple line", Some((0, 2)), 4, "le line", None; "scrolled past dot")]
-    #[test_case("simple line", Some((0, 9)), 4, "le line", Some((0, 5)); "scrolled updating dot")]
-    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs", Some((6, 13)); "with tabs")]
-    #[test_case("\twith tabs", Some((0, usize::MAX)), 0, "    with tabs", Some((0, 13)); "with tabs full")]
-    #[test_case("\t\twith tabs", Some((4, usize::MAX)), 0, "        with tabs", Some((10, 17)); "with multiple tabs")]
-    #[test]
-    fn raw_line_unchecked_updates_dot_correctly(
-        line: &str,
-        dot_range: Option<(usize, usize)>,
-        col_off: usize,
-        expected_line: &str,
-        expected_dot_range: Option<(usize, usize)>,
-    ) {
-        let mut b = Buffer::new_unnamed(0, line);
-        b.col_off = col_off;
-
-        let (line, dot_range) = b.raw_rline_unchecked(0, 0, 200, dot_range);
-
-        assert_eq!(line, expected_line);
-        assert_eq!(dot_range, expected_dot_range);
     }
 
     // Tests are executed from the root of the crate so existing file paths are relative to there

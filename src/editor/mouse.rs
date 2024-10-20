@@ -12,13 +12,13 @@ use std::time::Instant;
 /// Transient state that we hold to track the last mouse click we saw while
 /// we wait for it to be released or if the buffer changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct Click {
+pub(crate) struct Click {
     /// The button being held down
-    pub(super) btn: MouseButton,
+    pub(crate) btn: MouseButton,
     /// The current state of the dot associated with this click. This is updated
     /// by Hold events and matches the buffer Dot for Left clicks. For Right and
     /// Middle clicks this is a separate selection that is used on release.
-    pub(super) selection: Range,
+    pub(crate) selection: Range,
     cut_handled: bool,
     paste_handled: bool,
 }

@@ -10,16 +10,15 @@ use crate::{
     key::{Arrow, Input},
     mode::{modes, Mode},
     plumb::PlumbingRules,
-    restore_terminal_state, set_config,
+    set_config,
     system::{DefaultSystem, System},
     term::CurShape,
-    ui::{Tui, Ui},
+    ui::{StateChange, Ui, UserInterface},
     LogBuffer,
 };
 use ad_event::Source;
 use std::{
     env,
-    io::{self, Stdout},
     panic,
     path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
@@ -32,13 +31,11 @@ mod built_in_commands;
 mod commands;
 mod minibuffer;
 mod mouse;
-mod render;
 
 pub(crate) use actions::{Action, Actions, ViewPort};
 pub(crate) use built_in_commands::built_in_commands;
 pub(crate) use minibuffer::{MiniBufferSelection, MiniBufferState};
-
-use mouse::Click;
+pub(crate) use mouse::Click;
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,13 +53,11 @@ where
     S: System,
 {
     system: S,
+    ui: Ui,
     screen_rows: usize,
     screen_cols: usize,
-    stdout: Stdout,
     cwd: PathBuf,
     running: bool,
-    status_message: String,
-    status_time: Instant,
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
@@ -70,23 +65,11 @@ where
     rx_events: Receiver<Event>,
     tx_fsys: Sender<LogEvent>,
     rx_fsys: Option<Receiver<LogEvent>>,
-    mode: EditorMode,
     log_buffer: LogBuffer,
     plumbing_rules: PlumbingRules,
     held_click: Option<Click>,
     last_click_was_left: bool,
     last_click_time: Instant,
-}
-
-impl<S> Drop for Editor<S>
-where
-    S: System,
-{
-    fn drop(&mut self) {
-        if self.mode == EditorMode::Terminal {
-            restore_terminal_state(&mut self.stdout);
-        }
-    }
 }
 
 impl Editor<DefaultSystem> {
@@ -117,7 +100,6 @@ where
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
         };
-        let stdout = io::stdout();
         let (tx_events, rx_events) = channel();
         let (tx_fsys, rx_fsys) = channel();
 
@@ -125,13 +107,11 @@ where
 
         Self {
             system,
+            ui: mode.into(),
             screen_rows: 0,
             screen_cols: 0,
-            stdout,
             cwd,
             running: true,
-            status_message: String::new(),
-            status_time: Instant::now(),
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
@@ -139,7 +119,6 @@ where
             rx_events,
             tx_fsys,
             rx_fsys: Some(rx_fsys),
-            mode,
             log_buffer,
             plumbing_rules,
             held_click: None,
@@ -174,11 +153,7 @@ where
         let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
         AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
         self.ensure_correct_fsys_state();
-
-        match self.mode {
-            EditorMode::Terminal => self.run_tui_event_loop(),
-            EditorMode::Headless => self.run_event_loop(),
-        }
+        self.run_event_loop();
     }
 
     #[inline]
@@ -191,36 +166,43 @@ where
         }
     }
 
-    fn run_event_loop(mut self) {
-        while self.running {
-            match self.rx_events.recv() {
-                Ok(next_event) => self.handle_event(next_event),
-                _ => break,
-            }
-        }
+    pub(super) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
+        self.buffers
+            .active_mut()
+            .clamp_scroll(self.screen_rows, self.screen_cols);
+
+        self.ui.refresh(
+            &self.modes[0].name,
+            &self.buffers,
+            &self.pending_keys,
+            self.held_click.as_ref(),
+            mb,
+        );
     }
 
-    fn run_tui_event_loop(mut self) {
-        let mut ui = Tui::new();
+    fn run_event_loop(mut self) {
         let tx = self.tx_events.clone();
-        ui.init(&mut self, tx);
+        let (screen_rows, screen_cols) = self.ui.init(tx);
+        self.update_window_size(screen_rows, screen_cols);
+        self.ui.set_cursor_shape(self.current_cursor_shape());
 
         while self.running {
-            ui.refresh(&mut self, None);
+            self.refresh_screen_w_minibuffer(None);
+
             match self.rx_events.recv() {
                 Ok(next_event) => self.handle_event(next_event),
                 _ => break,
             }
         }
 
-        ui.shutdown();
+        self.ui.shutdown();
     }
 
     /// Update the status line to contain the given message.
     pub fn set_status_message(&mut self, msg: &str) {
-        self.status_message.clear();
-        self.status_message.push_str(msg);
-        self.status_time = Instant::now();
+        self.ui.state_change(StateChange::StatusMessage {
+            msg: msg.to_string(),
+        });
     }
 
     pub(crate) fn current_cursor_shape(&self) -> CurShape {
