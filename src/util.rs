@@ -1,9 +1,6 @@
 //! Utility functions
 use crate::editor::built_in_commands;
-use std::{
-    iter::Peekable,
-    str::Chars,
-};
+use std::{iter::Peekable, str::Chars};
 use tracing::warn;
 
 /// Pull in data from the ad crate itself to auto-generate the docs on the functionality
@@ -55,4 +52,3 @@ pub(crate) fn normalize_line_endings(mut s: String) -> String {
     s = s.replace("\r\n", "\n");
     s.replace("\r", "\n")
 }
-

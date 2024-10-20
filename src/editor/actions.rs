@@ -2,7 +2,7 @@
 use crate::{
     buffer::BufferKind,
     config::Config,
-    config_handle, 
+    config_handle,
     dot::{Cur, Dot, Range, TextObject},
     editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
@@ -12,8 +12,8 @@ use crate::{
     plumb::{MatchOutcome, PlumbingMessage},
     replace_config,
     system::System,
-    update_config,
     ui::UserInterface,
+    update_config,
     util::gen_help_docs,
 };
 use ad_event::Source;
@@ -162,6 +162,8 @@ where
                 }
                 _ = self.tx_fsys.send(LogEvent::Open(new_id));
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
+                self.windows
+                    .focus_buffer_in_active_window(self.buffers.active());
             }
 
             Ok(None) => {
@@ -179,6 +181,8 @@ where
                 let id = self.active_buffer_id();
                 if id != current_id {
                     _ = self.tx_fsys.send(LogEvent::Focus(id));
+                    self.windows
+                        .focus_buffer_in_active_window(self.buffers.active());
                 }
             }
         };

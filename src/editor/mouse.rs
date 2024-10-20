@@ -76,7 +76,9 @@ where
                 }
 
                 let b = self.buffers.active_mut();
-                b.set_dot_from_screen_coords(x, y);
+                self.windows
+                    .focused_view_mut()
+                    .set_dot_from_screen_coords(b, x, y);
 
                 if self.last_click_was_left {
                     let delta = (self.last_click_time - last_click_time).as_millis();
@@ -99,7 +101,11 @@ where
                         return;
                     }
 
-                    let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                    let cur = self.windows.focused_view_mut().cur_from_screen_coords(
+                        self.buffers.active_mut(),
+                        x,
+                        y,
+                    );
                     click.selection.set_active_cursor(cur);
 
                     if click.btn == Left {
@@ -110,12 +116,12 @@ where
 
             MouseEvent::Press { b: WheelUp, .. } => {
                 self.last_click_was_left = false;
-                self.buffers.active_mut().scroll_up(self.screen_rows);
+                self.windows.scroll_up(self.buffers.active_mut());
             }
 
             MouseEvent::Press { b: WheelDown, .. } => {
                 self.last_click_was_left = false;
-                self.buffers.active_mut().scroll_down();
+                self.windows.scroll_down(self.buffers.active_mut());
             }
 
             MouseEvent::Release { b, x, y } => {
@@ -134,7 +140,11 @@ where
                     return;
                 }
 
-                let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+                let cur = self.windows.focused_view_mut().cur_from_screen_coords(
+                    self.buffers.active_mut(),
+                    x,
+                    y,
+                );
                 click.selection.set_active_cursor(cur);
 
                 match click.btn {
@@ -149,7 +159,10 @@ where
 
     #[inline]
     fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
-        let cur = self.buffers.active_mut().cur_from_screen_coords(x, y);
+        let cur =
+            self.windows
+                .focused_view_mut()
+                .cur_from_screen_coords(self.buffers.active_mut(), x, y);
 
         Click::new(btn, Range::from_cursors(cur, cur, false))
     }

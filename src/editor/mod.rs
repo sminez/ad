@@ -13,13 +13,12 @@ use crate::{
     set_config,
     system::{DefaultSystem, System},
     term::CurShape,
-    ui::{StateChange, Ui, UserInterface},
+    ui::{StateChange, Ui, UserInterface, Windows},
     LogBuffer,
 };
 use ad_event::Source;
 use std::{
-    env,
-    panic,
+    env, panic,
     path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
@@ -54,13 +53,12 @@ where
 {
     system: S,
     ui: Ui,
-    screen_rows: usize,
-    screen_cols: usize,
     cwd: PathBuf,
     running: bool,
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
+    windows: Windows,
     tx_events: Sender<Event>,
     rx_events: Receiver<Event>,
     tx_fsys: Sender<LogEvent>,
@@ -108,13 +106,12 @@ where
         Self {
             system,
             ui: mode.into(),
-            screen_rows: 0,
-            screen_cols: 0,
             cwd,
             running: true,
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
+            windows: Windows::new(0, 0, 0),
             tx_events,
             rx_events,
             tx_fsys,
@@ -136,8 +133,8 @@ where
     /// This will panic if the available screen rows are 0 or 1
     pub(crate) fn update_window_size(&mut self, screen_rows: usize, screen_cols: usize) {
         trace!("window size updated: rows={screen_rows} cols={screen_cols}");
-        self.screen_rows = screen_rows - 2;
-        self.screen_cols = screen_cols;
+        self.windows
+            .update_screen_size(screen_rows - 2, screen_cols);
     }
 
     /// Ensure that opening without any files initialises the fsys state correctly
@@ -167,13 +164,11 @@ where
     }
 
     pub(super) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
-        self.buffers
-            .active_mut()
-            .clamp_scroll(self.screen_rows, self.screen_cols);
-
+        self.windows.clamp_scroll(self.buffers.active());
         self.ui.refresh(
             &self.modes[0].name,
             &self.buffers,
+            &self.windows,
             &self.pending_keys,
             self.held_click.as_ref(),
             mb,
@@ -416,11 +411,7 @@ where
             SelectBuffer => self.select_buffer(),
             SetMode { m } => self.set_mode(m),
             SetStatusMessage { message } => self.set_status_message(&message),
-            SetViewPort(vp) => {
-                self.buffers
-                    .active_mut()
-                    .set_view_port(vp, self.screen_rows, self.screen_cols)
-            }
+            SetViewPort(vp) => self.windows.set_viewport(self.buffers.active(), vp),
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
@@ -440,7 +431,7 @@ where
                 };
 
                 self.forward_action_to_active_buffer(
-                    DotSet(TextObject::Arr(arr), self.screen_rows),
+                    DotSet(TextObject::Arr(arr), self.windows.active_window_rows()),
                     Source::Keyboard,
                 );
             }
@@ -453,20 +444,28 @@ where
     }
 
     fn jump_forward(&mut self) {
-        let maybe_id = self
-            .buffers
-            .jump_list_forward(self.screen_rows, self.screen_cols);
-        if let Some(id) = maybe_id {
-            _ = self.tx_fsys.send(LogEvent::Focus(id));
+        let maybe_ids = self.buffers.jump_list_forward();
+        if let Some((prev_id, new_id)) = maybe_ids {
+            if let Some(b) = self.buffers.with_id(new_id) {
+                self.windows.set_viewport(b, ViewPort::Center);
+                self.windows.focus_buffer_in_active_window(b);
+            }
+            if new_id != prev_id {
+                _ = self.tx_fsys.send(LogEvent::Focus(new_id));
+            }
         }
     }
 
     fn jump_backward(&mut self) {
-        let maybe_id = self
-            .buffers
-            .jump_list_backward(self.screen_rows, self.screen_cols);
-        if let Some(id) = maybe_id {
-            _ = self.tx_fsys.send(LogEvent::Focus(id));
+        let maybe_ids = self.buffers.jump_list_backward();
+        if let Some((prev_id, new_id)) = maybe_ids {
+            if let Some(b) = self.buffers.with_id(new_id) {
+                self.windows.set_viewport(b, ViewPort::Center);
+                self.windows.focus_buffer_in_active_window(b);
+            }
+            if new_id != prev_id {
+                _ = self.tx_fsys.send(LogEvent::Focus(new_id));
+            }
         }
     }
 

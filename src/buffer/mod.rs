@@ -2,7 +2,7 @@
 use crate::{
     config_handle,
     dot::{find::find_forward_wrapping, Cur, Dot, Range, TextObject},
-    editor::{Action, ViewPort},
+    editor::Action,
     exec::IterBoundedChars,
     fsys::InputFilter,
     ftype::{lex::Tokenizer, try_tokenizer_for_path},
@@ -19,7 +19,6 @@ use std::{
     time::SystemTime,
 };
 use tracing::debug;
-use unicode_width::UnicodeWidthChar;
 
 mod buffers;
 mod edit;
@@ -150,9 +149,7 @@ pub struct Buffer {
     pub(crate) dot: Dot,
     pub(crate) xdot: Dot,
     pub(crate) txt: GapBuffer,
-    pub(crate) rx: usize,
-    pub(crate) row_off: usize,
-    pub(crate) col_off: usize,
+    pub(crate) cached_rx: usize,
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     pub(crate) input_filter: Option<InputFilter>,
@@ -172,9 +169,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(raw),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -270,9 +265,7 @@ impl Buffer {
             dot: Default::default(),
             xdot: Default::default(),
             txt: GapBuffer::from(""),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: Default::default(),
@@ -289,9 +282,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(normalize_line_endings(content.to_string())),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -316,9 +307,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(content),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -336,9 +325,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(normalize_line_endings(content)),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -454,61 +441,8 @@ impl Buffer {
         self.edit_log.debug_edits(self)
     }
 
-    /// Clamp the current viewport to include the [Dot].
-    pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
-        let (y, x) = self.dot.active_cur().as_yx(self);
-        self.rx = self.rx_from_x(y, x);
-
-        if y < self.row_off {
-            self.row_off = y;
-        }
-
-        if y >= self.row_off + screen_rows {
-            self.row_off = y - screen_rows + 1;
-        }
-
-        if self.rx < self.col_off {
-            self.col_off = self.rx;
-        }
-
-        if self.rx >= self.col_off + screen_cols {
-            self.col_off = self.rx - screen_cols + 1;
-        }
-    }
-
-    /// Set the current [ViewPort] while accounting for screen size.
-    pub fn set_view_port(&mut self, vp: ViewPort, screen_rows: usize, screen_cols: usize) {
-        let (y, _) = self.dot.active_cur().as_yx(self);
-
-        self.row_off = match vp {
-            ViewPort::Top => y,
-            ViewPort::Center => y.saturating_sub(screen_rows / 2),
-            ViewPort::Bottom => y.saturating_sub(screen_rows),
-        };
-
-        self.clamp_scroll(screen_rows, screen_cols);
-    }
-
-    pub(crate) fn rx_from_x(&self, y: usize, x: usize) -> usize {
-        if y >= self.len_lines() {
-            return 0;
-        }
-
-        let tabstop = config_handle!().tabstop;
-
-        let mut rx = 0;
-        for c in self.txt.line(y).chars().take(x) {
-            if c == '\t' {
-                rx += (tabstop - 1) - (rx % tabstop);
-            }
-            rx += UnicodeWidthChar::width(c).unwrap_or(1);
-        }
-
-        rx
-    }
-
     pub(crate) fn x_from_rx(&self, y: usize) -> usize {
-        self.x_from_provided_rx(y, self.rx)
+        self.x_from_provided_rx(y, self.cached_rx)
     }
 
     pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
@@ -539,13 +473,6 @@ impl Buffer {
         cx
     }
 
-    pub(crate) fn ui_xy(&self) -> (usize, usize) {
-        let (_, w_sgncol) = self.sign_col_dims();
-        let (y, _) = self.dot.active_cur().as_yx(self);
-
-        (self.rx - self.col_off + w_sgncol, y - self.row_off)
-    }
-
     /// The line at the requested index returned as a [Slice].
     pub fn line(&self, y: usize) -> Option<Slice<'_>> {
         if y >= self.len_lines() {
@@ -553,13 +480,6 @@ impl Buffer {
         } else {
             Some(self.txt.line(y))
         }
-    }
-
-    pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
-        let w_lnum = n_digits(self.len_lines());
-        let w_sgncol = w_lnum + 2;
-
-        (w_lnum, w_sgncol)
     }
 
     /// Attempt to expand from the given cursor position so long as either the previous or next
@@ -720,54 +640,11 @@ impl Buffer {
         None
     }
 
-    #[inline]
-    fn set_rx_from_screen_rows(&mut self, x: usize) {
-        self.rx = self.rx_from_screen_rows(x);
-    }
+    pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
+        let w_lnum = n_digits(self.len_lines());
+        let w_sgncol = w_lnum + 2;
 
-    #[inline]
-    pub(crate) fn rx_from_screen_rows(&self, x: usize) -> usize {
-        let (_, w_sgncol) = self.sign_col_dims();
-        x.saturating_sub(1).saturating_sub(w_sgncol)
-    }
-
-    pub(crate) fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> Cur {
-        self.set_rx_from_screen_rows(x);
-        let y = min(y + self.row_off, self.len_lines()).saturating_sub(1);
-        let mut cur = Cur::from_yx(y, self.x_from_provided_rx(y, self.rx), self);
-
-        cur.clamp_idx(self.txt.len_chars());
-
-        cur
-    }
-
-    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) {
-        self.dot = Dot::Cur {
-            c: self.cur_from_screen_coords(x, y),
-        };
-    }
-
-    pub(crate) fn scroll_up(&mut self, screen_rows: usize) {
-        let c = self.dot.active_cur();
-        let (y, x) = c.as_yx(self);
-        if self.row_off > 0 && y == self.row_off + screen_rows - 1 {
-            self.dot.set_active_cur(Cur::from_yx(y - 1, x, self));
-        }
-
-        // clamp scroll is called when we render so no need to run it here as well
-        self.row_off = self.row_off.saturating_sub(1);
-    }
-
-    pub(crate) fn scroll_down(&mut self) {
-        let c = self.dot.active_cur();
-        let (y, x) = c.as_yx(self);
-        if y == self.row_off && self.row_off < self.txt.len_lines() - 1 {
-            self.dot.set_active_cur(Cur::from_yx(y + 1, x, self));
-            self.dot.clamp_idx(self.txt.len_chars());
-        }
-
-        // clamp scroll is called when we render so no need to run it here as well
-        self.row_off += 1;
+        (w_lnum, w_sgncol)
     }
 
     pub(crate) fn append(&mut self, s: String, source: Source) {
@@ -1114,6 +991,9 @@ pub(crate) mod tests {
     use simple_test_case::test_case;
     use std::env;
 
+    const LINE_1: &str = "This is a test";
+    const LINE_2: &str = "involving multiple lines";
+
     #[test_case(0, 1; "n0")]
     #[test_case(5, 1; "n5")]
     #[test_case(10, 2; "n10")]
@@ -1124,9 +1004,6 @@ pub(crate) mod tests {
     fn n_digits_works(n: usize, digits: usize) {
         assert_eq!(n_digits(n), digits);
     }
-
-    const LINE_1: &str = "This is a test";
-    const LINE_2: &str = "involving multiple lines";
 
     pub fn buffer_from_lines(lines: &[&str]) -> Buffer {
         let mut b = Buffer::new_unnamed(0, "");
@@ -1422,34 +1299,5 @@ pub(crate) mod tests {
         b.insert_char(Dot::Cur { c: c(0) }, ch, None);
         // we force a trailing newline so account for that as well
         assert_eq!(b.str_contents(), format!("{expected}\n"));
-    }
-
-    // NOTE: there was a bug around misunderstanding terminal "cells" in relation to
-    //       wide unicode characters
-    //       - https://github.com/crossterm-rs/crossterm/issues/458
-    //       - https://github.com/unicode-rs/unicode-width
-    #[test]
-    fn ui_xy_correctly_handles_multibyte_characters() {
-        let s = "abc 世界 🦊";
-        // unicode display width for each character
-        let widths = &[1, 1, 1, 1, 2, 2, 1, 2];
-        let mut b = Buffer::new_virtual(0, "test", s);
-        let mut offset = 0;
-
-        // sign column offset is 3
-        for (idx, ch) in s.chars().enumerate() {
-            assert_eq!(b.dot_contents(), ch.to_string());
-            assert_eq!(b.dot, Dot::Cur { c: Cur { idx } });
-            assert_eq!(
-                b.ui_xy(),
-                (3 + offset, 0),
-                "idx={idx} content={:?}",
-                b.dot_contents()
-            );
-
-            b.set_dot(TextObject::Arr(Arrow::Right), 1);
-            b.clamp_scroll(80, 80);
-            offset += widths[idx];
-        }
     }
 }

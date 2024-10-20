@@ -14,7 +14,7 @@ use crate::{
         get_termsize, register_signal_handler, win_size_changed, CurShape,
     },
     term::{Cursor, Style},
-    ui::{StateChange, UserInterface},
+    ui::{windows::View, StateChange, UserInterface, Windows},
     ORIGINAL_TERMIOS, VERSION,
 };
 use std::{
@@ -61,6 +61,7 @@ impl Tui {
     }
 
     /// Returns the width of the sign column
+    #[allow(clippy::too_many_arguments)]
     fn render_rows(
         &mut self,
         buf: &mut String,
@@ -68,6 +69,7 @@ impl Tui {
         load_exec_range: Option<(bool, Range)>,
         cs: &ColorScheme,
         b: &Buffer,
+        view: &View,
         empty_scratch: bool,
     ) {
         let (w_lnum, w_sgncol) = b.sign_col_dims();
@@ -80,7 +82,7 @@ impl Tui {
         };
 
         for y in 0..screen_rows {
-            let file_row = y + b.row_off;
+            let file_row = y + view.row_off;
 
             if file_row >= b.len_lines() {
                 buf.push_str(&format!(
@@ -109,6 +111,7 @@ impl Tui {
                     Style::Fg(cs.fg),
                     styled_rline_unchecked(
                         b,
+                        view,
                         file_row,
                         padding,
                         self.screen_cols,
@@ -190,7 +193,8 @@ impl Tui {
             let width = self.screen_cols;
 
             for i in top..=bottom {
-                let (rline, _) = raw_rline_unchecked(b, i, 0, self.screen_cols, None);
+                let (rline, _) =
+                    raw_rline_unchecked(b, &View::new(0), i, 0, self.screen_cols, None);
                 let len = min(self.screen_cols, rline.len());
                 if i == selected_line_idx {
                     buf.push_str(&format!(
@@ -271,6 +275,7 @@ impl UserInterface for Tui {
         &mut self,
         mode_name: &str,
         buffers: &Buffers,
+        windows: &Windows,
         pending_keys: &[Input],
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
@@ -278,7 +283,7 @@ impl UserInterface for Tui {
         let w_minibuffer = mb.is_some();
         let MiniBufferState {
             cx,
-            cy,
+            n_visible_lines,
             selected_line_idx,
             prompt,
             input,
@@ -287,6 +292,7 @@ impl UserInterface for Tui {
             bottom,
         } = mb.unwrap_or_default();
         let active_buffer = buffers.active();
+        let view = windows.focused_view();
         let empty_scratch = buffers.is_empty_scratch();
 
         let mb_lines = b.map(|b| b.len_lines()).unwrap_or_default();
@@ -312,6 +318,7 @@ impl UserInterface for Tui {
             load_exec_range,
             &cs,
             active_buffer,
+            view,
             empty_scratch,
         );
         self.render_status_bar(&mut buf, &cs, mode_name, active_buffer);
@@ -331,9 +338,9 @@ impl UserInterface for Tui {
         }
 
         let (x, y) = if w_minibuffer {
-            (cx, cy)
+            (cx, self.screen_rows + n_visible_lines + 1)
         } else {
-            active_buffer.ui_xy()
+            view.ui_xy(active_buffer)
         };
 
         buf.push_str(&format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
@@ -398,6 +405,7 @@ fn render_pending(keys: &[Input]) -> String {
 /// mean that the requested range is not currently visible.
 fn raw_rline_unchecked(
     b: &Buffer,
+    view: &View,
     y: usize,
     lpad: usize,
     screen_cols: usize,
@@ -408,16 +416,16 @@ fn raw_rline_unchecked(
     let mut rline = Vec::with_capacity(max_chars);
     // Iterating over characters not bytes as we need to account for multi-byte utf8
     let line = b.txt.line(y);
-    let mut it = line.chars().skip(b.col_off);
+    let mut it = line.chars().skip(view.col_off);
 
     let mut update_dot = dot_range.is_some();
     let (mut start, mut end) = dot_range.unwrap_or_default();
 
-    if update_dot && b.col_off > end {
+    if update_dot && view.col_off > end {
         update_dot = false; // we're past the requested range
     } else {
-        start = start.saturating_sub(b.col_off);
-        end = end.saturating_sub(b.col_off);
+        start = start.saturating_sub(view.col_off);
+        end = end.saturating_sub(view.col_off);
     }
 
     while rline.len() <= max_chars {
@@ -455,6 +463,7 @@ fn raw_rline_unchecked(
 /// trailing \r\n or screen clearing escape codes.
 fn styled_rline_unchecked(
     b: &Buffer,
+    view: &View,
     y: usize,
     lpad: usize,
     screen_cols: usize,
@@ -471,7 +480,7 @@ fn styled_rline_unchecked(
     };
 
     let dot_range = b.dot.line_range(y, b).map(map_line_range);
-    let (rline, dot_range) = raw_rline_unchecked(b, y, lpad, screen_cols, dot_range);
+    let (rline, dot_range) = raw_rline_unchecked(b, view, y, lpad, screen_cols, dot_range);
 
     let raw_tks = match &b.tokenizer {
         Some(t) => t.tokenize(&rline),
@@ -493,7 +502,7 @@ fn styled_rline_unchecked(
         Some((is_load, rng)) if !b.dot.contains_range(&rng) => {
             if let Some(lr) = rng.line_range(y, b).map(map_line_range) {
                 if let (_, Some((start, end))) =
-                    raw_rline_unchecked(b, y, lpad, screen_cols, Some(lr))
+                    raw_rline_unchecked(b, view, y, lpad, screen_cols, Some(lr))
                 {
                     let ty = if is_load {
                         TokenType::Load
@@ -618,10 +627,11 @@ mod tests {
         expected_line: &str,
         expected_dot_range: Option<(usize, usize)>,
     ) {
-        let mut b = Buffer::new_unnamed(0, line);
-        b.col_off = col_off;
+        let b = Buffer::new_unnamed(0, line);
+        let mut view = View::new(0);
+        view.col_off = col_off;
 
-        let (line, dot_range) = raw_rline_unchecked(&b, 0, 0, 200, dot_range);
+        let (line, dot_range) = raw_rline_unchecked(&b, &view, 0, 0, 200, dot_range);
 
         assert_eq!(line, expected_line);
         assert_eq!(dot_range, expected_dot_range);

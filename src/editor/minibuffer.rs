@@ -16,7 +16,7 @@ use tracing::trace;
 #[derive(Debug, Default)]
 pub(crate) struct MiniBufferState<'a> {
     pub(crate) cx: usize,
-    pub(crate) cy: usize,
+    pub(crate) n_visible_lines: usize,
     pub(crate) selected_line_idx: usize,
     pub(crate) prompt: &'a str,
     pub(crate) input: &'a str,
@@ -148,10 +148,10 @@ where
     }
 
     #[inline]
-    fn current_state(&self, screen_rows: usize) -> MiniBufferState<'_> {
+    fn current_state(&self) -> MiniBufferState<'_> {
         MiniBufferState {
             cx: self.x + self.prompt.len(),
-            cy: screen_rows + self.n_visible_lines + 1,
+            n_visible_lines: self.n_visible_lines,
             prompt: &self.prompt,
             input: &self.input,
             selected_line_idx: self.selected_line_idx,
@@ -243,7 +243,7 @@ where
 
         loop {
             mb.update_state();
-            self.refresh_screen_w_minibuffer(Some(mb.current_state(self.screen_rows)));
+            self.refresh_screen_w_minibuffer(Some(mb.current_state()));
             let input = self.block_for_input();
             if let Some(selection) = mb.handle_input(input) {
                 return selection;
