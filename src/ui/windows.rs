@@ -73,7 +73,7 @@ impl Windows {
         let w_col = cols / self.cols.len();
         let slop = cols - (w_col * self.cols.len());
 
-        for col in self.cols.iter_mut() {
+        for (_, col) in self.cols.iter_mut() {
             col.update_size(w_col, rows);
         }
 
@@ -123,7 +123,7 @@ impl Windows {
         view.row_off += 1;
     }
 
-    pub(crate) fn clamp_scroll(&mut self, b: &Buffer) {
+    pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer) {
         let (rows, cols) = (self.screen_rows, self.screen_cols);
 
         if self.focused_view().bufid == b.id {
@@ -131,8 +131,8 @@ impl Windows {
             return;
         }
 
-        for col in self.cols.iter_mut() {
-            for win in col.wins.iter_mut() {
+        for (_, col) in self.cols.iter_mut() {
+            for (_, win) in col.wins.iter_mut() {
                 if win.view.bufid == b.id {
                     win.view.clamp_scroll(b, rows, cols);
                     return;
@@ -141,7 +141,7 @@ impl Windows {
         }
     }
 
-    pub(crate) fn set_viewport(&mut self, b: &Buffer, vp: ViewPort) {
+    pub(crate) fn set_viewport(&mut self, b: &mut Buffer, vp: ViewPort) {
         let (rows, cols) = (self.screen_rows, self.screen_cols);
 
         if self.focused_view().bufid == b.id {
@@ -149,8 +149,8 @@ impl Windows {
             return;
         }
 
-        for col in self.cols.iter_mut() {
-            for win in col.wins.iter_mut() {
+        for (_, col) in self.cols.iter_mut() {
+            for (_, win) in col.wins.iter_mut() {
                 if win.view.bufid == b.id {
                     win.view.set_viewport(b, vp, rows, cols);
                     return;
@@ -163,9 +163,9 @@ impl Windows {
 #[derive(Debug)]
 pub(crate) struct Column {
     /// Number of character columns wide
-    n_cols: usize,
+    pub(crate) n_cols: usize,
     /// Windows within this column
-    wins: Stack<Window>,
+    pub(crate) wins: Stack<Window>,
 }
 
 impl Column {
@@ -183,7 +183,7 @@ impl Column {
         self.n_cols = n_cols;
         let win_rows = n_rows / self.wins.len();
 
-        for win in self.wins.iter_mut() {
+        for (_, win) in self.wins.iter_mut() {
             win.n_rows = win_rows;
         }
 
@@ -195,9 +195,9 @@ impl Column {
 #[derive(Debug)]
 pub(crate) struct Window {
     /// Number of character rows high
-    n_rows: usize,
+    pub(crate) n_rows: usize,
     /// Buffer view details currently shown in this window
-    view: View,
+    pub(crate) view: View,
 }
 
 impl Window {
@@ -253,9 +253,10 @@ impl View {
     }
 
     /// Clamp the current viewport to include the [Dot].
-    pub(crate) fn clamp_scroll(&mut self, b: &Buffer, screen_rows: usize, screen_cols: usize) {
+    pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer, screen_rows: usize, screen_cols: usize) {
         let (y, x) = b.dot.active_cur().as_yx(b);
         self.rx = self.rx_from_x(b, y, x);
+        b.cached_rx = self.rx;
 
         if y < self.row_off {
             self.row_off = y;
@@ -277,7 +278,7 @@ impl View {
     /// Set the current [ViewPort] while accounting for screen size.
     pub(crate) fn set_viewport(
         &mut self,
-        b: &Buffer,
+        b: &mut Buffer,
         vp: ViewPort,
         screen_rows: usize,
         screen_cols: usize,
@@ -355,7 +356,7 @@ mod tests {
             );
 
             b.set_dot(TextObject::Arr(Arrow::Right), 1);
-            view.clamp_scroll(&b, 80, 80);
+            view.clamp_scroll(&mut b, 80, 80);
             offset += widths[idx];
         }
     }

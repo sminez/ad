@@ -30,7 +30,7 @@ use std::{
 };
 
 const VLINE: char = '│';
-const HLINE: char = '-';
+const HLINE: &str = "-";
 
 #[derive(Debug)]
 pub struct Tui {
@@ -68,20 +68,20 @@ impl Tui {
     fn render_window(
         &self,
         b: &Buffer,
-        view: &View,
-        n_rows: usize,
+        w: &Window,
+        n_cols: usize,
         load_exec_range: Option<(bool, Range)>,
         cs: &ColorScheme,
     ) -> Vec<String> {
-        let mut lines = Vec::with_capacity(n_rows);
-        let (w_lnum, w_sgncol) = b.sign_col_dims();
+        let mut lines = Vec::with_capacity(w.n_rows);
+        let (w_lnum, _) = b.sign_col_dims();
 
-        for y in 0..n_rows {
-            let file_row = y + view.row_off;
+        for y in 0..w.n_rows {
+            let file_row = y + w.view.row_off;
 
             if file_row >= b.len_lines() {
                 lines.push(format!(
-                    "{}{}~ {VLINE:>width$}{}", // pad whitespace to view width
+                    "{}{}~ {VLINE:>width$}{}", // FIXME: pad whitespace to view width
                     Style::Fg(cs.signcol_fg),
                     Style::Bg(cs.bg),
                     Style::Fg(cs.fg),
@@ -98,10 +98,10 @@ impl Tui {
                     Style::Fg(cs.fg),
                     styled_rline_unchecked(
                         b,
-                        view,
+                        &w.view,
                         file_row,
                         padding,
-                        self.screen_cols,
+                        n_cols,
                         load_exec_range,
                         cs
                     ),
@@ -117,17 +117,23 @@ impl Tui {
     /// mark the boundaries between windows.
     fn render_column(
         &self,
-        _col: &Column,
-        _buffers: &Buffers,
-        _load_exec_range: Option<(bool, Range)>,
-        _screen_rows: usize,
-        _cs: &ColorScheme,
+        col: &Column,
+        buffers: &Buffers,
+        load_exec_range: Option<(bool, Range)>,
+        screen_rows: usize,
+        cs: &ColorScheme,
     ) -> Vec<String> {
-        // - Cut off the _bottom_ of the column based on available screen rows if they are less than
-        //   expected thanks to the presence of a minibuffer.
-        // - For each window in the column, produce rows for the available viewport
-        // - insert '-' * col.n_cols to split each window
-        todo!()
+        let mut rendered_rows = Vec::with_capacity(screen_rows);
+        
+         for (is_focus, win) in col.wins.iter() {
+            let rng = if is_focus { load_exec_range } else { None };
+            let b = buffers.with_id(win.view.bufid).expect("valid buffer id");
+            rendered_rows.extend(self.render_window(b, win, col.n_cols, rng, cs));
+            rendered_rows.push(HLINE.repeat(col.n_cols));
+         }
+        rendered_rows.truncate(screen_rows);
+
+        rendered_rows
     }
 
     fn render_banner(&self, screen_rows: usize, cs: &ColorScheme) -> Vec<String> {
@@ -182,14 +188,17 @@ impl Tui {
         let mut rendered_cols: Vec<Vec<String>> = windows
             .cols
             .iter()
-            .map(|col| self.render_column(col, buffers, load_exec_range, screen_rows, cs))
+            .map(|(is_focus, col)| {
+                let rng = if is_focus { load_exec_range } else { None };
+                self.render_column(col, buffers, rng, screen_rows, cs)
+            })
             .collect();
 
         let mut lines = Vec::with_capacity(screen_rows);
         for _ in 0..screen_rows {
             let mut line_fragments = Vec::with_capacity(rendered_cols.len() + 1);
-            for i in 0..rendered_cols.len() {
-                line_fragments.push(rendered_cols[i].remove(0));
+            for col in rendered_cols.iter_mut() {
+                line_fragments.push(col.remove(0));
             }
             let mut buf = line_fragments.join(&format!(
                 "{}{}{VLINE}",

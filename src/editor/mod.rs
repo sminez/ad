@@ -164,7 +164,7 @@ where
     }
 
     pub(super) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
-        self.windows.clamp_scroll(self.buffers.active());
+        self.windows.clamp_scroll(self.buffers.active_mut());
         self.ui.refresh(
             &self.modes[0].name,
             &self.buffers,
@@ -411,7 +411,7 @@ where
             SelectBuffer => self.select_buffer(),
             SetMode { m } => self.set_mode(m),
             SetStatusMessage { message } => self.set_status_message(&message),
-            SetViewPort(vp) => self.windows.set_viewport(self.buffers.active(), vp),
+            SetViewPort(vp) => self.windows.set_viewport(self.buffers.active_mut(), vp),
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
@@ -446,7 +446,7 @@ where
     fn jump_forward(&mut self) {
         let maybe_ids = self.buffers.jump_list_forward();
         if let Some((prev_id, new_id)) = maybe_ids {
-            if let Some(b) = self.buffers.with_id(new_id) {
+            if let Some(b) = self.buffers.with_id_mut(new_id) {
                 self.windows.set_viewport(b, ViewPort::Center);
                 self.windows.focus_buffer_in_active_window(b);
             }
@@ -459,7 +459,7 @@ where
     fn jump_backward(&mut self) {
         let maybe_ids = self.buffers.jump_list_backward();
         if let Some((prev_id, new_id)) = maybe_ids {
-            if let Some(b) = self.buffers.with_id(new_id) {
+            if let Some(b) = self.buffers.with_id_mut(new_id) {
                 self.windows.set_viewport(b, ViewPort::Center);
                 self.windows.focus_buffer_in_active_window(b);
             }

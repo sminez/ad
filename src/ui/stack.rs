@@ -169,7 +169,7 @@ impl<T> Stack<T> {
     /// Flatten a Stack into a Vector, losing the information of which
     /// element is focused.
     pub fn flatten(self) -> Vec<T> {
-        self.into_iter().collect()
+        self.into_iter().map(|(_, t)| t).collect()
     }
 
     /// Return a reference to the first element in this [Stack]
@@ -550,30 +550,31 @@ impl<T: PartialEq> Stack<T> {
 /// An owned iterator over a [Stack].
 #[derive(Debug)]
 pub struct IntoIter<T> {
-    focus: Option<T>,
     up: VecDeque<T>,
+    focus: Option<T>,
     down: VecDeque<T>,
 }
 
 impl<T> Iterator for IntoIter<T> {
-    type Item = T;
+    type Item = (bool, T);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.up
             .pop_back()
-            .or_else(|| self.focus.take())
-            .or_else(|| self.down.pop_front())
+            .map(|t| (false, t))
+            .or_else(|| self.focus.take().map(|t| (true, t)))
+            .or_else(|| self.down.pop_front().map(|t| (false, t)))
     }
 }
 
 impl<T> IntoIterator for Stack<T> {
-    type Item = T;
+    type Item = (bool, T);
     type IntoIter = IntoIter<T>;
 
     fn into_iter(self) -> IntoIter<T> {
         IntoIter {
-            focus: Some(self.focus),
             up: self.up,
+            focus: Some(self.focus),
             down: self.down,
         }
     }
@@ -588,18 +589,19 @@ pub struct Iter<'a, T> {
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
-    type Item = &'a T;
+    type Item = (bool, &'a T);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.up
             .next_back()
-            .or_else(|| self.focus.take())
-            .or_else(|| self.down.next())
+            .map(|t| (false, t))
+            .or_else(|| self.focus.take().map(|t| (true, t)))
+            .or_else(|| self.down.next().map(|t| (false, t)))
     }
 }
 
 impl<'a, T> IntoIterator for &'a Stack<T> {
-    type Item = &'a T;
+    type Item = (bool, &'a T);
     type IntoIter = Iter<'a, T>;
 
     fn into_iter(self) -> Iter<'a, T> {
@@ -610,24 +612,25 @@ impl<'a, T> IntoIterator for &'a Stack<T> {
 /// A mutable iterator over a [Stack].
 #[derive(Debug)]
 pub struct IterMut<'a, T> {
-    focus: Option<&'a mut T>,
     up: vec_deque::IterMut<'a, T>,
+    focus: Option<&'a mut T>,
     down: vec_deque::IterMut<'a, T>,
 }
 
 impl<'a, T> Iterator for IterMut<'a, T> {
-    type Item = &'a mut T;
+    type Item = (bool, &'a mut T);
 
     fn next(&mut self) -> Option<Self::Item> {
         self.up
             .next_back()
-            .or_else(|| self.focus.take())
-            .or_else(|| self.down.next())
+            .map(|t| (false, t))
+            .or_else(|| self.focus.take().map(|t| (true, t)))
+            .or_else(|| self.down.next().map(|t| (false, t)))
     }
 }
 
 impl<'a, T> IntoIterator for &'a mut Stack<T> {
-    type Item = &'a mut T;
+    type Item = (bool, &'a mut T);
     type IntoIter = IterMut<'a, T>;
 
     fn into_iter(self) -> IterMut<'a, T> {
