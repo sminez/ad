@@ -34,9 +34,9 @@ use unicode_width::UnicodeWidthChar;
 #[derive(Debug)]
 pub(crate) struct Windows {
     /// Available screen width in terms of characters
-    screen_rows: usize,
+    pub(crate) screen_rows: usize,
     /// Available screen height in terms of characters
-    screen_cols: usize,
+    pub(crate) screen_cols: usize,
     /// Left to right Columns of windows
     cols: Stack<Column>,
     /// Known Buffer views that are not currently active

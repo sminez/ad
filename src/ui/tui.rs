@@ -280,6 +280,8 @@ impl UserInterface for Tui {
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
     ) {
+        self.screen_rows = windows.screen_rows;
+        self.screen_cols = windows.screen_cols;
         let w_minibuffer = mb.is_some();
         let MiniBufferState {
             cx,
@@ -297,7 +299,7 @@ impl UserInterface for Tui {
 
         let mb_lines = b.map(|b| b.len_lines()).unwrap_or_default();
         let mb_offset = if mb_lines > 0 { 1 } else { 0 };
-        let effective_screen_rows = self.screen_rows - (bottom - top) - mb_offset - 2; // 2 for status bar
+        let effective_screen_rows = self.screen_rows - (bottom - top) - mb_offset;
 
         let (cs, status_timeout) = {
             let conf = config_handle!();
