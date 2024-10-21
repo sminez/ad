@@ -676,14 +676,14 @@ mod tests {
     use super::*;
     use simple_test_case::test_case;
 
-    #[test_case("simple line", None, 0, "simple line", None; "simple line no dot")]
-    #[test_case("simple line", Some((1, 5)), 0, "simple line", Some((1, 5)); "simple line partial")]
-    #[test_case("simple line", Some((0, usize::MAX)), 0, "simple line", Some((0, 11)); "simple line full")]
-    #[test_case("simple line", Some((0, 2)), 4, "le line", None; "scrolled past dot")]
-    #[test_case("simple line", Some((0, 9)), 4, "le line", Some((0, 5)); "scrolled updating dot")]
-    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs", Some((6, 13)); "with tabs")]
-    #[test_case("\twith tabs", Some((0, usize::MAX)), 0, "    with tabs", Some((0, 13)); "with tabs full")]
-    #[test_case("\t\twith tabs", Some((4, usize::MAX)), 0, "        with tabs", Some((10, 17)); "with multiple tabs")]
+    #[test_case("simple line", None, 0, "simple line       ", None; "simple line no dot")]
+    #[test_case("simple line", Some((1, 5)), 0, "simple line       ", Some((1, 5)); "simple line partial")]
+    #[test_case("simple line", Some((0, usize::MAX)), 0, "simple line       ", Some((0, 11)); "simple line full")]
+    #[test_case("simple line", Some((0, 2)), 4, "le line           ", None; "scrolled past dot")]
+    #[test_case("simple line", Some((0, 9)), 4, "le line           ", Some((0, 5)); "scrolled updating dot")]
+    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs     ", Some((6, 13)); "with tabs")]
+    #[test_case("\twith tabs", Some((0, usize::MAX)), 0, "    with tabs     ", Some((0, 13)); "with tabs full")]
+    #[test_case("\t\twith tabs", Some((4, usize::MAX)), 0, "        with tabs ", Some((10, 17)); "with multiple tabs")]
     #[test]
     fn raw_line_unchecked_updates_dot_correctly(
         line: &str,
@@ -696,9 +696,9 @@ mod tests {
         let mut view = View::new(0);
         view.col_off = col_off;
 
-        let (line, dot_range) = raw_rline_unchecked(&b, &view, 0, 0, 200, dot_range);
+        let (line, dot_range) = raw_rline_unchecked(&b, &view, 0, 0, 18, dot_range);
 
-        assert_eq!(line, expected_line);
         assert_eq!(dot_range, expected_dot_range);
+        assert_eq!(line, expected_line);
     }
 }
