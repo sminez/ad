@@ -38,9 +38,9 @@ pub(crate) struct Windows {
     /// Available screen height in terms of characters
     pub(crate) screen_cols: usize,
     /// Left to right Columns of windows
-    cols: Stack<Column>,
+    pub(super) cols: Stack<Column>,
     /// Known Buffer views that are not currently active
-    views: Vec<View>,
+    pub(super) views: Vec<View>,
 }
 
 impl Windows {

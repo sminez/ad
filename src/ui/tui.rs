@@ -14,7 +14,10 @@ use crate::{
         get_termsize, register_signal_handler, win_size_changed, CurShape,
     },
     term::{Cursor, Style},
-    ui::{windows::View, StateChange, UserInterface, Windows},
+    ui::{
+        windows::{Column, View, Window},
+        StateChange, UserInterface, Windows,
+    },
     ORIGINAL_TERMIOS, VERSION,
 };
 use std::{
@@ -27,6 +30,7 @@ use std::{
 };
 
 const VLINE: char = '│';
+const HLINE: char = '-';
 
 #[derive(Debug)]
 pub struct Tui {
@@ -60,50 +64,33 @@ impl Tui {
         }
     }
 
-    /// Returns the width of the sign column
-    #[allow(clippy::too_many_arguments)]
-    fn render_rows(
-        &mut self,
-        buf: &mut String,
-        screen_rows: usize,
-        load_exec_range: Option<(bool, Range)>,
-        cs: &ColorScheme,
+    /// Render the visible lines of b for the available View.
+    fn render_window(
+        &self,
         b: &Buffer,
         view: &View,
-        empty_scratch: bool,
-    ) {
+        n_rows: usize,
+        load_exec_range: Option<(bool, Range)>,
+        cs: &ColorScheme,
+    ) -> Vec<String> {
+        let mut lines = Vec::with_capacity(n_rows);
         let (w_lnum, w_sgncol) = b.sign_col_dims();
-        let y_banner = self.screen_rows / 3;
-        let push_banner_line = |mut banner: String, buf: &mut String| {
-            banner.truncate(self.screen_cols - w_sgncol);
-            let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
-            buf.push_str(&" ".repeat(padding));
-            buf.push_str(&banner);
-        };
 
-        for y in 0..screen_rows {
+        for y in 0..n_rows {
             let file_row = y + view.row_off;
 
             if file_row >= b.len_lines() {
-                buf.push_str(&format!(
-                    "{}{}~ {VLINE:>width$}{}",
+                lines.push(format!(
+                    "{}{}~ {VLINE:>width$}{}", // pad whitespace to view width
                     Style::Fg(cs.signcol_fg),
                     Style::Bg(cs.bg),
                     Style::Fg(cs.fg),
                     width = w_lnum
                 ));
-
-                if empty_scratch {
-                    if y == y_banner && y < screen_rows {
-                        push_banner_line(format!("ad editor :: version {VERSION}"), buf);
-                    } else if y == y_banner + 1 && y + 1 < screen_rows {
-                        push_banner_line("type :help to view help".to_string(), buf);
-                    }
-                }
             } else {
                 // +2 for the leading space and vline chars
                 let padding = w_lnum + 2;
-                buf.push_str(&format!(
+                lines.push(format!(
                     "{}{} {:>width$}{VLINE}{}{}",
                     Style::Fg(cs.signcol_fg),
                     Style::Bg(cs.bg),
@@ -121,12 +108,102 @@ impl Tui {
                     width = w_lnum
                 ));
             }
-
-            buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
         }
+
+        lines
     }
 
-    fn render_status_bar(&self, buf: &mut String, cs: &ColorScheme, mode_name: &str, b: &Buffer) {
+    /// Render UI lines for each window in the column, including horizontal separators to
+    /// mark the boundaries between windows.
+    fn render_column(
+        &self,
+        _col: &Column,
+        _buffers: &Buffers,
+        _load_exec_range: Option<(bool, Range)>,
+        _screen_rows: usize,
+        _cs: &ColorScheme,
+    ) -> Vec<String> {
+        // - Cut off the _bottom_ of the column based on available screen rows if they are less than
+        //   expected thanks to the presence of a minibuffer.
+        // - For each window in the column, produce rows for the available viewport
+        // - insert '-' * col.n_cols to split each window
+        todo!()
+    }
+
+    fn render_banner(&self, screen_rows: usize, cs: &ColorScheme) -> Vec<String> {
+        let mut lines = Vec::with_capacity(screen_rows);
+        let (w_lnum, w_sgncol) = (1, 3);
+        let y_banner = self.screen_rows / 3;
+
+        let banner_line = |mut banner: String| {
+            let mut buf = String::new();
+            banner.truncate(self.screen_cols - w_sgncol);
+            let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
+            buf.push_str(&" ".repeat(padding));
+            buf.push_str(&banner);
+            buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
+
+            buf
+        };
+
+        for y in 0..screen_rows {
+            let mut line = format!(
+                "{}{}~ {VLINE:>width$}{}",
+                Style::Fg(cs.signcol_fg),
+                Style::Bg(cs.bg),
+                Style::Fg(cs.fg),
+                width = w_lnum
+            );
+
+            if y == y_banner && y < screen_rows {
+                line.push_str(&banner_line(format!("ad editor :: version {VERSION}")));
+            } else if y == y_banner + 1 && y + 1 < screen_rows {
+                line.push_str(&banner_line("type :help to view help".to_string()));
+            }
+            line.push_str(&format!("{}\r\n", Cursor::ClearRight));
+            lines.push(line);
+        }
+
+        lines
+    }
+
+    fn render_windows(
+        &self,
+        buffers: &Buffers,
+        windows: &Windows,
+        load_exec_range: Option<(bool, Range)>,
+        screen_rows: usize,
+        cs: &ColorScheme,
+    ) -> Vec<String> {
+        if buffers.is_empty_scratch() {
+            return self.render_banner(screen_rows, cs);
+        }
+
+        let mut rendered_cols: Vec<Vec<String>> = windows
+            .cols
+            .iter()
+            .map(|col| self.render_column(col, buffers, load_exec_range, screen_rows, cs))
+            .collect();
+
+        let mut lines = Vec::with_capacity(screen_rows);
+        for _ in 0..screen_rows {
+            let mut line_fragments = Vec::with_capacity(rendered_cols.len() + 1);
+            for i in 0..rendered_cols.len() {
+                line_fragments.push(rendered_cols[i].remove(0));
+            }
+            let mut buf = line_fragments.join(&format!(
+                "{}{}{VLINE}",
+                Style::Fg(cs.signcol_fg),
+                Style::Bg(cs.bg)
+            ));
+            buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
+            lines.push(buf);
+        }
+
+        lines
+    }
+
+    fn render_status_bar(&self, cs: &ColorScheme, mode_name: &str, b: &Buffer) -> String {
         let lstatus = format!(
             "{} {} - {} lines {}",
             mode_name,
@@ -137,22 +214,22 @@ impl Tui {
         let rstatus = b.dot.addr(b);
         let width = self.screen_cols - lstatus.len();
 
-        buf.push_str(&format!(
+        format!(
             "{}{}{lstatus}{rstatus:>width$}{}\r\n",
             Style::Bg(cs.bar_bg),
             Style::Fg(cs.fg),
             Style::Reset
-        ));
+        )
     }
 
     // current prompt and pending chars
     fn render_message_bar(
         &self,
-        buf: &mut String,
         cs: &ColorScheme,
         pending_keys: &[Input],
         status_timeout: u64,
-    ) {
+    ) -> String {
+        let mut buf = String::new();
         buf.push_str(&Cursor::ClearRight.to_string());
 
         let mut msg = self.status_message.clone();
@@ -176,28 +253,22 @@ impl Tui {
                 Style::Bg(cs.bg)
             ));
         }
+
+        buf
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn render_minibuffer_state(
-        &self,
-        buf: &mut String,
-        prompt_line: &str,
-        b: Option<&Buffer>,
-        selected_line_idx: usize,
-        top: usize,
-        bottom: usize,
-        cs: &ColorScheme,
-    ) {
-        if let Some(b) = b {
+    fn render_minibuffer_state(&self, mb: &MiniBufferState<'_>, cs: &ColorScheme) -> Vec<String> {
+        let mut lines = Vec::new();
+
+        if let Some(b) = mb.b {
             let width = self.screen_cols;
 
-            for i in top..=bottom {
+            for i in mb.top..=mb.bottom {
                 let (rline, _) =
                     raw_rline_unchecked(b, &View::new(0), i, 0, self.screen_cols, None);
                 let len = min(self.screen_cols, rline.len());
-                if i == selected_line_idx {
-                    buf.push_str(&format!(
+                if i == mb.selected_line_idx {
+                    lines.push(format!(
                         "{}{}{:<width$}{}\r\n",
                         Style::Fg(cs.fg),
                         Style::Bg(cs.minibuffer_hl),
@@ -205,7 +276,7 @@ impl Tui {
                         Style::Reset,
                     ));
                 } else {
-                    buf.push_str(&format!(
+                    lines.push(format!(
                         "{}{}{}{}\r\n",
                         Style::Fg(cs.fg),
                         Style::Bg(cs.bg),
@@ -216,12 +287,16 @@ impl Tui {
             }
         }
 
-        buf.push_str(&format!(
-            "{}{}{prompt_line}{}",
+        lines.push(format!(
+            "{}{}{}{}{}",
+            mb.prompt,
+            mb.input,
             Style::Fg(cs.fg),
             Style::Bg(cs.bg),
             Cursor::ClearRight
         ));
+
+        lines
     }
 }
 
@@ -283,23 +358,15 @@ impl UserInterface for Tui {
         self.screen_rows = windows.screen_rows;
         self.screen_cols = windows.screen_cols;
         let w_minibuffer = mb.is_some();
-        let MiniBufferState {
-            cx,
-            n_visible_lines,
-            selected_line_idx,
-            prompt,
-            input,
-            b,
-            top,
-            bottom,
-        } = mb.unwrap_or_default();
+        let mb = mb.unwrap_or_default();
         let active_buffer = buffers.active();
-        let view = windows.focused_view();
-        let empty_scratch = buffers.is_empty_scratch();
-
-        let mb_lines = b.map(|b| b.len_lines()).unwrap_or_default();
+        let mb_lines = mb.b.map(|b| b.len_lines()).unwrap_or_default();
         let mb_offset = if mb_lines > 0 { 1 } else { 0 };
-        let effective_screen_rows = self.screen_rows - (bottom - top) - mb_offset;
+
+        // This is the screen size that we have to work with for the buffer content we currently want to
+        // display. If the minibuffer is active then it take priority over anything else and we always
+        // show the status bar as the final two lines of the UI.
+        let effective_screen_rows = self.screen_rows - (mb.bottom - mb.top) - mb_offset;
 
         let (cs, status_timeout) = {
             let conf = config_handle!();
@@ -313,41 +380,34 @@ impl UserInterface for Tui {
             _ => None,
         };
 
-        let mut buf = format!("{}{}", Cursor::Hide, Cursor::ToStart);
-        self.render_rows(
-            &mut buf,
-            effective_screen_rows,
+        // We need space for each visible line plus the two commands to hide/show the cursor
+        let mut lines = Vec::with_capacity(self.screen_rows + 2);
+        lines.push(format!("{}{}", Cursor::Hide, Cursor::ToStart));
+
+        lines.append(&mut self.render_windows(
+            buffers,
+            windows,
             load_exec_range,
+            effective_screen_rows,
             &cs,
-            active_buffer,
-            view,
-            empty_scratch,
-        );
-        self.render_status_bar(&mut buf, &cs, mode_name, active_buffer);
+        ));
+        lines.push(self.render_status_bar(&cs, mode_name, active_buffer));
 
         if w_minibuffer {
-            self.render_minibuffer_state(
-                &mut buf,
-                &format!("{prompt}{input}"),
-                b,
-                selected_line_idx,
-                top,
-                bottom,
-                &cs,
-            );
+            lines.append(&mut self.render_minibuffer_state(&mb, &cs));
         } else {
-            self.render_message_bar(&mut buf, &cs, pending_keys, status_timeout);
+            lines.push(self.render_message_bar(&cs, pending_keys, status_timeout));
         }
 
+        // Position the cursor
         let (x, y) = if w_minibuffer {
-            (cx, self.screen_rows + n_visible_lines + 1)
+            (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
         } else {
-            view.ui_xy(active_buffer)
+            windows.focused_view().ui_xy(active_buffer)
         };
+        lines.push(format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
-        buf.push_str(&format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
-
-        if let Err(e) = self.stdout.write_all(buf.as_bytes()) {
+        if let Err(e) = self.stdout.write_all(lines.join("").as_bytes()) {
             die!("Unable to refresh screen: {e}");
         }
 
@@ -448,6 +508,9 @@ fn raw_rline_unchecked(
 
     rline.truncate(max_chars); // noop if max_chars > rline.len()
     let n_chars = rline.len();
+    // we pad to max_chars so that columns render correctly next to one another
+    let padding = max_chars - n_chars;
+    rline.append(&mut [' '].repeat(padding));
     let s = rline.into_iter().collect();
 
     if update_dot {
