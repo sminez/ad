@@ -299,28 +299,30 @@ impl<T> ZipList<T> {
         )
     }
 
-    /// Remove an element from the stack.
-    ///
-    /// If the element was present it is returned along with the rest of the [ZipList].
-    /// If this was the last element in the stack, the stack is dropped and None is
-    /// returned.
-    pub fn remove(mut self, t: &T) -> (Option<T>, Option<Self>)
-    where
-        T: PartialEq,
-    {
-        if let Some(found) = pop_where!(self, up, |elem: &T| elem == t) {
-            return (Some(found), Some(self));
+    /// Remove the first element that matches the given predicate function. If doing so would
+    /// remove the last element of the ZipList then `default_focus` is called to ensure that there
+    /// is a single element remaining as the current focus.
+    pub fn remove_where_with_default(
+        &mut self,
+        pred: impl Fn(&T) -> bool,
+        default: impl Fn() -> T,
+    ) -> Option<T> {
+        if let Some(found) = pop_where!(self, up, |elem: &T| pred(elem)) {
+            return Some(found);
+        } else if let Some(found) = pop_where!(self, down, |elem: &T| pred(elem)) {
+            return Some(found);
         }
 
-        if let Some(found) = pop_where!(self, down, |elem: &T| elem == t) {
-            return (Some(found), Some(self));
-        }
+        if pred(&self.focus) {
+            let mut focus = match self.down.pop_front().or_else(|| self.up.pop_front()) {
+                Some(focus) => focus,
+                None => default(),
+            };
+            swap(&mut focus, &mut self.focus);
 
-        if t == &self.focus {
-            let (focus, stack) = self.remove_focused();
-            (Some(focus), stack)
+            Some(focus)
         } else {
-            (None, Some(self))
+            None
         }
     }
 
@@ -563,6 +565,28 @@ impl<T: PartialEq> ZipList<T> {
     /// its original state.
     pub fn focus_element(&mut self, t: &T) {
         self.focus_element_by(|elem| elem == t)
+    }
+
+    /// Remove an element from the stack.
+    ///
+    /// If the element was present it is returned along with the rest of the [ZipList].
+    /// If this was the last element in the stack, the stack is dropped and None is
+    /// returned.
+    pub fn remove(mut self, t: &T) -> (Option<T>, Option<Self>) {
+        if let Some(found) = pop_where!(self, up, |elem: &T| elem == t) {
+            return (Some(found), Some(self));
+        }
+
+        if let Some(found) = pop_where!(self, down, |elem: &T| elem == t) {
+            return (Some(found), Some(self));
+        }
+
+        if t == &self.focus {
+            let (focus, stack) = self.remove_focused();
+            (Some(focus), stack)
+        } else {
+            (None, Some(self))
+        }
     }
 }
 
