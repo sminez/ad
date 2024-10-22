@@ -30,7 +30,8 @@ use std::{
 };
 
 const VLINE: char = '│';
-const HLINE: &str = "-";
+const HLINE: &str = "-"; // em dash
+//const HLINE: &str = "—"; // em dash
 
 #[derive(Debug)]
 pub struct Tui {

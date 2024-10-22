@@ -70,7 +70,7 @@ impl Windows {
         self.screen_cols = cols;
 
         if self.cols.len() == 1 {
-            self.cols.focus.update_size(cols, rows);
+            self.cols.focus.update_size(rows, cols);
             return;
         }
 
@@ -78,7 +78,7 @@ impl Windows {
         let slop = cols - (w_col * self.cols.len());
 
         for (_, col) in self.cols.iter_mut() {
-            col.update_size(w_col - 1, rows);
+            col.update_size(rows, w_col - 1);
         }
 
         self.cols.focus.n_cols += slop;
@@ -125,23 +125,23 @@ impl Windows {
     }
 
     pub(crate) fn scroll_up(&mut self, b: &mut Buffer) {
-        let (rows, cols) = (self.screen_rows, self.screen_cols);
-        let (x_offset, y_offset) = self.xy_offsets();
+        let cols = self.cols.focus.n_cols;
+        let rows = self.cols.focus.wins.focus.n_rows;
         let view = self.focused_view_mut();
         let c = b.dot.active_cur();
         let (y, x) = c.as_yx(b);
 
-        if view.row_off > 0 && y == view.row_off + rows - y_offset - 1 {
+        if view.row_off > 0 && y == view.row_off + rows - 1 {
             b.dot.set_active_cur(Cur::from_yx(y - 1, x, b));
         }
 
         view.row_off = view.row_off.saturating_sub(1);
-        view.clamp_scroll(b, rows - y_offset, cols - x_offset);
+        view.clamp_scroll(b, rows, cols);
     }
 
     pub(crate) fn scroll_down(&mut self, b: &mut Buffer) {
-        let (rows, cols) = (self.screen_rows, self.screen_cols);
-        let (x_offset, y_offset) = self.xy_offsets();
+        let cols = self.cols.focus.n_cols;
+        let rows = self.cols.focus.wins.focus.n_rows;
         let view = self.focused_view_mut();
         let c = b.dot.active_cur();
         let (y, x) = c.as_yx(b);
@@ -152,23 +152,23 @@ impl Windows {
         }
 
         view.row_off += 1;
-        view.clamp_scroll(b, rows - y_offset, cols - x_offset);
+        view.clamp_scroll(b, rows, cols);
     }
 
     pub(crate) fn clamp_scroll(&mut self, buffers: &mut Buffers) {
         let b = buffers.active_mut();
-        let (rows, cols) = (self.screen_rows, self.screen_cols);
-        let (x_offset, y_offset) = self.xy_offsets();
-        self.focused_view_mut()
-            .clamp_scroll(b, rows - y_offset, cols - x_offset);
+        let cols = self.cols.focus.n_cols;
+        let rows = self.cols.focus.wins.focus.n_rows;
+
+        self.focused_view_mut().clamp_scroll(b, rows, cols);
     }
 
     pub(crate) fn set_viewport(&mut self, buffers: &mut Buffers, vp: ViewPort) {
         let b = buffers.active_mut();
-        let (rows, cols) = (self.screen_rows, self.screen_cols);
-        let (x_offset, y_offset) = self.xy_offsets();
-        self.focused_view_mut()
-            .set_viewport(b, vp, rows - y_offset, cols - x_offset);
+        let cols = self.cols.focus.n_cols;
+        let rows = self.cols.focus.wins.focus.n_rows;
+
+        self.focused_view_mut().set_viewport(b, vp, rows, cols);
     }
 
     /// Coordinate offsets from the top left of the window layout to the top left of the active window.
@@ -310,21 +310,27 @@ impl Column {
         let mut wins =
             ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
         let slop = n_rows - (win_rows * buf_ids.len());
-        wins.focus.n_rows += slop;
+        wins.focus.n_rows += slop + 1;
 
         Self { n_cols, wins }
     }
 
-    fn update_size(&mut self, n_cols: usize, n_rows: usize) {
+    fn update_size(&mut self, n_rows: usize, n_cols: usize) {
         self.n_cols = n_cols;
-        let win_rows = (n_rows - self.wins.len() + 1) / self.wins.len();
+
+        if self.wins.len() == 1 {
+            self.wins.focus.n_rows = n_rows;
+            return;
+        }
+
+        let win_rows = n_rows / self.wins.len();
 
         for (_, win) in self.wins.iter_mut() {
-            win.n_rows = win_rows;
+            win.n_rows = win_rows - 1;
         }
 
         let slop = n_rows - (win_rows * self.wins.len());
-        self.wins.focus.n_rows += slop;
+        self.wins.focus.n_rows += slop + 1;
     }
 }
 
