@@ -166,10 +166,10 @@ where
 
                 if new_window {
                     self.windows
-                        .focus_buffer_in_new_window(self.buffers.active());
+                        .show_buffer_in_new_window(self.buffers.active());
                 } else {
                     self.windows
-                        .focus_buffer_in_active_window(self.buffers.active());
+                        .show_buffer_in_active_window(self.buffers.active());
                 }
             }
 
@@ -190,10 +190,10 @@ where
                     _ = self.tx_fsys.send(LogEvent::Focus(id));
                     if new_window {
                         self.windows
-                            .focus_buffer_in_new_window(self.buffers.active());
+                            .show_buffer_in_new_window(self.buffers.active());
                     } else {
                         self.windows
-                            .focus_buffer_in_active_window(self.buffers.active());
+                            .show_buffer_in_active_window(self.buffers.active());
                     }
                 }
             }

@@ -13,7 +13,8 @@ use tracing::debug;
 
 const MAX_JUMPS: usize = 100;
 
-type BufferId = usize;
+/// An ID for a known Buffer
+pub type BufferId = usize;
 
 /// A non-empty vec of buffers where the active buffer is accessible and default
 /// buffers are inserted where needed to maintain invariants

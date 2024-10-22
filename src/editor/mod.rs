@@ -221,7 +221,7 @@ where
         //self.windows
         //    .focus_buffer_in_new_window(self.buffers.active());
         self.windows
-            .focus_buffer_in_active_window(self.buffers.active());
+            .show_buffer_in_active_window(self.buffers.active());
     }
 
     fn send_buffer_resp(
@@ -452,7 +452,7 @@ where
         let maybe_ids = self.buffers.jump_list_forward();
         if let Some((prev_id, new_id)) = maybe_ids {
             self.windows
-                .focus_buffer_in_active_window(self.buffers.active_mut());
+                .show_buffer_in_active_window(self.buffers.active_mut());
             self.windows
                 .set_viewport(&mut self.buffers, ViewPort::Center);
             if new_id != prev_id {
@@ -465,7 +465,7 @@ where
         let maybe_ids = self.buffers.jump_list_backward();
         if let Some((prev_id, new_id)) = maybe_ids {
             self.windows
-                .focus_buffer_in_active_window(self.buffers.active_mut());
+                .show_buffer_in_active_window(self.buffers.active_mut());
             self.windows
                 .set_viewport(&mut self.buffers, ViewPort::Center);
             if new_id != prev_id {

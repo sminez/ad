@@ -16,8 +16,8 @@
 //! | Status Bar                        |
 //! +-----------------------------------+
 use crate::{
-    buffer::{Buffer, Buffers},
-    config_handle,
+    buffer::{Buffer, BufferId, Buffers},
+    config_handle, die,
     dot::{Cur, Dot},
     editor::ViewPort,
     stack,
@@ -29,7 +29,7 @@ use unicode_width::UnicodeWidthChar;
 /// Windows is a screen layout of the windows available for displaying buffer
 /// content to the user. The available screen space is split into a number of
 /// columns each containing a vertical stack of windows.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Windows {
     /// Available screen width in terms of characters
     pub(crate) screen_rows: usize,
@@ -42,7 +42,7 @@ pub(crate) struct Windows {
 }
 
 impl Windows {
-    pub(crate) fn new(screen_rows: usize, screen_cols: usize, active_buffer_id: usize) -> Self {
+    pub(crate) fn new(screen_rows: usize, screen_cols: usize, active_buffer_id: BufferId) -> Self {
         Self {
             screen_rows,
             screen_cols,
@@ -68,6 +68,12 @@ impl Windows {
     pub(crate) fn update_screen_size(&mut self, rows: usize, cols: usize) {
         self.screen_rows = rows;
         self.screen_cols = cols;
+
+        if self.cols.len() == 1 {
+            self.cols.focus.update_size(cols, rows);
+            return;
+        }
+
         let w_col = cols / self.cols.len();
         let slop = cols - (w_col * self.cols.len());
 
@@ -79,7 +85,7 @@ impl Windows {
     }
 
     /// Set the currently focused window to contain the given buffer
-    pub(crate) fn focus_buffer_in_active_window(&mut self, b: &Buffer) {
+    pub(crate) fn show_buffer_in_active_window(&mut self, b: &Buffer) {
         if self.focused_view().bufid == b.id {
             return;
         }
@@ -94,7 +100,7 @@ impl Windows {
     }
 
     /// Set the currently focused window to contain the given buffer
-    pub(crate) fn focus_buffer_in_new_window(&mut self, b: &Buffer) {
+    pub(crate) fn show_buffer_in_new_window(&mut self, b: &Buffer) {
         let view = if self.focused_view().bufid == b.id {
             self.focused_view().clone()
         } else {
@@ -183,7 +189,69 @@ impl Windows {
         (x + x_offset, y + y_offset)
     }
 
-    pub(crate) fn cur_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) -> Cur {
+    fn buffer_for_screen_coords(&self, x: usize, y: usize) -> BufferId {
+        let mut x_offset = 0;
+        let mut y_offset = 0;
+
+        for (_, col) in self.cols.iter() {
+            if x > x_offset + col.n_cols {
+                x_offset += col.n_cols + 1;
+                continue;
+            }
+            for (_, win) in col.wins.iter() {
+                if y > y_offset + win.n_rows {
+                    y_offset += win.n_rows + 1;
+                    continue;
+                }
+                return win.view.bufid;
+            }
+        }
+
+        die!("click out of bounds (x, y)=({x}, {y})");
+    }
+
+    fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
+        let mut x_offset = 0;
+        let mut y_offset = 0;
+
+        self.cols.focus_head();
+        for _ in 0..self.cols.len() {
+            let col = &self.cols.focus;
+            if x > x_offset + col.n_cols {
+                x_offset += col.n_cols + 1;
+                self.cols.focus_down();
+                continue;
+            }
+
+            self.cols.focus.wins.focus_head();
+            for _ in 0..self.cols.focus.wins.len() {
+                let win = &self.cols.focus.wins.focus;
+                if y > y_offset + win.n_rows {
+                    y_offset += win.n_rows + 1;
+                    self.cols.focus.wins.focus_down();
+                    continue;
+                }
+                return win.view.bufid;
+            }
+        }
+
+        die!("click out of bounds (x, y)=({x}, {y})");
+    }
+
+    pub(crate) fn cur_from_screen_coords(
+        &mut self,
+        buffers: &mut Buffers,
+        x: usize,
+        y: usize,
+        focus_clicked: bool,
+    ) -> (BufferId, Cur) {
+        let bufid = if focus_clicked {
+            self.focus_buffer_for_screen_coords(x, y)
+        } else {
+            self.buffer_for_screen_coords(x, y)
+        };
+        let b = buffers.with_id_mut(bufid).expect("windows state is stale");
+
         let (x_offset, y_offset) = self.xy_offsets();
         let (_, w_sgncol) = b.sign_col_dims();
         let rx = x
@@ -202,17 +270,30 @@ impl Windows {
 
         cur.clamp_idx(b.txt.len_chars());
 
-        cur
+        (bufid, cur)
     }
 
-    pub(crate) fn set_dot_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) {
-        b.dot = Dot::Cur {
-            c: self.cur_from_screen_coords(b, x, y),
-        };
+    /// Set the active buffer and dot based on a mouse click.
+    ///
+    /// Returns true if the click was in the currently active buffer and false if this click has
+    /// changed the active buffer.
+    pub(crate) fn set_dot_from_screen_coords(
+        &mut self,
+        buffers: &mut Buffers,
+        x: usize,
+        y: usize,
+    ) -> bool {
+        let current_bufid = buffers.active().id;
+        let (bufid, c) = self.cur_from_screen_coords(buffers, x, y, true);
+        buffers.focus_id(bufid);
+        let b = buffers.with_id_mut(bufid).expect("windows state is stale");
+        b.dot = Dot::Cur { c };
+
+        bufid == current_bufid
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Column {
     /// Number of character columns wide
     pub(crate) n_cols: usize,
@@ -221,13 +302,13 @@ pub(crate) struct Column {
 }
 
 impl Column {
-    pub(crate) fn new(n_rows: usize, n_cols: usize, buf_ids: &[usize]) -> Self {
+    pub(crate) fn new(n_rows: usize, n_cols: usize, buf_ids: &[BufferId]) -> Self {
         if buf_ids.is_empty() {
             panic!("cant have an empty column");
         }
         let win_rows = n_rows / buf_ids.len();
         let mut wins =
-            Stack::try_from_iter(buf_ids.iter().map(|id| Window::new(*id, win_rows))).unwrap();
+            Stack::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
         let slop = n_rows - (win_rows * buf_ids.len());
         wins.focus.n_rows += slop;
 
@@ -247,7 +328,7 @@ impl Column {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Window {
     /// Number of character rows high
     pub(crate) n_rows: usize,
@@ -256,7 +337,7 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    pub(crate) fn new(n_rows: usize, bufid: usize) -> Self {
+    pub(crate) fn new(n_rows: usize, bufid: BufferId) -> Self {
         Self {
             n_rows,
             view: View::new(bufid),
@@ -266,14 +347,14 @@ impl Window {
 
 #[derive(Debug, Clone)]
 pub(crate) struct View {
-    pub(crate) bufid: usize,
+    pub(crate) bufid: BufferId,
     pub(crate) col_off: usize,
     pub(crate) row_off: usize,
     pub(crate) rx: usize,
 }
 
 impl View {
-    pub(crate) fn new(bufid: usize) -> Self {
+    pub(crate) fn new(bufid: BufferId) -> Self {
         Self {
             bufid,
             col_off: 0,
@@ -360,6 +441,37 @@ mod tests {
         dot::{Dot, TextObject},
         key::Arrow,
     };
+    use simple_test_case::test_case;
+
+    #[test_case(&[1], 30, 40, 0; "one col one win")]
+    #[test_case(&[1, 1], 30, 40, 0; "two cols one win each click in first")]
+    #[test_case(&[1, 1], 60, 40, 1; "two cols one win each click in second")]
+    #[test_case(&[1, 2], 60, 40, 1; "two cols second with two click in second window")]
+    #[test_case(&[1, 2], 60, 60, 2; "two cols second with two click in third window")]
+    #[test]
+    fn buffer_for_screen_coords_works(col_wins: &[usize], x: usize, y: usize, expected: BufferId) {
+        let mut cols = Vec::with_capacity(col_wins.len());
+        let mut n = 0;
+
+        for m in col_wins.iter() {
+            let ids: Vec<usize> = (n..(n + m)).collect();
+            n += m;
+            cols.push(Column::new(80, 100, &ids));
+        }
+
+        let mut ws = Windows {
+            screen_rows: 80,
+            screen_cols: 100,
+            cols: Stack::try_from_iter(cols).unwrap(),
+            views: vec![],
+        };
+        ws.update_screen_size(80, 100);
+
+        assert_eq!(ws.buffer_for_screen_coords(x, y), expected, "bufid without mutation");
+        assert_eq!(ws.cols.focus.wins.focus.view.bufid, 0, "focused id before mutation");
+        assert_eq!(ws.focus_buffer_for_screen_coords(x, y), expected, "bufid with mutation");
+        assert_eq!(ws.cols.focus.wins.focus.view.bufid, expected, "focused id after mutation");
+    }
 
     // NOTE: there was a bug around misunderstanding terminal "cells" in relation to
     //       wide unicode characters

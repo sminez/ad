@@ -75,10 +75,12 @@ where
                     return;
                 }
 
+                let active_buffer_changed =
+                    self.windows
+                        .set_dot_from_screen_coords(&mut self.buffers, x, y);
                 let b = self.buffers.active_mut();
-                self.windows.set_dot_from_screen_coords(b, x, y);
 
-                if self.last_click_was_left {
+                if self.last_click_was_left && !active_buffer_changed {
                     let delta = (self.last_click_time - last_click_time).as_millis();
                     if delta < config_handle!().double_click_ms {
                         b.try_expand_delimited();
@@ -99,9 +101,10 @@ where
                         return;
                     }
 
-                    let cur = self
-                        .windows
-                        .cur_from_screen_coords(self.buffers.active_mut(), x, y);
+                    let (bufid, cur) = self.windows.cur_from_screen_coords(&mut self.buffers, x, y, false);
+                    if bufid != self.buffers.active().id {
+                        return;
+                    }
                     click.selection.set_active_cursor(cur);
 
                     if click.btn == Left {
@@ -136,10 +139,12 @@ where
                     return;
                 }
 
-                let cur = self
-                    .windows
-                    .cur_from_screen_coords(self.buffers.active_mut(), x, y);
-                click.selection.set_active_cursor(cur);
+                let (bufid, cur) = self.windows.cur_from_screen_coords(&mut self.buffers, x, y, false);
+                // Support releasing the mouse over a different window as actioning the selection
+                // as it was present in the active buffer
+                if bufid == self.buffers.active().id {
+                    click.selection.set_active_cursor(cur);
+                }
 
                 match click.btn {
                     Left | WheelUp | WheelDown => (),
@@ -153,9 +158,8 @@ where
 
     #[inline]
     fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
-        let cur = self
-            .windows
-            .cur_from_screen_coords(self.buffers.active_mut(), x, y);
+        let (bufid, cur) = self.windows.cur_from_screen_coords(&mut self.buffers, x, y, true);
+        self.buffers.focus_id(bufid);
 
         Click::new(btn, Range::from_cursors(cur, cur, false))
     }
@@ -631,6 +635,7 @@ mod tests {
                 clipboard: "X".to_string(),
             },
         );
+        ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
         ed.open_virtual("test", "some text to test with");
         ed.buffers.active_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
 
