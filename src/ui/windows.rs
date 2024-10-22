@@ -467,10 +467,24 @@ mod tests {
         };
         ws.update_screen_size(80, 100);
 
-        assert_eq!(ws.buffer_for_screen_coords(x, y), expected, "bufid without mutation");
-        assert_eq!(ws.cols.focus.wins.focus.view.bufid, 0, "focused id before mutation");
-        assert_eq!(ws.focus_buffer_for_screen_coords(x, y), expected, "bufid with mutation");
-        assert_eq!(ws.cols.focus.wins.focus.view.bufid, expected, "focused id after mutation");
+        assert_eq!(
+            ws.buffer_for_screen_coords(x, y),
+            expected,
+            "bufid without mutation"
+        );
+        assert_eq!(
+            ws.cols.focus.wins.focus.view.bufid, 0,
+            "focused id before mutation"
+        );
+        assert_eq!(
+            ws.focus_buffer_for_screen_coords(x, y),
+            expected,
+            "bufid with mutation"
+        );
+        assert_eq!(
+            ws.cols.focus.wins.focus.view.bufid, expected,
+            "focused id after mutation"
+        );
     }
 
     // NOTE: there was a bug around misunderstanding terminal "cells" in relation to

@@ -101,7 +101,9 @@ where
                         return;
                     }
 
-                    let (bufid, cur) = self.windows.cur_from_screen_coords(&mut self.buffers, x, y, false);
+                    let (bufid, cur) =
+                        self.windows
+                            .cur_from_screen_coords(&mut self.buffers, x, y, false);
                     if bufid != self.buffers.active().id {
                         return;
                     }
@@ -139,7 +141,9 @@ where
                     return;
                 }
 
-                let (bufid, cur) = self.windows.cur_from_screen_coords(&mut self.buffers, x, y, false);
+                let (bufid, cur) =
+                    self.windows
+                        .cur_from_screen_coords(&mut self.buffers, x, y, false);
                 // Support releasing the mouse over a different window as actioning the selection
                 // as it was present in the active buffer
                 if bufid == self.buffers.active().id {
@@ -158,7 +162,9 @@ where
 
     #[inline]
     fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
-        let (bufid, cur) = self.windows.cur_from_screen_coords(&mut self.buffers, x, y, true);
+        let (bufid, cur) = self
+            .windows
+            .cur_from_screen_coords(&mut self.buffers, x, y, true);
         self.buffers.focus_id(bufid);
 
         Click::new(btn, Range::from_cursors(cur, cur, false))
