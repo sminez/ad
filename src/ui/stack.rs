@@ -187,6 +187,10 @@ impl<T> Stack<T> {
         self.down.back().unwrap_or(&self.focus)
     }
 
+    pub fn last_mut(&mut self) -> &mut T {
+        self.down.back_mut().unwrap_or(&mut self.focus)
+    }
+
     /// Swap the current head element with the focused element in the
     /// stack order. Focus stays with the original focused element.
     pub fn swap_focus_and_head(&mut self) -> &mut Self {
@@ -228,6 +232,23 @@ impl<T> Stack<T> {
 
         for item in take(&mut self.up).into_iter().rev() {
             self.down.push_front(item);
+        }
+
+        self
+    }
+
+    /// Move focus to the element in the head position
+    pub fn focus_tail(&mut self) -> &mut Self {
+        let mut tail = match self.down.pop_back() {
+            None => return self, // focus is already tail
+            Some(t) => t,
+        };
+
+        swap(&mut tail, &mut self.focus);
+        self.up.push_front(tail);
+
+        for item in take(&mut self.down).into_iter() {
+            self.up.push_front(item);
         }
 
         self
@@ -690,6 +711,17 @@ mod tests {
         assert_eq!(s, expected);
     }
 
+    #[test_case(stack!([1, 2], 3, [4, 5]), stack!([1, 2, 3, 4], 5); "items up and down")]
+    #[test_case(stack!([1, 2], 3), stack!([1, 2], 3); "items up")]
+    #[test_case(stack!(3, [4, 5]), stack!([3, 4], 5); "items down")]
+    #[test_case(stack!(3), stack!(3); "focus only")]
+    #[test]
+    fn focus_tail(mut s: Stack<u8>, expected: Stack<u8>) {
+        s.focus_tail();
+
+        assert_eq!(s, expected);
+    }
+
     #[test_case(stack!([1, 2], 3, [4, 5, 6]), |&e| e == 3, stack!([1, 2], 3, [4, 5, 6]); "current focus")]
     #[test_case(stack!([1, 2], 3, [4, 5, 6]), |&e| e > 4, stack!([1, 2, 3, 4], 5, [6]); "in tail")]
     #[test_case(stack!([1, 2], 3, [4, 5, 6]), |&e| e < 3 && e > 1, stack!([1], 2, [3, 4, 5, 6]); "in head")]
@@ -706,25 +738,34 @@ mod tests {
     #[test]
     fn iter_yields_all_elements_in_order() {
         let s = stack!([1, 2], 3, [4, 5]);
-        let elems: Vec<u8> = s.iter().copied().collect();
+        let elems: Vec<(bool, u8)> = s.iter().map(|(b, t)| (b, *t)).collect();
 
-        assert_eq!(elems, vec![1, 2, 3, 4, 5])
+        assert_eq!(
+            elems,
+            vec![(false, 1), (false, 2), (true, 3), (false, 4), (false, 5)]
+        )
     }
 
     #[test]
     fn iter_mut_yields_all_elements_in_order() {
         let mut s = stack!([1, 2], 3, [4, 5]);
-        let elems: Vec<u8> = s.iter_mut().map(|c| *c).collect();
+        let elems: Vec<(bool, u8)> = s.iter_mut().map(|(b, t)| (b, *t)).collect();
 
-        assert_eq!(elems, vec![1, 2, 3, 4, 5])
+        assert_eq!(
+            elems,
+            vec![(false, 1), (false, 2), (true, 3), (false, 4), (false, 5)]
+        )
     }
 
     #[test]
     fn into_iter_yields_all_elements_in_order() {
         let s = stack!([1, 2], 3, [4, 5]);
-        let elems: Vec<u8> = s.into_iter().collect();
+        let elems: Vec<(bool, u8)> = s.into_iter().collect();
 
-        assert_eq!(elems, vec![1, 2, 3, 4, 5])
+        assert_eq!(
+            elems,
+            vec![(false, 1), (false, 2), (true, 3), (false, 4), (false, 5)]
+        )
     }
 
     #[test]

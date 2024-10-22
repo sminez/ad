@@ -16,12 +16,12 @@
 //! | Status Bar                        |
 //! +-----------------------------------+
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, Buffers},
     config_handle,
     dot::{Cur, Dot},
     editor::ViewPort,
     stack,
-    ui::stack::Stack,
+    ui::stack::{Position, Stack},
 };
 use std::{cmp::min, mem::swap};
 use unicode_width::UnicodeWidthChar;
@@ -74,7 +74,7 @@ impl Windows {
         let slop = cols - (w_col * self.cols.len());
 
         for (_, col) in self.cols.iter_mut() {
-            col.update_size(w_col, rows);
+            col.update_size(w_col - 1, rows);
         }
 
         self.cols.focus.n_cols += slop;
@@ -95,21 +95,49 @@ impl Windows {
         self.views.push(view);
     }
 
+    /// Set the currently focused window to contain the given buffer
+    pub(crate) fn focus_buffer_in_new_window(&mut self, b: &Buffer) {
+        let view = if self.focused_view().bufid == b.id {
+            self.focused_view().clone()
+        } else {
+            match self.views.iter().position(|v| v.bufid == b.id) {
+                Some(idx) => self.views.remove(idx),
+                None => View::new(b.id),
+            }
+        };
+
+        if self.cols.len() == 1 {
+            let mut col = Column::new(self.screen_rows, self.screen_cols, &[b.id]);
+            col.wins.last_mut().view = view;
+            self.cols.insert_at(Position::Tail, col);
+        } else {
+            let wins = &mut self.cols.last_mut().wins;
+            wins.insert_at(Position::Tail, Window { n_rows: 0, view });
+            wins.focus_tail();
+        }
+
+        self.cols.focus_tail();
+        self.update_screen_size(self.screen_rows, self.screen_cols);
+    }
+
     pub(crate) fn scroll_up(&mut self, b: &mut Buffer) {
-        let screen_rows = self.screen_rows;
+        let (rows, cols) = (self.screen_rows, self.screen_cols);
+        let (x_offset, y_offset) = self.xy_offsets();
         let view = self.focused_view_mut();
         let c = b.dot.active_cur();
         let (y, x) = c.as_yx(b);
 
-        if view.row_off > 0 && y == view.row_off + screen_rows - 1 {
+        if view.row_off > 0 && y == view.row_off + rows - y_offset - 1 {
             b.dot.set_active_cur(Cur::from_yx(y - 1, x, b));
         }
 
-        // clamp scroll is called when we render so no need to run it here as well
         view.row_off = view.row_off.saturating_sub(1);
+        view.clamp_scroll(b, rows - y_offset, cols - x_offset);
     }
 
     pub(crate) fn scroll_down(&mut self, b: &mut Buffer) {
+        let (rows, cols) = (self.screen_rows, self.screen_cols);
+        let (x_offset, y_offset) = self.xy_offsets();
         let view = self.focused_view_mut();
         let c = b.dot.active_cur();
         let (y, x) = c.as_yx(b);
@@ -119,44 +147,63 @@ impl Windows {
             b.dot.clamp_idx(b.txt.len_chars());
         }
 
-        // clamp scroll is called when we render so no need to run it here as well
         view.row_off += 1;
+        view.clamp_scroll(b, rows - y_offset, cols - x_offset);
     }
 
-    pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer) {
+    pub(crate) fn clamp_scroll(&mut self, buffers: &mut Buffers) {
+        let b = buffers.active_mut();
         let (rows, cols) = (self.screen_rows, self.screen_cols);
-
-        if self.focused_view().bufid == b.id {
-            self.focused_view_mut().clamp_scroll(b, rows, cols);
-            return;
-        }
-
-        for (_, col) in self.cols.iter_mut() {
-            for (_, win) in col.wins.iter_mut() {
-                if win.view.bufid == b.id {
-                    win.view.clamp_scroll(b, rows, cols);
-                    return;
-                }
-            }
-        }
+        let (x_offset, y_offset) = self.xy_offsets();
+        self.focused_view_mut().clamp_scroll(b, rows - y_offset, cols - x_offset);
     }
 
-    pub(crate) fn set_viewport(&mut self, b: &mut Buffer, vp: ViewPort) {
+    pub(crate) fn set_viewport(&mut self, buffers: &mut Buffers, vp: ViewPort) {
+        let b = buffers.active_mut();
         let (rows, cols) = (self.screen_rows, self.screen_cols);
+        let (x_offset, y_offset) = self.xy_offsets();
+        self.focused_view_mut().set_viewport(b, vp, rows - y_offset, cols - x_offset);
+    }
 
-        if self.focused_view().bufid == b.id {
-            self.focused_view_mut().set_viewport(b, vp, rows, cols);
-            return;
-        }
+    /// Coordinate offsets from the top left of the window layout to the top left of the active window.
+    fn xy_offsets(&self) -> (usize, usize) {
+        let cols_before = &self.cols.up;
+        let wins_above = &self.cols.focus.wins.up;
+        let x_offset = cols_before.iter().map(|c| c.n_cols).sum::<usize>() + cols_before.len();
+        let y_offset = wins_above.iter().map(|w| w.n_rows).sum::<usize>() + wins_above.len();
 
-        for (_, col) in self.cols.iter_mut() {
-            for (_, win) in col.wins.iter_mut() {
-                if win.view.bufid == b.id {
-                    win.view.set_viewport(b, vp, rows, cols);
-                    return;
-                }
-            }
-        }
+        (x_offset, y_offset)
+    }
+
+    /// Locate the absolute cursor position based on the current window layout
+    pub(crate) fn ui_xy(&self, b: &Buffer) -> (usize, usize) {
+        let (x_offset, y_offset) = self.xy_offsets();
+        let (x, y) = self.focused_view().ui_xy(b);
+
+        (x + x_offset, y + y_offset)
+    }
+
+    pub(crate) fn cur_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) -> Cur {
+        let (x_offset, y_offset) = self.xy_offsets();
+        let (_, w_sgncol) = b.sign_col_dims();
+        let rx = x.saturating_sub(1).saturating_sub(w_sgncol).saturating_sub(x_offset);
+
+        let view = self.focused_view_mut();
+        view.rx = rx;
+        b.cached_rx = rx;
+
+        let y = min(y + view.row_off, b.len_lines()).saturating_sub(1).saturating_sub(y_offset);
+        let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, view.rx), b);
+
+        cur.clamp_idx(b.txt.len_chars());
+
+        cur
+    }
+
+    pub(crate) fn set_dot_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) {
+        b.dot = Dot::Cur {
+            c: self.cur_from_screen_coords(b, x, y),
+        };
     }
 }
 
@@ -170,6 +217,9 @@ pub(crate) struct Column {
 
 impl Column {
     pub(crate) fn new(n_rows: usize, n_cols: usize, buf_ids: &[usize]) -> Self {
+        if buf_ids.is_empty() {
+            panic!("cant have an empty column");
+        }
         let win_rows = n_rows / buf_ids.len();
         let mut wins =
             Stack::try_from_iter(buf_ids.iter().map(|id| Window::new(*id, win_rows))).unwrap();
@@ -181,7 +231,7 @@ impl Column {
 
     fn update_size(&mut self, n_cols: usize, n_rows: usize) {
         self.n_cols = n_cols;
-        let win_rows = n_rows / self.wins.len();
+        let win_rows = (n_rows - self.wins.len() + 1) / self.wins.len();
 
         for (_, win) in self.wins.iter_mut() {
             win.n_rows = win_rows;
@@ -209,7 +259,7 @@ impl Window {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct View {
     pub(crate) bufid: usize,
     pub(crate) col_off: usize,
@@ -227,11 +277,14 @@ impl View {
         }
     }
 
-    pub(crate) fn ui_xy(&self, b: &Buffer) -> (usize, usize) {
+    /// provides an (x, y) coordinate assuming that this window is in the top left
+    fn ui_xy(&self, b: &Buffer) -> (usize, usize) {
         let (_, w_sgncol) = b.sign_col_dims();
         let (y, _) = b.dot.active_cur().as_yx(b);
+        let x = self.rx - self.col_off + w_sgncol;
+        let y = y - self.row_off;
 
-        (self.rx - self.col_off + w_sgncol, y - self.row_off)
+        (x, y)
     }
 
     pub(crate) fn rx_from_x(&self, b: &Buffer, y: usize, x: usize) -> usize {
@@ -292,34 +345,6 @@ impl View {
         };
 
         self.clamp_scroll(b, screen_rows, screen_cols);
-    }
-
-    #[inline]
-    fn set_rx_from_screen_rows(&mut self, b: &mut Buffer, x: usize) {
-        self.rx = self.rx_from_screen_rows(b, x);
-        b.cached_rx = self.rx;
-    }
-
-    #[inline]
-    pub(crate) fn rx_from_screen_rows(&self, b: &Buffer, x: usize) -> usize {
-        let (_, w_sgncol) = b.sign_col_dims();
-        x.saturating_sub(1).saturating_sub(w_sgncol)
-    }
-
-    pub(crate) fn cur_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) -> Cur {
-        self.set_rx_from_screen_rows(b, x);
-        let y = min(y + self.row_off, b.len_lines()).saturating_sub(1);
-        let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, self.rx), b);
-
-        cur.clamp_idx(b.txt.len_chars());
-
-        cur
-    }
-
-    pub(crate) fn set_dot_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) {
-        b.dot = Dot::Cur {
-            c: self.cur_from_screen_coords(b, x, y),
-        };
     }
 }
 

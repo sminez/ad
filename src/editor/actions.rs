@@ -72,6 +72,7 @@ pub enum Action {
     NewEditLogTransaction,
     NextBuffer,
     OpenFile { path: String },
+    OpenFileInNewWindow { path: String },
     Paste,
     PreviousBuffer,
     RawInput { i: Input },
@@ -142,12 +143,12 @@ where
 
     /// Open a file within the editor using a path that is relative to the current working
     /// directory
-    pub fn open_file_relative_to_cwd(&mut self, path: &str) {
-        self.open_file(self.cwd.join(path));
+    pub fn open_file_relative_to_cwd(&mut self, path: &str, new_window: bool) {
+        self.open_file(self.cwd.join(path), new_window);
     }
 
     /// Open a file within the editor
-    pub fn open_file<P: AsRef<Path>>(&mut self, path: P) {
+    pub fn open_file<P: AsRef<Path>>(&mut self, path: P, new_window: bool) {
         let path = path.as_ref();
         debug!(?path, "opening file");
         let was_empty_scratch = self.buffers.is_empty_scratch();
@@ -162,8 +163,14 @@ where
                 }
                 _ = self.tx_fsys.send(LogEvent::Open(new_id));
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
-                self.windows
-                    .focus_buffer_in_active_window(self.buffers.active());
+
+                if new_window {
+                    self.windows
+                        .focus_buffer_in_new_window(self.buffers.active());
+                } else {
+                    self.windows
+                        .focus_buffer_in_active_window(self.buffers.active());
+                }
             }
 
             Ok(None) => {
@@ -181,8 +188,13 @@ where
                 let id = self.active_buffer_id();
                 if id != current_id {
                     _ = self.tx_fsys.send(LogEvent::Focus(id));
-                    self.windows
-                        .focus_buffer_in_active_window(self.buffers.active());
+                    if new_window {
+                        self.windows
+                            .focus_buffer_in_new_window(self.buffers.active());
+                    } else {
+                        self.windows
+                            .focus_buffer_in_active_window(self.buffers.active());
+                    }
                 }
             }
         };
@@ -204,7 +216,7 @@ where
         };
 
         if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()));
+            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), false);
         }
     }
 
@@ -526,7 +538,7 @@ where
                 self.open_virtual(filename, data);
             }
             _ => {
-                self.open_file(data);
+                self.open_file(data, true);
                 if let Some(s) = attrs.get("addr") {
                     match Addr::parse(&mut s.chars().peekable()) {
                         Ok(mut addr) => {
@@ -570,7 +582,7 @@ where
         }
 
         if is_file {
-            self.open_file(path);
+            self.open_file(path, true);
             if let Some(mut addr) = maybe_addr {
                 let b = self.buffers.active_mut();
                 b.dot = b.map_addr(&mut addr);
@@ -762,7 +774,7 @@ recv {}({})",
         );
         let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
-        ed.open_file("foo");
+        ed.open_file("foo", false);
 
         // The first open should also close our scratch buffer
         assert_recv!(brx, Close, 0);
@@ -770,12 +782,12 @@ recv {}({})",
         assert_recv!(brx, Focus, 1);
 
         // Opening a second file should only notify for that file
-        ed.open_file("bar");
+        ed.open_file("bar", false);
         assert_recv!(brx, Open, 2);
         assert_recv!(brx, Focus, 2);
 
         // Opening the first file again should just notify for the current file
-        ed.open_file("foo");
+        ed.open_file("foo", false);
         assert_recv!(brx, Focus, 1);
     }
 
@@ -793,7 +805,7 @@ recv {}({})",
         let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
         for file in files {
-            ed.open_file(file);
+            ed.open_file(file, false);
         }
 
         ed.ensure_correct_fsys_state();

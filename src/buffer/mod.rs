@@ -490,7 +490,11 @@ impl Buffer {
             Dot::Range { .. } => return,
         };
 
-        let prev = self.txt.get_char(current_index - 1);
+        let prev = if current_index == 0 {
+            None
+        } else {
+            self.txt.get_char(current_index - 1)
+        };
         let next = self.txt.get_char(current_index + 1);
 
         let chars = match (prev, next) {

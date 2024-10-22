@@ -76,9 +76,7 @@ where
                 }
 
                 let b = self.buffers.active_mut();
-                self.windows
-                    .focused_view_mut()
-                    .set_dot_from_screen_coords(b, x, y);
+                self.windows.set_dot_from_screen_coords(b, x, y);
 
                 if self.last_click_was_left {
                     let delta = (self.last_click_time - last_click_time).as_millis();
@@ -101,7 +99,7 @@ where
                         return;
                     }
 
-                    let cur = self.windows.focused_view_mut().cur_from_screen_coords(
+                    let cur = self.windows.cur_from_screen_coords(
                         self.buffers.active_mut(),
                         x,
                         y,
@@ -140,7 +138,7 @@ where
                     return;
                 }
 
-                let cur = self.windows.focused_view_mut().cur_from_screen_coords(
+                let cur = self.windows.cur_from_screen_coords(
                     self.buffers.active_mut(),
                     x,
                     y,
@@ -161,7 +159,6 @@ where
     fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
         let cur =
             self.windows
-                .focused_view_mut()
                 .cur_from_screen_coords(self.buffers.active_mut(), x, y);
 
         Click::new(btn, Range::from_cursors(cur, cur, false))

@@ -80,13 +80,16 @@ impl Tui {
             let file_row = y + w.view.row_off;
 
             if file_row >= b.len_lines() {
-                lines.push(format!(
-                    "{}{}~ {VLINE:>width$}{}", // FIXME: pad whitespace to view width
+                let mut buf = format!(
+                    "{}{}~ {VLINE:>width$}{}",
                     Style::Fg(cs.signcol_fg),
                     Style::Bg(cs.bg),
                     Style::Fg(cs.fg),
                     width = w_lnum
-                ));
+                );
+                let padding = n_cols - w_lnum - 2;
+                buf.push_str(&" ".repeat(padding));
+                lines.push(buf);
             } else {
                 // +2 for the leading space and vline chars
                 let padding = w_lnum + 2;
@@ -124,13 +127,13 @@ impl Tui {
         cs: &ColorScheme,
     ) -> Vec<String> {
         let mut rendered_rows = Vec::with_capacity(screen_rows);
-        
-         for (is_focus, win) in col.wins.iter() {
+
+        for (is_focus, win) in col.wins.iter() {
             let rng = if is_focus { load_exec_range } else { None };
             let b = buffers.with_id(win.view.bufid).expect("valid buffer id");
             rendered_rows.extend(self.render_window(b, win, col.n_cols, rng, cs));
             rendered_rows.push(HLINE.repeat(col.n_cols));
-         }
+        }
         rendered_rows.truncate(screen_rows);
 
         rendered_rows
@@ -147,7 +150,6 @@ impl Tui {
             let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
             buf.push_str(&" ".repeat(padding));
             buf.push_str(&banner);
-            buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
 
             buf
         };
@@ -202,7 +204,7 @@ impl Tui {
             }
             let mut buf = line_fragments.join(&format!(
                 "{}{}{VLINE}",
-                Style::Fg(cs.signcol_fg),
+                Style::Fg(cs.minibuffer_hl),
                 Style::Bg(cs.bg)
             ));
             buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
@@ -412,7 +414,7 @@ impl UserInterface for Tui {
         let (x, y) = if w_minibuffer {
             (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
         } else {
-            windows.focused_view().ui_xy(active_buffer)
+            windows.ui_xy(active_buffer)
         };
         lines.push(format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
