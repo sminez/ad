@@ -99,11 +99,9 @@ where
                         return;
                     }
 
-                    let cur = self.windows.cur_from_screen_coords(
-                        self.buffers.active_mut(),
-                        x,
-                        y,
-                    );
+                    let cur = self
+                        .windows
+                        .cur_from_screen_coords(self.buffers.active_mut(), x, y);
                     click.selection.set_active_cursor(cur);
 
                     if click.btn == Left {
@@ -138,11 +136,9 @@ where
                     return;
                 }
 
-                let cur = self.windows.cur_from_screen_coords(
-                    self.buffers.active_mut(),
-                    x,
-                    y,
-                );
+                let cur = self
+                    .windows
+                    .cur_from_screen_coords(self.buffers.active_mut(), x, y);
                 click.selection.set_active_cursor(cur);
 
                 match click.btn {
@@ -157,9 +153,9 @@ where
 
     #[inline]
     fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
-        let cur =
-            self.windows
-                .cur_from_screen_coords(self.buffers.active_mut(), x, y);
+        let cur = self
+            .windows
+            .cur_from_screen_coords(self.buffers.active_mut(), x, y);
 
         Click::new(btn, Range::from_cursors(cur, cur, false))
     }

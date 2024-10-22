@@ -26,8 +26,6 @@ use crate::{
 use std::{cmp::min, mem::swap};
 use unicode_width::UnicodeWidthChar;
 
-// FIXME: for now there is only ever a single column with a single window
-
 /// Windows is a screen layout of the windows available for displaying buffer
 /// content to the user. The available screen space is split into a number of
 /// columns each containing a vertical stack of windows.
@@ -155,14 +153,16 @@ impl Windows {
         let b = buffers.active_mut();
         let (rows, cols) = (self.screen_rows, self.screen_cols);
         let (x_offset, y_offset) = self.xy_offsets();
-        self.focused_view_mut().clamp_scroll(b, rows - y_offset, cols - x_offset);
+        self.focused_view_mut()
+            .clamp_scroll(b, rows - y_offset, cols - x_offset);
     }
 
     pub(crate) fn set_viewport(&mut self, buffers: &mut Buffers, vp: ViewPort) {
         let b = buffers.active_mut();
         let (rows, cols) = (self.screen_rows, self.screen_cols);
         let (x_offset, y_offset) = self.xy_offsets();
-        self.focused_view_mut().set_viewport(b, vp, rows - y_offset, cols - x_offset);
+        self.focused_view_mut()
+            .set_viewport(b, vp, rows - y_offset, cols - x_offset);
     }
 
     /// Coordinate offsets from the top left of the window layout to the top left of the active window.
@@ -186,13 +186,18 @@ impl Windows {
     pub(crate) fn cur_from_screen_coords(&mut self, b: &mut Buffer, x: usize, y: usize) -> Cur {
         let (x_offset, y_offset) = self.xy_offsets();
         let (_, w_sgncol) = b.sign_col_dims();
-        let rx = x.saturating_sub(1).saturating_sub(w_sgncol).saturating_sub(x_offset);
+        let rx = x
+            .saturating_sub(1)
+            .saturating_sub(w_sgncol)
+            .saturating_sub(x_offset);
 
         let view = self.focused_view_mut();
         view.rx = rx;
         b.cached_rx = rx;
 
-        let y = min(y + view.row_off, b.len_lines()).saturating_sub(1).saturating_sub(y_offset);
+        let y = min(y + view.row_off, b.len_lines())
+            .saturating_sub(1)
+            .saturating_sub(y_offset);
         let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, view.rx), b);
 
         cur.clamp_idx(b.txt.len_chars());

@@ -67,9 +67,6 @@ impl Default for BufferKind {
 impl BufferKind {
     fn display_name(&self) -> String {
         match self {
-            // FIXME: remove these
-            // BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
-            // BufferKind::Directory(p) => relative_path_from(cwd, p).display().to_string(),
             BufferKind::File(p) => p.display().to_string(),
             BufferKind::Directory(p) => p.display().to_string(),
             BufferKind::Virtual(s) => s.clone(),

@@ -220,8 +220,8 @@ where
         self.buffers.open_virtual(name.into(), content.into());
         //self.windows
         //    .focus_buffer_in_new_window(self.buffers.active());
-        self.windows.focus_buffer_in_active_window(self.buffers.active());
-
+        self.windows
+            .focus_buffer_in_active_window(self.buffers.active());
     }
 
     fn send_buffer_resp(
@@ -451,8 +451,10 @@ where
     fn jump_forward(&mut self) {
         let maybe_ids = self.buffers.jump_list_forward();
         if let Some((prev_id, new_id)) = maybe_ids {
-            self.windows.focus_buffer_in_active_window(self.buffers.active_mut());
-            self.windows.set_viewport(&mut self.buffers, ViewPort::Center);
+            self.windows
+                .focus_buffer_in_active_window(self.buffers.active_mut());
+            self.windows
+                .set_viewport(&mut self.buffers, ViewPort::Center);
             if new_id != prev_id {
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
             }
@@ -462,8 +464,10 @@ where
     fn jump_backward(&mut self) {
         let maybe_ids = self.buffers.jump_list_backward();
         if let Some((prev_id, new_id)) = maybe_ids {
-            self.windows.focus_buffer_in_active_window(self.buffers.active_mut());
-            self.windows.set_viewport(&mut self.buffers, ViewPort::Center);
+            self.windows
+                .focus_buffer_in_active_window(self.buffers.active_mut());
+            self.windows
+                .set_viewport(&mut self.buffers, ViewPort::Center);
             if new_id != prev_id {
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
             }
