@@ -35,6 +35,7 @@ pub mod term;
 pub mod trie;
 pub mod ui;
 pub mod util;
+pub mod ziplist;
 
 pub use buffer::GapBuffer;
 pub use config::Config;

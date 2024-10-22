@@ -8,7 +8,6 @@ use crate::{
 };
 use std::sync::mpsc::Sender;
 
-mod stack;
 mod tui;
 mod windows;
 

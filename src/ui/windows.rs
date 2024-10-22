@@ -20,8 +20,8 @@ use crate::{
     config_handle, die,
     dot::{Cur, Dot},
     editor::ViewPort,
-    stack,
-    ui::stack::{Position, Stack},
+    ziplist,
+    ziplist::{Position, ZipList},
 };
 use std::{cmp::min, mem::swap};
 use unicode_width::UnicodeWidthChar;
@@ -36,7 +36,7 @@ pub(crate) struct Windows {
     /// Available screen height in terms of characters
     pub(crate) screen_cols: usize,
     /// Left to right Columns of windows
-    pub(super) cols: Stack<Column>,
+    pub(super) cols: ZipList<Column>,
     /// Known Buffer views that are not currently active
     pub(super) views: Vec<View>,
 }
@@ -46,7 +46,7 @@ impl Windows {
         Self {
             screen_rows,
             screen_cols,
-            cols: stack![Column::new(screen_rows, screen_cols, &[active_buffer_id])],
+            cols: ziplist![Column::new(screen_rows, screen_cols, &[active_buffer_id])],
             views: vec![],
         }
     }
@@ -298,7 +298,7 @@ pub(crate) struct Column {
     /// Number of character columns wide
     pub(crate) n_cols: usize,
     /// Windows within this column
-    pub(crate) wins: Stack<Window>,
+    pub(crate) wins: ZipList<Window>,
 }
 
 impl Column {
@@ -308,7 +308,7 @@ impl Column {
         }
         let win_rows = n_rows / buf_ids.len();
         let mut wins =
-            Stack::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
+            ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
         let slop = n_rows - (win_rows * buf_ids.len());
         wins.focus.n_rows += slop;
 
@@ -462,7 +462,7 @@ mod tests {
         let mut ws = Windows {
             screen_rows: 80,
             screen_cols: 100,
-            cols: Stack::try_from_iter(cols).unwrap(),
+            cols: ZipList::try_from_iter(cols).unwrap(),
             views: vec![],
         };
         ws.update_screen_size(80, 100);
