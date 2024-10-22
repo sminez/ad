@@ -66,7 +66,7 @@ pub trait System: fmt::Debug {
 #[derive(Debug, Clone, Copy)]
 pub struct DefaultSystem;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(unix, not(target_os = "macos")))]
 impl System for DefaultSystem {
     fn set_clipboard(&mut self, s: &str) -> io::Result<()> {
         let mut child = Command::new("xclip")
