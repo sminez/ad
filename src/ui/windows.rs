@@ -210,7 +210,12 @@ impl Windows {
         die!("click out of bounds (x, y)=({x}, {y})");
     }
 
-    fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
+    pub(crate) fn focus_buffer_for_screen_coords(
+        &mut self,
+        buffers: &mut Buffers,
+        x: usize,
+        y: usize,
+    ) -> BufferId {
         let mut x_offset = 0;
         let mut y_offset = 0;
 
@@ -231,6 +236,7 @@ impl Windows {
                     self.cols.focus.wins.focus_down();
                     continue;
                 }
+                buffers.focus_id(win.view.bufid);
                 return win.view.bufid;
             }
         }
@@ -243,10 +249,10 @@ impl Windows {
         buffers: &mut Buffers,
         x: usize,
         y: usize,
-        focus_clicked: bool,
+        set_focus: bool,
     ) -> (BufferId, Cur) {
-        let bufid = if focus_clicked {
-            self.focus_buffer_for_screen_coords(x, y)
+        let bufid = if set_focus {
+            self.focus_buffer_for_screen_coords(buffers, x, y)
         } else {
             self.buffer_for_screen_coords(x, y)
         };
@@ -282,9 +288,7 @@ impl Windows {
     ) -> bool {
         let current_bufid = buffers.active().id;
         let (bufid, c) = self.cur_from_screen_coords(buffers, x, y, true);
-        buffers.focus_id(bufid);
-        let b = buffers.with_id_mut(bufid).expect("windows state is stale");
-        b.dot = Dot::Cur { c };
+        buffers.active_mut().dot = Dot::Cur { c };
 
         bufid == current_bufid
     }
@@ -503,7 +507,7 @@ mod tests {
             "focused id before mutation"
         );
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            ws.focus_buffer_for_screen_coords(&mut Buffers::new(), x, y),
             expected,
             "bufid with mutation"
         );
@@ -544,7 +548,7 @@ mod tests {
         assert_eq!(&ids(&ws), &[0, 1, 2, 3, 4], "before first click");
 
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            ws.focus_buffer_for_screen_coords(&mut Buffers::new(), x, y),
             expected,
             "bufid with mutation"
         );
@@ -552,7 +556,7 @@ mod tests {
         assert_eq!(&ids(&ws), &[0, 1, 2, 3, 4], "after first click");
 
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            ws.focus_buffer_for_screen_coords(&mut Buffers::new(), x, y),
             expected,
             "bufid with mutation"
         );

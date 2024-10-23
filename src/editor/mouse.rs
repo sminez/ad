@@ -115,13 +115,15 @@ where
                 }
             }
 
-            MouseEvent::Press { b: WheelUp, .. } => {
+            MouseEvent::Press { b: WheelUp, x, y } => {
                 self.last_click_was_left = false;
+                self.windows.focus_buffer_for_screen_coords(&mut self.buffers, x, y);
                 self.windows.scroll_up(self.buffers.active_mut());
             }
 
-            MouseEvent::Press { b: WheelDown, .. } => {
+            MouseEvent::Press { b: WheelDown, x, y } => {
                 self.last_click_was_left = false;
+                self.windows.focus_buffer_for_screen_coords(&mut self.buffers, x, y);
                 self.windows.scroll_down(self.buffers.active_mut());
             }
 
