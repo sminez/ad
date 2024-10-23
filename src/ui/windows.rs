@@ -263,11 +263,8 @@ impl Windows {
         view.rx = rx;
         b.cached_rx = rx;
 
-        let y = min(y + view.row_off, b.len_lines())
-            .saturating_sub(1)
-            .saturating_sub(y_offset);
+        let y = min(y.saturating_sub(y_offset) + view.row_off, b.len_lines()).saturating_sub(1);
         let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, view.rx), b);
-
         cur.clamp_idx(b.txt.len_chars());
 
         (bufid, cur)
