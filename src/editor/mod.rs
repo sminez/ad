@@ -309,7 +309,7 @@ where
                 b.dot = b.xdot;
                 b.handle_action(Action::InsertString { s }, Source::Fsys);
                 (b.xdot, b.dot) = (b.dot, dot);
-                b.dot.clamp_idx(b.txt.len_chars()); // xdot already clamped as part of the insert
+                b.dot.clamp_idx(b.txt.len_chars()); // xdot clamped as part of handling the insert
             }),
 
             ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
@@ -319,6 +319,7 @@ where
                     Source::Fsys,
                 );
                 b.handle_action(Action::Delete, Source::Fsys);
+                b.xdot.clamp_idx(b.txt.len_chars());
             }),
 
             AppendBufferBody { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {

@@ -239,6 +239,7 @@ impl Buffer {
         let n_chars = raw.len();
         self.txt = GapBuffer::from(raw);
         self.dot.clamp_idx(n_chars);
+        self.xdot.clamp_idx(n_chars);
         self.edit_log.clear();
         self.dirty = false;
         self.last_save = SystemTime::now();
@@ -653,6 +654,8 @@ impl Buffer {
         self.set_dot(TextObject::BufferEnd, 1);
         self.handle_action(Action::InsertString { s }, source);
         self.dot = dot;
+        self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// The error result of this function is an error string that should be displayed to the user
@@ -662,18 +665,21 @@ impl Buffer {
                 let (c, deleted) = self.delete_dot(self.dot, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
+                self.xdot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
                 let (c, _) = self.insert_char(self.dot, c, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
+                self.xdot.clamp_idx(self.txt.len_chars());
                 return None;
             }
             Action::InsertString { s } => {
                 let (c, _) = self.insert_string(self.dot, s, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
+                self.xdot.clamp_idx(self.txt.len_chars());
                 return None;
             }
 
@@ -754,6 +760,7 @@ impl Buffer {
             t.set_dot(self);
         }
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// Extend dot foward and clamp to ensure it is within bounds
@@ -762,6 +769,7 @@ impl Buffer {
             t.extend_dot_forward(self);
         }
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// Extend dot backward and clamp to ensure it is within bounds
@@ -770,6 +778,7 @@ impl Buffer {
             t.extend_dot_backward(self);
         }
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     pub(crate) fn new_edit_log_transaction(&mut self) {

@@ -149,6 +149,7 @@ impl Windows {
         if y == view.row_off && view.row_off < b.txt.len_lines() - 1 {
             b.dot.set_active_cur(Cur::from_yx(y + 1, x, b));
             b.dot.clamp_idx(b.txt.len_chars());
+            b.xdot.clamp_idx(b.txt.len_chars());
         }
 
         view.row_off += 1;
