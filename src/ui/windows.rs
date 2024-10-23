@@ -1,20 +1,4 @@
 //! Layout of UI windows
-//!
-//!
-//!  Windows
-//! +-----------------+-----------------+
-//! |                 |                 |
-//! |                 |                 |
-//! |                 |                 |
-//! |                 |                 |
-//! |    Column       ...................
-//! |                 .                 .
-//! |                 .    Window       .
-//! |                 .                 .
-//! |                 .                 .
-//! +-----------------...................
-//! | Status Bar                        |
-//! +-----------------------------------+
 use crate::{
     buffer::{Buffer, BufferId, Buffers},
     config_handle, die,
@@ -49,6 +33,26 @@ impl Windows {
             cols: ziplist![Column::new(screen_rows, screen_cols, &[active_buffer_id])],
             views: vec![],
         }
+    }
+
+    pub(crate) fn next_column(&mut self, buffers: &mut Buffers) {
+        self.cols.focus_down();
+        buffers.focus_id(self.focused_view().bufid);
+    }
+
+    pub(crate) fn prev_column(&mut self, buffers: &mut Buffers) {
+        self.cols.focus_up();
+        buffers.focus_id(self.focused_view().bufid);
+    }
+
+    pub(crate) fn next_window_in_column(&mut self, buffers: &mut Buffers) {
+        self.cols.focus.wins.focus_down();
+        buffers.focus_id(self.focused_view().bufid);
+    }
+
+    pub(crate) fn prev_window_in_column(&mut self, buffers: &mut Buffers) {
+        self.cols.focus.wins.focus_up();
+        buffers.focus_id(self.focused_view().bufid);
     }
 
     #[inline]

@@ -104,6 +104,12 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char('z'), Char('z') ] => [ SetViewPort(ViewPort::Center) ],
         [ Char('z'), Char('b') ] => [ SetViewPort(ViewPort::Bottom) ],
 
+        // Window manipulation
+        [ Alt('w') ] => [ PreviousWindowInColumn ],
+        [ Alt('a') ] => [ PreviousColumn ],
+        [ Alt('s') ] => [ NextWindowInColumn ],
+        [ Alt('d') ] => [ NextColumn ],
+
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],
         [ Char('d') ] => [ Delete ],
@@ -117,7 +123,8 @@ pub(crate) fn normal_mode() -> Mode {
         [ Alt('[') ] => [ JumpListBack ],
         [ Alt(']') ] => [ JumpListForward ],
 
-        [ Return ] => [ LoadDot ],
+        [ Return ] => [ LoadDot { new_window: false } ],
+        [ AltReturn ] => [ LoadDot { new_window: true } ],
         [ Char('@') ] => [ ExecuteDot ],
         [ Char('*') ] => [ ExpandDot ],
 

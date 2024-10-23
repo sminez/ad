@@ -29,6 +29,7 @@ pub enum Input {
     CtrlAlt(char),
     Tab,
     BackTab,
+    AltReturn,
     Return,
     Backspace,
     Arrow(Arrow),
@@ -68,6 +69,7 @@ impl Input {
             ('\x1b', c) if c.is_ascii() => match Self::from_char(c) {
                 Input::Char(c) => Some(Input::Alt(c)),
                 Input::Ctrl(c) => Some(Input::CtrlAlt(c)),
+                Input::Return => Some(Input::AltReturn),
                 _ => None,
             },
             _ => None,

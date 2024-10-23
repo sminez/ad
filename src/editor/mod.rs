@@ -398,11 +398,21 @@ where
             FocusBuffer { id } => self.focus_buffer(id),
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
-            LoadDot => self.default_load_dot(source, false),
+            LoadDot { new_window } => self.default_load_dot(source, new_window),
             MarkClean { bufid } => self.mark_clean(bufid),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            NextColumn => {
+                self.windows.next_column(&mut self.buffers);
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            NextWindowInColumn => {
+                self.windows.next_window_in_column(&mut self.buffers);
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
@@ -411,6 +421,16 @@ where
             Paste => self.paste_from_clipboard(source),
             PreviousBuffer => {
                 self.buffers.previous();
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            PreviousColumn => {
+                self.windows.prev_column(&mut self.buffers);
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            PreviousWindowInColumn => {
+                self.windows.prev_window_in_column(&mut self.buffers);
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
