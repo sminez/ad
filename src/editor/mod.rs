@@ -216,12 +216,20 @@ where
     }
 
     /// Open a new virtual buffer which will be removed from state when it loses focus.
-    pub(crate) fn open_virtual(&mut self, name: impl Into<String>, content: impl Into<String>) {
+    pub(crate) fn open_virtual(
+        &mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+        load_in_new_window: bool,
+    ) {
         self.buffers.open_virtual(name.into(), content.into());
-        //self.windows
-        //    .focus_buffer_in_new_window(self.buffers.active());
-        self.windows
-            .show_buffer_in_active_window(self.buffers.active());
+        if load_in_new_window {
+            self.windows
+                .show_buffer_in_new_window(self.buffers.active());
+        } else {
+            self.windows
+                .show_buffer_in_active_window(self.buffers.active());
+        }
     }
 
     fn send_buffer_resp(
@@ -337,7 +345,7 @@ where
             }
 
             LoadInBuffer { id, txt } => {
-                self.load_explicit_string(id, txt);
+                self.load_explicit_string(id, txt, false);
                 default_handled();
             }
 
@@ -389,7 +397,7 @@ where
             FocusBuffer { id } => self.focus_buffer(id),
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
-            LoadDot => self.default_load_dot(source),
+            LoadDot => self.default_load_dot(source, false),
             MarkClean { bufid } => self.mark_clean(bufid),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {

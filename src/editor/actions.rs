@@ -200,7 +200,7 @@ where
         };
     }
 
-    fn find_file_under_dir(&mut self, d: &Path) {
+    fn find_file_under_dir(&mut self, d: &Path, new_window: bool) {
         let cmd = config_handle!().find_command.clone();
 
         let selection = match cmd.split_once(' ') {
@@ -217,13 +217,20 @@ where
 
         if let MiniBufferSelection::Line { line, .. } = selection {
             self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), false);
+            if new_window {
+                self.windows
+                    .show_buffer_in_new_window(self.buffers.active());
+            } else {
+                self.windows
+                    .show_buffer_in_active_window(self.buffers.active());
+            }
         }
     }
 
     /// This shells out to the fd command line program
     pub(crate) fn find_file(&mut self) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        self.find_file_under_dir(&d);
+        self.find_file_under_dir(&d, true);
     }
 
     /// This shells out to the git and fd command line programs
@@ -243,7 +250,7 @@ where
         };
 
         let root = Path::new(s.trim());
-        self.find_file_under_dir(root);
+        self.find_file_under_dir(root, true);
     }
 
     pub(crate) fn delete_buffer(&mut self, id: usize, force: bool) {
@@ -453,11 +460,11 @@ where
     }
 
     pub(super) fn view_logs(&mut self) {
-        self.open_virtual("+logs", self.log_buffer.content())
+        self.open_virtual("+logs", self.log_buffer.content(), false)
     }
 
     pub(super) fn show_help(&mut self) {
-        self.open_virtual("+help", gen_help_docs())
+        self.open_virtual("+help", gen_help_docs(), false)
     }
 
     pub(super) fn debug_edit_log(&mut self) {
@@ -480,7 +487,7 @@ where
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_load_dot(&mut self, source: Source) {
+    pub(super) fn default_load_dot(&mut self, source: Source, load_in_new_window: bool) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
         if b.notify_load(source) {
@@ -503,7 +510,7 @@ where
         };
 
         match self.plumbing_rules.plumb(m) {
-            Some(MatchOutcome::Message(m)) => self.handle_plumbing_message(m),
+            Some(MatchOutcome::Message(m)) => self.handle_plumbing_message(m, load_in_new_window),
 
             Some(MatchOutcome::Run(cmd)) => {
                 let mut command = Command::new("sh");
@@ -516,7 +523,7 @@ where
                 };
             }
 
-            None => self.load_explicit_string(id, s),
+            None => self.load_explicit_string(id, s, load_in_new_window),
         }
     }
 
@@ -527,7 +534,7 @@ where
     ///   - if the attr "action" is set to "showdata" then a new buffer is created to hold the data
     ///     - if the attr "filename" is set as well then it will be used as the name for the buffer
     ///     - otherwise the filename will be "+plumbing-message"
-    fn handle_plumbing_message(&mut self, m: PlumbingMessage) {
+    fn handle_plumbing_message(&mut self, m: PlumbingMessage, load_in_new_window: bool) {
         let PlumbingMessage { attrs, data, .. } = m;
         match attrs.get("action") {
             Some(s) if s == "showdata" => {
@@ -535,10 +542,10 @@ where
                     .get("filename")
                     .cloned()
                     .unwrap_or_else(|| "+plumbing-message".to_string());
-                self.open_virtual(filename, data);
+                self.open_virtual(filename, data, load_in_new_window);
             }
             _ => {
-                self.open_file(data, true);
+                self.open_file(data, load_in_new_window);
                 if let Some(s) = attrs.get("addr") {
                     match Addr::parse(&mut s.chars().peekable()) {
                         Ok(mut addr) => {
@@ -552,7 +559,12 @@ where
         }
     }
 
-    pub(super) fn load_explicit_string(&mut self, bufid: usize, s: String) {
+    pub(super) fn load_explicit_string(
+        &mut self,
+        bufid: usize,
+        s: String,
+        load_in_new_window: bool,
+    ) {
         let b = match self.buffers.with_id_mut(bufid) {
             Some(b) => b,
             None => return,
@@ -582,7 +594,7 @@ where
         }
 
         if is_file {
-            self.open_file(path, true);
+            self.open_file(path, load_in_new_window);
             if let Some(mut addr) = maybe_addr {
                 let b = self.buffers.active_mut();
                 b.dot = b.map_addr(&mut addr);

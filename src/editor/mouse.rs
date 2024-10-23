@@ -95,6 +95,8 @@ where
             }
 
             (Press, NoMod, Right) => self.handle_right_or_middle_click(true, x, y),
+            (Press, Alt, Right) => self.handle_right_or_middle_click(true, x, y),
+
             (Press, NoMod, Middle) | (Press, Ctrl, Left) => {
                 self.handle_right_or_middle_click(false, x, y)
             }
@@ -133,7 +135,7 @@ where
                 self.windows.scroll_down(self.buffers.active_mut());
             }
 
-            (Release, _, b) => {
+            (Release, m, b) => {
                 if let Some(click) = self.held_click {
                     if click.btn == Left && (b == Right || b == Middle) {
                         return; // paste and cut are handled on click
@@ -161,7 +163,7 @@ where
                 match click.btn {
                     Left | WheelUp | WheelDown => (),
                     Right | Middle => {
-                        self.handle_right_or_middle_release(click.btn == Right, click)
+                        self.handle_right_or_middle_release(click.btn == Right, click, m == Alt)
                     }
                 }
             }
@@ -212,14 +214,19 @@ where
     }
 
     #[inline]
-    fn handle_right_or_middle_release(&mut self, is_right: bool, click: Click) {
+    fn handle_right_or_middle_release(
+        &mut self,
+        is_right: bool,
+        click: Click,
+        load_in_new_window: bool,
+    ) {
         if click.selection.start != click.selection.end {
             // In the case where the click selection is a range we Load/Execute it directly.
             // For Middle clicks, if there is also a range dot in the buffer then that is
             // used as an argument to the command being executed.
             if is_right {
                 self.buffers.active_mut().dot = Dot::from(click.selection);
-                self.default_load_dot(Source::Mouse);
+                self.default_load_dot(Source::Mouse, load_in_new_window);
             } else {
                 let dot = self.buffers.active().dot;
                 self.buffers.active_mut().dot = Dot::from(click.selection);
@@ -242,7 +249,7 @@ where
             }
 
             if is_right {
-                self.default_load_dot(Source::Mouse);
+                self.default_load_dot(Source::Mouse, load_in_new_window);
             } else {
                 self.default_execute_dot(None, Source::Mouse);
             }
@@ -652,7 +659,7 @@ mod tests {
             },
         );
         ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
-        ed.open_virtual("test", "some text to test with");
+        ed.open_virtual("test", "some text to test with", false);
         ed.buffers.active_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
 
         // attach an input filter so we can intercept load and execute events

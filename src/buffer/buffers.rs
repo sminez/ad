@@ -111,6 +111,21 @@ impl Buffers {
     }
 
     pub(crate) fn open_virtual(&mut self, name: String, content: String) {
+        let existing_id = self
+            .inner
+            .iter()
+            .find(|(_, b)| match &b.kind {
+                BufferKind::Virtual(s) => s == &name,
+                _ => false,
+            })
+            .map(|(_, b)| b.id);
+
+        if let Some(id) = existing_id {
+            self.focus_id(id);
+            self.inner.focus.txt = content.into();
+            return;
+        }
+
         let buf = Buffer::new_virtual(self.next_id, name, content);
         self.record_jump_position();
         self.push_buffer(buf);
