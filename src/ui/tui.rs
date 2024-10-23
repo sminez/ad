@@ -29,9 +29,15 @@ use std::{
     time::Instant,
 };
 
-const VLINE: char = '│';
 // const HLINE: &str = "—"; // em dash
 const HLINE: &str = "-";
+const VLINE: &str = "│";
+const TSTR: &str = "├";
+const XSTR: &str = "┼";
+
+fn box_draw_str(s: &str, cs: &ColorScheme) -> String {
+    format!("{}{}{s}", Style::Fg(cs.minibuffer_hl), Style::Bg(cs.bg))
+}
 
 #[derive(Debug)]
 pub struct Tui {
@@ -198,16 +204,19 @@ impl Tui {
             .collect();
 
         let mut lines = Vec::with_capacity(screen_rows);
+        let vstr = box_draw_str(VLINE, cs);
+        let xstr = box_draw_str(XSTR, cs);
+        let tstr = box_draw_str(TSTR, cs);
+        let hvh = format!("{HLINE}{vstr}{HLINE}");
+        let vh = format!("{vstr}{HLINE}");
+
         for _ in 0..screen_rows {
             let mut line_fragments = Vec::with_capacity(rendered_cols.len() + 1);
             for col in rendered_cols.iter_mut() {
                 line_fragments.push(col.remove(0));
             }
-            let mut buf = line_fragments.join(&format!(
-                "{}{}{VLINE}",
-                Style::Fg(cs.minibuffer_hl),
-                Style::Bg(cs.bg)
-            ));
+            let mut buf = line_fragments.join(&vstr);
+            buf = buf.replace(&hvh, &xstr).replace(&vh, &tstr);
             buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
             lines.push(buf);
         }
