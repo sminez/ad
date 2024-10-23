@@ -159,7 +159,7 @@ impl Buffers {
     }
 
     pub(crate) fn focus_id(&mut self, id: BufferId) {
-        if !self.contains_bufid(id) {
+        if !self.contains_bufid(id) || self.active().id == id {
             return;
         }
         self.record_jump_position();
