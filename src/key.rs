@@ -1,4 +1,5 @@
 //! Keypresses and related user interactions.
+use tracing::trace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Arrow {
@@ -95,35 +96,110 @@ pub enum MouseButton {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum MouseEvent {
-    Press { b: MouseButton, x: usize, y: usize },
-    Hold { b: MouseButton, x: usize, y: usize },
-    Release { b: MouseButton, x: usize, y: usize },
+pub enum MouseMod {
+    NoMod,
+    Alt,
+    Ctrl,
+    AltCtrl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MouseEventKind {
+    Press,
+    Hold,
+    Release,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MouseEvent {
+    pub k: MouseEventKind,
+    pub m: MouseMod,
+    pub b: MouseButton,
+    pub x: usize,
+    pub y: usize,
 }
 
 impl MouseEvent {
-    pub(crate) fn try_from_raw(b: usize, x: usize, y: usize, m: char) -> Option<Self> {
+    pub(crate) fn try_from_raw(b: usize, x: usize, y: usize, c: char) -> Option<Self> {
         use MouseButton::*;
+        use MouseEventKind::*;
+        use MouseMod::*;
 
-        // 16,48 are ctl+Left, 18,50 are ctl+Right
-        match (b, m) {
-            (0, 'M') => Some(Self::Press { b: Left, x, y }),
-            (1 | 16, 'M') => Some(Self::Press { b: Middle, x, y }),
-            (2 | 18, 'M') => Some(Self::Press { b: Right, x, y }),
-            (64, 'M') => Some(Self::Press { b: WheelUp, x, y }),
-            (65, 'M') => Some(Self::Press { b: WheelDown, x, y }),
+        let (k, m, b) = match (b, c) {
+            // No modifiers
+            (0, 'M') => (Press, NoMod, Left),
+            (1, 'M') => (Press, NoMod, Middle),
+            (2, 'M') => (Press, NoMod, Right),
+            (64, 'M') => (Press, NoMod, WheelUp),
+            (65, 'M') => (Press, NoMod, WheelDown),
 
-            (0, 'm') | (3, _) => Some(Self::Release { b: Left, x, y }),
-            (1 | 16, 'm') => Some(Self::Release { b: Middle, x, y }),
-            (2 | 18, 'm') => Some(Self::Release { b: Right, x, y }),
-            (64, 'm') => Some(Self::Release { b: WheelUp, x, y }),
-            (65, 'm') => Some(Self::Release { b: WheelDown, x, y }),
+            (0, 'm') | (3, _) => (Release, NoMod, Left),
+            (1, 'm') => (Release, NoMod, Middle),
+            (2, 'm') => (Release, NoMod, Right),
+            (64, 'm') => (Release, NoMod, WheelUp),
+            (65, 'm') => (Release, NoMod, WheelDown),
 
-            (32, _) => Some(Self::Hold { b: Left, x, y }),
-            (33 | 48, _) => Some(Self::Hold { b: Middle, x, y }),
-            (34 | 50, _) => Some(Self::Hold { b: Right, x, y }),
+            (32, _) => (Hold, NoMod, Left),
+            (33, _) => (Hold, NoMod, Middle),
+            (34, _) => (Hold, NoMod, Right),
 
-            _ => None,
-        }
+            // Alt modifier
+            (8, 'M') => (Press, Alt, Left),
+            (9, 'M') => (Press, Alt, Middle),
+            (10, 'M') => (Press, Alt, Right),
+            (72, 'M') => (Press, Alt, WheelUp),
+            (73, 'M') => (Press, Alt, WheelDown),
+
+            (8, 'm') => (Release, Alt, Left),
+            (9, 'm') => (Release, Alt, Middle),
+            (10, 'm') => (Release, Alt, Right),
+            (72, 'm') => (Release, Alt, WheelUp),
+            (73, 'm') => (Release, Alt, WheelDown),
+
+            (40, _) => (Hold, Alt, Left),
+            (41, _) => (Hold, Alt, Middle),
+            (42, _) => (Hold, Alt, Right),
+
+            // Ctrl modifier
+            (16, 'M') => (Press, Ctrl, Left),
+            (17, 'M') => (Press, Ctrl, Middle),
+            (18, 'M') => (Press, Ctrl, Right),
+            (80, 'M') => (Press, Ctrl, WheelUp),
+            (81, 'M') => (Press, Ctrl, WheelDown),
+
+            (16, 'm') => (Release, Ctrl, Left),
+            (17, 'm') => (Release, Ctrl, Middle),
+            (18, 'm') => (Release, Ctrl, Right),
+            (80, 'm') => (Release, Ctrl, WheelUp),
+            (81, 'm') => (Release, Ctrl, WheelDown),
+
+            (48, _) => (Hold, Ctrl, Left),
+            (49, _) => (Hold, Ctrl, Middle),
+            (50, _) => (Hold, Ctrl, Right),
+
+            // Alt+Ctrl modifiers
+            (24, 'M') => (Press, AltCtrl, Left),
+            (25, 'M') => (Press, AltCtrl, Middle),
+            (26, 'M') => (Press, AltCtrl, Right),
+            (88, 'M') => (Press, AltCtrl, WheelUp),
+            (89, 'M') => (Press, AltCtrl, WheelDown),
+
+            (24, 'm') => (Release, AltCtrl, Left),
+            (25, 'm') => (Release, AltCtrl, Middle),
+            (26, 'm') => (Release, AltCtrl, Right),
+            (88, 'm') => (Release, AltCtrl, WheelUp),
+            (89, 'm') => (Release, AltCtrl, WheelDown),
+
+            (56, _) => (Hold, AltCtrl, Left),
+            (57, _) => (Hold, AltCtrl, Middle),
+            (58, _) => (Hold, AltCtrl, Right),
+
+            _ => {
+                trace!("unmapped mouse input: b=b m=m");
+                return None;
+            }
+        };
+
+        Some(MouseEvent { k, m, b, x, y })
     }
 }
