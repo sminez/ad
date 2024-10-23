@@ -77,7 +77,9 @@ impl Windows {
         let (w_col, slop) = calculate_dims(cols, self.cols.len());
         for (i, (_, col)) in self.cols.iter_mut().enumerate() {
             let mut w = w_col;
-            if i < slop { w += 1; }
+            if i < slop {
+                w += 1;
+            }
             col.update_size(rows, w);
         }
     }
@@ -325,7 +327,9 @@ impl Column {
         let (h_win, slop) = calculate_dims(n_rows, self.wins.len());
         for (i, (_, win)) in self.wins.iter_mut().enumerate() {
             let mut h = h_win;
-            if i < slop { h += 1; }
+            if i < slop {
+                h += 1;
+            }
             win.n_rows = h;
         }
     }
@@ -450,7 +454,7 @@ impl View {
 fn calculate_dims(t: usize, n: usize) -> (usize, usize) {
     let size = (t + 1) / n - 1;
     let slop = t + 1 - n * (size + 1);
-    
+
     (size, slop)
 }
 
@@ -533,7 +537,12 @@ mod tests {
         };
         ws.update_screen_size(80, 100);
 
-        let ids = |ws: &Windows| ws.cols.iter().flat_map(|(_, c)| c.wins.iter().map(|(_, w)| w.view.bufid)).collect::<Vec<_>>();
+        let ids = |ws: &Windows| {
+            ws.cols
+                .iter()
+                .flat_map(|(_, c)| c.wins.iter().map(|(_, w)| w.view.bufid))
+                .collect::<Vec<_>>()
+        };
 
         assert_eq!(&ids(&ws), &[0, 1, 2, 3, 4], "before first click");
 
