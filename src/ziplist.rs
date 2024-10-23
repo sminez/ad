@@ -230,7 +230,7 @@ impl<T> ZipList<T> {
         swap(&mut head, &mut self.focus);
         self.down.push_front(head);
 
-        for item in take(&mut self.up).into_iter().rev() {
+        for item in take(&mut self.up).into_iter() {
             self.down.push_front(item);
         }
 
@@ -724,9 +724,9 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!(1, [2, 3, 4, 5]); "items up and down")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!(1, [2, 3]); "items up")]
-    #[test_case(ziplist!(3, [4, 5]), ziplist!(3, [4, 5]); "items down")]
+    #[test_case(ziplist!([1, 2, 3], 4, [5, 6, 7]), ziplist!(1, [2, 3, 4, 5, 6, 7]); "items up and down")]
+    #[test_case(ziplist!([1, 2, 3], 4), ziplist!(1, [2, 3, 4]); "items up")]
+    #[test_case(ziplist!(3, [4, 5, 6]), ziplist!(3, [4, 5, 6]); "items down")]
     #[test_case(ziplist!(3), ziplist!(3); "focus only")]
     #[test]
     fn focus_head(mut s: ZipList<u8>, expected: ZipList<u8>) {
@@ -735,9 +735,9 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([1, 2, 3, 4], 5); "items up and down")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!([1, 2], 3); "items up")]
-    #[test_case(ziplist!(3, [4, 5]), ziplist!([3, 4], 5); "items down")]
+    #[test_case(ziplist!([1, 2, 3], 4, [5, 6, 7]), ziplist!([1, 2, 3, 4, 5, 6], 7); "items up and down")]
+    #[test_case(ziplist!([1, 2, 3], 4), ziplist!([1, 2, 3], 4); "items up")]
+    #[test_case(ziplist!(3, [4, 5, 6]), ziplist!([3, 4, 5], 6); "items down")]
     #[test_case(ziplist!(3), ziplist!(3); "focus only")]
     #[test]
     fn focus_tail(mut s: ZipList<u8>, expected: ZipList<u8>) {

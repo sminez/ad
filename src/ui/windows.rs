@@ -74,14 +74,12 @@ impl Windows {
             return;
         }
 
-        let w_col = cols / self.cols.len();
-        let slop = cols - (w_col * self.cols.len());
-
-        for (_, col) in self.cols.iter_mut() {
-            col.update_size(rows, w_col - 1);
+        let (w_col, slop) = calculate_dims(cols, self.cols.len());
+        for (i, (_, col)) in self.cols.iter_mut().enumerate() {
+            let mut w = w_col;
+            if i < slop { w += 1; }
+            col.update_size(rows, w);
         }
-
-        self.cols.focus.n_cols += slop;
     }
 
     /// Set the currently focused window to contain the given buffer
@@ -309,8 +307,9 @@ impl Column {
         let win_rows = n_rows / buf_ids.len();
         let mut wins =
             ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
-        let slop = n_rows - (win_rows * buf_ids.len());
-        wins.focus.n_rows += slop + 1;
+
+        let slop = n_rows - (win_rows * buf_ids.len()) + buf_ids.len() - 1;
+        wins.focus.n_rows += slop;
 
         Self { n_cols, wins }
     }
@@ -323,14 +322,12 @@ impl Column {
             return;
         }
 
-        let win_rows = n_rows / self.wins.len();
-
-        for (_, win) in self.wins.iter_mut() {
-            win.n_rows = win_rows - 1;
+        let (h_win, slop) = calculate_dims(n_rows, self.wins.len());
+        for (i, (_, win)) in self.wins.iter_mut().enumerate() {
+            let mut h = h_win;
+            if i < slop { h += 1; }
+            win.n_rows = h;
         }
-
-        let slop = n_rows - (win_rows * self.wins.len());
-        self.wins.focus.n_rows += slop + 1;
     }
 }
 
@@ -440,6 +437,23 @@ impl View {
     }
 }
 
+/// Calculate the size (rows/cols) for n blocks within an available space of t
+/// while accounting for "slop" that will be added to some elements to make up
+/// the correct total.
+///
+/// This calculation is derived from:  t = n(size) + (n - 1) + slop
+///
+/// where the (n - 1) is spacer rows/columns between each region. The use of
+/// truncating division in computing "size" gets us an approximate answer for
+/// an integer value that solve the equation above without "slop", which is then
+/// calculated to get the correct total
+fn calculate_dims(t: usize, n: usize) -> (usize, usize) {
+    let size = (t + 1) / n - 1;
+    let slop = t + 1 - n * (size + 1);
+    
+    (size, slop)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -454,6 +468,10 @@ mod tests {
     #[test_case(&[1, 1], 60, 40, 1; "two cols one win each click in second")]
     #[test_case(&[1, 2], 60, 40, 1; "two cols second with two click in second window")]
     #[test_case(&[1, 2], 60, 60, 2; "two cols second with two click in third window")]
+    #[test_case(&[1, 3], 60, 15, 1; "two cols second with three click in first window")]
+    #[test_case(&[1, 3], 60, 35, 2; "two cols second with three click in second window")]
+    #[test_case(&[1, 3], 60, 60, 3; "two cols second with three click in third window")]
+    #[test_case(&[1, 4], 60, 70, 4; "two cols second with four click in fourth window")]
     #[test]
     fn buffer_for_screen_coords_works(col_wins: &[usize], x: usize, y: usize, expected: BufferId) {
         let mut cols = Vec::with_capacity(col_wins.len());
@@ -472,6 +490,7 @@ mod tests {
             views: vec![],
         };
         ws.update_screen_size(80, 100);
+        println!("{ws:#?}");
 
         assert_eq!(
             ws.buffer_for_screen_coords(x, y),
@@ -491,6 +510,48 @@ mod tests {
             ws.cols.focus.wins.focus.view.bufid, expected,
             "focused id after mutation"
         );
+    }
+
+    #[test]
+    fn focus_buffer_for_screen_coords_doesnt_reorder_windows() {
+        let (x, y) = (60, 70);
+        let expected = 4;
+        let mut cols = Vec::with_capacity(2);
+        let mut n = 0;
+
+        for m in [1, 4].iter() {
+            let ids: Vec<usize> = (n..(n + m)).collect();
+            n += m;
+            cols.push(Column::new(80, 100, &ids));
+        }
+
+        let mut ws = Windows {
+            screen_rows: 80,
+            screen_cols: 100,
+            cols: ZipList::try_from_iter(cols).unwrap(),
+            views: vec![],
+        };
+        ws.update_screen_size(80, 100);
+
+        let ids = |ws: &Windows| ws.cols.iter().flat_map(|(_, c)| c.wins.iter().map(|(_, w)| w.view.bufid)).collect::<Vec<_>>();
+
+        assert_eq!(&ids(&ws), &[0, 1, 2, 3, 4], "before first click");
+
+        assert_eq!(
+            ws.focus_buffer_for_screen_coords(x, y),
+            expected,
+            "bufid with mutation"
+        );
+
+        assert_eq!(&ids(&ws), &[0, 1, 2, 3, 4], "after first click");
+
+        assert_eq!(
+            ws.focus_buffer_for_screen_coords(x, y),
+            expected,
+            "bufid with mutation"
+        );
+
+        assert_eq!(&ids(&ws), &[0, 1, 2, 3, 4], "after second click");
     }
 
     // NOTE: there was a bug around misunderstanding terminal "cells" in relation to
