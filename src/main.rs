@@ -55,7 +55,7 @@ fn main() {
 
     let mut e = Editor::new(config, plumbing_rules, EditorMode::Terminal, log_buffer);
     for fname in files.iter() {
-        e.open_file_relative_to_cwd(fname);
+        e.open_file_relative_to_cwd(fname, false);
     }
 
     e.run()

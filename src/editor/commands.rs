@@ -82,6 +82,16 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             }
         }
 
+        "O" | "open-in-new-window" => {
+            if args.is_empty() {
+                Err("No filename provided".to_string())
+            } else {
+                Ok(Single(OpenFileInNewWindow {
+                    path: args.to_string(),
+                }))
+            }
+        }
+
         "pwd" => Ok(Single(SetStatusMessage {
             message: cwd.display().to_string(),
         })),

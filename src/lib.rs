@@ -33,7 +33,9 @@ pub mod regex;
 pub mod system;
 pub mod term;
 pub mod trie;
+pub mod ui;
 pub mod util;
+pub mod ziplist;
 
 pub use buffer::GapBuffer;
 pub use config::Config;
@@ -49,7 +51,7 @@ pub const LOG_LEVEL_ENV_VAR: &str = "AD_LOG";
 
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub(crate) const UNNAMED_BUFFER: &str = "[No Name]";
-pub(crate) const MAX_NAME_LEN: usize = 20;
+pub(crate) const MAX_NAME_LEN: usize = 40;
 
 pub(crate) static ORIGINAL_TERMIOS: OnceLock<Termios> = OnceLock::new();
 

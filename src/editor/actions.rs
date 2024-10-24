@@ -2,23 +2,23 @@
 use crate::{
     buffer::BufferKind,
     config::Config,
-    config_handle, die,
+    config_handle,
     dot::{Cur, Dot, Range, TextObject},
     editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
     fsys::LogEvent,
-    key::Input,
+    key::{Arrow, Input},
     mode::Mode,
     plumb::{MatchOutcome, PlumbingMessage},
     replace_config,
     system::System,
+    ui::UserInterface,
     update_config,
     util::gen_help_docs,
 };
 use ad_event::Source;
 use std::{
     env, fs,
-    io::Write,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc::Sender,
@@ -56,24 +56,30 @@ pub enum Action {
     DotExtendForward(TextObject, usize),
     DotFlip,
     DotSet(TextObject, usize),
+    DragWindow { direction: Arrow },
     EditCommand { cmd: String },
     ExecuteDot,
     Exit { force: bool },
     ExpandDot,
-    FindFile,
-    FindRepoFile,
+    FindFile { new_window: bool },
+    FindRepoFile { new_window: bool },
     FocusBuffer { id: usize },
     InsertChar { c: char },
     InsertString { s: String },
     JumpListForward,
     JumpListBack,
-    LoadDot,
+    LoadDot { new_window: bool },
     MarkClean { bufid: usize },
     NewEditLogTransaction,
     NextBuffer,
+    NextColumn,
+    NextWindowInColumn,
     OpenFile { path: String },
+    OpenFileInNewWindow { path: String },
     Paste,
     PreviousBuffer,
+    PreviousColumn,
+    PreviousWindowInColumn,
     RawInput { i: Input },
     Redo,
     ReloadActiveBuffer,
@@ -142,12 +148,12 @@ where
 
     /// Open a file within the editor using a path that is relative to the current working
     /// directory
-    pub fn open_file_relative_to_cwd(&mut self, path: &str) {
-        self.open_file(self.cwd.join(path));
+    pub fn open_file_relative_to_cwd(&mut self, path: &str, new_window: bool) {
+        self.open_file(self.cwd.join(path), new_window);
     }
 
     /// Open a file within the editor
-    pub fn open_file<P: AsRef<Path>>(&mut self, path: P) {
+    pub fn open_file<P: AsRef<Path>>(&mut self, path: P, new_window: bool) {
         let path = path.as_ref();
         debug!(?path, "opening file");
         let was_empty_scratch = self.buffers.is_empty_scratch();
@@ -162,6 +168,14 @@ where
                 }
                 _ = self.tx_fsys.send(LogEvent::Open(new_id));
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
+
+                if new_window {
+                    self.windows
+                        .show_buffer_in_new_window(self.buffers.active());
+                } else {
+                    self.windows
+                        .show_buffer_in_active_window(self.buffers.active());
+                }
             }
 
             Ok(None) => {
@@ -179,12 +193,19 @@ where
                 let id = self.active_buffer_id();
                 if id != current_id {
                     _ = self.tx_fsys.send(LogEvent::Focus(id));
+                    if new_window {
+                        self.windows
+                            .show_buffer_in_new_window(self.buffers.active());
+                    } else {
+                        self.windows
+                            .show_buffer_in_active_window(self.buffers.active());
+                    }
                 }
             }
         };
     }
 
-    fn find_file_under_dir(&mut self, d: &Path) {
+    fn find_file_under_dir(&mut self, d: &Path, new_window: bool) {
         let cmd = config_handle!().find_command.clone();
 
         let selection = match cmd.split_once(' ') {
@@ -200,18 +221,18 @@ where
         };
 
         if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()));
+            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), new_window);
         }
     }
 
     /// This shells out to the fd command line program
-    pub(crate) fn find_file(&mut self) {
+    pub(crate) fn find_file(&mut self, new_window: bool) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        self.find_file_under_dir(&d);
+        self.find_file_under_dir(&d, new_window);
     }
 
     /// This shells out to the git and fd command line programs
-    pub(crate) fn find_repo_file(&mut self) {
+    pub(crate) fn find_repo_file(&mut self, new_window: bool) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
         let s = match self.system.run_command_blocking(
             "git",
@@ -227,7 +248,7 @@ where
         };
 
         let root = Path::new(s.trim());
-        self.find_file_under_dir(root);
+        self.find_file_under_dir(root, new_window);
     }
 
     pub(crate) fn delete_buffer(&mut self, id: usize, force: bool) {
@@ -336,20 +357,10 @@ where
         }
     }
 
-    pub(super) fn set_cursor_shape_for_active_mode(&mut self) {
-        // FIXME: This should be a message to the UI rather than the editor itself writing to stdout
-        let cur_shape = self.modes[0].cur_shape.to_string();
-        if let Err(e) = self.stdout.write_all(cur_shape.as_bytes()) {
-            // In this situation we're probably not going to be able to do all that much
-            // but we might as well try
-            die!("Unable to write to stdout: {e}");
-        };
-    }
-
     pub(super) fn set_mode(&mut self, name: &str) {
         if let Some((i, _)) = self.modes.iter().enumerate().find(|(_, m)| m.name == name) {
             self.modes.swap(0, i);
-            self.set_cursor_shape_for_active_mode();
+            self.ui.set_cursor_shape(self.current_cursor_shape());
         }
     }
 
@@ -447,11 +458,11 @@ where
     }
 
     pub(super) fn view_logs(&mut self) {
-        self.open_virtual("+logs", self.log_buffer.content())
+        self.open_virtual("+logs", self.log_buffer.content(), false)
     }
 
     pub(super) fn show_help(&mut self) {
-        self.open_virtual("+help", gen_help_docs())
+        self.open_virtual("+help", gen_help_docs(), false)
     }
 
     pub(super) fn debug_edit_log(&mut self) {
@@ -474,7 +485,7 @@ where
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_load_dot(&mut self, source: Source) {
+    pub(super) fn default_load_dot(&mut self, source: Source, load_in_new_window: bool) {
         let b = self.buffers.active_mut();
         b.expand_cur_dot();
         if b.notify_load(source) {
@@ -497,7 +508,7 @@ where
         };
 
         match self.plumbing_rules.plumb(m) {
-            Some(MatchOutcome::Message(m)) => self.handle_plumbing_message(m),
+            Some(MatchOutcome::Message(m)) => self.handle_plumbing_message(m, load_in_new_window),
 
             Some(MatchOutcome::Run(cmd)) => {
                 let mut command = Command::new("sh");
@@ -510,7 +521,7 @@ where
                 };
             }
 
-            None => self.load_explicit_string(id, s),
+            None => self.load_explicit_string(id, s, load_in_new_window),
         }
     }
 
@@ -521,7 +532,7 @@ where
     ///   - if the attr "action" is set to "showdata" then a new buffer is created to hold the data
     ///     - if the attr "filename" is set as well then it will be used as the name for the buffer
     ///     - otherwise the filename will be "+plumbing-message"
-    fn handle_plumbing_message(&mut self, m: PlumbingMessage) {
+    fn handle_plumbing_message(&mut self, m: PlumbingMessage, load_in_new_window: bool) {
         let PlumbingMessage { attrs, data, .. } = m;
         match attrs.get("action") {
             Some(s) if s == "showdata" => {
@@ -529,10 +540,10 @@ where
                     .get("filename")
                     .cloned()
                     .unwrap_or_else(|| "+plumbing-message".to_string());
-                self.open_virtual(filename, data);
+                self.open_virtual(filename, data, load_in_new_window);
             }
             _ => {
-                self.open_file(data);
+                self.open_file(data, load_in_new_window);
                 if let Some(s) = attrs.get("addr") {
                     match Addr::parse(&mut s.chars().peekable()) {
                         Ok(mut addr) => {
@@ -546,7 +557,12 @@ where
         }
     }
 
-    pub(super) fn load_explicit_string(&mut self, bufid: usize, s: String) {
+    pub(super) fn load_explicit_string(
+        &mut self,
+        bufid: usize,
+        s: String,
+        load_in_new_window: bool,
+    ) {
         let b = match self.buffers.with_id_mut(bufid) {
             Some(b) => b,
             None => return,
@@ -576,7 +592,7 @@ where
         }
 
         if is_file {
-            self.open_file(path);
+            self.open_file(path, load_in_new_window);
             if let Some(mut addr) = maybe_addr {
                 let b = self.buffers.active_mut();
                 b.dot = b.map_addr(&mut addr);
@@ -768,7 +784,7 @@ recv {}({})",
         );
         let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
-        ed.open_file("foo");
+        ed.open_file("foo", false);
 
         // The first open should also close our scratch buffer
         assert_recv!(brx, Close, 0);
@@ -776,12 +792,12 @@ recv {}({})",
         assert_recv!(brx, Focus, 1);
 
         // Opening a second file should only notify for that file
-        ed.open_file("bar");
+        ed.open_file("bar", false);
         assert_recv!(brx, Open, 2);
         assert_recv!(brx, Focus, 2);
 
         // Opening the first file again should just notify for the current file
-        ed.open_file("foo");
+        ed.open_file("foo", false);
         assert_recv!(brx, Focus, 1);
     }
 
@@ -799,7 +815,7 @@ recv {}({})",
         let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
         for file in files {
-            ed.open_file(file);
+            ed.open_file(file, false);
         }
 
         ed.ensure_correct_fsys_state();

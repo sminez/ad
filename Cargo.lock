@@ -4,7 +4,7 @@ version = 3
 
 [[package]]
 name = "ad-editor"
-version = "0.1.3"
+version = "0.2.0"
 dependencies = [
  "ad_event",
  "criterion",

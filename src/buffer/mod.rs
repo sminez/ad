@@ -1,18 +1,13 @@
 //! A [Buffer] represents a single file or in memory text buffer open within the editor.
 use crate::{
-    config::ColorScheme,
     config_handle,
-    dot::{find::find_forward_wrapping, Cur, Dot, LineRange, Range, TextObject},
-    editor::{Action, ViewPort},
+    dot::{find::find_forward_wrapping, Cur, Dot, Range, TextObject},
+    editor::Action,
     exec::IterBoundedChars,
     fsys::InputFilter,
-    ftype::{
-        lex::{Token, TokenType, Tokenizer, Tokens},
-        try_tokenizer_for_path,
-    },
+    ftype::{lex::Tokenizer, try_tokenizer_for_path},
     key::Input,
-    term::Style,
-    util::{normalize_line_endings, relative_path_from},
+    util::normalize_line_endings,
     MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ad_event::Source;
@@ -24,7 +19,6 @@ use std::{
     time::SystemTime,
 };
 use tracing::debug;
-use unicode_width::UnicodeWidthChar;
 
 mod buffers;
 mod edit;
@@ -33,7 +27,7 @@ mod internal;
 use edit::{Edit, EditLog, Kind, Txt};
 pub use internal::{Chars, GapBuffer, IdxChars, Slice};
 
-pub(crate) use buffers::Buffers;
+pub(crate) use buffers::{BufferId, Buffers};
 
 pub(crate) const DEFAULT_OUTPUT_BUFFER: &str = "+output";
 const HTTPS: &str = "https://";
@@ -71,10 +65,10 @@ impl Default for BufferKind {
 }
 
 impl BufferKind {
-    fn display_name(&self, cwd: &Path) -> String {
+    fn display_name(&self) -> String {
         match self {
-            BufferKind::File(p) => relative_path_from(cwd, p).display().to_string(),
-            BufferKind::Directory(p) => relative_path_from(cwd, p).display().to_string(),
+            BufferKind::File(p) => p.display().to_string(),
+            BufferKind::Directory(p) => p.display().to_string(),
             BufferKind::Virtual(s) => s.clone(),
             BufferKind::Output(s) => s.clone(),
             BufferKind::Unnamed => UNNAMED_BUFFER.to_string(),
@@ -152,14 +146,12 @@ pub struct Buffer {
     pub(crate) dot: Dot,
     pub(crate) xdot: Dot,
     pub(crate) txt: GapBuffer,
-    pub(crate) rx: usize,
-    pub(crate) row_off: usize,
-    pub(crate) col_off: usize,
+    pub(crate) cached_rx: usize,
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     pub(crate) input_filter: Option<InputFilter>,
+    pub(crate) tokenizer: Option<Tokenizer>,
     edit_log: EditLog,
-    tokenizer: Option<Tokenizer>,
 }
 
 impl Buffer {
@@ -174,9 +166,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(raw),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -249,6 +239,7 @@ impl Buffer {
         let n_chars = raw.len();
         self.txt = GapBuffer::from(raw);
         self.dot.clamp_idx(n_chars);
+        self.xdot.clamp_idx(n_chars);
         self.edit_log.clear();
         self.dirty = false;
         self.last_save = SystemTime::now();
@@ -272,9 +263,7 @@ impl Buffer {
             dot: Default::default(),
             xdot: Default::default(),
             txt: GapBuffer::from(""),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: Default::default(),
@@ -291,9 +280,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(normalize_line_endings(content.to_string())),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -318,9 +305,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(content),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -338,9 +323,7 @@ impl Buffer {
             dot: Dot::default(),
             xdot: Dot::default(),
             txt: GapBuffer::from(normalize_line_endings(content)),
-            rx: 0,
-            row_off: 0,
-            col_off: 0,
+            cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
             edit_log: EditLog::default(),
@@ -350,8 +333,8 @@ impl Buffer {
     }
 
     /// Short name for displaying in the status line
-    pub fn display_name(&self, cwd: &Path) -> String {
-        let s = self.kind.display_name(cwd);
+    pub fn display_name(&self) -> String {
+        let s = self.kind.display_name();
 
         s[0..min(MAX_NAME_LEN, s.len())].to_string()
     }
@@ -456,61 +439,8 @@ impl Buffer {
         self.edit_log.debug_edits(self)
     }
 
-    /// Clamp the current viewport to include the [Dot].
-    pub fn clamp_scroll(&mut self, screen_rows: usize, screen_cols: usize) {
-        let (y, x) = self.dot.active_cur().as_yx(self);
-        self.rx = self.rx_from_x(y, x);
-
-        if y < self.row_off {
-            self.row_off = y;
-        }
-
-        if y >= self.row_off + screen_rows {
-            self.row_off = y - screen_rows + 1;
-        }
-
-        if self.rx < self.col_off {
-            self.col_off = self.rx;
-        }
-
-        if self.rx >= self.col_off + screen_cols {
-            self.col_off = self.rx - screen_cols + 1;
-        }
-    }
-
-    /// Set the current [ViewPort] while accounting for screen size.
-    pub fn set_view_port(&mut self, vp: ViewPort, screen_rows: usize, screen_cols: usize) {
-        let (y, _) = self.dot.active_cur().as_yx(self);
-
-        self.row_off = match vp {
-            ViewPort::Top => y,
-            ViewPort::Center => y.saturating_sub(screen_rows / 2),
-            ViewPort::Bottom => y.saturating_sub(screen_rows),
-        };
-
-        self.clamp_scroll(screen_rows, screen_cols);
-    }
-
-    pub(crate) fn rx_from_x(&self, y: usize, x: usize) -> usize {
-        if y >= self.len_lines() {
-            return 0;
-        }
-
-        let tabstop = config_handle!().tabstop;
-
-        let mut rx = 0;
-        for c in self.txt.line(y).chars().take(x) {
-            if c == '\t' {
-                rx += (tabstop - 1) - (rx % tabstop);
-            }
-            rx += UnicodeWidthChar::width(c).unwrap_or(1);
-        }
-
-        rx
-    }
-
     pub(crate) fn x_from_rx(&self, y: usize) -> usize {
-        self.x_from_provided_rx(y, self.rx)
+        self.x_from_provided_rx(y, self.cached_rx)
     }
 
     pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
@@ -541,13 +471,6 @@ impl Buffer {
         cx
     }
 
-    pub(crate) fn ui_xy(&self) -> (usize, usize) {
-        let (_, w_sgncol) = self.sign_col_dims();
-        let (y, _) = self.dot.active_cur().as_yx(self);
-
-        (self.rx - self.col_off + w_sgncol, y - self.row_off)
-    }
-
     /// The line at the requested index returned as a [Slice].
     pub fn line(&self, y: usize) -> Option<Slice<'_>> {
         if y >= self.len_lines() {
@@ -555,142 +478,6 @@ impl Buffer {
         } else {
             Some(self.txt.line(y))
         }
-    }
-
-    /// The render representation of a given line, truncated to fit within the
-    /// available screen space.
-    /// This includes tab expansion but not any styling that might be applied,
-    /// trailing \r\n or screen clearing escape codes.
-    /// If a dot range is provided then the character offsets used will be adjusted
-    /// to account for expanded tab characters, returning None if self.col_off would
-    /// mean that the requested range is not currently visible.
-    pub(crate) fn raw_rline_unchecked(
-        &self,
-        y: usize,
-        lpad: usize,
-        screen_cols: usize,
-        dot_range: Option<(usize, usize)>,
-    ) -> (String, Option<(usize, usize)>) {
-        let max_chars = screen_cols - lpad;
-        let tabstop = config_handle!().tabstop;
-        let mut rline = Vec::with_capacity(max_chars);
-        // Iterating over characters not bytes as we need to account for multi-byte utf8
-        let line = self.txt.line(y);
-        let mut it = line.chars().skip(self.col_off);
-
-        let mut update_dot = dot_range.is_some();
-        let (mut start, mut end) = dot_range.unwrap_or_default();
-
-        if update_dot && self.col_off > end {
-            update_dot = false; // we're past the requested range
-        } else {
-            start = start.saturating_sub(self.col_off);
-            end = end.saturating_sub(self.col_off);
-        }
-
-        while rline.len() <= max_chars {
-            match it.next() {
-                Some('\n') | None => break,
-                Some('\t') => {
-                    if rline.len() < start {
-                        start += tabstop - 1;
-                    }
-                    if rline.len() < end {
-                        end = end.saturating_add(tabstop - 1);
-                    }
-                    rline.append(&mut [' '].repeat(tabstop));
-                }
-                Some(c) => rline.push(c),
-            }
-        }
-
-        rline.truncate(max_chars); // noop if max_chars > rline.len()
-        let n_chars = rline.len();
-        let s = rline.into_iter().collect();
-
-        if update_dot {
-            start = min(start, n_chars);
-            end = min(end, n_chars);
-            (s, Some((start, end)))
-        } else {
-            (s, None)
-        }
-    }
-
-    /// The render representation of a given line, truncated to fit within the
-    /// available screen space.
-    /// This includes tab expansion and any styling that might be applied but not
-    /// trailing \r\n or screen clearing escape codes.
-    pub(crate) fn styled_rline_unchecked(
-        &self,
-        y: usize,
-        lpad: usize,
-        screen_cols: usize,
-        load_exec_range: Option<(bool, Range)>,
-        cs: &ColorScheme,
-    ) -> String {
-        let map_line_range = |lr| match lr {
-            // LineRange is an inclusive range so we need to insert after `end` if its
-            // not the end of the line
-            LineRange::Partial { start, end, .. } => (start, end + 1),
-            LineRange::FromStart { end, .. } => (0, end + 1),
-            LineRange::ToEnd { start, .. } => (start, usize::MAX),
-            LineRange::Full { .. } => (0, usize::MAX),
-        };
-
-        let dot_range = self.dot.line_range(y, self).map(map_line_range);
-        let (rline, dot_range) = self.raw_rline_unchecked(y, lpad, screen_cols, dot_range);
-
-        let raw_tks = match &self.tokenizer {
-            Some(t) => t.tokenize(&rline),
-            None => Tokens::Single(Token {
-                ty: TokenType::Default,
-                s: &rline,
-            }),
-        };
-
-        let mut tks = match dot_range {
-            Some((start, end)) => raw_tks.with_highlighted_dot(start, end, TokenType::Dot),
-            None => match raw_tks {
-                Tokens::Single(tk) => vec![tk],
-                Tokens::Multi(tks) => tks,
-            },
-        };
-
-        match load_exec_range {
-            Some((is_load, rng)) if !self.dot.contains_range(&rng) => {
-                if let Some(lr) = rng.line_range(y, self).map(map_line_range) {
-                    if let (_, Some((start, end))) =
-                        self.raw_rline_unchecked(y, lpad, screen_cols, Some(lr))
-                    {
-                        let ty = if is_load {
-                            TokenType::Load
-                        } else {
-                            TokenType::Execute
-                        };
-                        tks = Tokens::Multi(tks).with_highlighted_dot(start, end, ty);
-                    }
-                }
-            }
-
-            _ => (),
-        }
-
-        let mut buf = String::new();
-        for tk in tks.into_iter() {
-            buf.push_str(&tk.render(cs));
-        }
-
-        buf.push_str(&Style::Bg(cs.bg).to_string());
-
-        buf
-    }
-
-    pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
-        let w_lnum = n_digits(self.len_lines());
-        let w_sgncol = w_lnum + 2;
-
-        (w_lnum, w_sgncol)
     }
 
     /// Attempt to expand from the given cursor position so long as either the previous or next
@@ -701,7 +488,11 @@ impl Buffer {
             Dot::Range { .. } => return,
         };
 
-        let prev = self.txt.get_char(current_index - 1);
+        let prev = if current_index == 0 {
+            None
+        } else {
+            self.txt.get_char(current_index - 1)
+        };
         let next = self.txt.get_char(current_index + 1);
 
         let chars = match (prev, next) {
@@ -851,54 +642,11 @@ impl Buffer {
         None
     }
 
-    #[inline]
-    fn set_rx_from_screen_rows(&mut self, x: usize) {
-        self.rx = self.rx_from_screen_rows(x);
-    }
+    pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
+        let w_lnum = n_digits(self.len_lines());
+        let w_sgncol = w_lnum + 2;
 
-    #[inline]
-    pub(crate) fn rx_from_screen_rows(&self, x: usize) -> usize {
-        let (_, w_sgncol) = self.sign_col_dims();
-        x.saturating_sub(1).saturating_sub(w_sgncol)
-    }
-
-    pub(crate) fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> Cur {
-        self.set_rx_from_screen_rows(x);
-        let y = min(y + self.row_off, self.len_lines()).saturating_sub(1);
-        let mut cur = Cur::from_yx(y, self.x_from_provided_rx(y, self.rx), self);
-
-        cur.clamp_idx(self.txt.len_chars());
-
-        cur
-    }
-
-    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) {
-        self.dot = Dot::Cur {
-            c: self.cur_from_screen_coords(x, y),
-        };
-    }
-
-    pub(crate) fn scroll_up(&mut self, screen_rows: usize) {
-        let c = self.dot.active_cur();
-        let (y, x) = c.as_yx(self);
-        if self.row_off > 0 && y == self.row_off + screen_rows - 1 {
-            self.dot.set_active_cur(Cur::from_yx(y - 1, x, self));
-        }
-
-        // clamp scroll is called when we render so no need to run it here as well
-        self.row_off = self.row_off.saturating_sub(1);
-    }
-
-    pub(crate) fn scroll_down(&mut self) {
-        let c = self.dot.active_cur();
-        let (y, x) = c.as_yx(self);
-        if y == self.row_off && self.row_off < self.txt.len_lines() - 1 {
-            self.dot.set_active_cur(Cur::from_yx(y + 1, x, self));
-            self.dot.clamp_idx(self.txt.len_chars());
-        }
-
-        // clamp scroll is called when we render so no need to run it here as well
-        self.row_off += 1;
+        (w_lnum, w_sgncol)
     }
 
     pub(crate) fn append(&mut self, s: String, source: Source) {
@@ -906,6 +654,8 @@ impl Buffer {
         self.set_dot(TextObject::BufferEnd, 1);
         self.handle_action(Action::InsertString { s }, source);
         self.dot = dot;
+        self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// The error result of this function is an error string that should be displayed to the user
@@ -915,18 +665,21 @@ impl Buffer {
                 let (c, deleted) = self.delete_dot(self.dot, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
+                self.xdot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             Action::InsertChar { c } => {
                 let (c, _) = self.insert_char(self.dot, c, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
+                self.xdot.clamp_idx(self.txt.len_chars());
                 return None;
             }
             Action::InsertString { s } => {
                 let (c, _) = self.insert_string(self.dot, s, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
+                self.xdot.clamp_idx(self.txt.len_chars());
                 return None;
             }
 
@@ -1007,6 +760,7 @@ impl Buffer {
             t.set_dot(self);
         }
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// Extend dot foward and clamp to ensure it is within bounds
@@ -1015,6 +769,7 @@ impl Buffer {
             t.extend_dot_forward(self);
         }
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// Extend dot backward and clamp to ensure it is within bounds
@@ -1023,6 +778,7 @@ impl Buffer {
             t.extend_dot_backward(self);
         }
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     pub(crate) fn new_edit_log_transaction(&mut self) {
@@ -1245,6 +1001,9 @@ pub(crate) mod tests {
     use simple_test_case::test_case;
     use std::env;
 
+    const LINE_1: &str = "This is a test";
+    const LINE_2: &str = "involving multiple lines";
+
     #[test_case(0, 1; "n0")]
     #[test_case(5, 1; "n5")]
     #[test_case(10, 2; "n10")]
@@ -1255,9 +1014,6 @@ pub(crate) mod tests {
     fn n_digits_works(n: usize, digits: usize) {
         assert_eq!(n_digits(n), digits);
     }
-
-    const LINE_1: &str = "This is a test";
-    const LINE_2: &str = "involving multiple lines";
 
     pub fn buffer_from_lines(lines: &[&str]) -> Buffer {
         let mut b = Buffer::new_unnamed(0, "");
@@ -1491,31 +1247,6 @@ pub(crate) mod tests {
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
 
-    #[test_case("simple line", None, 0, "simple line", None; "simple line no dot")]
-    #[test_case("simple line", Some((1, 5)), 0, "simple line", Some((1, 5)); "simple line partial")]
-    #[test_case("simple line", Some((0, usize::MAX)), 0, "simple line", Some((0, 11)); "simple line full")]
-    #[test_case("simple line", Some((0, 2)), 4, "le line", None; "scrolled past dot")]
-    #[test_case("simple line", Some((0, 9)), 4, "le line", Some((0, 5)); "scrolled updating dot")]
-    #[test_case("\twith tabs", Some((3, usize::MAX)), 0, "    with tabs", Some((6, 13)); "with tabs")]
-    #[test_case("\twith tabs", Some((0, usize::MAX)), 0, "    with tabs", Some((0, 13)); "with tabs full")]
-    #[test_case("\t\twith tabs", Some((4, usize::MAX)), 0, "        with tabs", Some((10, 17)); "with multiple tabs")]
-    #[test]
-    fn raw_line_unchecked_updates_dot_correctly(
-        line: &str,
-        dot_range: Option<(usize, usize)>,
-        col_off: usize,
-        expected_line: &str,
-        expected_dot_range: Option<(usize, usize)>,
-    ) {
-        let mut b = Buffer::new_unnamed(0, line);
-        b.col_off = col_off;
-
-        let (line, dot_range) = b.raw_rline_unchecked(0, 0, 200, dot_range);
-
-        assert_eq!(line, expected_line);
-        assert_eq!(dot_range, expected_dot_range);
-    }
-
     // Tests are executed from the root of the crate so existing file paths are relative to there
     #[test_case("foo", None; "unknown format")]
     #[test_case("someFunc()", None; "camel case function call")]
@@ -1578,34 +1309,5 @@ pub(crate) mod tests {
         b.insert_char(Dot::Cur { c: c(0) }, ch, None);
         // we force a trailing newline so account for that as well
         assert_eq!(b.str_contents(), format!("{expected}\n"));
-    }
-
-    // NOTE: there was a bug around misunderstanding terminal "cells" in relation to
-    //       wide unicode characters
-    //       - https://github.com/crossterm-rs/crossterm/issues/458
-    //       - https://github.com/unicode-rs/unicode-width
-    #[test]
-    fn ui_xy_correctly_handles_multibyte_characters() {
-        let s = "abc 世界 🦊";
-        // unicode display width for each character
-        let widths = &[1, 1, 1, 1, 2, 2, 1, 2];
-        let mut b = Buffer::new_virtual(0, "test", s);
-        let mut offset = 0;
-
-        // sign column offset is 3
-        for (idx, ch) in s.chars().enumerate() {
-            assert_eq!(b.dot_contents(), ch.to_string());
-            assert_eq!(b.dot, Dot::Cur { c: Cur { idx } });
-            assert_eq!(
-                b.ui_xy(),
-                (3 + offset, 0),
-                "idx={idx} content={:?}",
-                b.dot_contents()
-            );
-
-            b.set_dot(TextObject::Arr(Arrow::Right), 1);
-            b.clamp_scroll(80, 80);
-            offset += widths[idx];
-        }
     }
 }

@@ -6,23 +6,19 @@ use crate::{
     dot::TextObject,
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
-    input::{Event, StdinInput},
+    input::Event,
     key::{Arrow, Input},
     mode::{modes, Mode},
     plumb::PlumbingRules,
-    restore_terminal_state, set_config,
+    set_config,
     system::{DefaultSystem, System},
-    term::{
-        clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
-        get_termsize, register_signal_handler,
-    },
-    LogBuffer, ORIGINAL_TERMIOS,
+    term::CurShape,
+    ui::{StateChange, Ui, UserInterface, Windows},
+    LogBuffer,
 };
 use ad_event::Source;
 use std::{
-    env,
-    io::{self, Stdout, Write},
-    panic,
+    env, panic,
     path::PathBuf,
     sync::mpsc::{channel, Receiver, Sender},
     time::Instant,
@@ -34,13 +30,11 @@ mod built_in_commands;
 mod commands;
 mod minibuffer;
 mod mouse;
-mod render;
 
 pub(crate) use actions::{Action, Actions, ViewPort};
 pub(crate) use built_in_commands::built_in_commands;
 pub(crate) use minibuffer::{MiniBufferSelection, MiniBufferState};
-
-use mouse::Click;
+pub(crate) use mouse::Click;
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,37 +52,22 @@ where
     S: System,
 {
     system: S,
-    screen_rows: usize,
-    screen_cols: usize,
-    stdout: Stdout,
+    ui: Ui,
     cwd: PathBuf,
     running: bool,
-    status_message: String,
-    status_time: Instant,
     modes: Vec<Mode>,
     pending_keys: Vec<Input>,
     buffers: Buffers,
+    windows: Windows,
     tx_events: Sender<Event>,
     rx_events: Receiver<Event>,
     tx_fsys: Sender<LogEvent>,
     rx_fsys: Option<Receiver<LogEvent>>,
-    mode: EditorMode,
     log_buffer: LogBuffer,
     plumbing_rules: PlumbingRules,
     held_click: Option<Click>,
     last_click_was_left: bool,
     last_click_time: Instant,
-}
-
-impl<S> Drop for Editor<S>
-where
-    S: System,
-{
-    fn drop(&mut self) {
-        if self.mode == EditorMode::Terminal {
-            restore_terminal_state(&mut self.stdout);
-        }
-    }
 }
 
 impl Editor<DefaultSystem> {
@@ -119,7 +98,6 @@ where
             Ok(cwd) => cwd,
             Err(e) => die!("Unable to determine working directory: {e}"),
         };
-        let stdout = io::stdout();
         let (tx_events, rx_events) = channel();
         let (tx_fsys, rx_fsys) = channel();
 
@@ -127,21 +105,17 @@ where
 
         Self {
             system,
-            screen_rows: 0,
-            screen_cols: 0,
-            stdout,
+            ui: mode.into(),
             cwd,
             running: true,
-            status_message: String::new(),
-            status_time: Instant::now(),
             modes: modes(),
             pending_keys: Vec::new(),
             buffers: Buffers::new(),
+            windows: Windows::new(0, 0, 0),
             tx_events,
             rx_events,
             tx_fsys,
             rx_fsys: Some(rx_fsys),
-            mode,
             log_buffer,
             plumbing_rules,
             held_click: None,
@@ -157,12 +131,10 @@ where
 
     /// Update the stored window size, accounting for the status and message bars
     /// This will panic if the available screen rows are 0 or 1
-    fn update_window_size(&mut self) {
-        let (screen_rows, screen_cols) = get_termsize();
+    pub(crate) fn update_window_size(&mut self, screen_rows: usize, screen_cols: usize) {
         trace!("window size updated: rows={screen_rows} cols={screen_cols}");
-
-        self.screen_rows = screen_rows - 2;
-        self.screen_cols = screen_cols;
+        self.windows
+            .update_screen_size(screen_rows - 2, screen_cols);
     }
 
     /// Ensure that opening without any files initialises the fsys state correctly
@@ -178,11 +150,7 @@ where
         let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
         AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
         self.ensure_correct_fsys_state();
-
-        match self.mode {
-            EditorMode::Terminal => self.run_event_loop_with_screen_refresh(self.tx_events.clone()),
-            EditorMode::Headless => self.run_event_loop(),
-        }
+        self.run_event_loop();
     }
 
     #[inline]
@@ -191,69 +159,49 @@ where
             Event::Input(i) => self.handle_input(i),
             Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Message(msg) => self.handle_message(msg),
-            Event::WinsizeChanged => self.update_window_size(),
+            Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
         }
     }
 
-    fn run_event_loop(&mut self) {
+    pub(super) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
+        self.windows.clamp_scroll(&mut self.buffers);
+        self.ui.refresh(
+            &self.modes[0].name,
+            &self.buffers,
+            &self.windows,
+            &self.pending_keys,
+            self.held_click.as_ref(),
+            mb,
+        );
+    }
+
+    fn run_event_loop(mut self) {
+        let tx = self.tx_events.clone();
+        let (screen_rows, screen_cols) = self.ui.init(tx);
+        self.update_window_size(screen_rows, screen_cols);
+        self.ui.set_cursor_shape(self.current_cursor_shape());
+
         while self.running {
+            self.refresh_screen_w_minibuffer(None);
+
             match self.rx_events.recv() {
                 Ok(next_event) => self.handle_event(next_event),
                 _ => break,
             }
         }
-    }
 
-    fn run_event_loop_with_screen_refresh(&mut self, tx: Sender<Event>) {
-        self.init_tui(tx);
-
-        while self.running {
-            self.refresh_screen();
-            match self.rx_events.recv() {
-                Ok(next_event) => self.handle_event(next_event),
-                _ => break,
-            }
-        }
-
-        clear_screen(&mut self.stdout);
-    }
-
-    fn init_tui(&mut self, tx: Sender<Event>) {
-        let original_termios = get_termios();
-        enable_raw_mode(original_termios);
-        _ = ORIGINAL_TERMIOS.set(original_termios);
-
-        panic::set_hook(Box::new(|panic_info| {
-            let mut stdout = io::stdout();
-            restore_terminal_state(&mut stdout);
-            _ = stdout.flush();
-
-            // Restoring the terminal state to move us off of the alternate screen
-            // can race with our attempt to print the panic info so given that we
-            // are already in a fatal situation, sleeping briefly to ensure that
-            // the cause of the panic is visible before we exit isn't _too_ bad.
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            eprintln!("Fatal error:\n{panic_info}");
-            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}"));
-        }));
-
-        enable_mouse_support(&mut self.stdout);
-        enable_alternate_screen(&mut self.stdout);
-
-        // SAFETY: we only register our signal handler once
-        unsafe { register_signal_handler() };
-
-        self.update_window_size();
-        self.set_cursor_shape_for_active_mode();
-
-        StdinInput::new(tx).run_threaded();
+        self.ui.shutdown();
     }
 
     /// Update the status line to contain the given message.
     pub fn set_status_message(&mut self, msg: &str) {
-        self.status_message.clear();
-        self.status_message.push_str(msg);
-        self.status_time = Instant::now();
+        self.ui.state_change(StateChange::StatusMessage {
+            msg: msg.to_string(),
+        });
+    }
+
+    pub(crate) fn current_cursor_shape(&self) -> CurShape {
+        self.modes[0].cur_shape
     }
 
     pub(crate) fn block_for_input(&mut self) -> Input {
@@ -262,14 +210,26 @@ where
                 Event::Input(k) => return k,
                 Event::Action(a) => self.handle_action(a, Source::Fsys),
                 Event::Message(msg) => self.handle_message(msg),
-                Event::WinsizeChanged => self.update_window_size(),
+                Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
             }
         }
     }
 
     /// Open a new virtual buffer which will be removed from state when it loses focus.
-    pub(crate) fn open_virtual(&mut self, name: impl Into<String>, content: impl Into<String>) {
+    pub(crate) fn open_virtual(
+        &mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+        load_in_new_window: bool,
+    ) {
         self.buffers.open_virtual(name.into(), content.into());
+        if load_in_new_window {
+            self.windows
+                .show_buffer_in_new_window(self.buffers.active());
+        } else {
+            self.windows
+                .show_buffer_in_active_window(self.buffers.active());
+        }
     }
 
     fn send_buffer_resp(
@@ -349,7 +309,7 @@ where
                 b.dot = b.xdot;
                 b.handle_action(Action::InsertString { s }, Source::Fsys);
                 (b.xdot, b.dot) = (b.dot, dot);
-                b.dot.clamp_idx(b.txt.len_chars()); // xdot already clamped as part of the insert
+                b.dot.clamp_idx(b.txt.len_chars()); // xdot clamped as part of handling the insert
             }),
 
             ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
@@ -359,6 +319,7 @@ where
                     Source::Fsys,
                 );
                 b.handle_action(Action::Delete, Source::Fsys);
+                b.xdot.clamp_idx(b.txt.len_chars());
             }),
 
             AppendBufferBody { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
@@ -385,7 +346,7 @@ where
             }
 
             LoadInBuffer { id, txt } => {
-                self.load_explicit_string(id, txt);
+                self.load_explicit_string(id, txt, false);
                 default_handled();
             }
 
@@ -428,27 +389,64 @@ where
             ChangeDirectory { path } => self.change_directory(path),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
+            DragWindow {
+                direction: Arrow::Up,
+            } => self.windows.drag_up(),
+            DragWindow {
+                direction: Arrow::Down,
+            } => self.windows.drag_down(),
+            DragWindow {
+                direction: Arrow::Left,
+            } => self.windows.drag_left(),
+            DragWindow {
+                direction: Arrow::Right,
+            } => self.windows.drag_right(),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
             ExecuteDot => self.default_execute_dot(None, source),
             Exit { force } => self.exit(force),
             ExpandDot => self.expand_current_dot(),
-            FindFile => self.find_file(),
-            FindRepoFile => self.find_repo_file(),
+            FindFile { new_window } => self.find_file(new_window),
+            FindRepoFile { new_window } => self.find_repo_file(new_window),
             FocusBuffer { id } => self.focus_buffer(id),
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
-            LoadDot => self.default_load_dot(source),
+            LoadDot { new_window } => self.default_load_dot(source, new_window),
             MarkClean { bufid } => self.mark_clean(bufid),
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();
+                self.windows
+                    .show_buffer_in_active_window(self.buffers.active());
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
-            OpenFile { path } => self.open_file_relative_to_cwd(&path),
+            NextColumn => {
+                self.windows.next_column(&mut self.buffers);
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            NextWindowInColumn => {
+                self.windows.next_window_in_column(&mut self.buffers);
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            OpenFile { path } => self.open_file_relative_to_cwd(&path, false),
+            OpenFileInNewWindow { path } => self.open_file_relative_to_cwd(&path, true),
             Paste => self.paste_from_clipboard(source),
             PreviousBuffer => {
                 self.buffers.previous();
+                self.windows
+                    .show_buffer_in_active_window(self.buffers.active());
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            PreviousColumn => {
+                self.windows.prev_column(&mut self.buffers);
+                let id = self.active_buffer_id();
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            PreviousWindowInColumn => {
+                self.windows.prev_window_in_column(&mut self.buffers);
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
@@ -463,11 +461,7 @@ where
             SelectBuffer => self.select_buffer(),
             SetMode { m } => self.set_mode(m),
             SetStatusMessage { message } => self.set_status_message(&message),
-            SetViewPort(vp) => {
-                self.buffers
-                    .active_mut()
-                    .set_view_port(vp, self.screen_rows, self.screen_cols)
-            }
+            SetViewPort(vp) => self.windows.set_viewport(&mut self.buffers, vp),
             ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
@@ -487,7 +481,7 @@ where
                 };
 
                 self.forward_action_to_active_buffer(
-                    DotSet(TextObject::Arr(arr), self.screen_rows),
+                    DotSet(TextObject::Arr(arr), self.windows.active_window_rows()),
                     Source::Keyboard,
                 );
             }
@@ -500,20 +494,28 @@ where
     }
 
     fn jump_forward(&mut self) {
-        let maybe_id = self
-            .buffers
-            .jump_list_forward(self.screen_rows, self.screen_cols);
-        if let Some(id) = maybe_id {
-            _ = self.tx_fsys.send(LogEvent::Focus(id));
+        let maybe_ids = self.buffers.jump_list_forward();
+        if let Some((prev_id, new_id)) = maybe_ids {
+            self.windows
+                .show_buffer_in_active_window(self.buffers.active_mut());
+            self.windows
+                .set_viewport(&mut self.buffers, ViewPort::Center);
+            if new_id != prev_id {
+                _ = self.tx_fsys.send(LogEvent::Focus(new_id));
+            }
         }
     }
 
     fn jump_backward(&mut self) {
-        let maybe_id = self
-            .buffers
-            .jump_list_backward(self.screen_rows, self.screen_cols);
-        if let Some(id) = maybe_id {
-            _ = self.tx_fsys.send(LogEvent::Focus(id));
+        let maybe_ids = self.buffers.jump_list_backward();
+        if let Some((prev_id, new_id)) = maybe_ids {
+            self.windows
+                .show_buffer_in_active_window(self.buffers.active_mut());
+            self.windows
+                .set_viewport(&mut self.buffers, ViewPort::Center);
+            if new_id != prev_id {
+                _ = self.tx_fsys.send(LogEvent::Focus(new_id));
+            }
         }
     }
 
