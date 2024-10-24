@@ -10,6 +10,31 @@ use crate::{
 use std::{cmp::min, mem::swap};
 use unicode_width::UnicodeWidthChar;
 
+macro_rules! drag {
+    ($self:expr, $others:ident, $focus_fn:ident, $pos:ident) => {{
+        if $self.cols.len() == 1 || $self.cols.$others.is_empty() {
+            if $self.cols.focus.wins.len() == 1 {
+                return;
+            }
+            let win = $self.cols.focus.wins.remove_focused_unchecked();
+            let mut col = Column::new($self.screen_rows, $self.screen_cols, &[0]);
+            col.wins.focus = win;
+            $self.cols.insert_at(Position::$pos, col);
+            $self.cols.$focus_fn();
+        } else {
+            let win = if $self.cols.focus.wins.len() == 1 {
+                $self.cols.remove_focused_unchecked().wins.focus
+            } else {
+                $self.cols.focus.wins.remove_focused_unchecked()
+            };
+
+            $self.cols.$focus_fn();
+            $self.cols.focus.wins.insert(win);
+        }
+        $self.update_screen_size($self.screen_rows, $self.screen_cols);
+    }}
+}
+
 /// Windows is a screen layout of the windows available for displaying buffer
 /// content to the user. The available screen space is split into a number of
 /// columns each containing a vertical stack of windows.
@@ -81,56 +106,14 @@ impl Windows {
     ///   direction is towards other columns then the window is moved to that column
     ///   and the previous column is removed.
     pub(crate) fn drag_left(&mut self) {
-        if self.cols.len() == 1 || self.cols.up.is_empty() {
-            if self.cols.focus.wins.len() == 1 {
-                return;
-            }
-            let win = self.cols.focus.wins.remove_focused_unchecked();
-            let mut col = Column::new(self.screen_rows, self.screen_cols, &[0]);
-            col.wins.focus = win;
-            self.cols.insert_at(Position::Head, col);
-            self.cols.focus_up();
-            self.update_screen_size(self.screen_rows, self.screen_cols);
-            return;
-        }
-
-        let win = if self.cols.focus.wins.len() == 1 {
-            self.cols.remove_focused_unchecked().wins.focus
-        } else {
-            self.cols.focus.wins.remove_focused_unchecked()
-        };
-
-        self.cols.focus_up();
-        self.cols.focus.wins.insert(win);
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+        drag!(self, up, focus_up, Head);
     }
 
     /// Drag the focused window to the column on the right.
     ///
     /// See [Windows::drag_left] for semantics.
     pub(crate) fn drag_right(&mut self) {
-        if self.cols.len() == 1 || self.cols.down.is_empty() {
-            if self.cols.focus.wins.len() == 1 {
-                return;
-            }
-            let win = self.cols.focus.wins.remove_focused_unchecked();
-            let mut col = Column::new(self.screen_rows, self.screen_cols, &[0]);
-            col.wins.focus = win;
-            self.cols.insert_at(Position::Tail, col);
-            self.cols.focus_down();
-            self.update_screen_size(self.screen_rows, self.screen_cols);
-            return;
-        }
-
-        let win = if self.cols.focus.wins.len() == 1 {
-            self.cols.remove_focused_unchecked().wins.focus
-        } else {
-            self.cols.focus.wins.remove_focused_unchecked()
-        };
-
-        self.cols.focus_down();
-        self.cols.focus.wins.insert(win);
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+        drag!(self, down, focus_down, Tail);
     }
 
     #[inline]
