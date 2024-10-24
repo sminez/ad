@@ -32,7 +32,7 @@ macro_rules! drag {
             $self.cols.focus.wins.insert(win);
         }
         $self.update_screen_size($self.screen_rows, $self.screen_cols);
-    }}
+    }};
 }
 
 /// Windows is a screen layout of the windows available for displaying buffer
