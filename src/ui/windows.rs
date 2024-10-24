@@ -35,24 +35,102 @@ impl Windows {
         }
     }
 
+    /// Move focus to the column to the right of current focus (wrapping)
     pub(crate) fn next_column(&mut self, buffers: &mut Buffers) {
         self.cols.focus_down();
         buffers.focus_id(self.focused_view().bufid);
     }
 
+    /// Move focus to the column to the left of current focus (wrapping)
     pub(crate) fn prev_column(&mut self, buffers: &mut Buffers) {
         self.cols.focus_up();
         buffers.focus_id(self.focused_view().bufid);
     }
 
+    /// Move focus to the window below in the current column (wrapping)
     pub(crate) fn next_window_in_column(&mut self, buffers: &mut Buffers) {
         self.cols.focus.wins.focus_down();
         buffers.focus_id(self.focused_view().bufid);
     }
 
+    /// Move focus to the window above in the current column (wrapping)
     pub(crate) fn prev_window_in_column(&mut self, buffers: &mut Buffers) {
         self.cols.focus.wins.focus_up();
         buffers.focus_id(self.focused_view().bufid);
+    }
+
+    /// Drag the focused window up through the column containing it (wrapping)
+    pub(crate) fn drag_up(&mut self) {
+        self.cols.focus.wins.swap_up();
+    }
+
+    /// Drag the focused window down through the column containing it (wrapping)
+    pub(crate) fn drag_down(&mut self) {
+        self.cols.focus.wins.swap_down();
+    }
+
+    /// Drag the focused window to the column on the left.
+    ///
+    /// # Semantics
+    /// - If the current columns contains multiple windows and the target exists
+    ///   then the current focus is moved to the focus position of the target column
+    /// - We anchor if the current column is the extreme left or right and this is
+    ///   the only window, otherwise a new column is created and the window is moved
+    ///   into it as the focus.
+    /// - If the focused window is the only window in and extremal column and the
+    ///   direction is towards other columns then the window is moved to that column
+    ///   and the previous column is removed.
+    pub(crate) fn drag_left(&mut self) {
+        if self.cols.len() == 1 || self.cols.up.is_empty() {
+            if self.cols.focus.wins.len() == 1 {
+                return;
+            }
+            let win = self.cols.focus.wins.remove_focused_unchecked();
+            let mut col = Column::new(self.screen_rows, self.screen_cols, &[0]);
+            col.wins.focus = win;
+            self.cols.insert_at(Position::Head, col);
+            self.cols.focus_up();
+            self.update_screen_size(self.screen_rows, self.screen_cols);
+            return;
+        }
+
+        let win = if self.cols.focus.wins.len() == 1 {
+            self.cols.remove_focused_unchecked().wins.focus
+        } else {
+            self.cols.focus.wins.remove_focused_unchecked()
+        };
+
+        self.cols.focus_up();
+        self.cols.focus.wins.insert(win);
+        self.update_screen_size(self.screen_rows, self.screen_cols);
+    }
+
+    /// Drag the focused window to the column on the right.
+    ///
+    /// See [Windows::drag_left] for semantics.
+    pub(crate) fn drag_right(&mut self) {
+        if self.cols.len() == 1 || self.cols.down.is_empty() {
+            if self.cols.focus.wins.len() == 1 {
+                return;
+            }
+            let win = self.cols.focus.wins.remove_focused_unchecked();
+            let mut col = Column::new(self.screen_rows, self.screen_cols, &[0]);
+            col.wins.focus = win;
+            self.cols.insert_at(Position::Tail, col);
+            self.cols.focus_down();
+            self.update_screen_size(self.screen_rows, self.screen_cols);
+            return;
+        }
+
+        let win = if self.cols.focus.wins.len() == 1 {
+            self.cols.remove_focused_unchecked().wins.focus
+        } else {
+            self.cols.focus.wins.remove_focused_unchecked()
+        };
+
+        self.cols.focus_down();
+        self.cols.focus.wins.insert(win);
+        self.update_screen_size(self.screen_rows, self.screen_cols);
     }
 
     #[inline]
@@ -473,6 +551,73 @@ mod tests {
     };
     use simple_test_case::test_case;
 
+    fn test_windows(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Windows {
+        let mut cols = Vec::with_capacity(col_wins.len());
+        let mut n = 0;
+
+        for m in col_wins.iter() {
+            let ids: Vec<usize> = (n..(n + m)).collect();
+            n += m;
+            cols.push(Column::new(n_rows, n_cols, &ids));
+        }
+
+        let mut ws = Windows {
+            screen_rows: n_rows,
+            screen_cols: n_cols,
+            cols: ZipList::try_from_iter(cols).unwrap(),
+            views: vec![],
+        };
+        ws.update_screen_size(n_rows, n_cols);
+
+        ws
+    }
+
+    #[test]
+    fn next_prev_column_methods_work() {
+        let mut ws = test_windows(&[1, 1, 2], 80, 100);
+        let mut bs = Buffers::new();
+        assert_eq!(ws.focused_view().bufid, 0);
+
+        // next wrapping
+        ws.next_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 1);
+        ws.next_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 2);
+        ws.next_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 0);
+
+        // prev wrapping
+        ws.prev_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 2);
+        ws.prev_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 1);
+        ws.prev_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 0);
+    }
+
+    #[test]
+    fn next_prev_window_methods_work() {
+        let mut ws = test_windows(&[3, 1], 80, 100);
+        let mut bs = Buffers::new();
+        assert_eq!(ws.focused_view().bufid, 0);
+
+        // next wrapping
+        ws.next_window_in_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 1);
+        ws.next_window_in_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 2);
+        ws.next_window_in_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 0);
+
+        // prev wrapping
+        ws.prev_window_in_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 2);
+        ws.prev_window_in_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 1);
+        ws.prev_window_in_column(&mut bs);
+        assert_eq!(ws.focused_view().bufid, 0);
+    }
+
     #[test_case(&[1], 30, 40, 0; "one col one win")]
     #[test_case(&[1, 1], 30, 40, 0; "two cols one win each click in first")]
     #[test_case(&[1, 1], 60, 40, 1; "two cols one win each click in second")]
@@ -484,22 +629,7 @@ mod tests {
     #[test_case(&[1, 4], 60, 70, 4; "two cols second with four click in fourth window")]
     #[test]
     fn buffer_for_screen_coords_works(col_wins: &[usize], x: usize, y: usize, expected: BufferId) {
-        let mut cols = Vec::with_capacity(col_wins.len());
-        let mut n = 0;
-
-        for m in col_wins.iter() {
-            let ids: Vec<usize> = (n..(n + m)).collect();
-            n += m;
-            cols.push(Column::new(80, 100, &ids));
-        }
-
-        let mut ws = Windows {
-            screen_rows: 80,
-            screen_cols: 100,
-            cols: ZipList::try_from_iter(cols).unwrap(),
-            views: vec![],
-        };
-        ws.update_screen_size(80, 100);
+        let mut ws = test_windows(col_wins, 80, 100);
         println!("{ws:#?}");
 
         assert_eq!(
@@ -526,22 +656,7 @@ mod tests {
     fn focus_buffer_for_screen_coords_doesnt_reorder_windows() {
         let (x, y) = (60, 70);
         let expected = 4;
-        let mut cols = Vec::with_capacity(2);
-        let mut n = 0;
-
-        for m in [1, 4].iter() {
-            let ids: Vec<usize> = (n..(n + m)).collect();
-            n += m;
-            cols.push(Column::new(80, 100, &ids));
-        }
-
-        let mut ws = Windows {
-            screen_rows: 80,
-            screen_cols: 100,
-            cols: ZipList::try_from_iter(cols).unwrap(),
-            views: vec![],
-        };
-        ws.update_screen_size(80, 100);
+        let mut ws = test_windows(&[1, 4], 80, 100);
 
         let ids = |ws: &Windows| {
             ws.cols

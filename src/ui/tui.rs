@@ -28,6 +28,7 @@ use std::{
     thread::{spawn, JoinHandle},
     time::Instant,
 };
+use unicode_width::UnicodeWidthChar;
 
 // const HLINE: &str = "—"; // em dash
 const HLINE: &str = "-";
@@ -139,7 +140,7 @@ impl Tui {
             let rng = if is_focus { load_exec_range } else { None };
             let b = buffers.with_id(win.view.bufid).expect("valid buffer id");
             rendered_rows.extend(self.render_window(b, win, col.n_cols, rng, cs));
-            rendered_rows.push(HLINE.repeat(col.n_cols));
+            rendered_rows.push(box_draw_str(&HLINE.repeat(col.n_cols), cs));
         }
         rendered_rows.truncate(screen_rows);
 
@@ -205,10 +206,11 @@ impl Tui {
 
         let mut lines = Vec::with_capacity(screen_rows);
         let vstr = box_draw_str(VLINE, cs);
+        let hstr = box_draw_str(HLINE, cs);
         let xstr = box_draw_str(XSTR, cs);
         let tstr = box_draw_str(TSTR, cs);
-        let hvh = format!("{HLINE}{vstr}{HLINE}");
-        let vh = format!("{vstr}{HLINE}");
+        let hvh = format!("{hstr}{vstr}{hstr}");
+        let vh = format!("{vstr}{hstr}");
 
         for _ in 0..screen_rows {
             let mut line_fragments = Vec::with_capacity(rendered_cols.len() + 1);
@@ -479,6 +481,13 @@ fn render_pending(keys: &[Input]) -> String {
     s
 }
 
+fn num_cols(chars: &[char]) -> usize {
+    chars
+        .iter()
+        .map(|c| UnicodeWidthChar::width(*c).unwrap_or(1))
+        .sum()
+}
+
 /// The render representation of a given line, truncated to fit within the
 /// available screen space.
 /// This includes tab expansion but not any styling that might be applied,
@@ -494,9 +503,9 @@ fn raw_rline_unchecked(
     screen_cols: usize,
     dot_range: Option<(usize, usize)>,
 ) -> (String, Option<(usize, usize)>) {
-    let max_chars = screen_cols - lpad;
+    let max_cols = screen_cols - lpad;
     let tabstop = config_handle!().tabstop;
-    let mut rline = Vec::with_capacity(max_chars);
+    let mut rline = Vec::with_capacity(max_cols);
     // Iterating over characters not bytes as we need to account for multi-byte utf8
     let line = b.txt.line(y);
     let mut it = line.chars().skip(view.col_off);
@@ -511,7 +520,9 @@ fn raw_rline_unchecked(
         end = end.saturating_sub(view.col_off);
     }
 
-    while rline.len() <= max_chars {
+    let mut rline_cols = 0;
+
+    while rline_cols <= max_cols {
         match it.next() {
             Some('\n') | None => break,
             Some('\t') => {
@@ -525,12 +536,27 @@ fn raw_rline_unchecked(
             }
             Some(c) => rline.push(c),
         }
+
+        rline_cols = num_cols(&rline);
     }
 
-    rline.truncate(max_chars); // noop if max_chars > rline.len()
+    // We need to check for overflowing both from tab expansion and variable width
+    // unicode characters at the end of the line. After trimming the line to ensure
+    // we are under the column limit we may end up short so we unconditionally
+    // do the padding check after this.
+    if rline_cols >= max_cols {
+        while rline_cols > max_cols {
+            match rline.pop() {
+                Some(c) => rline_cols -= UnicodeWidthChar::width(c).unwrap_or(1),
+                None => break,
+            }
+        }
+    }
+
     let n_chars = rline.len();
-    // we pad to max_chars so that columns render correctly next to one another
-    let padding = max_chars - n_chars;
+
+    // Pad to max_cols so that columns render correctly next to one another
+    let padding = max_cols - rline_cols;
     rline.append(&mut [' '].repeat(padding));
     let s = rline.into_iter().collect();
 

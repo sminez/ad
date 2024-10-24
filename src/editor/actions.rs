@@ -7,7 +7,7 @@ use crate::{
     editor::{Editor, MiniBufferSelection},
     exec::{Addr, Address, Program},
     fsys::LogEvent,
-    key::Input,
+    key::{Arrow, Input},
     mode::Mode,
     plumb::{MatchOutcome, PlumbingMessage},
     replace_config,
@@ -56,12 +56,13 @@ pub enum Action {
     DotExtendForward(TextObject, usize),
     DotFlip,
     DotSet(TextObject, usize),
+    DragWindow { direction: Arrow },
     EditCommand { cmd: String },
     ExecuteDot,
     Exit { force: bool },
     ExpandDot,
-    FindFile,
-    FindRepoFile,
+    FindFile { new_window: bool },
+    FindRepoFile { new_window: bool },
     FocusBuffer { id: usize },
     InsertChar { c: char },
     InsertString { s: String },
@@ -220,25 +221,18 @@ where
         };
 
         if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), false);
-            if new_window {
-                self.windows
-                    .show_buffer_in_new_window(self.buffers.active());
-            } else {
-                self.windows
-                    .show_buffer_in_active_window(self.buffers.active());
-            }
+            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), new_window);
         }
     }
 
     /// This shells out to the fd command line program
-    pub(crate) fn find_file(&mut self) {
+    pub(crate) fn find_file(&mut self, new_window: bool) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
-        self.find_file_under_dir(&d, true);
+        self.find_file_under_dir(&d, new_window);
     }
 
     /// This shells out to the git and fd command line programs
-    pub(crate) fn find_repo_file(&mut self) {
+    pub(crate) fn find_repo_file(&mut self, new_window: bool) {
         let d = self.buffers.active().dir().unwrap_or(&self.cwd).to_owned();
         let s = match self.system.run_command_blocking(
             "git",
@@ -254,7 +248,7 @@ where
         };
 
         let root = Path::new(s.trim());
-        self.find_file_under_dir(root, true);
+        self.find_file_under_dir(root, new_window);
     }
 
     pub(crate) fn delete_buffer(&mut self, id: usize, force: bool) {

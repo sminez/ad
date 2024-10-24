@@ -23,13 +23,15 @@ pub(crate) fn normal_mode() -> Mode {
         [ Char(':') ] => [ CommandMode ],
         [ Char('!') ] => [ RunMode ],
         [ Char('.') ] => [ SamMode ],
-        [ Char('-') ] => [ FindFile ],
-        [ Char('_') ] => [ FindRepoFile ],
+        [ Char('-') ] => [ FindFile { new_window: false } ],
+        [ Char('_') ] => [ FindRepoFile { new_window: false } ],
+        [ Alt('-') ] => [ FindFile { new_window: true } ],
+        [ Alt('_') ] => [ FindRepoFile { new_window: true } ],
 
         // DEBUG
         [ Alt('?') ] => [ DebugBufferContents ],
         [ Alt('#') ] => [ DebugEditLog ],
-        [ Alt('-') ] => [ ViewLogs ],
+        [ Alt('=') ] => [ ViewLogs ],
 
         // Entering INSERT mode
         [ Char('i') ] => [ SetMode { m: "INSERT" }, NewEditLogTransaction ],
@@ -109,6 +111,10 @@ pub(crate) fn normal_mode() -> Mode {
         [ Alt('a') ] => [ PreviousColumn ],
         [ Alt('s') ] => [ NextWindowInColumn ],
         [ Alt('d') ] => [ NextColumn ],
+        [ Alt('W') ] => [ DragWindow { direction: Up } ],
+        [ Alt('A') ] => [ DragWindow { direction: Left } ],
+        [ Alt('S') ] => [ DragWindow { direction: Down } ],
+        [ Alt('D') ] => [ DragWindow { direction: Right } ],
 
         // Editing actions
         [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],

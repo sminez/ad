@@ -389,12 +389,24 @@ where
             ChangeDirectory { path } => self.change_directory(path),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.buffers.active().id, force),
+            DragWindow {
+                direction: Arrow::Up,
+            } => self.windows.drag_up(),
+            DragWindow {
+                direction: Arrow::Down,
+            } => self.windows.drag_down(),
+            DragWindow {
+                direction: Arrow::Left,
+            } => self.windows.drag_left(),
+            DragWindow {
+                direction: Arrow::Right,
+            } => self.windows.drag_right(),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
             ExecuteDot => self.default_execute_dot(None, source),
             Exit { force } => self.exit(force),
             ExpandDot => self.expand_current_dot(),
-            FindFile => self.find_file(),
-            FindRepoFile => self.find_repo_file(),
+            FindFile { new_window } => self.find_file(new_window),
+            FindRepoFile { new_window } => self.find_repo_file(new_window),
             FocusBuffer { id } => self.focus_buffer(id),
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
@@ -403,6 +415,8 @@ where
             NewEditLogTransaction => self.buffers.active_mut().new_edit_log_transaction(),
             NextBuffer => {
                 self.buffers.next();
+                self.windows
+                    .show_buffer_in_active_window(self.buffers.active());
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
@@ -421,6 +435,8 @@ where
             Paste => self.paste_from_clipboard(source),
             PreviousBuffer => {
                 self.buffers.previous();
+                self.windows
+                    .show_buffer_in_active_window(self.buffers.active());
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }

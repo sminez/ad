@@ -299,6 +299,17 @@ impl<T> ZipList<T> {
         )
     }
 
+    /// Removed the focused element of this Ziplist.
+    ///
+    /// # Panics
+    /// Panics if the focus was the only element
+    pub fn remove_focused_unchecked(&mut self) -> T {
+        self.down
+            .pop_front()
+            .or_else(|| self.up.pop_front())
+            .expect("Ziplist only contained a single element")
+    }
+
     /// Remove the first element that matches the given predicate function. If doing so would
     /// remove the last element of the ZipList then `default_focus` is called to ensure that there
     /// is a single element remaining as the current focus.
