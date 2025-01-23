@@ -30,16 +30,22 @@ impl Drop for Socket {
     }
 }
 
+const DEFAULT_DISPLAY_VALUE: &str = ":0";
+
+fn socket_dir() -> String {
+    let uname = env::var("USER").unwrap();
+    let display = env::var("DISPLAY").unwrap_or(String::from(DEFAULT_DISPLAY_VALUE));
+    format!("/tmp/ns.{uname}.{display}")
+}
+
 /// The unix socket path that will be used for a given server name.
 pub fn socket_path(name: &str) -> String {
-    let uname = env::var("USER").unwrap();
-    let socket_dir = format!("/tmp/ns.{uname}.:0");
+    let socket_dir = socket_dir();
     format!("{socket_dir}/{name}")
 }
 
 fn unix_socket(name: &str) -> Socket {
-    let uname = env::var("USER").unwrap();
-    let socket_dir = format!("/tmp/ns.{uname}.:0");
+    let socket_dir = socket_dir();
     let _ = fs::create_dir_all(&socket_dir);
     let path = format!("{socket_dir}/{name}");
 
