@@ -64,18 +64,18 @@ dot = { fg = "#E6D29E", bg = "#336677" }
 load = { fg = "#E6D29E", bg = "#957FB8" }
 exec = { fg = "#E6D29E", bg = "#Bf616A" }
 # Styling for tree-sitter query captures
-boolean = { fg = "#DCA561", bold = true }
-character = { fg = "#61DCA5", italic = true }
-comment = { fg = "#624354", italic = true }
-constant = { fg = "#FF9E3B" }
-function = { fg = "#957FB8" }
-keyword = { fg = "#Bf616A" }
-module = { fg = "#2D4F67" }
-number = { fg = "#D27E99" }
-punctuation = { fg = "#9CABCA" }
-string = { fg = "#61DCA5" }
-type = { fg = "#7E9CD8" }
-variable = { fg = "#E6C384" }
+boolean = { fg = "#DCA561", bg = "#1B1720", bold = true }
+character = { fg = "#61DCA5", bg = "#1B1720", italic = true }
+comment = { fg = "#624354", bg = "#1B1720", italic = true }
+constant = { fg = "#FF9E3B", bg = "#1B1720" }
+function = { fg = "#957FB8", bg = "#1B1720" }
+keyword = { fg = "#Bf616A", bg = "#1B1720" }
+module = { fg = "#2D4F67", bg = "#1B1720" }
+number = { fg = "#D27E99", bg = "#1B1720" }
+punctuation = { fg = "#9CABCA", bg = "#1B1720" }
+string = { fg = "#61DCA5", bg = "#1B1720" }
+type = { fg = "#7E9CD8", bg = "#1B1720" }
+variable = { fg = "#E6C384", bg = "#1B1720" }
 
 
 # Key mappings to programs that must be available on $PATH or commands.
