@@ -160,14 +160,15 @@ impl Client<UnixStream> {
     /// Create a new [Client] connected to a unix socket at the given aname under the default
     /// namespace.
     ///
-    /// The default namespace is located in /tmp/ns.$USER.:0/
+    /// The default namespace is located in /tmp/ns.$USER.$DISPLAY/
     pub fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> io::Result<Self> {
         let ns = ns.into();
         let uname = match env::var("USER") {
             Ok(s) => s,
             Err(_) => return err("USER env var not set"),
         };
-        let path = format!("/tmp/ns.{uname}.:0/{ns}");
+        let display = env::var("DISPLAY").unwrap_or(":0".to_string());
+        let path = format!("/tmp/ns.{uname}.{display}/{ns}");
 
         Self::new_unix_with_explicit_path(uname, path, aname)
     }
