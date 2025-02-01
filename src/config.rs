@@ -77,6 +77,7 @@ impl Config {
             Err(e) => return Err(format!("Unable to load config file: {e}")),
         };
 
+        cfg.set_default_bg_for_tokens();
         cfg.expand_home_dir_refs(&home);
 
         Ok(cfg)
@@ -101,6 +102,15 @@ impl Config {
         warn!("ignoring runtime config update: {input}");
 
         Err("runtime config updates are not currently supported".to_owned())
+    }
+
+    fn set_default_bg_for_tokens(&mut self) {
+        for style in self.colorscheme.syntax.values_mut() {
+            // Use default colorscheme's background color if none is specified
+            if style.bg.is_none() {
+                style.bg = Some(self.colorscheme.bg);
+            }
+        }
     }
 
     fn expand_home_dir_refs(&mut self, home: &str) {
