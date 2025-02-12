@@ -149,3 +149,17 @@ extensions = ["sql"]
 [[languages]]
 name = "toml"
 extensions = ["toml"]
+
+[[languages]]
+name = "r"
+extensions = ["R"]
+lsp.command = "R"
+lsp.args = ["--slave", "-e", "languageserver::run()"]
+lsp.roots = ["dummy.R"]
+
+[[languages]]
+name = "python"
+extensions = ["py"]
+lsp.command = "pylsp"
+lsp.roots = ["dummy.py"]
+
