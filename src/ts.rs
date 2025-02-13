@@ -28,7 +28,7 @@ use std::{
     cmp::{max, min, Ord, Ordering, PartialOrd},
     collections::HashSet,
     fmt, fs,
-    iter::Peekable,
+    iter::{repeat_n, Peekable},
     ops::{Deref, DerefMut},
     path::Path,
     slice,
@@ -91,6 +91,7 @@ impl TsState {
             Some(tree) => {
                 let mut t = p.new_tokenizer(query)?;
                 t.update(tree.root_node(), gb);
+                info!("TS loaded for {}", p.lang_name);
                 Ok(Self { p, t, tree })
             }
             None => Err("failed to parse file".to_owned()),
@@ -147,6 +148,41 @@ impl TsState {
     ) -> LineIter<'_> {
         self.t
             .iter_tokenized_lines_from(line, gb, dot_range, load_exec_range)
+    }
+
+    pub fn pretty_print_tree(&self) -> String {
+        let sexp = self.tree.root_node().to_sexp();
+        let mut buf = String::with_capacity(sexp.len()); // better starting point than default
+        let mut has_field = false;
+        let mut indent = 0;
+
+        for s in sexp.split([' ', ')']) {
+            if s.is_empty() {
+                indent -= 1;
+                buf.push(')');
+            } else if s.starts_with('(') {
+                if has_field {
+                    has_field = false;
+                } else {
+                    if indent > 0 {
+                        buf.push('\n');
+                        buf.extend(repeat_n(' ', indent * 2));
+                    }
+                    indent += 1;
+                }
+
+                buf.push_str(s); // "(node_name"
+            } else if s.ends_with(':') {
+                buf.push('\n');
+                buf.extend(repeat_n(' ', indent * 2));
+                buf.push_str(s); // "field:"
+                buf.push(' ');
+                has_field = true;
+                indent += 1;
+            }
+        }
+
+        buf
     }
 }
 

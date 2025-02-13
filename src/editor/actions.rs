@@ -118,6 +118,7 @@ pub enum Action {
     ShellRun { cmd: String },
     ShellSend { cmd: String },
     ShowHelp,
+    TsShowTree,
     Undo,
     UpdateConfig { input: String },
     ViewLogs,
@@ -493,6 +494,13 @@ where
     pub(super) fn view_logs(&mut self) {
         self.layout
             .open_virtual("+logs", self.log_buffer.content(), false)
+    }
+
+    pub(super) fn show_active_ts_tree(&mut self) {
+        match self.layout.active_buffer().pretty_print_ts_tree() {
+            Some(s) => self.layout.open_virtual("+ts-tree", s, false),
+            None => self.set_status_message("no tree-sitter tree for current buffer"),
+        }
     }
 
     pub(super) fn show_help(&mut self) {

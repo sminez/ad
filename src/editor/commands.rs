@@ -138,6 +138,8 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             input: input.to_string(),
         })),
 
+        "ts-show-tree" => Ok(Single(TsShowTree)),
+
         "view-logs" => Ok(Single(ViewLogs)),
 
         "w" | "write" => {
