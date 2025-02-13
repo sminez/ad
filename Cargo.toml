@@ -54,3 +54,5 @@ toml = "0.8.19"
 [dev-dependencies]
 simple_test_case = "1.2.0"
 criterion = "0.5"
+tree-sitter-python = "0.23.6"
+tree-sitter-rust = "0.23.2"

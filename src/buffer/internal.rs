@@ -414,7 +414,7 @@ impl GapBuffer {
     }
 
     /// Convert a byte index to a character index
-    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
+    pub fn raw_byte_to_char(&self, byte_idx: usize) -> usize {
         self.chars_in_raw_range(0, byte_idx)
     }
 
@@ -739,7 +739,7 @@ impl GapBuffer {
     }
 
     #[inline]
-    fn byte_to_raw_byte(&self, byte: usize) -> usize {
+    pub fn byte_to_raw_byte(&self, byte: usize) -> usize {
         if byte > self.gap_start {
             byte + self.gap()
         } else {

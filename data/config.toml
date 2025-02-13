@@ -72,6 +72,7 @@ function = { fg = "#957FB8" }
 keyword = { fg = "#Bf616A" }
 module = { fg = "#2D4F67" }
 number = { fg = "#D27E99" }
+operator = { fg = "#E6C384" }
 punctuation = { fg = "#9CABCA" }
 string = { fg = "#61DCA5" }
 type = { fg = "#7E9CD8" }
