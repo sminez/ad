@@ -57,6 +57,9 @@
 
 (comment) @comment
 
+((comment) @comment.documentation
+  (#match? @comment.documentation "^/[*][*][^*].*[*]/$"))
+
 [
   "("
   ")"

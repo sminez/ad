@@ -1,3 +1,5 @@
+(shebang) @keyword.directive
+
 (function_item (identifier) @function)
 (function_signature_item (identifier) @function)
 (macro_invocation
@@ -5,6 +7,10 @@
   "!" @function.macro)
 
 (identifier) @variable
+
+; Assume all-caps names are constants
+((identifier) @constant
+  (#match? @constant "^[A-Z][A-Z%d_]*$"))
 
 (const_item
   name: (identifier) @constant)
@@ -18,10 +24,19 @@
   name: (identifier) @module)
 (self) @keyword.builtin
 
-"_" @character.special
+[
+  (line_comment)
+  (block_comment)
+  (outer_doc_comment_marker)
+  (inner_doc_comment_marker)
+] @comment @spell
 
-(line_comment) @comment
-(block_comment) @comment
+(line_comment
+  (doc_comment)) @comment.documentation
+
+(block_comment
+  (doc_comment)) @comment.documentation
+
 
 (boolean_literal) @boolean
 (integer_literal) @number
@@ -31,6 +46,14 @@
 
 (string_literal) @string
 (raw_string_literal) @string
+
+(use_wildcard
+  "*" @character.special)
+
+(remaining_field_pattern
+  ".." @character.special)
+
+"_" @character.special
 
 ; Keywords
 [
@@ -111,30 +134,6 @@
 (closure_parameters
   "|" @punctuation.bracket)
 
-(type_arguments
-  [
-    "<"
-    ">"
-  ] @punctuation.bracket)
-
-(type_parameters
-  [
-    "<"
-    ">"
-  ] @punctuation.bracket)
-
-(bracketed_type
-  [
-    "<"
-    ">"
-  ] @punctuation.bracket)
-
-(for_lifetimes
-  [
-    "<"
-    ">"
-  ] @punctuation.bracket)
-
 [
   ","
   "."
@@ -185,17 +184,40 @@
   "||"
 ] @operator
 
-(use_wildcard
-  "*" @character.special)
+(type_arguments
+  [
+    "<"
+    ">"
+  ] @punctuation.bracket)
 
-(remaining_field_pattern
-  ".." @character.special)
+(type_parameters
+  [
+    "<"
+    ">"
+  ] @punctuation.bracket)
 
-; (attribute_item
-;   "#" @punctuation.special)
+(bracketed_type
+  [
+    "<"
+    ">"
+  ] @punctuation.bracket)
 
-; (inner_attribute_item
-;   [
-;     "!"
-;     "#"
-;   ] @punctuation.special)
+(for_lifetimes
+  [
+    "<"
+    ">"
+  ] @punctuation.bracket)
+
+
+(attribute_item
+  "#" @punctuation.special)
+
+(inner_attribute_item
+  [
+    "!"
+    "#"
+  ] @punctuation.special)
+
+
+((identifier) @constant.builtin
+  (#any-of? @constant.builtin "Some" "None" "Ok" "Err"))
