@@ -86,7 +86,7 @@ impl PositionEncoding {
             Self::Utf8 => {
                 let line_start = b.txt.line_to_char(pos.line as usize);
                 let byte_idx = b.txt.char_to_byte(line_start + pos.character as usize);
-                let col = b.txt.byte_to_char(byte_idx);
+                let col = b.txt.raw_byte_to_char(byte_idx);
 
                 (pos.line as usize, col)
             }

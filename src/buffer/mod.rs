@@ -410,6 +410,10 @@ impl Buffer {
         s
     }
 
+    pub(crate) fn pretty_print_ts_tree(&self) -> Option<String> {
+        self.ts_state.as_ref().map(|ts| ts.pretty_print_tree())
+    }
+
     pub(crate) fn string_lines(&self) -> Vec<String> {
         self.txt
             .iter_lines()
