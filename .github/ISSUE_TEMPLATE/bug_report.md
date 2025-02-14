@@ -7,6 +7,22 @@ assignees: ''
 
 ---
 
+### Versions & OS Details
+
+> **Please note that there are currently no official packages of ad**
+>
+> If you have installed `ad` through a package manager (such as homebrew or the
+> aur) then please report any package related issues you are having to the
+> maintainer of the package in question. The `ad` README is transparent about
+> the current state of the project and the fact that it is not expected to be
+> fully stable or suitable for use as your primary text editor at this time.
+
+- ad Version [point version from crates.io or hash of develop]
+- OS: [e.g. linux/bsd]
+- Distribution [e.g. Ubuntu/Arch]
+- OS Version [e.g. 24.04 LTS]
+
+
 ### Describe the bug
 
 ...
@@ -23,12 +39,4 @@ Steps to reproduce the behavior:
 
 If applicable, add screenshots to help explain your problem.
 
-### Versions & OS Details
-
-- OS: [e.g. linux/bsd]
-- Distribution [e.g. Ubuntu/Arch]
-- OS Version [e.g. 20.04 LTS]
-- ad Version [point version from crates.io or hash of develop]
-
 ### Additional context
-
