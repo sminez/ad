@@ -67,16 +67,17 @@ exec = { fg = "#E6D29E", bg = "#Bf616A" }
 boolean = { fg = "#DCA561", bold = true }
 character = { fg = "#61DCA5", italic = true }
 comment = { fg = "#624354", italic = true }
-constant = { fg = "#FF9E3B" }
-function = { fg = "#957FB8" }
+constant = { fg = "#FFA066" }
+function = { fg = "#8793B5" }
+"function.macro" = { fg = "#FFA066" }
 keyword = { fg = "#Bf616A" }
 module = { fg = "#2D4F67" }
 number = { fg = "#D27E99" }
-operator = { fg = "#E6C384" }
+operator = { fg = "#DCA561" }
 punctuation = { fg = "#9CABCA" }
 string = { fg = "#61DCA5" }
-type = { fg = "#7E9CD8" }
-variable = { fg = "#E6C384" }
+type = { fg = "#9AB292" }
+variable = { fg = "#E6D29E" }
 
 
 # Key mappings to programs that must be available on $PATH or commands.

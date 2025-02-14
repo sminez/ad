@@ -1,11 +1,5 @@
 (shebang) @keyword.directive
 
-(function_item (identifier) @function)
-(function_signature_item (identifier) @function)
-(macro_invocation
-  macro: (identifier) @function.macro
-  "!" @function.macro)
-
 (identifier) @variable
 
 ; Assume all-caps names are constants
@@ -24,12 +18,35 @@
   name: (identifier) @module)
 (self) @keyword.builtin
 
+(function_item (identifier) @function)
+(function_signature_item (identifier) @function)
+(macro_invocation
+  macro: (identifier) @function.macro
+  "!" @function.macro)
+
+(call_expression
+  function: (identifier) @function.call)
+(call_expression
+  function: (scoped_identifier
+    (identifier) @function.call .))
+(call_expression
+  function: (field_expression
+    field: (field_identifier) @function.call))
+(generic_function
+  function: (identifier) @function.call)
+(generic_function
+  function: (scoped_identifier
+    name: (identifier) @function.call))
+(generic_function
+  function: (field_expression
+    field: (field_identifier) @function.call))
+
 [
   (line_comment)
   (block_comment)
   (outer_doc_comment_marker)
   (inner_doc_comment_marker)
-] @comment @spell
+] @comment
 
 (line_comment
   (doc_comment)) @comment.documentation
