@@ -158,7 +158,7 @@ things into the interactive editor directly should be coming soon. For now, here
 simple functionality of the engine:
 
 ```sh
-$ cat examples/exec_scripts/result_fns.ad
+$ cat examples/scripts/result_fns.ad
 ,                              # set dot to be the full input (not required as this is the default)
 x/fn@*?\{/                     # select all Rust function signatures up to the opening brace
 g/->.*Result.*\{/              # keep those that return some form of Result
