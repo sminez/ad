@@ -20,10 +20,13 @@ use crate::{
     ziplist, ORIGINAL_TERMIOS, VERSION,
 };
 use std::{
+    cell::RefCell,
     char,
     cmp::{min, Ordering},
+    collections::HashMap,
     io::{stdin, stdout, Read, Stdout, Write},
     panic,
+    rc::Rc,
     sync::mpsc::Sender,
     thread::{spawn, JoinHandle},
     time::Instant,
@@ -47,11 +50,15 @@ pub struct Tui {
     screen_cols: usize,
     status_message: String,
     last_status: Instant,
+    // Box elements for rendering window borders
     vstr: String,
     xstr: String,
     tstr: String,
     hvh: String,
     vh: String,
+    // Cache of the ANSI escape code strings required for each fully qualified tree-sitter
+    // highlighting tag. See render_line for details on how the cache is used.
+    style_cache: Rc<RefCell<HashMap<String, String>>>,
 }
 
 impl Default for Tui {
@@ -79,13 +86,14 @@ impl Tui {
             xstr: String::new(),
             hvh: String::new(),
             vh: String::new(),
+            style_cache: Default::default(),
         };
-        tui.update_box_elements();
+        tui.update_cached_elements();
 
         tui
     }
 
-    fn update_box_elements(&mut self) {
+    fn update_cached_elements(&mut self) {
         let cs = &config_handle!().colorscheme;
         let vstr = box_draw_str(VLINE, cs);
         let hstr = box_draw_str(HLINE, cs);
@@ -94,6 +102,7 @@ impl Tui {
         self.hvh = format!("{hstr}{vstr}{hstr}");
         self.vh = format!("{vstr}{hstr}");
         self.vstr = vstr;
+        self.style_cache.borrow_mut().clear();
     }
 
     fn render_banner(&self, screen_rows: usize, cs: &ColorScheme) -> Vec<String> {
@@ -202,17 +211,18 @@ impl Tui {
                 } else {
                     cs.bg
                 };
-                let styles = Styles {
+                let style_str = Styles {
                     fg: Some(cs.fg),
                     bg: Some(bg),
                     ..Default::default()
-                };
+                }
+                .to_string();
 
                 let mut rline = String::new();
                 let mut cols = 0;
                 render_slice(
                     slice,
-                    &styles,
+                    &style_str,
                     self.screen_cols,
                     tabstop,
                     &mut 0,
@@ -288,7 +298,7 @@ impl UserInterface for Tui {
 
     fn state_change(&mut self, change: StateChange) {
         match change {
-            StateChange::ConfigUpdated => self.update_box_elements(),
+            StateChange::ConfigUpdated => self.update_cached_elements(),
             StateChange::StatusMessage { msg } => {
                 self.status_message = msg;
                 self.last_status = Instant::now();
@@ -402,7 +412,15 @@ impl<'a> WinsIter<'a> {
             .iter()
             .map(|(is_focus, col)| {
                 let rng = if is_focus { load_exec_range } else { None };
-                ColIter::new(col, layout, rng, screen_rows, tabstop, cs)
+                ColIter::new(
+                    col,
+                    layout,
+                    rng,
+                    screen_rows,
+                    tabstop,
+                    cs,
+                    tui.style_cache.clone(),
+                )
             })
             .collect();
         let buf = Vec::with_capacity(col_iters.len());
@@ -442,6 +460,7 @@ struct ColIter<'a> {
     current: Option<WinIter<'a>>,
     layout: &'a Layout,
     cs: &'a ColorScheme,
+    style_cache: Rc<RefCell<HashMap<String, String>>>,
     load_exec_range: Option<(bool, Range)>,
     screen_rows: usize,
     tabstop: usize,
@@ -457,12 +476,14 @@ impl<'a> ColIter<'a> {
         screen_rows: usize,
         tabstop: usize,
         cs: &'a ColorScheme,
+        style_cache: Rc<RefCell<HashMap<String, String>>>,
     ) -> Self {
         ColIter {
             inner: col.wins.iter(),
             current: None,
             layout,
             cs,
+            style_cache,
             load_exec_range,
             screen_rows,
             tabstop,
@@ -493,6 +514,7 @@ impl<'a> ColIter<'a> {
             gb: &b.txt,
             w,
             cs: self.cs,
+            style_cache: self.style_cache.clone(),
         })
     }
 }
@@ -530,6 +552,7 @@ struct WinIter<'a> {
     gb: &'a GapBuffer,
     w: &'a Window,
     cs: &'a ColorScheme,
+    style_cache: Rc<RefCell<HashMap<String, String>>>,
 }
 
 impl Iterator for WinIter<'_> {
@@ -574,7 +597,8 @@ impl Iterator for WinIter<'_> {
                         self.w.view.col_off,
                         self.n_cols - padding,
                         self.tabstop,
-                        self.cs
+                        self.cs,
+                        &mut self.style_cache
                     ),
                     width = self.w_lnum
                 )
@@ -621,7 +645,7 @@ fn render_pending(keys: &[Input]) -> String {
 #[inline]
 fn render_slice(
     slice: Slice<'_>,
-    styles: &Styles,
+    style_str: &str,
     max_cols: usize,
     tabstop: usize,
     to_skip: &mut usize,
@@ -650,21 +674,7 @@ fn render_slice(
         }
     }
 
-    if let Some(fg) = styles.fg {
-        buf.push_str(&Style::Fg(fg).to_string());
-    }
-    if let Some(bg) = styles.bg {
-        buf.push_str(&Style::Bg(bg).to_string());
-    }
-    if styles.bold {
-        buf.push_str(&Style::Bold.to_string());
-    }
-    if styles.italic {
-        buf.push_str(&Style::Italic.to_string());
-    }
-    if styles.underline {
-        buf.push_str(&Style::Underline.to_string());
-    }
+    buf.push_str(style_str);
 
     if let Some(n) = spaces {
         buf.extend(std::iter::repeat_n(' ', n));
@@ -706,17 +716,39 @@ fn render_line(
     max_cols: usize,
     tabstop: usize,
     cs: &ColorScheme,
+    style_cache: &mut Rc<RefCell<HashMap<String, String>>>,
 ) -> String {
     let mut buf = String::new();
     let mut to_skip = col_off;
     let mut cols = 0;
 
     for tk in it {
-        let styles = cs.styles_for(tk.tag());
-        let slice = tk.as_slice(gb);
+        // In the common case we have the styles for each tag already cached, so we take the hit on
+        // allocating the cache key and looking it up a second time when we insert into the cache.
+        // This allows us to avoid having to allocate the key on every lookup in order to make use
+        // of the entry API.
+        //
+        // The cache styles are also stored against the original tag rather so they can be looked
+        // up directly each time they are used, rather than need to to traverse the fallback path
+        // as done in ColorScheme::styles_for.
+        //
+        // We always assume that it safe to borrow the style_cache mutably at this point as we are
+        // only expecting this function to be called as part of a render pass where the clones of
+        // the style_cache Rc are held in different iterators that are processed sequentially in a
+        // single thread.
+        let mut guard = style_cache.borrow_mut();
+        let style_str = match guard.get(tk.tag) {
+            Some(s) => s,
+            None => {
+                let s = cs.styles_for(tk.tag).to_string();
+                guard.insert(tk.tag.to_string(), s);
+                guard.get(tk.tag).unwrap()
+            }
+        };
+
         render_slice(
-            slice,
-            styles,
+            tk.as_slice(gb),
+            style_str,
             max_cols,
             tabstop,
             &mut to_skip,

@@ -113,6 +113,28 @@ pub struct Styles {
     pub underline: bool,
 }
 
+impl fmt::Display for Styles {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(fg) = self.fg {
+            write!(f, "{}", Style::Fg(fg))?;
+        }
+        if let Some(bg) = self.bg {
+            write!(f, "{}", Style::Bg(bg))?;
+        }
+        if self.bold {
+            write!(f, "{}", Style::Bold)?;
+        }
+        if self.italic {
+            write!(f, "{}", Style::Italic)?;
+        }
+        if self.underline {
+            write!(f, "{}", Style::Underline)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Fg(Color),

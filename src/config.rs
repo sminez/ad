@@ -9,7 +9,7 @@ use crate::{
     util::parent_dir_containing,
 };
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::HashMap, env, fs, io, path::Path};
+use std::{collections::HashMap, env, fs, io, iter::successors, path::Path};
 use tracing::{error, warn};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../data/config.toml");
@@ -181,20 +181,21 @@ impl Default for ColorScheme {
 }
 
 impl ColorScheme {
-    /// Determine UI [Style]s to be applied for a given syntax tag.
+    /// Determine UI [Styles] to be applied for a given syntax tag.
     ///
-    /// If the full tag does not have associated styling but its dotted prefix does (e.g.
-    /// "function.macro" -> "function") then the styling of the prefix is used. Otherwise default
-    /// styling will be used ([TK_DEFAULT]).
+    /// If the full tag does not have associated styling but its dotted prefix does then the
+    /// styling of the prefix is used, otherwise default styling will be used ([TK_DEFAULT]).
+    ///
+    /// For key "foo.bar.baz" this will return the first value found out of the following keyset:
+    ///   - "foo.bar.baz"
+    ///   - "foo.bar"
+    ///   - "foo"
+    ///   - [TK_DEFAULT]
     pub fn styles_for(&self, tag: &str) -> &Styles {
-        match self.syntax.get(tag) {
-            Some(styles) => styles,
-            None => tag
-                .split_once('.')
-                .and_then(|(prefix, _)| self.syntax.get(prefix))
-                .or(self.syntax.get(TK_DEFAULT))
-                .expect("to have default styles"),
-        }
+        successors(Some(tag), |s| Some(s.rsplit_once('.')?.0))
+            .find_map(|k| self.syntax.get(k))
+            .or(self.syntax.get(TK_DEFAULT))
+            .expect("to have default styles")
     }
 }
 
