@@ -912,6 +912,12 @@ mod tests {
     #[test_case(1, 11, "foo\tbar baz", "!oo$|  $!bar$| $!baz$"; "skipping first character")]
     #[test_case(3, 9, "foo\tbar baz", "|  $!bar$| $!baz$"; "skipping first token")]
     #[test_case(4, 8, "foo\tbar baz", "| $!bar$| $!baz$"; "skipping part way through a tab")]
+    #[test_case(0, 10, "世\t界 foo", "!世$|  $!界$| $!foo$"; "unicode full line")]
+    #[test_case(0, 12, "世\t界 foo", "!世$|  $!界$| $!foo$#  "; "unicode full line padded to max cols")]
+    // In the case where we skip part way through a unicode character we still apply the tag
+    // styling to the spaces we insert to pad to the correct offset rather than replacing it
+    // with default styling instead
+    #[test_case(1, 9, "世\t界 foo", "! $|  $!界$| $!foo$"; "unicode skipping first column of multibyte char")]
     #[test]
     fn render_line_correctly_skips_tokens(
         col_off: usize,
