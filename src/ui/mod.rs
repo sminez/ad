@@ -67,6 +67,7 @@ pub(crate) enum StateChange {
     StatusMessage { msg: String },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
 pub(crate) enum Ui {
     Headless,

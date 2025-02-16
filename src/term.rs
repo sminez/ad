@@ -20,6 +20,7 @@ const ENABLE_MOUSE_SUPPORT: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h
 const DISABLE_MOUSE_SUPPORT: &str = "\x1b[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l";
 const ENABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const DISABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
+pub const RESET_STYLE: &str = "\x1b[m";
 
 /// Used for storing and checking whether or not we've received a signal that our window
 /// size has changed.
@@ -111,6 +112,28 @@ pub struct Styles {
     pub italic: bool,
     #[serde(default)]
     pub underline: bool,
+}
+
+impl fmt::Display for Styles {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(fg) = self.fg {
+            write!(f, "{}", Style::Fg(fg))?;
+        }
+        if let Some(bg) = self.bg {
+            write!(f, "{}", Style::Bg(bg))?;
+        }
+        if self.bold {
+            write!(f, "{}", Style::Bold)?;
+        }
+        if self.italic {
+            write!(f, "{}", Style::Italic)?;
+        }
+        if self.underline {
+            write!(f, "{}", Style::Underline)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

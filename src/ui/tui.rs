@@ -1,6 +1,6 @@
 //! A terminal UI for ad
 use crate::{
-    buffer::{Buffer, GapBuffer, Slice},
+    buffer::{Buffer, Chars, GapBuffer},
     config::ColorScheme,
     config_handle, die,
     dot::Range,
@@ -11,8 +11,9 @@ use crate::{
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler, win_size_changed, CurShape, Cursor, Style, Styles,
+        RESET_STYLE,
     },
-    ts::{LineIter, TokenIter},
+    ts::{LineIter, RangeToken},
     ui::{
         layout::{Column, Window},
         Layout, StateChange, UserInterface,
@@ -20,10 +21,14 @@ use crate::{
     ziplist, ORIGINAL_TERMIOS, VERSION,
 };
 use std::{
+    cell::RefCell,
     char,
     cmp::{min, Ordering},
+    collections::HashMap,
     io::{stdin, stdout, Read, Stdout, Write},
+    iter::{repeat_n, Peekable},
     panic,
+    rc::Rc,
     sync::mpsc::Sender,
     thread::{spawn, JoinHandle},
     time::Instant,
@@ -47,11 +52,15 @@ pub struct Tui {
     screen_cols: usize,
     status_message: String,
     last_status: Instant,
+    // Box elements for rendering window borders
     vstr: String,
     xstr: String,
     tstr: String,
     hvh: String,
     vh: String,
+    // Cache of the ANSI escape code strings required for each fully qualified tree-sitter
+    // highlighting tag. See render_line for details on how the cache is used.
+    style_cache: Rc<RefCell<HashMap<String, String>>>,
 }
 
 impl Default for Tui {
@@ -79,13 +88,14 @@ impl Tui {
             xstr: String::new(),
             hvh: String::new(),
             vh: String::new(),
+            style_cache: Default::default(),
         };
-        tui.update_box_elements();
+        tui.update_cached_elements();
 
         tui
     }
 
-    fn update_box_elements(&mut self) {
+    fn update_cached_elements(&mut self) {
         let cs = &config_handle!().colorscheme;
         let vstr = box_draw_str(VLINE, cs);
         let hstr = box_draw_str(HLINE, cs);
@@ -94,6 +104,7 @@ impl Tui {
         self.hvh = format!("{hstr}{vstr}{hstr}");
         self.vh = format!("{vstr}{hstr}");
         self.vstr = vstr;
+        self.style_cache.borrow_mut().clear();
     }
 
     fn render_banner(&self, screen_rows: usize, cs: &ColorScheme) -> Vec<String> {
@@ -202,20 +213,21 @@ impl Tui {
                 } else {
                     cs.bg
                 };
-                let styles = Styles {
+
+                let mut cols = 0;
+                let mut chars = slice.chars().peekable();
+                let mut rline = Styles {
                     fg: Some(cs.fg),
                     bg: Some(bg),
                     ..Default::default()
-                };
+                }
+                .to_string();
 
-                let mut rline = String::new();
-                let mut cols = 0;
-                render_slice(
-                    slice,
-                    &styles,
+                render_chars(
+                    &mut chars,
+                    None,
                     self.screen_cols,
                     tabstop,
-                    &mut 0,
                     &mut cols,
                     &mut rline,
                 );
@@ -288,7 +300,7 @@ impl UserInterface for Tui {
 
     fn state_change(&mut self, change: StateChange) {
         match change {
-            StateChange::ConfigUpdated => self.update_box_elements(),
+            StateChange::ConfigUpdated => self.update_cached_elements(),
             StateChange::StatusMessage { msg } => {
                 self.status_message = msg;
                 self.last_status = Instant::now();
@@ -402,7 +414,15 @@ impl<'a> WinsIter<'a> {
             .iter()
             .map(|(is_focus, col)| {
                 let rng = if is_focus { load_exec_range } else { None };
-                ColIter::new(col, layout, rng, screen_rows, tabstop, cs)
+                ColIter::new(
+                    col,
+                    layout,
+                    rng,
+                    screen_rows,
+                    tabstop,
+                    cs,
+                    tui.style_cache.clone(),
+                )
             })
             .collect();
         let buf = Vec::with_capacity(col_iters.len());
@@ -442,6 +462,7 @@ struct ColIter<'a> {
     current: Option<WinIter<'a>>,
     layout: &'a Layout,
     cs: &'a ColorScheme,
+    style_cache: Rc<RefCell<HashMap<String, String>>>,
     load_exec_range: Option<(bool, Range)>,
     screen_rows: usize,
     tabstop: usize,
@@ -457,12 +478,14 @@ impl<'a> ColIter<'a> {
         screen_rows: usize,
         tabstop: usize,
         cs: &'a ColorScheme,
+        style_cache: Rc<RefCell<HashMap<String, String>>>,
     ) -> Self {
         ColIter {
             inner: col.wins.iter(),
             current: None,
             layout,
             cs,
+            style_cache,
             load_exec_range,
             screen_rows,
             tabstop,
@@ -493,6 +516,7 @@ impl<'a> ColIter<'a> {
             gb: &b.txt,
             w,
             cs: self.cs,
+            style_cache: self.style_cache.clone(),
         })
     }
 }
@@ -530,6 +554,7 @@ struct WinIter<'a> {
     gb: &'a GapBuffer,
     w: &'a Window,
     cs: &'a ColorScheme,
+    style_cache: Rc<RefCell<HashMap<String, String>>>,
 }
 
 impl Iterator for WinIter<'_> {
@@ -574,7 +599,8 @@ impl Iterator for WinIter<'_> {
                         self.w.view.col_off,
                         self.n_cols - padding,
                         self.tabstop,
-                        self.cs
+                        self.cs,
+                        &mut self.style_cache
                     ),
                     width = self.w_lnum
                 )
@@ -619,55 +645,47 @@ fn render_pending(keys: &[Input]) -> String {
 }
 
 #[inline]
-fn render_slice(
-    slice: Slice<'_>,
-    styles: &Styles,
-    max_cols: usize,
+fn skip_token_chars(
+    chars: &mut Peekable<Chars<'_>>,
     tabstop: usize,
     to_skip: &mut usize,
-    cols: &mut usize,
-    buf: &mut String,
-) {
-    let mut chars = slice.chars().peekable();
-    let mut spaces = None;
+) -> Option<usize> {
+    for ch in chars.by_ref() {
+        let w = if ch == '\t' {
+            tabstop
+        } else {
+            UnicodeWidthChar::width(ch).unwrap_or(1)
+        };
 
-    if *to_skip > 0 {
-        for ch in chars.by_ref() {
-            let w = if ch == '\t' {
-                tabstop
-            } else {
-                UnicodeWidthChar::width(ch).unwrap_or(1)
-            };
-
-            match (*to_skip).cmp(&w) {
-                Ordering::Less => {
-                    spaces = Some(w - *to_skip);
-                    break;
-                }
-                Ordering::Equal => break,
-                Ordering::Greater => *to_skip -= w,
+        match (*to_skip).cmp(&w) {
+            Ordering::Less => {
+                let spaces = Some(w - *to_skip);
+                *to_skip = 0;
+                return spaces;
             }
+
+            Ordering::Equal => {
+                *to_skip = 0;
+                break;
+            }
+
+            Ordering::Greater => *to_skip -= w,
         }
     }
 
-    if let Some(fg) = styles.fg {
-        buf.push_str(&Style::Fg(fg).to_string());
-    }
-    if let Some(bg) = styles.bg {
-        buf.push_str(&Style::Bg(bg).to_string());
-    }
-    if styles.bold {
-        buf.push_str(&Style::Bold.to_string());
-    }
-    if styles.italic {
-        buf.push_str(&Style::Italic.to_string());
-    }
-    if styles.underline {
-        buf.push_str(&Style::Underline.to_string());
-    }
+    None
+}
 
+fn render_chars(
+    chars: &mut Peekable<Chars<'_>>,
+    spaces: Option<usize>,
+    max_cols: usize,
+    tabstop: usize,
+    cols: &mut usize,
+    buf: &mut String,
+) {
     if let Some(n) = spaces {
-        buf.extend(std::iter::repeat_n(' ', n));
+        buf.extend(repeat_n(' ', n));
         *cols = n;
     }
 
@@ -686,7 +704,7 @@ fn render_slice(
                 // Tab is just a control character that moves the cursor rather than
                 // replacing the previous buffer content so we need to explicitly
                 // insert spaces instead.
-                buf.extend(std::iter::repeat_n(' ', tabstop));
+                buf.extend(repeat_n(' ', tabstop));
             } else {
                 buf.push(ch);
             }
@@ -696,38 +714,69 @@ fn render_slice(
         }
     }
 
-    buf.push_str(&Style::Reset.to_string());
+    buf.push_str(RESET_STYLE);
 }
 
-fn render_line(
-    gb: &GapBuffer,
-    it: TokenIter<'_>,
+fn render_line<'a>(
+    gb: &'a GapBuffer,
+    it: impl Iterator<Item = RangeToken<'a>>,
     col_off: usize,
     max_cols: usize,
     tabstop: usize,
     cs: &ColorScheme,
+    style_cache: &mut Rc<RefCell<HashMap<String, String>>>,
 ) -> String {
     let mut buf = String::new();
     let mut to_skip = col_off;
     let mut cols = 0;
 
     for tk in it {
-        let styles = cs.styles_for(tk.tag());
         let slice = tk.as_slice(gb);
-        render_slice(
-            slice,
-            styles,
-            max_cols,
-            tabstop,
-            &mut to_skip,
-            &mut cols,
-            &mut buf,
-        );
+        let mut chars = slice.chars().peekable();
+        let spaces = if to_skip > 0 {
+            let spaces = skip_token_chars(&mut chars, tabstop, &mut to_skip);
+            if to_skip > 0 || (chars.peek().is_none() && spaces.is_none()) {
+                continue;
+            }
+            spaces
+        } else {
+            None
+        };
+
+        // In the common case we have the styles for each tag already cached, so we take the hit on
+        // allocating the cache key and looking it up a second time when we insert into the cache.
+        // This allows us to avoid having to allocate the key on every lookup in order to make use
+        // of the entry API.
+        //
+        // The cache styles are also stored against the original tag rather so they can be looked
+        // up directly each time they are used, rather than need to to traverse the fallback path
+        // as done in ColorScheme::styles_for.
+        //
+        // We always assume that it safe to borrow the style_cache mutably at this point as we are
+        // only expecting this function to be called as part of a render pass where the clones of
+        // the style_cache Rc are held in different iterators that are processed sequentially in a
+        // single thread.
+        let mut guard = style_cache.borrow_mut();
+        let style_str = match guard.get(tk.tag) {
+            Some(s) => s,
+            None => {
+                let s = cs.styles_for(tk.tag).to_string();
+                guard.insert(tk.tag.to_string(), s);
+                guard.get(tk.tag).unwrap()
+            }
+        };
+
+        buf.push_str(style_str);
+        render_chars(&mut chars, spaces, max_cols, tabstop, &mut cols, &mut buf);
+
+        if cols == max_cols {
+            break;
+        }
     }
 
     if cols < max_cols {
         buf.push_str(&Style::Bg(cs.bg).to_string());
-        buf.extend(std::iter::repeat_n(' ', max_cols - cols));
+        buf.extend(repeat_n(' ', max_cols - cols));
     }
 
     buf
@@ -829,6 +878,7 @@ fn try_read_input(stdin: &mut impl Read) -> Option<Input> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ts::{ByteRange, TK_DEFAULT};
     use simple_test_case::test_case;
     use std::{char::REPLACEMENT_CHARACTER, io};
 
@@ -846,5 +896,66 @@ mod tests {
         }
 
         assert_eq!(&chars, expected);
+    }
+
+    fn rt(tag: &'static str, from: usize, to: usize) -> RangeToken<'static> {
+        RangeToken {
+            tag,
+            r: ByteRange { from, to },
+        }
+    }
+
+    // The !| characters here are the dummy style strings in the style_cache
+    // The $# characters are replaced with RESET_STYLE and bg color respectively
+    #[test_case(0, 14, "foo\tbar baz", "!foo$|  $!bar$| $!baz$#  "; "full line padded to max cols")]
+    #[test_case(0, 12, "foo\tbar baz", "!foo$|  $!bar$| $!baz$"; "full line")]
+    #[test_case(1, 11, "foo\tbar baz", "!oo$|  $!bar$| $!baz$"; "skipping first character")]
+    #[test_case(3, 9, "foo\tbar baz", "|  $!bar$| $!baz$"; "skipping first token")]
+    #[test_case(4, 8, "foo\tbar baz", "| $!bar$| $!baz$"; "skipping part way through a tab")]
+    #[test_case(0, 10, "世\t界 foo", "!世$|  $!界$| $!foo$"; "unicode full line")]
+    #[test_case(0, 12, "世\t界 foo", "!世$|  $!界$| $!foo$#  "; "unicode full line padded to max cols")]
+    // In the case where we skip part way through a unicode character we still apply the tag
+    // styling to the spaces we insert to pad to the correct offset rather than replacing it
+    // with default styling instead
+    #[test_case(1, 9, "世\t界 foo", "! $|  $!界$| $!foo$"; "unicode skipping first column of multibyte char")]
+    #[test]
+    fn render_line_correctly_skips_tokens(
+        col_off: usize,
+        max_cols: usize,
+        s: &str,
+        expected_template: &str,
+    ) {
+        let gb = GapBuffer::from(s);
+        let range_tokens = vec![
+            rt("a", 0, 3),
+            rt(TK_DEFAULT, 3, 4),
+            rt("a", 4, 7),
+            rt(TK_DEFAULT, 7, 8),
+            rt("a", 8, 11),
+        ];
+
+        let cs = ColorScheme::default();
+        let style_cache: HashMap<String, String> = [
+            ("a".to_owned(), "!".to_owned()),
+            (TK_DEFAULT.to_owned(), "|".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+
+        let s = render_line(
+            &gb,
+            range_tokens.into_iter(),
+            col_off,
+            max_cols,
+            2,
+            &cs,
+            &mut Rc::new(RefCell::new(style_cache)),
+        );
+
+        let expected = expected_template
+            .replace("$", RESET_STYLE)
+            .replace("#", &Style::Bg(cs.bg).to_string());
+
+        assert_eq!(s, expected);
     }
 }
