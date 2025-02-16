@@ -789,7 +789,7 @@ impl View {
         }
 
         if y >= self.row_off + screen_rows {
-            self.row_off = y - screen_rows + 1;
+            self.row_off = y + 1 - screen_rows;
         }
 
         if self.rx < self.col_off {
@@ -797,7 +797,7 @@ impl View {
         }
 
         if self.rx >= self.col_off + screen_cols - w_sgncol {
-            self.col_off = self.rx - screen_cols + w_sgncol + 1;
+            self.col_off = self.rx + w_sgncol + 1 - screen_cols;
         }
     }
 

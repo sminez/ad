@@ -20,6 +20,7 @@ const ENABLE_MOUSE_SUPPORT: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h
 const DISABLE_MOUSE_SUPPORT: &str = "\x1b[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l";
 const ENABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const DISABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
+pub const RESET_STYLE: &str = "\x1b[m";
 
 /// Used for storing and checking whether or not we've received a signal that our window
 /// size has changed.

@@ -1,6 +1,6 @@
 //! A terminal UI for ad
 use crate::{
-    buffer::{Buffer, GapBuffer, Slice},
+    buffer::{Buffer, Chars, GapBuffer},
     config::ColorScheme,
     config_handle, die,
     dot::Range,
@@ -11,8 +11,9 @@ use crate::{
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler, win_size_changed, CurShape, Cursor, Style, Styles,
+        RESET_STYLE,
     },
-    ts::{LineIter, TokenIter},
+    ts::{LineIter, RangeToken},
     ui::{
         layout::{Column, Window},
         Layout, StateChange, UserInterface,
@@ -25,6 +26,7 @@ use std::{
     cmp::{min, Ordering},
     collections::HashMap,
     io::{stdin, stdout, Read, Stdout, Write},
+    iter::{repeat_n, Peekable},
     panic,
     rc::Rc,
     sync::mpsc::Sender,
@@ -211,21 +213,21 @@ impl Tui {
                 } else {
                     cs.bg
                 };
-                let style_str = Styles {
+
+                let mut cols = 0;
+                let mut chars = slice.chars().peekable();
+                let mut rline = Styles {
                     fg: Some(cs.fg),
                     bg: Some(bg),
                     ..Default::default()
                 }
                 .to_string();
 
-                let mut rline = String::new();
-                let mut cols = 0;
-                render_slice(
-                    slice,
-                    &style_str,
+                render_chars(
+                    &mut chars,
+                    None,
                     self.screen_cols,
                     tabstop,
-                    &mut 0,
                     &mut cols,
                     &mut rline,
                 );
@@ -643,41 +645,46 @@ fn render_pending(keys: &[Input]) -> String {
 }
 
 #[inline]
-fn render_slice(
-    slice: Slice<'_>,
-    style_str: &str,
-    max_cols: usize,
+fn skip_token_chars(
+    chars: &mut Peekable<Chars<'_>>,
     tabstop: usize,
     to_skip: &mut usize,
-    cols: &mut usize,
-    buf: &mut String,
-) {
-    let mut chars = slice.chars().peekable();
-    let mut spaces = None;
+) -> Option<usize> {
+    for ch in chars.by_ref() {
+        let w = if ch == '\t' {
+            tabstop
+        } else {
+            UnicodeWidthChar::width(ch).unwrap_or(1)
+        };
 
-    if *to_skip > 0 {
-        for ch in chars.by_ref() {
-            let w = if ch == '\t' {
-                tabstop
-            } else {
-                UnicodeWidthChar::width(ch).unwrap_or(1)
-            };
-
-            match (*to_skip).cmp(&w) {
-                Ordering::Less => {
-                    spaces = Some(w - *to_skip);
-                    break;
-                }
-                Ordering::Equal => break,
-                Ordering::Greater => *to_skip -= w,
+        match (*to_skip).cmp(&w) {
+            Ordering::Less => {
+                *to_skip = 0;
+                return Some(w - *to_skip);
             }
+
+            Ordering::Equal => {
+                *to_skip = 0;
+                break;
+            }
+
+            Ordering::Greater => *to_skip -= w,
         }
     }
 
-    buf.push_str(style_str);
+    None
+}
 
+fn render_chars(
+    chars: &mut Peekable<Chars<'_>>,
+    spaces: Option<usize>,
+    max_cols: usize,
+    tabstop: usize,
+    cols: &mut usize,
+    buf: &mut String,
+) {
     if let Some(n) = spaces {
-        buf.extend(std::iter::repeat_n(' ', n));
+        buf.extend(repeat_n(' ', n));
         *cols = n;
     }
 
@@ -696,7 +703,7 @@ fn render_slice(
                 // Tab is just a control character that moves the cursor rather than
                 // replacing the previous buffer content so we need to explicitly
                 // insert spaces instead.
-                buf.extend(std::iter::repeat_n(' ', tabstop));
+                buf.extend(repeat_n(' ', tabstop));
             } else {
                 buf.push(ch);
             }
@@ -706,12 +713,12 @@ fn render_slice(
         }
     }
 
-    buf.push_str(&Style::Reset.to_string());
+    buf.push_str(RESET_STYLE);
 }
 
-fn render_line(
-    gb: &GapBuffer,
-    it: TokenIter<'_>,
+fn render_line<'a>(
+    gb: &'a GapBuffer,
+    it: impl Iterator<Item = RangeToken<'a>>,
     col_off: usize,
     max_cols: usize,
     tabstop: usize,
@@ -723,6 +730,18 @@ fn render_line(
     let mut cols = 0;
 
     for tk in it {
+        let slice = tk.as_slice(gb);
+        let mut chars = slice.chars().peekable();
+        let spaces = if to_skip > 0 {
+            let spaces = skip_token_chars(&mut chars, tabstop, &mut to_skip);
+            if to_skip > 0 {
+                continue;
+            }
+            spaces
+        } else {
+            None
+        };
+
         // In the common case we have the styles for each tag already cached, so we take the hit on
         // allocating the cache key and looking it up a second time when we insert into the cache.
         // This allows us to avoid having to allocate the key on every lookup in order to make use
@@ -746,20 +765,17 @@ fn render_line(
             }
         };
 
-        render_slice(
-            tk.as_slice(gb),
-            style_str,
-            max_cols,
-            tabstop,
-            &mut to_skip,
-            &mut cols,
-            &mut buf,
-        );
+        buf.push_str(style_str);
+        render_chars(&mut chars, spaces, max_cols, tabstop, &mut cols, &mut buf);
+
+        if cols == max_cols {
+            break;
+        }
     }
 
     if cols < max_cols {
         buf.push_str(&Style::Bg(cs.bg).to_string());
-        buf.extend(std::iter::repeat_n(' ', max_cols - cols));
+        buf.extend(repeat_n(' ', max_cols - cols));
     }
 
     buf
