@@ -78,6 +78,17 @@ punctuation = { fg = "#9CABCA" }
 string = { fg = "#61DCA5" }
 type = { fg = "#9AB292" }
 variable = { fg = "#E6D29E" }
+"markup.italic" = { fg = "#E6D29E", bg = "#1B1720", italic = true } 
+"markup.bold" = { fg = "#E6D29E", bg = "#1B1720", bold = true } 
+"markup.heading" = { fg = "#8793B5", bold = true }
+"markup.raw" = { fg = "#624354", italic = true }
+"markup.quote" = { fg = "#957FB8", italic = true }
+"markup.link.url" = { fg = "#9CABCA", underline = true }
+"markup.link.label" = { fg = "#2D4F67", bold = true }
+"markup.list.unchecked" = { fg = "#DCA561", bold = true }
+"markup.list.checked" = { fg = "#9AB292", bold = true }
+"markup.list" = { fg = "#9CABCA", bg = "#1B1720", bold = true } 
+label = { fg = "#E6C384" }
 
 
 # Key mappings to programs that must be available on $PATH or commands.
