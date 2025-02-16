@@ -659,8 +659,9 @@ fn skip_token_chars(
 
         match (*to_skip).cmp(&w) {
             Ordering::Less => {
+                let spaces = Some(w - *to_skip);
                 *to_skip = 0;
-                return Some(w - *to_skip);
+                return spaces;
             }
 
             Ordering::Equal => {
@@ -734,7 +735,7 @@ fn render_line<'a>(
         let mut chars = slice.chars().peekable();
         let spaces = if to_skip > 0 {
             let spaces = skip_token_chars(&mut chars, tabstop, &mut to_skip);
-            if to_skip > 0 {
+            if to_skip > 0 || (chars.peek().is_none() && spaces.is_none()) {
                 continue;
             }
             spaces
@@ -877,6 +878,7 @@ fn try_read_input(stdin: &mut impl Read) -> Option<Input> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ts::{ByteRange, TK_DEFAULT};
     use simple_test_case::test_case;
     use std::{char::REPLACEMENT_CHARACTER, io};
 
@@ -894,5 +896,60 @@ mod tests {
         }
 
         assert_eq!(&chars, expected);
+    }
+
+    fn rt(tag: &'static str, from: usize, to: usize) -> RangeToken<'static> {
+        RangeToken {
+            tag,
+            r: ByteRange { from, to },
+        }
+    }
+
+    // The !| characters here are the dummy style strings in the style_cache
+    // The $# characters are replaced with RESET_STYLE and bg color respectively
+    #[test_case(0, 14, "foo\tbar baz", "!foo$|  $!bar$| $!baz$#  "; "full line padded to max cols")]
+    #[test_case(0, 12, "foo\tbar baz", "!foo$|  $!bar$| $!baz$"; "full line")]
+    #[test_case(1, 11, "foo\tbar baz", "!oo$|  $!bar$| $!baz$"; "skipping first character")]
+    #[test_case(3, 9, "foo\tbar baz", "|  $!bar$| $!baz$"; "skipping first token")]
+    #[test_case(4, 8, "foo\tbar baz", "| $!bar$| $!baz$"; "skipping part way through a tab")]
+    #[test]
+    fn render_line_correctly_skips_tokens(
+        col_off: usize,
+        max_cols: usize,
+        s: &str,
+        expected_template: &str,
+    ) {
+        let gb = GapBuffer::from(s);
+        let range_tokens = vec![
+            rt("a", 0, 3),
+            rt(TK_DEFAULT, 3, 4),
+            rt("a", 4, 7),
+            rt(TK_DEFAULT, 7, 8),
+            rt("a", 8, 11),
+        ];
+
+        let cs = ColorScheme::default();
+        let style_cache: HashMap<String, String> = [
+            ("a".to_owned(), "!".to_owned()),
+            (TK_DEFAULT.to_owned(), "|".to_owned()),
+        ]
+        .into_iter()
+        .collect();
+
+        let s = render_line(
+            &gb,
+            range_tokens.into_iter(),
+            col_off,
+            max_cols,
+            2,
+            &cs,
+            &mut Rc::new(RefCell::new(style_cache)),
+        );
+
+        let expected = expected_template
+            .replace("$", RESET_STYLE)
+            .replace("#", &Style::Bg(cs.bg).to_string());
+
+        assert_eq!(s, expected);
     }
 }

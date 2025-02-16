@@ -398,8 +398,8 @@ impl Tokenizer {
 /// Byte offsets within a Buffer
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ByteRange {
-    from: usize,
-    to: usize,
+    pub(crate) from: usize,
+    pub(crate) to: usize,
 }
 
 impl ByteRange {
