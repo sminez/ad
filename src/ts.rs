@@ -70,7 +70,7 @@ impl TsState {
     }
 
     #[cfg(test)]
-    fn try_new_from_language(
+    pub(crate) fn try_new_from_language(
         lang_name: &str,
         lang: ts::Language,
         query: &str,

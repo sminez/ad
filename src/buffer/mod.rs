@@ -951,6 +951,13 @@ impl Buffer {
         };
 
         let idx = cur.idx;
+
+        if let Some(ts) = self.ts_state.as_mut() {
+            let len = deleted.as_ref().map(|s| s.chars().count()).unwrap_or(1);
+            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
+            ts.edit(idx, ch_old_end, idx, &self.txt);
+        }
+
         self.txt.insert_char(idx, ch);
 
         if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
@@ -960,12 +967,7 @@ impl Buffer {
         self.edit_log.insert_char(cur, ch);
 
         if let Some(ts) = self.ts_state.as_mut() {
-            let idx = dot.first_cur().idx;
-            let ch_old_end = match deleted.as_ref() {
-                Some(s) => idx + s.chars().count(),
-                None => idx,
-            };
-            ts.edit(idx, ch_old_end, idx + 1, &self.txt);
+            ts.edit(idx, idx, idx + 1, &self.txt);
         }
 
         self.mark_dirty();
@@ -988,6 +990,12 @@ impl Buffer {
 
         let idx = cur.idx;
 
+        if let Some(ts) = self.ts_state.as_mut() {
+            let len = deleted.as_ref().map(|s| s.chars().count()).unwrap_or(1);
+            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
+            ts.edit(idx, ch_old_end, idx, &self.txt);
+        }
+
         // Inserting an empty string should not be recorded as an edit (and is
         // a no-op for the content of self.txt) but we support it as inserting
         // an empty string while dot is a range has the same effect as a delete.
@@ -1003,12 +1011,7 @@ impl Buffer {
         }
 
         if let Some(ts) = self.ts_state.as_mut() {
-            let idx = dot.first_cur().idx;
-            let ch_old_end = match deleted.as_ref() {
-                Some(s) => idx + s.chars().count(),
-                None => idx,
-            };
-            ts.edit(idx, ch_old_end, idx + len, &self.txt);
+            ts.edit(idx, idx, idx + len, &self.txt);
         }
 
         self.mark_dirty();
@@ -1405,5 +1408,46 @@ pub(crate) mod tests {
         b.insert_char(Dot::Cur { c: c(0) }, ch, None);
         // we force a trailing newline so account for that as well
         assert_eq!(b.str_contents(), format!("{expected}\n"));
+    }
+
+    // Computing tree-sitter edits involves working with references to the old positions within the
+    // tree which can become invalidated when the buffer is being truncated.
+    #[test]
+    fn insert_string_reducing_buffer_len_works_with_ts_state() {
+        let mut b = Buffer::new_virtual(0, "test", "fn main() {}");
+        b.ts_state = Some(
+            TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
+                .unwrap(),
+        );
+
+        b.set_dot(TextObject::BufferStart, 1);
+        b.extend_dot_forward(TextObject::BufferEnd, 1);
+
+        b.handle_action(
+            Action::InsertString {
+                s: "bar".to_owned(),
+            },
+            Source::Fsys,
+        );
+
+        assert_eq!(b.txt.to_string(), "bar");
+        assert_eq!(b.dot, Dot::Cur { c: Cur { idx: 3 } });
+    }
+
+    #[test]
+    fn insert_char_reducing_buffer_len_works_with_ts_state() {
+        let mut b = Buffer::new_virtual(0, "test", "fn main() {}");
+        b.ts_state = Some(
+            TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
+                .unwrap(),
+        );
+
+        b.set_dot(TextObject::BufferStart, 1);
+        b.extend_dot_forward(TextObject::BufferEnd, 1);
+
+        b.handle_action(Action::InsertChar { c: 'a' }, Source::Fsys);
+
+        assert_eq!(b.txt.to_string(), "a");
+        assert_eq!(b.dot, Dot::Cur { c: Cur { idx: 1 } });
     }
 }

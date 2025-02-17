@@ -252,7 +252,9 @@ impl BufferNodes {
 
         match Message::send(req, &self.tx) {
             Ok(_) => Ok(n_bytes),
-            Err(e) => Err(format!("unable to execute control message: {e}")),
+            Err(e) => Err(format!(
+                "unable to write to {fname} (n_bytes={n_bytes}): {e}",
+            )),
         }
     }
 
