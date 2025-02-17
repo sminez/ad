@@ -953,9 +953,11 @@ impl Buffer {
         let idx = cur.idx;
 
         if let Some(ts) = self.ts_state.as_mut() {
-            let len = deleted.as_ref().map(|s| s.chars().count()).unwrap_or(1);
-            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-            ts.edit(idx, ch_old_end, idx, &self.txt);
+            if let Some(s) = deleted.as_ref() {
+                let len = s.chars().count();
+                let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
+                ts.edit(idx, ch_old_end, idx, &self.txt);
+            }
         }
 
         self.txt.insert_char(idx, ch);
