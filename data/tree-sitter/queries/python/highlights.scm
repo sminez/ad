@@ -6,21 +6,13 @@
 ; Reset highlighting in f-string interpolations
 (interpolation) @none
 
-; Identifier naming conventions
-((identifier) @type
-  (#lua-match? @type "^[A-Z].*[a-z]"))
-
-((identifier) @constant
-  (#lua-match? @constant "^[A-Z][A-Z_0-9]*$"))
-
 ((identifier) @constant.builtin
-  (#lua-match? @constant.builtin "^__[a-zA-Z0-9_]*__$"))
+  (#any-of? @constant.builtin
+    ; https://docs.python.org/3/library/constants.html
+    "NotImplemented" "Ellipsis" "quit" "exit" "copyright" "credits" "license"))
 
 "_" @character.special ; match wildcard
 
-((attribute
-  attribute: (identifier) @variable.member)
-  (#lua-match? @variable.member "^[%l_].*$"))
 
 ((assignment
   left: (identifier) @type.definition
@@ -41,15 +33,6 @@
 (call
   function: (attribute
     attribute: (identifier) @function.method.call))
-
-((call
-  function: (identifier) @constructor)
-  (#lua-match? @constructor "^%u"))
-
-((call
-  function: (attribute
-    attribute: (identifier) @constructor))
-  (#lua-match? @constructor "^%u"))
 
 ; Decorators
 ((decorator
@@ -75,6 +58,18 @@
 ((decorator
   (identifier) @attribute.builtin)
   (#any-of? @attribute.builtin "classmethod" "property" "staticmethod"))
+
+; Builtin functions
+((call
+  function: (identifier) @function.builtin)
+  (#any-of? @function.builtin
+    "abs" "all" "any" "ascii" "bin" "bool" "breakpoint" "bytearray" "bytes" "callable" "chr"
+    "classmethod" "compile" "complex" "delattr" "dict" "dir" "divmod" "enumerate" "eval" "exec"
+    "filter" "float" "format" "frozenset" "getattr" "globals" "hasattr" "hash" "help" "hex" "id"
+    "input" "int" "isinstance" "issubclass" "iter" "len" "list" "locals" "map" "max" "memoryview"
+    "min" "next" "object" "oct" "open" "ord" "pow" "print" "property" "range" "repr" "reversed"
+    "round" "set" "setattr" "slice" "sorted" "staticmethod" "str" "sum" "super" "tuple" "type"
+    "vars" "zip" "__import__"))
 
 ; Function definitions
 (function_definition
@@ -157,16 +152,17 @@
   (false)
 ] @boolean
 
+((identifier) @variable.builtin
+  (#eq? @variable.builtin "self"))
+
+((identifier) @variable.builtin
+  (#eq? @variable.builtin "cls"))
+
 (integer) @number
 
 (float) @number.float
 
 (comment) @comment @spell
-
-((module
-  .
-  (comment) @keyword.directive @nospell)
-  (#lua-match? @keyword.directive "^#!/"))
 
 (string) @string
 
@@ -386,25 +382,30 @@
     (identifier) @type))
 
 ((class_definition
-  body: (block
-    (expression_statement
-      (assignment
-        left: (identifier) @variable.member))))
-  (#lua-match? @variable.member "^[%l_].*$"))
-
-((class_definition
-  body: (block
-    (expression_statement
-      (assignment
-        left: (_
-          (identifier) @variable.member)))))
-  (#lua-match? @variable.member "^[%l_].*$"))
-
-((class_definition
   (block
     (function_definition
       name: (identifier) @constructor)))
   (#any-of? @constructor "__new__" "__init__"))
+
+((identifier) @type.builtin
+  (#any-of? @type.builtin
+    ; https://docs.python.org/3/library/exceptions.html
+    "BaseException" "Exception" "ArithmeticError" "BufferError" "LookupError" "AssertionError"
+    "AttributeError" "EOFError" "FloatingPointError" "GeneratorExit" "ImportError"
+    "ModuleNotFoundError" "IndexError" "KeyError" "KeyboardInterrupt" "MemoryError" "NameError"
+    "NotImplementedError" "OSError" "OverflowError" "RecursionError" "ReferenceError" "RuntimeError"
+    "StopIteration" "StopAsyncIteration" "SyntaxError" "IndentationError" "TabError" "SystemError"
+    "SystemExit" "TypeError" "UnboundLocalError" "UnicodeError" "UnicodeEncodeError"
+    "UnicodeDecodeError" "UnicodeTranslateError" "ValueError" "ZeroDivisionError" "EnvironmentError"
+    "IOError" "WindowsError" "BlockingIOError" "ChildProcessError" "ConnectionError"
+    "BrokenPipeError" "ConnectionAbortedError" "ConnectionRefusedError" "ConnectionResetError"
+    "FileExistsError" "FileNotFoundError" "InterruptedError" "IsADirectoryError"
+    "NotADirectoryError" "PermissionError" "ProcessLookupError" "TimeoutError" "Warning"
+    "UserWarning" "DeprecationWarning" "PendingDeprecationWarning" "SyntaxWarning" "RuntimeWarning"
+    "FutureWarning" "ImportWarning" "UnicodeWarning" "BytesWarning" "ResourceWarning"
+    ; https://docs.python.org/3/library/stdtypes.html
+    "bool" "int" "float" "complex" "list" "tuple" "range" "str" "bytes" "bytearray" "memoryview"
+    "set" "frozenset" "dict" "type" "object"))
 
 ; Regex from the `re` module
 (call
@@ -415,5 +416,3 @@
     (string
       (string_content) @string.regexp))
   (#eq? @_re "re"))
-
-
