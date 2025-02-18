@@ -1,9 +1,18 @@
 // https://github.com/matklad/cargo-xtask
+use man::prelude::*;
 use std::{
     env, fs,
     path::{Path, PathBuf},
     process::exit,
 };
+
+const DESCRIPTION: &str = "\
+ad is a text editor and command line stream editor. The text editor interface for
+ad is inspired by the likes of vim and kakoune, along with the acme and sam editors
+from plan9. ad aims to provide an 'integrating development environment' as opposed
+to an 'integrated' one: leveraging the surrounding system for the majority of
+functionality outisde of the core text editing actions.
+";
 
 type DynResult = Result<(), Box<dyn std::error::Error>>;
 
@@ -29,6 +38,7 @@ fn try_main() -> DynResult {
 
     match task.as_deref() {
         Some("lint-ts-queries") => lint_ts_queries()?,
+        Some("gen-man-page") => generate_manpage()?,
 
         _ => list_tasks(),
     }
@@ -39,7 +49,8 @@ fn try_main() -> DynResult {
 fn list_tasks() {
     eprintln!(
         "Available tasks:
-  * lint-ts-queries         ensure that the tree-sitter queries in /data are valid"
+  * lint-ts-queries         ensure that the tree-sitter queries in /data are valid
+  * gen-man-page            re-generate the man page"
     );
 }
 
@@ -100,10 +111,55 @@ fn lint_ts_queries() -> DynResult {
     Ok(())
 }
 
+fn generate_manpage() -> DynResult {
+    eprintln!(">> Generating man page");
+    fs::create_dir_all(dist_dir())?;
+
+    let content = Manual::new("ad")
+        .about("An adaptable text editor")
+        .author(Author::new("Innes Anderson-Morrison"))
+        .description(DESCRIPTION)
+        .option(
+            Opt::new("script")
+                .short("-e")
+                .help("Execute an edit script on file(s)"),
+        )
+        .option(
+            Opt::new("script-file")
+                .short("-f")
+                .help("Execute an edit script loaded from a script-file on file(s)"),
+        )
+        .arg(Arg::new("[file...]"))
+        .flag(
+            Flag::new()
+                .short("-h")
+                .long("--help")
+                .help("Print command line help and exit"),
+        )
+        .flag(
+            Flag::new()
+                .short("-v")
+                .long("--version")
+                .help("Print version information and exit"),
+        )
+        .render();
+
+    let p = dist_dir().join("ad.1");
+    eprintln!("  [ ] writing manpage to {}", p.display());
+    fs::write(p, content)?;
+    eprintln!("  [ ] done");
+
+    Ok(())
+}
+
 fn project_root() -> PathBuf {
     Path::new(&env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(1)
         .unwrap()
         .to_path_buf()
+}
+
+fn dist_dir() -> PathBuf {
+    project_root().join("target/dist")
 }
