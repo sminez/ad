@@ -162,7 +162,7 @@
 
 (float) @number.float
 
-(comment) @comment @spell
+(comment) @comment
 
 (string) @string
 
@@ -178,21 +178,21 @@
   .
   (expression_statement
     (string
-      (string_content) @spell) @string.documentation))
+      (string_content)) @string.documentation))
 
 (class_definition
   body: (block
     .
     (expression_statement
       (string
-        (string_content) @spell) @string.documentation)))
+        (string_content)) @string.documentation)))
 
 (function_definition
   body: (block
     .
     (expression_statement
       (string
-        (string_content) @spell) @string.documentation)))
+        (string_content)) @string.documentation)))
 
 ; Tokens
 [
