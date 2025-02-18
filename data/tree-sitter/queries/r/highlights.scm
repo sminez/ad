@@ -12,7 +12,7 @@
     (escape_sequence) @string.escape))
 
 ; Comments
-(comment) @comment @spell
+(comment) @comment
 
 ; Operators
 [

@@ -14,14 +14,14 @@ include = [
     "Cargo.toml",
     "README.md"
 ]
-keywords = [ "terminal", "editor", "text-editor", ]
+keywords = [ "terminal", "editor", "text-editor" ]
 categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 
 [workspace]
-members = [ "crates/*" ]
+members = [ "crates/*" , "xtask" ]
 
 [[bin]]
 doc = false
