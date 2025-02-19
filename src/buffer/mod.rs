@@ -772,21 +772,20 @@ impl Buffer {
 
         match k {
             Input::Return => {
-                let prefix = if match_indent {
+                let mut s = if match_indent {
                     let cur = self.dot.first_cur();
                     let y = self.txt.char_to_line(cur.idx);
                     let line = self.txt.line(y).to_string();
                     line.find(|c: char| !c.is_whitespace())
                         .map(|ix| line.split_at(ix).0.to_string())
+                        .unwrap_or_default()
                 } else {
-                    None
+                    "".to_string()
                 };
 
-                let (c, _) = self.insert_char(self.dot, '\n', Some(Source::Keyboard));
-                let c = match prefix {
-                    Some(s) => self.insert_string(Dot::Cur { c }, s, None).0,
-                    None => c,
-                };
+                s.push('\n');
+
+                let c = self.insert_string(self.dot, s, Some(Source::Keyboard)).0;
 
                 self.dot = Dot::Cur { c };
                 return None;
@@ -993,9 +992,11 @@ impl Buffer {
         let idx = cur.idx;
 
         if let Some(ts) = self.ts_state.as_mut() {
-            let len = deleted.as_ref().map(|s| s.chars().count()).unwrap_or(1);
-            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-            ts.edit(idx, ch_old_end, idx, &self.txt);
+            if let Some(s) = deleted.as_ref() {
+                let len = s.chars().count();
+                let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
+                ts.edit(idx, ch_old_end, idx, &self.txt);
+            }
         }
 
         // Inserting an empty string should not be recorded as an edit (and is

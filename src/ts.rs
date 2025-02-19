@@ -100,27 +100,15 @@ impl TsState {
     }
 
     pub fn edit(&mut self, ch_start: usize, ch_old_end: usize, ch_new_end: usize, gb: &GapBuffer) {
-        let byte_and_point = |ch: usize| {
-            let byte = gb.char_to_byte(ch);
-            let row = gb.char_to_line(ch);
-            let col = byte - gb.char_to_byte(gb.line_to_char(row));
-
-            (byte, ts::Point::new(row, col))
-        };
-
-        let (start_byte, start_position) = byte_and_point(ch_start);
-        let (old_end_byte, old_end_position) = byte_and_point(ch_old_end);
-        let (new_end_byte, new_end_position) = byte_and_point(ch_new_end);
-        let edit = ts::InputEdit {
-            start_byte,
-            old_end_byte,
-            new_end_byte,
-            start_position,
-            old_end_position,
-            new_end_position,
-        };
-
-        self.tree.edit(&edit);
+        self.tree.edit(&ts::InputEdit {
+            start_byte: gb.char_to_byte(ch_start),
+            old_end_byte: gb.char_to_byte(ch_old_end),
+            new_end_byte: gb.char_to_byte(ch_new_end),
+            // See https://github.com/tree-sitter/tree-sitter/discussions/1793 for why this OK
+            start_position: ts::Point::new(0, 0),
+            old_end_position: ts::Point::new(0, 0),
+            new_end_position: ts::Point::new(0, 0),
+        });
 
         let new_tree = self.p.parse_with(
             &mut |byte_offset, _| gb.maximal_slice_from_offset(byte_offset),
@@ -131,19 +119,21 @@ impl TsState {
             // TODO: it might be looking at self.tree.changed_ranges(&tree) to optimise being able
             // to only tokenize regions we're missing
             self.tree = tree;
-            self.t.ranges.clear();
         }
+
+        self.t.ranges.clear();
     }
 
     pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
         let byte_from = gb.char_to_byte(gb.line_to_char(from));
-        let byte_to = gb.char_to_byte(gb.line_to_char(min(from + n_rows + 1, gb.len_lines() - 1)));
-        let need_tokens = if self.t.ranges.is_empty() {
-            true
+        let byte_to = if from + n_rows + 1 < gb.len_lines() {
+            gb.char_to_byte(gb.line_to_char(from + n_rows + 1))
         } else {
-            self.t.ranges.first().unwrap().r.from > byte_from
-                || self.t.ranges.last().unwrap().r.to < byte_to
+            gb.len()
         };
+        let need_tokens = self.t.ranges.is_empty()
+            || self.t.ranges.first().unwrap().r.from > byte_from
+            || self.t.ranges.last().unwrap().r.to < byte_to;
 
         if need_tokens {
             self.t.update(self.tree.root_node(), gb, from, n_rows);
@@ -351,7 +341,7 @@ impl Tokenizer {
                 row: from,
                 column: 0,
             }..ts::Point {
-                row: from + n_rows,
+                row: from + n_rows + 1,
                 column: 0,
             },
         );
