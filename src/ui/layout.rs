@@ -50,10 +50,6 @@ impl Layout {
         &self.buffers
     }
 
-    pub(crate) fn buffers_mut(&mut self) -> &mut Buffers {
-        &mut self.buffers
-    }
-
     pub(crate) fn ensure_file_is_open(&mut self, path: &str) {
         self.buffers.ensure_file_is_open(path)
     }
@@ -663,6 +659,20 @@ impl Layout {
         self.buffers.active_mut().dot = Dot::Cur { c };
 
         bufid == current_bufid
+    }
+
+    pub(crate) fn update_visible_ts_state(&mut self) {
+        let it = self.cols.iter().flat_map(|(_, c)| {
+            c.wins
+                .iter()
+                .map(|(_, w)| (w.view.bufid, w.view.row_off, w.n_rows))
+        });
+
+        for (bufid, from, n_rows) in it {
+            // SAFETY: we know this id is valid
+            let b = unsafe { self.buffers.with_id_mut(bufid).unwrap_unchecked() };
+            b.update_ts_state(from, n_rows);
+        }
     }
 }
 

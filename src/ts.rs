@@ -90,8 +90,9 @@ impl TsState {
         match tree {
             Some(tree) => {
                 let mut t = p.new_tokenizer(query)?;
-                t.update(tree.root_node(), gb);
+                t.update(tree.root_node(), gb, 0, usize::MAX - 1);
                 info!("TS loaded for {}", p.lang_name);
+
                 Ok(Self { p, t, tree })
             }
             None => Err("failed to parse file".to_owned()),
@@ -127,14 +128,25 @@ impl TsState {
         );
 
         if let Some(tree) = new_tree {
+            // TODO: it might be looking at self.tree.changed_ranges(&tree) to optimise being able
+            // to only tokenize regions we're missing
             self.tree = tree;
-            self.t.stale = true;
+            self.t.ranges.clear();
         }
     }
 
-    pub fn update(&mut self, gb: &GapBuffer) {
-        if self.t.stale {
-            self.t.update(self.tree.root_node(), gb);
+    pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
+        let byte_from = gb.char_to_byte(gb.line_to_char(from));
+        let byte_to = gb.char_to_byte(gb.line_to_char(min(from + n_rows + 1, gb.len_lines() - 1)));
+        let need_tokens = if self.t.ranges.is_empty() {
+            true
+        } else {
+            self.t.ranges.first().unwrap().r.from > byte_from
+                || self.t.ranges.last().unwrap().r.to < byte_to
+        };
+
+        if need_tokens {
+            self.t.update(self.tree.root_node(), gb, from, n_rows);
         }
     }
 
@@ -314,16 +326,16 @@ impl Parser {
             q,
             cur,
             ranges: Vec::new(),
-            stale: true,
         })
     }
 }
 
 pub struct Tokenizer {
+    // Tree-sitter state
     q: ts::Query,
     cur: ts::QueryCursor,
+    // Cache of computed syntax tokens for passing to LineIter
     ranges: Vec<SyntaxRange>,
-    stale: bool,
 }
 
 impl fmt::Debug for Tokenizer {
@@ -333,11 +345,19 @@ impl fmt::Debug for Tokenizer {
 }
 
 impl Tokenizer {
-    pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer) {
+    pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: usize, n_rows: usize) {
+        self.cur.set_point_range(
+            ts::Point {
+                row: from,
+                column: 0,
+            }..ts::Point {
+                row: from + n_rows,
+                column: 0,
+            },
+        );
+
         // This is a streaming-iterator not an interator, hence the odd while-let that follows
         let mut it = self.cur.captures(&self.q, root, gb);
-        // FIXME: this is really inefficient. Ideally we should be able to apply a diff here
-        self.ranges.clear();
 
         while let Some((m, idx)) = it.next() {
             let cap = m.captures[*idx];
@@ -360,7 +380,6 @@ impl Tokenizer {
 
         self.ranges.sort_unstable();
         self.ranges.dedup();
-        self.stale = false;
     }
 
     #[inline]
@@ -1240,7 +1259,10 @@ mod tests {
 
         b.dot = Dot::Cur { c: Cur { idx: 9 } };
         b.handle_action(Action::Delete, Source::Fsys);
-        b.ts_state.as_mut().unwrap().update(&b.txt);
+        b.ts_state
+            .as_mut()
+            .unwrap()
+            .update(&b.txt, 0, usize::MAX - 1);
         let ranges = b.ts_state.as_ref().unwrap().t.range_tokens();
 
         assert_eq!(b.str_contents(), "fn main(){}\n");

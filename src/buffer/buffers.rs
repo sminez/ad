@@ -142,12 +142,6 @@ impl Buffers {
         self.inner.iter().map(|(_, b)| b)
     }
 
-    pub fn update_ts_state(&mut self) {
-        for b in self.inner.iter_mut().map(|(_, b)| b) {
-            b.update_ts_state();
-        }
-    }
-
     pub fn close_buffer(&mut self, id: BufferId) {
         let removed = self
             .inner

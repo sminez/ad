@@ -427,9 +427,9 @@ impl Buffer {
             .collect()
     }
 
-    pub fn update_ts_state(&mut self) {
+    pub fn update_ts_state(&mut self, from: usize, n_rows: usize) {
         if let Some(ts) = self.ts_state.as_mut() {
-            ts.update(&self.txt);
+            ts.update(&self.txt, from, n_rows);
         }
     }
 
