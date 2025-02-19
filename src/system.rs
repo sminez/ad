@@ -91,7 +91,7 @@ impl ClipboardProvider {
             info!("clipboard provider found: xclip");
             (
                 "xclip",
-                vec!["-quiet", "-i", "-selection", "clipboard"],
+                vec!["-i", "-selection", "clipboard"],
                 "xclip",
                 vec!["-o", "-selection", "clipboard"],
             )
