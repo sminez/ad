@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ad-editor"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ad_event",
  "criterion",
@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "ad_client"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ad_event",
  "ninep",
@@ -35,7 +35,7 @@ dependencies = [
 
 [[package]]
 name = "ad_event"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -44,7 +44,7 @@ dependencies = [
 
 [[package]]
 name = "ad_repl"
-version = "0.1.0"
+version = "0.3.0"
 dependencies = [
  "ad_client",
  "subprocess",
@@ -381,7 +381,7 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "ninep"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "bitflags 2.6.0",
  "simple_test_case",

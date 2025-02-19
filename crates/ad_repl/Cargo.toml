@@ -1,6 +1,6 @@
 [package]
 name = "ad_repl"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
@@ -17,5 +17,5 @@ keywords = [ "terminal", "editor", "text-editor", ]
 categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
 [dependencies]
-ad_client = { version = "0.2", path = "../ad_client" }
+ad_client = { version = "0.3", path = "../ad_client" }
 subprocess = "0.2.9"

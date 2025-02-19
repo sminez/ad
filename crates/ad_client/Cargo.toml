@@ -1,6 +1,6 @@
 [package]
 name = "ad_client"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
@@ -18,5 +18,5 @@ categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
 
 [dependencies]
-ad_event = { version = "0.2", path = "../ad_event" }
-ninep = { version = "0.2", path = "../ninep" }
+ad_event = { version = "0.3", path = "../ad_event" }
+ninep = { version = "0.3", path = "../ninep" }
