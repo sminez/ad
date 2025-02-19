@@ -11,6 +11,7 @@ use std::{
     sync::mpsc::Sender,
     thread::spawn,
 };
+use tracing::info;
 
 /// Wrapper around storing system interactions
 pub trait System: fmt::Debug {
@@ -62,42 +63,97 @@ pub trait System: fmt::Debug {
     }
 }
 
-/// A default implementation for system interactions
-#[derive(Debug, Clone, Copy)]
-pub struct DefaultSystem;
+#[derive(Debug, Clone)]
+struct ClipboardProvider {
+    copy_cmd: &'static str,
+    copy_args: Vec<&'static str>,
+    paste_cmd: &'static str,
+    paste_args: Vec<&'static str>,
+}
 
-#[cfg(target_os = "linux")]
-impl System for DefaultSystem {
-    fn set_clipboard(&mut self, s: &str) -> io::Result<()> {
-        let mut child = Command::new("xclip")
-            .args(["-selection", "clipboard", "-i"])
-            .stdin(Stdio::piped())
-            .spawn()?;
+impl ClipboardProvider {
+    pub fn try_from_env() -> Option<Self> {
+        let paths = env::var("PATH").expect("path not set");
+        let exists = |cmd: &str| env::split_paths(&paths).any(|dir| dir.join(cmd).is_file());
 
-        child.stdin.take().unwrap().write_all(s.as_bytes())
-    }
+        let (copy_cmd, copy_args, paste_cmd, paste_args) = if exists("pbcopy") {
+            info!("clipboard provider found: pbcopy");
+            ("pbcopy", vec![], "pbpaste", vec![])
+        } else if env::var("WAYLAND_DISPLAY").is_ok() && exists("wl-copy") && exists("wl-paste") {
+            info!("clipboard provider found: wl-copy");
+            (
+                "wl-copy",
+                vec!["--foreground", "--type", "text/plain"],
+                "wl-paste",
+                vec!["--no-newline"],
+            )
+        } else if env::var("DISPLAY").is_ok() && exists("xclip") {
+            info!("clipboard provider found: xclip");
+            (
+                "xclip",
+                vec!["-quiet", "-i", "-selection", "clipboard"],
+                "xclip",
+                vec!["-o", "-selection", "clipboard"],
+            )
+        } else {
+            info!("no clipboard provider found");
+            return None;
+        };
 
-    fn read_clipboard(&self) -> io::Result<String> {
-        let output = Command::new("xclip")
-            .args(["-selection", "clipboard", "-o"])
-            .output()?;
-
-        Ok(String::from_utf8(output.stdout).unwrap_or_default())
+        Some(Self {
+            copy_cmd,
+            copy_args,
+            paste_cmd,
+            paste_args,
+        })
     }
 }
 
-#[cfg(target_os = "macos")]
+/// A default implementation for system interactions
+#[derive(Debug, Clone)]
+pub struct DefaultSystem {
+    selection: String,
+    cp: Option<ClipboardProvider>,
+}
+
+impl DefaultSystem {
+    pub fn from_env() -> Self {
+        Self {
+            selection: String::new(),
+            cp: ClipboardProvider::try_from_env(),
+        }
+    }
+}
+
 impl System for DefaultSystem {
     fn set_clipboard(&mut self, s: &str) -> io::Result<()> {
-        let mut child = Command::new("pbcopy").stdin(Stdio::piped()).spawn()?;
+        match &self.cp {
+            Some(cp) => {
+                let mut child = Command::new(cp.copy_cmd)
+                    .args(&cp.copy_args)
+                    .stdin(Stdio::piped())
+                    .spawn()?;
 
-        child.stdin.take().unwrap().write_all(s.as_bytes())
+                child.stdin.take().unwrap().write_all(s.as_bytes())
+            }
+
+            None => {
+                self.selection = s.to_string();
+                Ok(())
+            }
+        }
     }
 
     fn read_clipboard(&self) -> io::Result<String> {
-        let output = Command::new("pbpaste").output()?;
+        match &self.cp {
+            Some(cp) => {
+                let output = Command::new(cp.paste_cmd).args(&cp.paste_args).output()?;
 
-        Ok(String::from_utf8(output.stdout).unwrap_or_default())
+                Ok(String::from_utf8(output.stdout).unwrap_or_default())
+            }
+
+            None => Ok(self.selection.clone()),
+        }
     }
 }
 

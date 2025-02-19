@@ -82,7 +82,13 @@ impl Editor<DefaultSystem> {
         mode: EditorMode,
         log_buffer: LogBuffer,
     ) -> Self {
-        Self::new_with_system(cfg, plumbing_rules, mode, log_buffer, DefaultSystem)
+        Self::new_with_system(
+            cfg,
+            plumbing_rules,
+            mode,
+            log_buffer,
+            DefaultSystem::from_env(),
+        )
     }
 }
 
