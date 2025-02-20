@@ -1,11 +1,8 @@
 name: Test on FreeBSD
 
-on:
-  push:
-    branches:
-      - develop
-    pull_request:
-      - develop      
+# Running this involves installing a packages and setting up a VM so we don't trigger it
+# on every push. 
+on: workflow_dispatch
 
 env:
   CARGO_TERM_COLOR: always
@@ -27,3 +24,4 @@ jobs:
           pwd
           freebsd-version
           cargo test --verbose
+          rm -rf target
