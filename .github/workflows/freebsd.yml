@@ -1,0 +1,29 @@
+name: Test on FreeBSD
+
+on:
+  push:
+    branches:
+      - develop
+    pull_request:
+      - develop      
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_LOG: info
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: Run tests on FreeBSD
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Test
+      uses: vmactions/freebsd-vm@v1
+      with:
+        usesh: true
+        prepare: pkg install -y rust
+        run: |
+          pwd
+          freebsd-version
+          cargo test --verbose
