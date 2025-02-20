@@ -48,7 +48,7 @@ in place, so the recommended way to try out `ad` is to clone this repo and compi
 $ git clone git@github.com:sminez/ad.git
 $ cd ad
 $ cargo install --path .
-$ make setup-dotfiles
+$ cargo xtask setup-dotfiles
 ```
 
 From there you should be able to open `ad` and run the `:help` command to view the built-in help.
