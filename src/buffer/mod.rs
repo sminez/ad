@@ -772,18 +772,18 @@ impl Buffer {
 
         match k {
             Input::Return => {
-                let mut s = if match_indent {
+                let mut s = "\n".to_string();
+                if match_indent {
                     let cur = self.dot.first_cur();
                     let y = self.txt.char_to_line(cur.idx);
                     let line = self.txt.line(y).to_string();
-                    line.find(|c: char| !c.is_whitespace())
-                        .map(|ix| line.split_at(ix).0.to_string())
-                        .unwrap_or_default()
-                } else {
-                    "".to_string()
-                };
-
-                s.push('\n');
+                    s.push_str(
+                        &line
+                            .find(|c: char| !c.is_whitespace())
+                            .map(|ix| line.split_at(ix).0.to_string())
+                            .unwrap_or_default(),
+                    );
+                }
 
                 let c = self.insert_string(self.dot, s, Some(Source::Keyboard)).0;
 
@@ -1452,5 +1452,13 @@ pub(crate) mod tests {
 
         assert_eq!(b.txt.to_string(), "a");
         assert_eq!(b.dot, Dot::Cur { c: Cur { idx: 1 } });
+    }
+
+    #[test]
+    fn match_indent_works() {
+        let mut b = Buffer::new_virtual(0, "test", "  foo");
+        b.set_dot(TextObject::BufferEnd, 1);
+        b.handle_raw_input(Input::Return);
+        assert_eq!(b.txt.to_string(), "  foo\n  ");
     }
 }
