@@ -89,8 +89,7 @@ impl TsState {
 
         match tree {
             Some(tree) => {
-                let mut t = p.new_tokenizer(query)?;
-                t.update(tree.root_node(), gb, 0, gb.len());
+                let t = p.new_tokenizer(query)?;
                 info!("TS loaded for {}", p.lang_name);
 
                 Ok(Self { p, t, tree })
@@ -1306,10 +1305,11 @@ mod tests {
         let s = "fn main() {}";
         let mut b = Buffer::new_unnamed(0, s);
         let gb = &b.txt;
-        b.ts_state = Some(
+        let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
-                .unwrap(),
-        );
+                .unwrap();
+        ts.update(gb, 0, gb.len());
+        b.ts_state = Some(ts);
 
         assert_eq!(b.str_contents(), "fn main() {}\n");
         assert_eq!(
@@ -1363,13 +1363,14 @@ mod tests {
         let s = "import builtins as _builtins";
         let b = Buffer::new_unnamed(0, s);
         let gb = &b.txt;
-        let ts = TsState::try_new_from_language(
+        let mut ts = TsState::try_new_from_language(
             "python",
             tree_sitter_python::LANGUAGE.into(),
             query,
             gb,
         )
         .unwrap();
+        ts.update(gb, 0, gb.len());
 
         assert_eq!(
             ts.t.range_tokens(),
@@ -1397,9 +1398,10 @@ mod tests {
         let s = "Ok(Some(42)) foo BAR";
         let b = Buffer::new_unnamed(0, s);
         let gb = &b.txt;
-        let ts =
+        let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
                 .unwrap();
+        ts.update(gb, 0, gb.len());
 
         assert_eq!(
             ts.t.range_tokens(),
