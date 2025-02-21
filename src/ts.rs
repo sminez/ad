@@ -89,8 +89,7 @@ impl TsState {
 
         match tree {
             Some(tree) => {
-                let mut t = p.new_tokenizer(query)?;
-                t.update(tree.root_node(), gb, 0, usize::MAX - 1);
+                let t = p.new_tokenizer(query)?;
                 info!("TS loaded for {}", p.lang_name);
 
                 Ok(Self { p, t, tree })
@@ -117,26 +116,38 @@ impl TsState {
 
         if let Some(tree) = new_tree {
             // TODO: it might be looking at self.tree.changed_ranges(&tree) to optimise being able
-            // to only tokenize regions we're missing
+            // to only clear regions that are now invalid
             self.tree = tree;
         }
 
-        self.t.ranges.clear();
+        self.t.clear();
     }
 
     pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
-        let byte_from = gb.char_to_byte(gb.line_to_char(from));
-        let byte_to = if from + n_rows + 1 < gb.len_lines() {
+        let raw_from = gb.char_to_byte(gb.line_to_char(from));
+        let raw_to = if from + n_rows + 1 < gb.len_lines() {
             gb.char_to_byte(gb.line_to_char(from + n_rows + 1))
         } else {
             gb.len()
         };
-        let need_tokens = self.t.ranges.is_empty()
-            || self.t.ranges.first().unwrap().r.from > byte_from
-            || self.t.ranges.last().unwrap().r.to < byte_to;
 
-        if need_tokens {
-            self.t.update(self.tree.root_node(), gb, from, n_rows);
+        if let Some((a, b)) = self.t.missing_region(raw_from, raw_to) {
+            // To avoid spinning on calling back to the tree-sitter API for individual lines, we
+            // pre-emptively grab a larger block of tokens from the region ahead or behind of the
+            // requested one if we have missing tokens in that direction.
+            const PADDING: usize = 512;
+            let byte_from = if b < raw_to {
+                a.saturating_sub(PADDING)
+            } else {
+                a
+            };
+            let byte_to = if a > raw_from {
+                min(b + PADDING, gb.len())
+            } else {
+                b
+            };
+
+            self.t.update(self.tree.root_node(), gb, byte_from, byte_to);
         }
     }
 
@@ -316,6 +327,7 @@ impl Parser {
             q,
             cur,
             ranges: Vec::new(),
+            tokenized_regions: Vec::new(),
         })
     }
 }
@@ -326,6 +338,8 @@ pub struct Tokenizer {
     cur: ts::QueryCursor,
     // Cache of computed syntax tokens for passing to LineIter
     ranges: Vec<SyntaxRange>,
+    // The regions of the file that we currently have tokens for
+    tokenized_regions: Vec<ByteRange>,
 }
 
 impl fmt::Debug for Tokenizer {
@@ -334,17 +348,77 @@ impl fmt::Debug for Tokenizer {
     }
 }
 
+#[inline]
+fn mark_region(regions: &mut Vec<ByteRange>, from: usize, to: usize) {
+    regions.push(ByteRange { from, to });
+    if regions.len() == 1 {
+        return;
+    }
+
+    regions.sort_unstable();
+
+    let mut idx = 0;
+    for i in 1..regions.len() {
+        if regions[idx].to >= regions[i].from {
+            // Merge overlapping regions
+            regions[idx].to = max(regions[idx].to, regions[i].to);
+        } else {
+            // Move to the next region to check for overlaps
+            idx += 1;
+            regions.swap(idx, i);
+        }
+    }
+
+    // If we performed any merges then there will be unused regions at the end of the
+    // Vec now that we need to drop
+    regions.truncate(idx + 1);
+}
+
+/// This is not attempting to be maximally efficient in returning a set of missing regions as the
+/// goal is simply to minimise the amount of retokenization we do via tree-sitter where possible.
+#[inline]
+fn missing_region(regions: &[ByteRange], from: usize, to: usize) -> Option<(usize, usize)> {
+    let mut it = regions.iter();
+    while let Some(r) = it.next() {
+        if to < r.from {
+            // before this region and not in the previous so all missing
+            break;
+        } else if from < r.from {
+            // runs up to the start of this region or over this region
+            let end = if r.to > to { r.from } else { to };
+            return Some((from, end));
+        } else if r.contains(from, to) {
+            // contained entirely within this region so nothing missing
+            return None;
+        } else if from < r.to && to > r.to {
+            // from inside this region out to the next or past it
+            let end = match it.next() {
+                Some(r) if r.from < to => r.from,
+                _ => to,
+            };
+            return Some((r.to, end));
+        }
+    }
+
+    Some((from, to))
+}
+
 impl Tokenizer {
-    pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: usize, n_rows: usize) {
-        self.cur.set_point_range(
-            ts::Point {
-                row: from,
-                column: 0,
-            }..ts::Point {
-                row: from + n_rows + 1,
-                column: 0,
-            },
-        );
+    fn clear(&mut self) {
+        self.ranges.clear();
+        self.tokenized_regions.clear();
+    }
+
+    fn missing_region(&self, from: usize, to: usize) -> Option<(usize, usize)> {
+        missing_region(&self.tokenized_regions, from, to)
+    }
+
+    fn mark_region(&mut self, from: usize, to: usize) {
+        mark_region(&mut self.tokenized_regions, from, to);
+    }
+
+    pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: usize, to: usize) {
+        self.cur.set_byte_range(from..to);
 
         // This is a streaming-iterator not an interator, hence the odd while-let that follows
         let mut it = self.cur.captures(&self.q, root, gb);
@@ -370,6 +444,7 @@ impl Tokenizer {
 
         self.ranges.sort_unstable();
         self.ranges.dedup();
+        self.mark_region(from, to);
     }
 
     #[inline]
@@ -1230,10 +1305,11 @@ mod tests {
         let s = "fn main() {}";
         let mut b = Buffer::new_unnamed(0, s);
         let gb = &b.txt;
-        b.ts_state = Some(
+        let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
-                .unwrap(),
-        );
+                .unwrap();
+        ts.update(gb, 0, gb.len());
+        b.ts_state = Some(ts);
 
         assert_eq!(b.str_contents(), "fn main() {}\n");
         assert_eq!(
@@ -1287,13 +1363,14 @@ mod tests {
         let s = "import builtins as _builtins";
         let b = Buffer::new_unnamed(0, s);
         let gb = &b.txt;
-        let ts = TsState::try_new_from_language(
+        let mut ts = TsState::try_new_from_language(
             "python",
             tree_sitter_python::LANGUAGE.into(),
             query,
             gb,
         )
         .unwrap();
+        ts.update(gb, 0, gb.len());
 
         assert_eq!(
             ts.t.range_tokens(),
@@ -1321,9 +1398,10 @@ mod tests {
         let s = "Ok(Some(42)) foo BAR";
         let b = Buffer::new_unnamed(0, s);
         let gb = &b.txt;
-        let ts =
+        let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
                 .unwrap();
+        ts.update(gb, 0, gb.len());
 
         assert_eq!(
             ts.t.range_tokens(),
@@ -1338,5 +1416,49 @@ mod tests {
                 rt("constant", 17, 20),       // BAR
             ]
         );
+    }
+
+    fn br(from: usize, to: usize) -> ByteRange {
+        ByteRange { from, to }
+    }
+
+    #[test_case(vec![], 0, 5, vec![br(0, 5)]; "no initial regions")]
+    #[test_case(vec![br(0, 5)], 0, 5, vec![br(0, 5)]; "existing region idempotent")]
+    #[test_case(vec![br(9, 15)], 0, 5, vec![br(0, 5), br(9, 15)]; "disjoint regions")]
+    #[test_case(vec![br(0, 5)], 3, 5, vec![br(0, 5)]; "existing region contains new")]
+    #[test_case(vec![br(0, 5)], 3, 9, vec![br(0, 9)]; "existing region extending past current end")]
+    #[test_case(vec![br(3, 5)], 0, 3, vec![br(0, 5)]; "existing region extending before current start")]
+    #[test_case(vec![br(3, 5)], 0, 9, vec![br(0, 9)]; "existing region contained within new")]
+    #[test_case(vec![br(0, 5), br(7, 15)], 4, 9, vec![br(0, 15)]; "new region joins multiple existing")]
+    #[test]
+    fn mark_region_works(
+        mut regions: Vec<ByteRange>,
+        from: usize,
+        to: usize,
+        expected: Vec<ByteRange>,
+    ) {
+        mark_region(&mut regions, from, to);
+        assert_eq!(regions, expected);
+    }
+
+    #[test_case(vec![br(0, 100)], 5, 20, None; "contained")]
+    #[test_case(vec![br(0, 1366)], 89, 1385, Some((1366, 1385)); "scroll down")]
+    #[test_case(vec![br(100, 1366)], 0, 255, Some((0, 100)); "scroll up")]
+    #[test_case(vec![br(100, 1366)], 0, 80, Some((0, 80)); "before")]
+    #[test_case(vec![br(100, 1366)], 1400, 1500, Some((1400, 1500)); "after")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 150, 180, Some((150, 180)); "in between regions")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 50, 180, Some((100, 180)); "from one range into gap")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 150, 280, Some((150, 200)); "from gap into region")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 50, 280, Some((100, 200)); "from one region into another")]
+    #[test_case(vec![br(50, 100), br(200, 300)], 0, 150, Some((0, 150)); "around an existing region")]
+    #[test]
+    fn missing_region_works(
+        regions: Vec<ByteRange>,
+        from: usize,
+        to: usize,
+        expected: Option<(usize, usize)>,
+    ) {
+        let res = missing_region(&regions, from, to);
+        assert_eq!(res, expected);
     }
 }
