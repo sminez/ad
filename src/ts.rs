@@ -375,20 +375,29 @@ fn mark_region(regions: &mut Vec<ByteRange>, from: usize, to: usize) {
     regions.truncate(idx + 1);
 }
 
+/// This is not attempting to be maximally efficient in returning a set of missing regions as the
+/// goal is simply to minimise the amount of retokenization we do via tree-sitter where possible.
 #[inline]
 fn missing_region(regions: &[ByteRange], from: usize, to: usize) -> Option<(usize, usize)> {
-    for r in regions.iter() {
+    let mut it = regions.iter();
+    while let Some(r) = it.next() {
         if to < r.from {
             // before this region and not in the previous so all missing
-            return Some((from, to));
+            break;
         } else if from < r.from {
-            // runs up to the start of this region
-            return Some((from, r.from));
+            // runs up to the start of this region or over this region
+            let end = if r.to > to { r.from } else { to };
+            return Some((from, end));
         } else if r.contains(from, to) {
-            // contained entirely within this region
+            // contained entirely within this region so nothing missing
             return None;
         } else if from < r.to && to > r.to {
-            return Some((r.to, to));
+            // from inside this region out to the next or past it
+            let end = match it.next() {
+                Some(r) if r.from < to => r.from,
+                _ => to,
+            };
+            return Some((r.to, end));
         }
     }
 
@@ -1435,6 +1444,11 @@ mod tests {
     #[test_case(vec![br(100, 1366)], 0, 255, Some((0, 100)); "scroll up")]
     #[test_case(vec![br(100, 1366)], 0, 80, Some((0, 80)); "before")]
     #[test_case(vec![br(100, 1366)], 1400, 1500, Some((1400, 1500)); "after")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 150, 180, Some((150, 180)); "in between regions")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 50, 180, Some((100, 180)); "from one range into gap")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 150, 280, Some((150, 200)); "from gap into region")]
+    #[test_case(vec![br(0, 100), br(200, 300)], 50, 280, Some((100, 200)); "from one region into another")]
+    #[test_case(vec![br(50, 100), br(200, 300)], 0, 150, Some((0, 150)); "around an existing region")]
     #[test]
     fn missing_region_works(
         regions: Vec<ByteRange>,
