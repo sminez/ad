@@ -20,6 +20,7 @@ use std::{
 pub mod client;
 pub mod fs;
 pub mod protocol;
+pub mod sansio;
 pub mod server;
 
 use protocol::{Format9p, Rdata, Rmessage};
