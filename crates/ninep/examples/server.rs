@@ -24,7 +24,7 @@
 //! ```
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{ClientId, ReadOutcome, Serve9p, Server},
+    sync::server::{ClientId, ReadOutcome, Serve9p, Server},
     Result,
 };
 use std::{

@@ -10,7 +10,7 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
-use ninep::client::{ReadLineIter, UnixClient};
+use ninep::sync::client::{ReadLineIter, UnixClient};
 use std::{io, io::Write, os::unix::net::UnixStream};
 
 mod event;

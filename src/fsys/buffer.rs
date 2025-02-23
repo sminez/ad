@@ -9,7 +9,7 @@ use crate::{
     },
     input::Event,
 };
-use ninep::{fs::Stat, server::ReadOutcome};
+use ninep::{fs::Stat, sansio::server::ReadOutcome};
 use std::{
     collections::BTreeMap,
     sync::mpsc::{channel, Receiver, Sender},

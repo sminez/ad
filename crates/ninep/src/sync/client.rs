@@ -1,8 +1,8 @@
 //! A simple 9p client for building out application specific client applications.
 use crate::{
     fs::{Mode, Perm, Stat},
-    protocol::{Data, Format9p, RawStat, Rdata, Rmessage, Tdata, Tmessage},
-    Stream,
+    sansio::protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
+    sync::{SyncNineP, SyncStream},
 };
 use std::{
     cmp::min,
@@ -61,7 +61,7 @@ pub type TcpClient = Client<TcpStream>;
 #[derive(Debug)]
 pub struct Client<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     /// The shared inner client holding our connection to the server
     ///
@@ -72,7 +72,7 @@ where
 
 impl<S> Clone for Client<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     fn clone(&self) -> Self {
         Self {
@@ -85,7 +85,7 @@ where
 #[derive(Debug)]
 struct ClientInner<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     stream: S,
     uname: String,
@@ -96,7 +96,7 @@ where
 
 impl<S> Drop for ClientInner<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     fn drop(&mut self) {
         let fids = std::mem::take(&mut self.fids);
@@ -108,7 +108,7 @@ where
 
 impl<S> ClientInner<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     fn send(&mut self, tag: u16, content: Tdata) -> io::Result<Rmessage> {
         let t = Tmessage { tag, content };
@@ -202,7 +202,7 @@ impl Client<TcpStream> {
 
 impl<S> Client<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     #[inline]
     fn inner(&mut self) -> MutexGuard<'_, ClientInner<S>> {
@@ -488,7 +488,7 @@ where
 #[derive(Debug)]
 pub struct ChunkIter<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     client: Client<S>,
     fid: u32,
@@ -498,7 +498,7 @@ where
 
 impl<S> Iterator for ChunkIter<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     type Item = Vec<u8>;
 
@@ -523,7 +523,7 @@ where
 #[derive(Debug)]
 pub struct ReadLineIter<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     client: Client<S>,
     buf: Vec<u8>,
@@ -535,7 +535,7 @@ where
 
 impl<S> Iterator for ReadLineIter<S>
 where
-    S: Stream,
+    S: SyncStream,
 {
     type Item = String;
 

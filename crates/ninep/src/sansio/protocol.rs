@@ -71,12 +71,12 @@ pub trait Read9p: Sized {
     fn accept_bytes(self, bytes: &[u8]) -> io::Result<NinepReader<Self::T>>;
 }
 
-#[inline]
-fn accept_bytes_final<R: Read9p>(r: R, bytes: &[u8]) -> io::Result<R::T> {
-    match r.accept_bytes(bytes)? {
-        NinepReader::Complete(t) => Ok(t),
-        NinepReader::Pending(_) => unreachable!(),
-    }
+/// wrapper around uX::from_le_bytes that accepts a slice rather than a fixed size array
+macro_rules! from_le_bytes {
+    ($ty:ty, $bytes:expr) => {
+        // SAFETY: we know we are setting the correct array length
+        unsafe { <$ty>::from_le_bytes($bytes[0..size_of::<$ty>()].try_into().unwrap_unchecked()) }
+    };
 }
 
 /// Attempt to read a [NineP] value from a byte buffer that contains sufficient data without
@@ -147,9 +147,7 @@ macro_rules! impl_u {
                 }
 
                 fn accept_bytes(self, bytes: &[u8]) -> io::Result<NinepReader<$ty>> {
-                    let buf = bytes[0..size_of::<$ty>()].try_into().unwrap();
-
-                    Ok(NinepReader::Complete(<$ty>::from_le_bytes(buf)))
+                    Ok(NinepReader::Complete(from_le_bytes!($ty, bytes)))
                 }
             }
         )+
@@ -212,7 +210,7 @@ impl Read9p for StringReader {
     fn accept_bytes(self, mut bytes: &[u8]) -> io::Result<NinepReader<String>> {
         match self {
             Self::Start => {
-                let len = accept_bytes_final(0u16, bytes)? as usize;
+                let len = from_le_bytes!(u16, bytes) as usize;
                 Ok(NinepReader::Pending(Self::WithLen(len)))
             }
 
@@ -291,7 +289,7 @@ impl<T: NineP + fmt::Debug> Read9p for VecReader<T> {
     fn accept_bytes(self, bytes: &[u8]) -> io::Result<NinepReader<Vec<T>>> {
         match self {
             Self::Start => {
-                let len = accept_bytes_final(0u16, bytes)? as usize;
+                let len = from_le_bytes!(u16, bytes) as usize;
                 let buf = Vec::with_capacity(len);
                 let r = T::reader();
 
@@ -329,7 +327,7 @@ impl<T: NineP + fmt::Debug> Read9p for VecReader<T> {
 ///       size[4] Rwrite tag[2] count[4]
 /// ```
 #[derive(Clone, PartialEq, Eq)]
-pub struct Data(pub(super) Vec<u8>);
+pub struct Data(pub(crate) Vec<u8>);
 
 impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -410,7 +408,7 @@ impl Read9p for DataReader {
     fn accept_bytes(self, bytes: &[u8]) -> io::Result<NinepReader<Self::T>> {
         match self {
             DataReader::Start => {
-                let len = accept_bytes_final(0u32, bytes)? as usize;
+                let len = from_le_bytes!(u32, bytes) as usize;
                 if len > MAX_DATA_LEN {
                     return Err(io::Error::new(
                         ErrorKind::InvalidData,
@@ -441,29 +439,29 @@ impl Read9p for DataReader {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawStat {
     /// size[2]      total byte count of the following data
-    size: u16,
+    pub size: u16,
     /// type[2]      for kernel use
-    ty: u16,
+    pub ty: u16,
     /// dev[4]       for kernel use
-    dev: u32,
+    pub dev: u32,
     /// Qid type, version and path
-    qid: Qid,
+    pub qid: Qid,
     /// mode[4]      permissions and flags
-    mode: u32,
+    pub mode: u32,
     /// atime[4]     last access time
-    atime: u32,
+    pub atime: u32,
     /// mtime[4]     last modification time
-    mtime: u32,
+    pub mtime: u32,
     /// length[8]    length of file in bytes
-    length: u64,
+    pub length: u64,
     /// name[ s ]    file name; must be / if the file is the root directory of the server
-    name: String,
+    pub name: String,
     /// uid[ s ]     owner name
-    uid: String,
+    pub uid: String,
     /// gid[ s ]     group name
-    gid: String,
+    pub gid: String,
     /// muid[ s ]    name of the user who last modified the file
-    muid: String,
+    pub muid: String,
 }
 
 macro_rules! write_fields {
@@ -526,14 +524,14 @@ impl Read9p for RawStatReader {
     fn accept_bytes(self, bytes: &[u8]) -> io::Result<NinepReader<Self::T>> {
         match self {
             Self::Start => {
-                let size = accept_bytes_final(0u16, bytes)?;
-                let ty = accept_bytes_final(0u16, &bytes[2..])?;
-                let dev = accept_bytes_final(0u32, &bytes[4..])?;
+                let size = from_le_bytes!(u16, bytes);
+                let ty = from_le_bytes!(u16, &bytes[2..]);
+                let dev = from_le_bytes!(u32, &bytes[4..]);
                 let qid: Qid = try_read_9p_bytes(&bytes[8..])?;
-                let mode = accept_bytes_final(0u32, &bytes[21..])?;
-                let atime = accept_bytes_final(0u32, &bytes[25..])?;
-                let mtime = accept_bytes_final(0u32, &bytes[29..])?;
-                let length = accept_bytes_final(0u64, &bytes[33..])?;
+                let mode = from_le_bytes!(u32, &bytes[21..]);
+                let atime = from_le_bytes!(u32, &bytes[25..]);
+                let mtime = from_le_bytes!(u32, &bytes[29..]);
+                let length = from_le_bytes!(u64, &bytes[33..]);
                 let rs = RawStat {
                     size,
                     ty,
@@ -968,12 +966,12 @@ macro_rules! impl_message_format {
             fn accept_bytes(self, bytes: &[u8]) -> io::Result<NinepReader<$message_ty>> {
                 match self {
                     Self::Start => {
-                        let size = accept_bytes_final(0u32, bytes)? as usize;
+                        let size = from_le_bytes!(u32, bytes) as usize;
                         Ok(NinepReader::Pending($reader::WithSize(size)))
                     }
                     Self::WithSize(_) => {
-                        let ty = accept_bytes_final(0u8, bytes)?;
-                        let tag = accept_bytes_final(0u16, &bytes[1..])?;
+                        let ty = from_le_bytes!(u8, bytes);
+                        let tag = from_le_bytes!(u16, &bytes[1..]);
                         let mut offset = 3;
                         let content = match MessageType(ty) {
                             $(
@@ -1333,9 +1331,8 @@ impl_rdata! {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::Format9p as _;
     use simple_test_case::test_case;
-    use std::{cmp::PartialEq, io::Cursor};
+    use std::cmp::PartialEq;
 
     #[test]
     fn uint_decode() {
@@ -1345,16 +1342,6 @@ mod tests {
         assert_eq!(0x2301, try_read_9p_bytes::<u16>(&buf).unwrap());
         assert_eq!(0x67452301, try_read_9p_bytes::<u32>(&buf).unwrap());
         assert_eq!(0xefcdab8967452301, try_read_9p_bytes::<u64>(&buf).unwrap());
-    }
-
-    #[test]
-    fn reading_a_string_works() {
-        let s = "Hello, world!".to_owned();
-        let mut buf = Cursor::new(Vec::new());
-        s.write_to(&mut buf).unwrap();
-
-        let res = try_read_9p_bytes::<String>(&buf.into_inner()).unwrap();
-        assert_eq!(res, "Hello, world!");
     }
 
     #[test_case("test", &[0x04, 0x00, 0x74, 0x65, 0x73, 0x74]; "single byte chars only")]

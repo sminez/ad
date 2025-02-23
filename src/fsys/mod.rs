@@ -30,7 +30,7 @@
 use crate::{config_handle, editor::Action, input::Event};
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
+    sync::server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
     Result,
 };
 use std::{
