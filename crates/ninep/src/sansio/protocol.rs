@@ -60,7 +60,7 @@ pub trait NineP: Sized {
 }
 
 /// A paired helper type for decoding a [Format9p] type from a bytestream.
-pub trait Read9p: Sized {
+pub trait Read9p: Sized + Send {
     /// The parent [Format9p] type being decoded into
     type T: NineP<Reader = Self>;
 
@@ -237,7 +237,7 @@ impl Read9p for StringReader {
 // From [INTRO(5)](http://man.cat-v.org/plan_9/5/intro):
 //   Data items of larger or variable lengths are represented by a two-byte field specifying
 //   a count, n, followed by n bytes of data.
-impl<T: NineP + fmt::Debug> NineP for Vec<T> {
+impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
     type Reader = VecReader<T>;
 
     fn n_bytes(&self) -> usize {
@@ -270,13 +270,13 @@ impl<T: NineP + fmt::Debug> NineP for Vec<T> {
 #[allow(missing_docs)]
 pub enum VecReader<T>
 where
-    T: NineP,
+    T: NineP + fmt::Debug + Send,
 {
     Start,
     Reading(usize, T::Reader, Vec<T>),
 }
 
-impl<T: NineP + fmt::Debug> Read9p for VecReader<T> {
+impl<T: NineP + fmt::Debug + Send> Read9p for VecReader<T> {
     type T = Vec<T>;
 
     fn needs_bytes(&self) -> usize {

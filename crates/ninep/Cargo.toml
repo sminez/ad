@@ -13,8 +13,14 @@ include = [
     "README.md"
 ]
 
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio", "dep:async-trait"]
+
 [dependencies]
+async-trait = { version = "0.1.86", optional = true }
 bitflags = "2.6"
+tokio =  { version = "1.43.0", features = ["time", "macros", "parking_lot", "rt-multi-thread", "net", "io-util", "sync"], optional = true }
 
 [dev-dependencies]
 simple_test_case = "1"

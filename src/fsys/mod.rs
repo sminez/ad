@@ -40,7 +40,10 @@ use std::{
     mem::take,
     path::Path,
     process::Command,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, Mutex,
+    },
     thread::{spawn, JoinHandle},
     time::SystemTime,
 };
@@ -141,9 +144,12 @@ enum MiniBufferContent {
     Pending(Sender<Sender<Vec<u8>>>, Receiver<Vec<u8>>),
 }
 
-/// The filesystem interface for ad
+/// Mutable state for the ad filesystem.
+///
+/// The parent [AdFs] holds onto this state inside of an Arc<Mutex<>> which means that all
+/// incoming requests will be processed sequentially.
 #[derive(Debug)]
-pub(crate) struct AdFs {
+struct State {
     tx: Sender<Event>,
     buffer_nodes: BufferNodes,
     minibuffer_content: MiniBufferContent,
@@ -159,7 +165,7 @@ pub(crate) struct AdFs {
     auto_mount: bool,
 }
 
-impl Drop for AdFs {
+impl Drop for State {
     fn drop(&mut self) {
         if self.auto_mount {
             let res = Command::new("fusermount")
@@ -173,60 +179,7 @@ impl Drop for AdFs {
     }
 }
 
-impl AdFs {
-    /// Construct a new filesystem interface using channels held by the editor.
-    pub fn new(tx: Sender<Event>, brx: Receiver<LogEvent>) -> Self {
-        let home = env::var("HOME").expect("$HOME to be set");
-        let mount_path = format!("{home}/{MOUNT_DIR}");
-
-        if !Path::new(&mount_path).exists() {
-            create_dir_all(&mount_path).expect("to be able to create our mount point");
-        }
-
-        let (log_tx, log_rx) = channel();
-        let (listener_tx, listener_rx) = channel();
-        spawn_log_listener(brx, listener_tx, log_rx);
-
-        let buffer_nodes = BufferNodes::new(tx.clone(), listener_rx, log_tx);
-        let auto_mount = config_handle!().auto_mount;
-
-        Self {
-            tx,
-            buffer_nodes,
-            open_cids: HashMap::new(),
-            minibuffer_content: MiniBufferContent::Data(Vec::new()),
-            minibuffer_prompt: None,
-            mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
-            control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
-            minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
-            log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
-            mount_path,
-            auto_mount,
-        }
-    }
-
-    /// Spawn a thread for running this filesystem and return a handle to it
-    pub fn run_threaded(self) -> FsHandle {
-        let auto_mount = self.auto_mount;
-        let mount_path = self.mount_path.clone();
-        let socket_path = socket_path(DEFAULT_SOCKET_NAME);
-
-        let s = Server::new(self);
-        let handle = FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()));
-
-        if auto_mount {
-            let res = Command::new("9pfuse")
-                .args([socket_path, mount_path])
-                .spawn();
-
-            if let Ok(mut child) = res {
-                _ = child.wait();
-            }
-        }
-
-        handle
-    }
-
+impl State {
     fn add_open_cid(&mut self, qid: u64, cid: ClientId) {
         self.open_cids.entry(qid).or_default().cids.push(cid);
     }
@@ -346,6 +299,71 @@ impl AdFs {
     }
 }
 
+/// The filesystem interface for ad
+#[derive(Debug)]
+pub(crate) struct AdFs {
+    state: Arc<Mutex<State>>,
+}
+
+impl AdFs {
+    /// Construct a new filesystem interface using channels held by the editor.
+    pub fn new(tx: Sender<Event>, brx: Receiver<LogEvent>) -> Self {
+        let home = env::var("HOME").expect("$HOME to be set");
+        let mount_path = format!("{home}/{MOUNT_DIR}");
+
+        if !Path::new(&mount_path).exists() {
+            create_dir_all(&mount_path).expect("to be able to create our mount point");
+        }
+
+        let (log_tx, log_rx) = channel();
+        let (listener_tx, listener_rx) = channel();
+        spawn_log_listener(brx, listener_tx, log_rx);
+
+        let buffer_nodes = BufferNodes::new(tx.clone(), listener_rx, log_tx);
+        let auto_mount = config_handle!().auto_mount;
+
+        Self {
+            state: Arc::new(Mutex::new(State {
+                tx,
+                buffer_nodes,
+                open_cids: HashMap::new(),
+                minibuffer_content: MiniBufferContent::Data(Vec::new()),
+                minibuffer_prompt: None,
+                mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
+                control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
+                minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
+                log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
+                mount_path,
+                auto_mount,
+            })),
+        }
+    }
+
+    /// Spawn a thread for running this filesystem and return a handle to it
+    pub fn run_threaded(self) -> FsHandle {
+        let s = self.state.lock().unwrap();
+        let auto_mount = s.auto_mount;
+        let mount_path = s.mount_path.clone();
+        let socket_path = socket_path(DEFAULT_SOCKET_NAME);
+        drop(s);
+
+        let s = Server::new(self);
+        let handle = FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()));
+
+        if auto_mount {
+            let res = Command::new("9pfuse")
+                .args([socket_path, mount_path])
+                .spawn();
+
+            if let Ok(mut child) = res {
+                _ = child.wait();
+            }
+        }
+
+        handle
+    }
+}
+
 /// Spawn a listener to wait for a reply from the editor for our minibuffer selection
 fn spawn_minibuffer_listener(
     data_rx: Receiver<String>,
@@ -372,62 +390,59 @@ fn spawn_minibuffer_listener(
 }
 
 impl Serve9p for AdFs {
-    fn stat(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
+    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
         trace!(?cid, %qid, %uname, "handling stat request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         match qid {
-            MOUNT_ROOT_QID => Ok(self.mount_dir_stat.clone()),
-            CONTROL_FILE_QID => Ok(self.control_file_stat.clone()),
-            MINIBUFFER_QID => Ok(self.minibuffer_stat.clone()),
-            LOG_FILE_QID => Ok(self.log_file_stat.clone()),
-            BUFFERS_QID => Ok(self.buffer_nodes.stat().clone()),
-            qid => match self.buffer_nodes.get_stat_for_qid(qid) {
+            MOUNT_ROOT_QID => Ok(s.mount_dir_stat.clone()),
+            CONTROL_FILE_QID => Ok(s.control_file_stat.clone()),
+            MINIBUFFER_QID => Ok(s.minibuffer_stat.clone()),
+            LOG_FILE_QID => Ok(s.log_file_stat.clone()),
+            BUFFERS_QID => Ok(s.buffer_nodes.stat().clone()),
+            qid => match s.buffer_nodes.get_stat_for_qid(qid) {
                 Some(stat) => Ok(stat.clone()),
                 None => Err(E_UNKNOWN_FILE.to_string()),
             },
         }
     }
 
-    fn write_stat(&mut self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+    fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
         trace!(?cid, %qid, %uname, "handling write stat request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         if stat.n_bytes == 0 {
             trace!(%qid, %uname, "stat n_bytes=0, truncating file");
             match qid {
                 MOUNT_ROOT_QID | CONTROL_FILE_QID | MINIBUFFER_QID | LOG_FILE_QID => (),
-                qid => self.buffer_nodes.truncate(qid),
+                qid => s.buffer_nodes.truncate(qid),
             }
         }
 
         Ok(())
     }
 
-    fn walk(
-        &mut self,
-        cid: ClientId,
-        parent_qid: u64,
-        child: &str,
-        uname: &str,
-    ) -> Result<FileMeta> {
+    fn walk(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta> {
         trace!(?cid, %parent_qid, %child, %uname, "handling walk request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         match parent_qid {
             MOUNT_ROOT_QID => match child {
-                CONTROL_FILE => Ok(self.control_file_stat.fm.clone()),
-                MINIBUFFER => Ok(self.minibuffer_stat.fm.clone()),
-                LOG_FILE => Ok(self.log_file_stat.fm.clone()),
-                BUFFERS_DIR => Ok(self.buffer_nodes.stat().fm.clone()),
-                _ => match self.buffer_nodes.lookup_file_stat(parent_qid, child) {
+                CONTROL_FILE => Ok(s.control_file_stat.fm.clone()),
+                MINIBUFFER => Ok(s.minibuffer_stat.fm.clone()),
+                LOG_FILE => Ok(s.log_file_stat.fm.clone()),
+                BUFFERS_DIR => Ok(s.buffer_nodes.stat().fm.clone()),
+                _ => match s.buffer_nodes.lookup_file_stat(parent_qid, child) {
                     Some(stat) => Ok(stat.fm.clone()),
                     None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
                 },
             },
 
-            qid if qid == BUFFERS_QID || self.buffer_nodes.is_known_buffer_qid(qid) => {
-                match self.buffer_nodes.lookup_file_stat(qid, child) {
+            qid if qid == BUFFERS_QID || s.buffer_nodes.is_known_buffer_qid(qid) => {
+                match s.buffer_nodes.lookup_file_stat(qid, child) {
                     Some(stat) => Ok(stat.fm.clone()),
                     None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
                 }
@@ -437,38 +452,40 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn open(&mut self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
         trace!(?cid, %qid, %uname, ?mode, "handling open request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         if qid == LOG_FILE_QID {
-            self.buffer_nodes.log.add_client(cid);
+            s.buffer_nodes.log.add_client(cid);
         } else if !TOP_LEVEL_QIDS.contains(&qid) {
-            if let QidCheck::Unknown = self.buffer_nodes.check_if_known_qid(qid) {
+            if let QidCheck::Unknown = s.buffer_nodes.check_if_known_qid(qid) {
                 return Err(format!("{E_UNKNOWN_FILE}: {qid}"));
             }
         }
 
-        self.add_open_cid(qid, cid);
+        s.add_open_cid(qid, cid);
 
         Ok(IO_UNIT)
     }
 
-    fn clunk(&mut self, cid: ClientId, qid: u64) {
+    fn clunk(&self, cid: ClientId, qid: u64) {
         trace!(?cid, %qid, "handling clunk request");
+        let mut s = self.state.lock().unwrap();
 
         if qid == LOG_FILE_QID {
-            self.buffer_nodes.log.remove_client(cid);
-        } else if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
-            if self.readlocked_cid(qid) == Some(cid) {
-                self.buffer_nodes.clear_input_filter(buf_qid);
+            s.buffer_nodes.log.remove_client(cid);
+        } else if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid) {
+            if s.readlocked_cid(qid) == Some(cid) {
+                s.buffer_nodes.clear_input_filter(buf_qid);
             }
         }
-        self.remove_open_cid(qid, cid); // also handles clearing the read lock
+        s.remove_open_cid(qid, cid); // also handles clearing the read lock
     }
 
     fn read(
-        &mut self,
+        &self,
         cid: ClientId,
         qid: u64,
         offset: usize,
@@ -476,48 +493,50 @@ impl Serve9p for AdFs {
         uname: &str,
     ) -> Result<ReadOutcome> {
         trace!(?cid, %qid, %offset, %count, %uname, "handling read request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         if qid == CONTROL_FILE_QID {
             return Ok(ReadOutcome::Immediate(Vec::new()));
         } else if qid == MINIBUFFER_QID {
-            return Ok(self.minibuffer_read(offset, count));
+            return Ok(s.minibuffer_read(offset, count));
         } else if qid == LOG_FILE_QID {
-            return Ok(self.buffer_nodes.log.events_since_last_read(cid));
+            return Ok(s.buffer_nodes.log.events_since_last_read(cid));
         }
 
-        if let QidCheck::EventFile { buf_qid } = self.buffer_nodes.check_if_known_qid(qid) {
-            match self.readlocked_cid(qid) {
+        if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid) {
+            match s.readlocked_cid(qid) {
                 Some(id) if id == cid => (),
                 Some(_) => return Ok(ReadOutcome::Immediate(Vec::new())),
                 None => {
                     trace!("attaching filter qid={qid} cid={cid:?}");
-                    self.buffer_nodes.attach_input_filter(buf_qid)?;
-                    self.lock_qid_for_reading(qid, cid)?;
+                    s.buffer_nodes.attach_input_filter(buf_qid)?;
+                    s.lock_qid_for_reading(qid, cid)?;
                 }
             }
         }
 
-        match self.buffer_nodes.get_file_content(qid, offset, count) {
+        match s.buffer_nodes.get_file_content(qid, offset, count) {
             InternalRead::Unknown => Err(format!("{E_UNKNOWN_FILE}: {qid}")),
             InternalRead::Immediate(content) => Ok(ReadOutcome::Immediate(content)),
             InternalRead::Blocked(tx) => Ok(ReadOutcome::Blocked(tx)),
         }
     }
 
-    fn read_dir(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
         trace!(?cid, %qid, %uname, "handling read dir request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         match qid {
             MOUNT_ROOT_QID => Ok(vec![
-                self.log_file_stat.clone(),
-                self.minibuffer_stat.clone(),
-                self.control_file_stat.clone(),
-                self.buffer_nodes.stat().clone(),
+                s.log_file_stat.clone(),
+                s.minibuffer_stat.clone(),
+                s.control_file_stat.clone(),
+                s.buffer_nodes.stat().clone(),
             ]),
-            BUFFERS_QID => Ok(self.buffer_nodes.top_level_stats()),
-            qid => self
+            BUFFERS_QID => Ok(s.buffer_nodes.top_level_stats()),
+            qid => s
                 .buffer_nodes
                 .buffer_level_stats(qid)
                 .ok_or_else(|| E_UNKNOWN_FILE.to_string()),
@@ -525,7 +544,7 @@ impl Serve9p for AdFs {
     }
 
     fn write(
-        &mut self,
+        &self,
         cid: ClientId,
         qid: u64,
         offset: usize,
@@ -533,46 +552,47 @@ impl Serve9p for AdFs {
         uname: &str,
     ) -> Result<usize> {
         trace!(?cid, %qid, %offset, n_bytes=%data.len(), %uname, "handling write request");
-        self.buffer_nodes.update();
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
 
         let n_bytes = data.len();
-        let s = match String::from_utf8(data.to_vec()) {
+        let str = match String::from_utf8(data.to_vec()) {
             Ok(s) => s,
             Err(e) => return Err(format!("Invalid data: {e}")),
         };
 
         match qid {
-            CONTROL_FILE_QID => match s.strip_prefix("minibuffer-prompt ") {
+            CONTROL_FILE_QID => match str.strip_prefix("minibuffer-prompt ") {
                 Some(prompt) => {
-                    self.minibuffer_prompt = Some(prompt.to_string());
+                    s.minibuffer_prompt = Some(prompt.to_string());
                     Ok(n_bytes)
                 }
                 None => {
-                    self.control_file_stat.last_modified = SystemTime::now();
-                    match Message::send(Req::ControlMessage { msg: s }, &self.tx) {
+                    s.control_file_stat.last_modified = SystemTime::now();
+                    match Message::send(Req::ControlMessage { msg: str }, &s.tx) {
                         Ok(_) => Ok(n_bytes),
                         Err(e) => Err(format!("unable to execute control message: {e}")),
                     }
                 }
             },
 
-            MINIBUFFER_QID => self.minibuffer_write(s),
-            CURRENT_BUFFER_QID => self.set_active_buffer(s),
+            MINIBUFFER_QID => s.minibuffer_write(str),
+            CURRENT_BUFFER_QID => s.set_active_buffer(str),
 
             LOG_FILE_QID | INDEX_BUFFER_QID => Err(E_NOT_ALLOWED.to_string()),
 
-            qid => self.buffer_nodes.write(qid, s, offset),
+            qid => s.buffer_nodes.write(qid, str, offset),
         }
     }
 
     // TODO: allow remove of a buffer to close the buffer
-    fn remove(&mut self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
+    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
         trace!(?cid, %qid, %uname, "handling remove request");
         Err("remove not allowed".to_string())
     }
 
     fn create(
-        &mut self,
+        &self,
         cid: ClientId,
         parent: u64,
         name: &str,

@@ -24,16 +24,17 @@
 //! ```
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    sync::server::{ClientId, ReadOutcome, Serve9p, Server},
+    tokio::server::{AsyncServe9p, ClientId, ReadOutcome, Server},
     Result,
 };
 use std::{
-    sync::{mpsc::channel, Arc, RwLock},
-    thread::{sleep, spawn},
+    sync::{Arc, RwLock},
     time::{Duration, SystemTime},
 };
+use tokio::{spawn, sync::mpsc::channel, time::sleep};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let s = Server::new(EchoServer {
         state: Arc::new(RwLock::new(State {
             rw: "initial".to_string(),
@@ -42,7 +43,7 @@ fn main() {
         })),
     });
     println!("starting server");
-    _ = s.serve_socket("ninep-server").join();
+    _ = s.serve_socket_async("ninep-server").await;
 }
 
 struct State {
@@ -62,8 +63,9 @@ const BAZ: u64 = 3;
 const RW: u64 = 4;
 const BLOCKING: u64 = 5;
 
-impl Serve9p for EchoServer {
-    fn write(
+#[async_trait::async_trait]
+impl AsyncServe9p for EchoServer {
+    async fn write(
         &self,
         _cid: ClientId,
         qid: u64,
@@ -84,7 +86,7 @@ impl Serve9p for EchoServer {
     }
 
     #[allow(unused_variables)]
-    fn create(
+    async fn create(
         &self,
         cid: ClientId,
         parent: u64,
@@ -97,16 +99,22 @@ impl Serve9p for EchoServer {
     }
 
     #[allow(unused_variables)]
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
+    async fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
         Err("remove not supported".to_string())
     }
 
     #[allow(unused_variables)]
-    fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+    async fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
         Err("write_stat not supported".to_string())
     }
 
-    fn walk(&self, _cid: ClientId, parent_qid: u64, child: &str, _uname: &str) -> Result<FileMeta> {
+    async fn walk(
+        &self,
+        _cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        _uname: &str,
+    ) -> Result<FileMeta> {
         println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
             (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),
@@ -118,7 +126,7 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn stat(&self, _cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
+    async fn stat(&self, _cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
         println!("handling stat request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(Stat {
@@ -191,7 +199,7 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn open(&self, _cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+    async fn open(&self, _cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
         println!("handling open request: qid={qid} mode={mode:?} uname={uname}");
         match (qid, mode) {
             (FOO | BAZ | RW | BLOCKING, Mode::FILE) => Ok(8168),
@@ -201,7 +209,7 @@ impl Serve9p for EchoServer {
         }
     }
 
-    fn read(
+    async fn read(
         &self,
         _cid: ClientId,
         qid: u64,
@@ -226,16 +234,16 @@ impl Serve9p for EchoServer {
             BAZ => chunk("contents of baz\n"),
             RW => chunk(&format!("server state is currently: '{}'", s.rw)),
             BLOCKING => {
-                let (tx, rx) = channel();
+                let (tx, rx) = channel(1);
                 let data = chunk(&s.blocking);
                 s.n += 1;
                 let n_str = s.n.to_string();
                 s.blocking.push_str(&n_str);
                 s.blocking.push('\n');
 
-                spawn(move || {
-                    sleep(Duration::from_secs(1));
-                    _ = tx.send(data);
+                spawn(async move {
+                    sleep(Duration::from_secs(1)).await;
+                    _ = tx.send(data).await;
                 });
 
                 return Ok(ReadOutcome::Blocked(rx));
@@ -247,7 +255,7 @@ impl Serve9p for EchoServer {
         Ok(ReadOutcome::Immediate(data))
     }
 
-    fn read_dir(&self, _cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+    async fn read_dir(&self, _cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
         println!("handling read_dir request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(vec![

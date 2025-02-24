@@ -7,7 +7,7 @@ fn main() -> io::Result<()> {
     tree(&mut client, "", 0)?;
 
     for line in client.iter_lines("blocking")? {
-        print!("{line}");
+        println!("{line}");
     }
 
     Ok(())

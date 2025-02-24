@@ -17,12 +17,3 @@ impl From<(u16, Result<Rdata>)> for Rmessage {
         }
     }
 }
-
-// TODO: pull up as much as possible into this trait
-
-/// An underlying stream over which we can handle 9p connections
-pub trait Stream: Send + Sized + 'static {
-    /// The underlying try_clone implementations for file descriptors can fail at the libc level so
-    /// we need to account for that here.
-    fn try_clone(&self) -> Result<Self>;
-}

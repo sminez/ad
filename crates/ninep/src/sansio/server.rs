@@ -1,17 +1,14 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     fs::{FileMeta, FileType, QID_ROOT},
-    sansio::{
-        protocol::{Qid, Rdata, MAX_DATA_LEN},
-        Stream,
-    },
+    sansio::protocol::{Qid, Rdata, MAX_DATA_LEN},
     Result,
 };
 use std::{
     cmp::min,
     collections::btree_map::BTreeMap,
     env,
-    sync::{mpsc::Receiver, Arc, Mutex, RwLock},
+    sync::{mpsc::Receiver, Arc},
 };
 
 /// Marker afid to denode that auth is not required for establishing connections
@@ -63,15 +60,21 @@ pub enum ReadOutcome {
 /// A 9p server wrapping an `S` that must implement an IO specific handler trait to provide the
 /// actual filesystem implementation.
 #[derive(Debug)]
-pub struct Server<S> {
-    pub(crate) s: Arc<Mutex<S>>,
+pub struct Server<S>
+where
+    S: Send,
+{
+    pub(crate) s: Arc<S>,
     pub(crate) msize: u32,
     pub(crate) roots: BTreeMap<String, u64>,
-    pub(crate) qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+    pub(crate) qids: BTreeMap<u64, FileMeta>,
     pub(crate) next_client_id: u64,
 }
 
-impl<S> Server<S> {
+impl<S> Server<S>
+where
+    S: Send,
+{
     /// Create a new file server with a single anonymous root (name will be "") and
     /// qid of [QID_ROOT].
     pub fn new(s: S) -> Self {
@@ -86,19 +89,16 @@ impl<S> Server<S> {
             .collect();
 
         Self {
-            s: Arc::new(Mutex::new(s)),
+            s: Arc::new(s),
             msize: MAX_DATA_LEN as u32,
             roots,
-            qids: Arc::new(RwLock::new(qids)),
+            qids,
             next_client_id: 0,
         }
     }
 
     /// Construct a new unattached [Session] over the provided [Stream]
-    pub(crate) fn new_session<U>(&mut self, stream: U) -> Session<Unattached, S, U>
-    where
-        U: Stream,
-    {
+    pub(crate) fn new_session<U>(&mut self, stream: U) -> Session<Unattached, S, U> {
         let session = Session::new_unattached(
             ClientId(self.next_client_id),
             self.msize,
@@ -144,24 +144,24 @@ impl Attached {
 pub(crate) struct Session<T, S, U>
 where
     T: SessionType,
-    U: Stream,
+    S: Send,
 {
     pub(crate) client_id: ClientId,
     pub(crate) state: T,
     pub(crate) msize: u32,
     pub(crate) roots: BTreeMap<String, u64>,
-    pub(crate) s: Arc<Mutex<S>>,
-    pub(crate) qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+    pub(crate) s: Arc<S>,
+    pub(crate) qids: BTreeMap<u64, FileMeta>,
     pub(crate) stream: U,
 }
 
 impl<T, S, U> Session<T, S, U>
 where
     T: SessionType,
-    U: Stream,
+    S: Send,
 {
     pub(crate) fn qid(&self, qid: u64) -> Option<Qid> {
-        self.qids.read().unwrap().get(&qid).map(|fm| fm.as_qid())
+        self.qids.get(&qid).map(|fm| fm.as_qid())
     }
 
     /// The version request negotiates the protocol version and message size to be used on the
@@ -228,14 +228,14 @@ where
 
 impl<S, U> Session<Unattached, S, U>
 where
-    U: Stream,
+    S: Send,
 {
     fn new_unattached(
         client_id: ClientId,
         msize: u32,
         roots: BTreeMap<String, u64>,
-        s: Arc<Mutex<S>>,
-        qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+        s: Arc<S>,
+        qids: BTreeMap<u64, FileMeta>,
         stream: U,
     ) -> Self {
         Self {
@@ -303,15 +303,15 @@ pub(crate) enum Either<L, R> {
 
 impl<S, U> Session<Attached, S, U>
 where
-    U: Stream,
+    S: Send,
 {
     fn new_attached(
         client_id: ClientId,
         state: Attached,
         msize: u32,
         roots: BTreeMap<String, u64>,
-        s: Arc<Mutex<S>>,
-        qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+        s: Arc<S>,
+        qids: BTreeMap<u64, FileMeta>,
         stream: U,
     ) -> Self {
         Self {
@@ -327,7 +327,7 @@ where
 
     pub(crate) fn try_file_meta(&self, fid: u32) -> Result<FileMeta> {
         let opt = match self.state.fids.get(&fid) {
-            Some(&qid) => self.qids.read().unwrap().get(&qid).cloned(),
+            Some(&qid) => self.qids.get(&qid).cloned(),
             None => None,
         };
 

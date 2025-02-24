@@ -1,31 +1,32 @@
-//! A synchronous implementation of 9p Servers and Clients
+//! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
     sansio::protocol::{NineP, NinepReader, Rdata, Read9p, Rmessage},
     Result,
 };
-use std::{
-    io::{self, Read, Write},
-    net::TcpStream,
-    os::unix::net::UnixStream,
+use std::{io, marker::Unpin};
+use tokio::{
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpStream, UnixStream},
 };
 
 pub mod client;
 pub mod server;
 
 /// Synchronous IO support for reading and writing 9p messages
-pub trait SyncNineP: NineP {
+#[async_trait::async_trait]
+pub trait AsyncNineP: NineP {
     /// Encode self as bytes for the 9p protocol and write to the given [SyncStream].
-    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    async fn write_to<W: AsyncWrite + Unpin + Send>(&self, w: &mut W) -> io::Result<()> {
         let mut buf = vec![0; self.n_bytes()];
         self.write_bytes(&mut buf)
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
 
-        w.write_all(&buf)
+        w.write_all(&buf).await
     }
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
     #[allow(clippy::uninit_vec)]
-    fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
+    async fn read_from<R: AsyncRead + Unpin + Send>(r: &mut R) -> io::Result<Self> {
         let mut nr = NinepReader::Pending(Self::reader());
         let mut buf = Vec::new();
 
@@ -36,7 +37,7 @@ pub trait SyncNineP: NineP {
                     buf.reserve(n.saturating_sub(buf.len()));
                     // SAFETY: we've just reserved sufficient capacity
                     unsafe { buf.set_len(n) };
-                    r.read_exact(&mut buf)?;
+                    r.read_exact(&mut buf).await?;
                     nr = r9.accept_bytes(&buf[0..n])?;
                 }
 
@@ -46,29 +47,18 @@ pub trait SyncNineP: NineP {
     }
 }
 
-impl<T> SyncNineP for T where T: NineP {}
+impl<T> AsyncNineP for T where T: NineP {}
 
 /// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
-pub trait SyncStream: Read + Write + Send + Sized + 'static {
-    /// Clone this stream, accounting for operating system errors
-    fn try_clone(&self) -> Result<Self>;
-
+#[allow(async_fn_in_trait)]
+pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + Sized + 'static {
     /// Reply to the specified tag with a given Result. Err's will be converted to 9p error
     /// messages automatically.
-    fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
+    async fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
         let r: Rmessage = (tag, resp).into();
-        let _ = r.write_to(self);
+        let _ = r.write_to(self).await;
     }
 }
 
-impl SyncStream for UnixStream {
-    fn try_clone(&self) -> Result<Self> {
-        self.try_clone().map_err(|e| e.to_string())
-    }
-}
-
-impl SyncStream for TcpStream {
-    fn try_clone(&self) -> Result<Self> {
-        self.try_clone().map_err(|e| e.to_string())
-    }
-}
+impl AsyncStream for UnixStream {}
+impl AsyncStream for TcpStream {}
