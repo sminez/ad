@@ -74,12 +74,14 @@ where
         let poll = fut.as_mut().poll(&mut Context::from_waker(&waker));
         match poll {
             Poll::Ready(val) => return val,
-            Poll::Pending => {
-                let n = s.inner.lock().unwrap().n;
+            // SAFETY: the only other reference to the shared state is in the future we are
+            // polling so mutating its inner state is safe
+            Poll::Pending => unsafe {
+                let n = s.requested_bytes();
                 let mut buf = vec![0; n];
                 r.read_exact(&mut buf).await?;
-                s.inner.lock().unwrap().buf = Some(buf);
-            }
+                s.set_bytes(buf);
+            },
         }
     }
 }

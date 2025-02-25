@@ -41,13 +41,14 @@ pub trait SyncNineP: NineP {
         loop {
             match fut.as_mut().poll(&mut ctx) {
                 Poll::Ready(val) => return val,
-                Poll::Pending => {
-                    let mut guard = s.inner.lock().unwrap();
-                    let n = guard.n;
+                // SAFETY: the only other reference to the shared state is in the future we are
+                // polling so mutating its inner state is safe
+                Poll::Pending => unsafe {
+                    let n = s.requested_bytes();
                     let mut buf = vec![0; n];
                     r.read_exact(&mut buf)?;
-                    guard.buf = Some(buf);
-                }
+                    s.set_bytes(buf);
+                },
             }
         }
     }

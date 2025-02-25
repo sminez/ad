@@ -86,16 +86,10 @@ impl Future for RequestBytes {
         if self.polled {
             // SAFETY: we can only poll this future using a waker wrapping State
             let data = unsafe {
-                let state = (ctx.waker().data() as *mut () as *mut State)
+                (ctx.waker().data() as *mut () as *mut State)
                     .as_mut()
-                    .unwrap_unchecked();
-                state
-                    .inner
-                    .lock()
                     .unwrap_unchecked()
-                    .buf
-                    .take()
-                    .unwrap_unchecked()
+                    .take_bytes()
             };
 
             Poll::Ready(data)
@@ -106,10 +100,7 @@ impl Future for RequestBytes {
                 (ctx.waker().data() as *mut () as *mut State)
                     .as_mut()
                     .unwrap_unchecked()
-                    .inner
-                    .lock()
-                    .unwrap_unchecked()
-                    .n = self.n;
+                    .set_requested(self.n);
             };
 
             Poll::Pending
