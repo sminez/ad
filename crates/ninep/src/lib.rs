@@ -14,6 +14,8 @@
 pub mod fs;
 pub mod sansio;
 pub mod sync;
+
+#[cfg(feature = "tokio")]
 pub mod tokio;
 
 /// A simple result type for errors returned from this crate

@@ -1,12 +1,18 @@
 //! A synchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::protocol::{NineP, NinepReader, Rdata, Read9p, Rmessage},
+    sansio::{
+        protocol::{NineP, Rdata, Rmessage, State},
+        stub_waker,
+    },
     Result,
 };
 use std::{
+    future::Future,
     io::{self, Read, Write},
     net::TcpStream,
     os::unix::net::UnixStream,
+    pin::pin,
+    task::{Context, Poll},
 };
 
 pub mod client;
@@ -24,23 +30,23 @@ pub trait SyncNineP: NineP {
     }
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
-    #[allow(clippy::uninit_vec)]
     fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let mut nr = NinepReader::Pending(Self::reader());
-        let mut buf = Vec::new();
+        let waker = stub_waker();
+        let mut context = Context::from_waker(&waker);
+        let s = State::default();
 
+        // SAFETY: assumes the impl of Read9p is a valid future for us to poll
+        let mut fut = unsafe { pin!(Self::read(&s)) };
         loop {
-            match nr {
-                NinepReader::Pending(r9) => {
-                    let n = Self::Reader::needs_bytes(&r9);
-                    buf.reserve(n.saturating_sub(buf.len()));
-                    // SAFETY: we've just reserved sufficient capacity
-                    unsafe { buf.set_len(n) };
+            match fut.as_mut().poll(&mut context) {
+                Poll::Ready(val) => return val,
+                // SAFETY: s is only shared with the future we're polling
+                Poll::Pending => unsafe {
+                    let n = (*s.0.get()).n;
+                    let mut buf = vec![0; n];
                     r.read_exact(&mut buf)?;
-                    nr = r9.accept_bytes(&buf[0..n])?;
-                }
-
-                NinepReader::Complete(t) => return Ok(t),
+                    (*s.0.get()).buf = Some(buf);
+                },
             }
         }
     }

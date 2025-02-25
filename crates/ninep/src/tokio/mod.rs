@@ -1,9 +1,18 @@
 //! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::protocol::{NineP, NinepReader, Rdata, Read9p, Rmessage},
+    sansio::{
+        protocol::{NineP, Rdata, Rmessage, State},
+        stub_waker,
+    },
     Result,
 };
-use std::{io, marker::Unpin};
+use std::{
+    future::Future,
+    io,
+    marker::Unpin,
+    pin::pin,
+    task::{Context, Poll},
+};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpStream, UnixStream},
@@ -12,42 +21,68 @@ use tokio::{
 pub mod client;
 pub mod server;
 
-/// Synchronous IO support for reading and writing 9p messages
-#[async_trait::async_trait]
-pub trait AsyncNineP: NineP {
+/// Asynchronous IO support for reading and writing 9p messages
+pub trait AsyncNineP: NineP + Send + Sync {
     /// Encode self as bytes for the 9p protocol and write to the given [SyncStream].
-    async fn write_to<W: AsyncWrite + Unpin + Send>(&self, w: &mut W) -> io::Result<()> {
-        let mut buf = vec![0; self.n_bytes()];
-        self.write_bytes(&mut buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
-
-        w.write_all(&buf).await
+    fn write_to<W>(&self, w: &mut W) -> impl Future<Output = io::Result<()>> + Send
+    where
+        W: AsyncWrite + Unpin + Send,
+    {
+        write_to(self, w)
     }
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
-    #[allow(clippy::uninit_vec)]
-    async fn read_from<R: AsyncRead + Unpin + Send>(r: &mut R) -> io::Result<Self> {
-        let mut nr = NinepReader::Pending(Self::reader());
-        let mut buf = Vec::new();
-
-        loop {
-            match nr {
-                NinepReader::Pending(r9) => {
-                    let n = Self::Reader::needs_bytes(&r9);
-                    buf.reserve(n.saturating_sub(buf.len()));
-                    // SAFETY: we've just reserved sufficient capacity
-                    unsafe { buf.set_len(n) };
-                    r.read_exact(&mut buf).await?;
-                    nr = r9.accept_bytes(&buf[0..n])?;
-                }
-
-                NinepReader::Complete(t) => return Ok(t),
-            }
-        }
+    fn read_from<R>(r: &mut R) -> impl Future<Output = io::Result<Self>> + Send
+    where
+        R: AsyncRead + Unpin + Send,
+    {
+        read_from(r)
     }
 }
 
-impl<T> AsyncNineP for T where T: NineP {}
+impl<T> AsyncNineP for T where T: NineP + Send + Sync {}
+
+// write_to and read_from are written as free functions so we can use async/await here while also
+// explicitly requiring a Send bound on the methods of the AsyncNineP trait above.
+
+#[inline(always)]
+async fn write_to<T, W>(t: &T, w: &mut W) -> io::Result<()>
+where
+    T: NineP + Sync,
+    W: AsyncWrite + Unpin + Send,
+{
+    let mut buf = vec![0; t.n_bytes()];
+    t.write_bytes(&mut buf)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+
+    w.write_all(&buf).await
+}
+
+#[inline(always)]
+async fn read_from<T, R>(r: &mut R) -> io::Result<T>
+where
+    T: NineP + Send,
+    R: AsyncRead + Unpin + Send,
+{
+    let waker = stub_waker();
+    let s = State::default();
+
+    // SAFETY: assumes the impl of Read9p is a valid future for us to poll
+    let mut fut = unsafe { pin!(T::read(&s)) };
+    loop {
+        let poll = fut.as_mut().poll(&mut Context::from_waker(&waker));
+        match poll {
+            Poll::Ready(val) => return val,
+            // SAFETY: s is only shared with the future we're polling
+            Poll::Pending => unsafe {
+                let n = (*s.0.get()).n;
+                let mut buf = vec![0; n];
+                r.read_exact(&mut buf).await?;
+                (*s.0.get()).buf = Some(buf);
+            },
+        }
+    }
+}
 
 /// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
 #[allow(async_fn_in_trait)]

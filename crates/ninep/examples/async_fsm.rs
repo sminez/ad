@@ -1,11 +1,10 @@
 //! This is a little exploration of using async/await + a dummy Waker to simplify writing sans-io
 //! state machine code.
 use std::{
-    cell::RefCell,
+    cell::UnsafeCell,
     future::{Future, IntoFuture},
     io::{Cursor, Read},
     pin::{pin, Pin},
-    rc::Rc,
     sync::Arc,
     task::{Context, Poll, Wake, Waker},
 };
@@ -24,17 +23,17 @@ async fn main() {
     ]);
 
     println!(">> reading using std::io::Read");
-    let s: String = read_9p_sync_from_bytes(&mut cur);
+    let s: String = read_9p_sync(&mut cur);
     println!("  got val: {s:?}\n");
 
     cur.set_position(0);
 
     println!(">> reading using tokio::io::AsyncRead");
-    let s: String = read_9p_async_from_bytes(&mut cur).await;
+    let s: String = read_9p_async(&mut cur).await;
     println!("  got val: {s:?}");
 }
 
-fn read_9p_sync_from_bytes<T, R>(r: &mut R) -> T
+fn read_9p_sync<T, R>(r: &mut R) -> T
 where
     T: Read9p,
     R: Read,
@@ -48,18 +47,18 @@ where
     loop {
         match fut.as_mut().poll(&mut context) {
             Poll::Ready(val) => return val,
-            Poll::Pending => {
-                let n = s.0.borrow().n;
+            Poll::Pending => unsafe {
+                let n = (*s.0.get()).n;
                 println!("{n} bytes requested");
                 let mut buf = vec![0; n];
                 r.read_exact(&mut buf).unwrap();
-                s.0.borrow_mut().buf = Some(buf);
-            }
+                (*s.0.get()).buf = Some(buf);
+            },
         }
     }
 }
 
-async fn read_9p_async_from_bytes<T, R>(r: &mut R) -> T
+async fn read_9p_async<T, R>(r: &mut R) -> T
 where
     T: Read9p,
     R: AsyncRead + Unpin,
@@ -73,13 +72,13 @@ where
     loop {
         match fut.as_mut().poll(&mut context) {
             Poll::Ready(val) => return val,
-            Poll::Pending => {
-                let n = s.0.borrow().n;
+            Poll::Pending => unsafe {
+                let n = (*s.0.get()).n;
                 println!("{n} bytes requested");
                 let mut buf = vec![0; n];
                 r.read_exact(&mut buf).await.unwrap();
-                s.0.borrow_mut().buf = Some(buf);
-            }
+                (*s.0.get()).buf = Some(buf);
+            },
         }
     }
 }
@@ -106,8 +105,14 @@ impl Future for Yield {
     }
 }
 
+/// Shared state between a [NineP] impl and a parent read loop that is performing IO.
 #[derive(Default, Debug, Clone)]
-struct State(Rc<RefCell<StateInner>>);
+pub struct State(pub(crate) Arc<UnsafeCell<StateInner>>);
+
+// SAFETY: StateInner is only accessable in this crate
+unsafe impl Send for State {}
+// SAFETY: StateInner is only accessable in this crate
+unsafe impl Sync for State {}
 
 #[derive(Default, Debug)]
 struct StateInner {
@@ -119,20 +124,19 @@ struct StateInner {
 /// so it can perform IO and provide the requested data.
 macro_rules! request_bytes {
     ($s:expr, $n:expr) => {{
-        $s.0.borrow_mut().n = $n;
+        (*$s.0.get()).n = $n;
         Yield(false).await;
-        $s.0.borrow_mut().buf.take().unwrap()
+        (*$s.0.get()).buf.take().unwrap()
     }};
 }
 
 /// # Safety
 /// The read method of this trait requires that you only yield view the [request_bytes] macro.
-#[allow(async_fn_in_trait)]
 unsafe trait Read9p {
     /// # Safety
     /// Implementations of `read` need to ensure that the only await points they contain are
     /// from calls to the [request_bytes] macro.
-    async unsafe fn read(state: State) -> Self;
+    unsafe fn read(state: State) -> impl Future<Output = Self> + Send;
 }
 
 #[allow(async_fn_in_trait)]

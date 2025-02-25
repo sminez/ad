@@ -38,7 +38,7 @@ harness = false
 
 [dependencies]
 ad_event = { version = "0.3", path = "crates/ad_event" }
-ninep = { version = "0.3", path = "crates/ninep" }
+ninep = { version = "0.4", path = "crates/ninep" }
 libc = "0.2.159"
 lsp-types = "0.97.0"
 serde = "1.0.215"

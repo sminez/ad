@@ -27,7 +27,7 @@ dependencies = [
 
 [[package]]
 name = "ad_client"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ad_event",
  "ninep",
@@ -85,17 +85,6 @@ name = "anstyle"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55cc3b69f167a1ef2e161439aa98aed94e6028e5f9a59be9a6ffb47aef1651f9"
-
-[[package]]
-name = "async-trait"
-version = "0.1.86"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "644dd749086bf3771a2fbc5f256fdb982d53f011c7d5d560304eafeecebce79d"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
 
 [[package]]
 name = "autocfg"
@@ -455,9 +444,8 @@ dependencies = [
 
 [[package]]
 name = "ninep"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
- "async-trait",
  "bitflags 2.8.0",
  "simple_test_case",
  "tokio",

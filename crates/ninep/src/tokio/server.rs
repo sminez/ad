@@ -14,7 +14,7 @@ use crate::{
     tokio::{AsyncNineP, AsyncStream},
     Result,
 };
-use std::{collections::btree_map::Entry, fs, mem::size_of};
+use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of};
 use tokio::{
     net::{TcpListener, UnixListener},
     sync::mpsc::{unbounded_channel, Receiver, UnboundedSender},
@@ -83,11 +83,10 @@ async fn tcp_socket(port: u16) -> TcpListener {
 /// as such, [Serve9p] only needs to worry about maintaining `qids` for resources.
 ///
 /// The source code of [Server] is a useful reference for those wanting to learn more.
-#[async_trait::async_trait]
 pub trait AsyncServe9p: Send + Sync + 'static {
     // #[allow(unused_variables)]
-    // async fn auth(&self, afid: u32, uname: &str, aname: &str) -> Result<Qid> {
-    //     Err("authentication not required".to_string())
+    // fn auth(&self, afid: u32, uname: &str, aname: &str) -> impl Future<Output=Result<Qid>> + Send {
+    //     async { Err("authentication not required".to_string()) }
     // }
 
     /// Lookup a child node under a known parent directory by name.
@@ -98,27 +97,35 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     ///
     /// [Server] will ensure that this method is only called for known parents who have previously
     /// been identified has having [FileType::Directory].
-    async fn walk(
+    fn walk(
         &self,
         cid: ClientId,
         parent_qid: u64,
         child: &str,
         uname: &str,
-    ) -> Result<FileMeta>;
+    ) -> impl Future<Output = Result<FileMeta>> + Send;
 
     /// Open an existing file in the requested mode for subsequent I/O via [read](Serve9p::read) and
     /// [write](Serve9p::write) calls.
     ///
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
     /// bytes that will be supported per read/write call on this resource.
-    async fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
+    fn open(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        mode: Mode,
+        uname: &str,
+    ) -> impl Future<Output = Result<IoUnit>> + Send;
 
     /// Clunk a currently open file.
     #[allow(unused_variables)]
-    async fn clunk(&self, cid: ClientId, qid: u64) {}
+    fn clunk(&self, cid: ClientId, qid: u64) -> impl Future<Output = ()> + Send {
+        async {}
+    }
 
     /// Create a new file in the given parent directory.
-    async fn create(
+    fn create(
         &self,
         cid: ClientId,
         parent: u64,
@@ -126,39 +133,60 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         perm: Perm,
         mode: Mode,
         uname: &str,
-    ) -> Result<(FileMeta, IoUnit)>;
+    ) -> impl Future<Output = Result<(FileMeta, IoUnit)>> + Send;
 
     /// Read `count` bytes from the requested file starting from the given `offset`.
-    async fn read(
+    fn read(
         &self,
         cid: ClientId,
         qid: u64,
         offset: usize,
         count: usize,
         uname: &str,
-    ) -> Result<ReadOutcome>;
+    ) -> impl Future<Output = Result<ReadOutcome>> + Send;
 
     /// List the contents of the given directory.
-    async fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>>;
+    fn read_dir(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        uname: &str,
+    ) -> impl Future<Output = Result<Vec<Stat>>> + Send;
 
     /// Write the given `data` to the requested file starting at `offset`
-    async fn write(
+    fn write(
         &self,
         cid: ClientId,
         qid: u64,
         offset: usize,
         data: Vec<u8>,
         uname: &str,
-    ) -> Result<usize>;
+    ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Remove the requested file from the filesystem.
-    async fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()>;
+    fn remove(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        uname: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
 
     /// Request a machine independent "directory entry" for the given resource.
-    async fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat>;
+    fn stat(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        uname: &str,
+    ) -> impl Future<Output = Result<Stat>> + Send;
 
     /// Attempt to set the machine independent "directory entry" for the given resource.
-    async fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()>;
+    fn write_stat(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        stat: Stat,
+        uname: &str,
+    ) -> impl Future<Output = Result<()>> + Send;
 }
 
 impl<S> Server<S>

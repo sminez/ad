@@ -63,7 +63,6 @@ const BAZ: u64 = 3;
 const RW: u64 = 4;
 const BLOCKING: u64 = 5;
 
-#[async_trait::async_trait]
 impl AsyncServe9p for EchoServer {
     async fn write(
         &self,
