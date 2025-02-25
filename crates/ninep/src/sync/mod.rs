@@ -1,8 +1,8 @@
 //! A synchronous implementation of 9p Servers and Clients
 use crate::{
     sansio::{
-        protocol::{NineP, Rdata, Rmessage, State},
-        stub_waker,
+        protocol::{NineP, Rdata, Rmessage},
+        State,
     },
     Result,
 };
@@ -12,7 +12,8 @@ use std::{
     net::TcpStream,
     os::unix::net::UnixStream,
     pin::pin,
-    task::{Context, Poll},
+    sync::Arc,
+    task::{Context, Poll, Waker},
 };
 
 pub mod client;
@@ -31,22 +32,22 @@ pub trait SyncNineP: NineP {
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
     fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let waker = stub_waker();
-        let mut context = Context::from_waker(&waker);
-        let s = State::default();
+        let s = Arc::new(State::default());
+        let waker = Waker::from(s.clone());
+        let mut ctx = Context::from_waker(&waker);
 
         // SAFETY: assumes the impl of Read9p is a valid future for us to poll
-        let mut fut = unsafe { pin!(Self::read(&s)) };
+        let mut fut = unsafe { pin!(Self::read()) };
         loop {
-            match fut.as_mut().poll(&mut context) {
+            match fut.as_mut().poll(&mut ctx) {
                 Poll::Ready(val) => return val,
-                // SAFETY: s is only shared with the future we're polling
-                Poll::Pending => unsafe {
-                    let n = (*s.0.get()).n;
+                Poll::Pending => {
+                    let mut guard = s.inner.lock().unwrap();
+                    let n = guard.n;
                     let mut buf = vec![0; n];
                     r.read_exact(&mut buf)?;
-                    (*s.0.get()).buf = Some(buf);
-                },
+                    guard.buf = Some(buf);
+                }
             }
         }
     }

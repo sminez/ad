@@ -1,15 +1,13 @@
 //! Sans-io 9p protocol implementation
 //!
 //!   http://man.cat-v.org/plan_9/5/
-use crate::sync::SyncNineP;
+use crate::{sansio::State, sync::SyncNineP};
 use std::{
-    cell::UnsafeCell,
     fmt,
     future::Future,
     io::{self, Cursor, ErrorKind},
     mem::size_of,
     pin::Pin,
-    sync::Arc,
     task::{Context, Poll},
 };
 
@@ -72,46 +70,62 @@ pub trait NineP: Sized {
     /// # Safety
     /// Implementations of `read` need to ensure that the only await points they contain are
     /// from calls to the [request_bytes] macro.
-    unsafe fn read(state: &State) -> impl Future<Output = io::Result<Self>> + Send;
+    unsafe fn read() -> impl Future<Output = io::Result<Self>> + Send;
 }
 
 /// Helper struct for awaiting a Future that returns pending once so we can return control to the
 /// poll loop and perform IO.
-struct Yield(bool);
-impl Future for Yield {
-    type Output = ();
-    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
-        if self.0 {
-            Poll::Ready(())
+struct RequestBytes {
+    polled: bool,
+    n: usize,
+}
+
+impl Future for RequestBytes {
+    type Output = Vec<u8>;
+    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Vec<u8>> {
+        if self.polled {
+            // SAFETY: we can only poll this future using a waker wrapping State
+            let data = unsafe {
+                let state = (ctx.waker().data() as *mut () as *mut State)
+                    .as_mut()
+                    .unwrap_unchecked();
+                state
+                    .inner
+                    .lock()
+                    .unwrap_unchecked()
+                    .buf
+                    .take()
+                    .unwrap_unchecked()
+            };
+
+            Poll::Ready(data)
         } else {
-            self.0 = true;
+            self.polled = true;
+            // SAFETY: we can only poll this future using a waker wrapping State
+            unsafe {
+                (ctx.waker().data() as *mut () as *mut State)
+                    .as_mut()
+                    .unwrap_unchecked()
+                    .inner
+                    .lock()
+                    .unwrap_unchecked()
+                    .n = self.n;
+            };
+
             Poll::Pending
         }
     }
 }
 
-/// Shared state between a [NineP] impl and a parent read loop that is performing IO.
-#[derive(Default, Debug, Clone)]
-pub struct State(pub(crate) Arc<UnsafeCell<StateInner>>);
-
-// SAFETY: StateInner is only accessable in this crate
-unsafe impl Send for State {}
-// SAFETY: StateInner is only accessable in this crate
-unsafe impl Sync for State {}
-
-#[derive(Default, Debug)]
-pub(crate) struct StateInner {
-    pub(crate) n: usize,
-    pub(crate) buf: Option<Vec<u8>>,
-}
-
 /// Request a specific number of bytes from the parent poll loop and then yield to that poll loop
 /// so it can perform IO and provide the requested data.
 macro_rules! request_bytes {
-    ($s:expr, $n:expr) => {{
-        (*$s.0.get()).n = $n;
-        Yield(false).await;
-        (*$s.0.get()).buf.take().unwrap()
+    ($n:expr) => {{
+        RequestBytes {
+            polled: false,
+            n: $n,
+        }
+        .await
     }};
 }
 
@@ -119,7 +133,7 @@ macro_rules! request_bytes {
 macro_rules! from_le_bytes {
     ($ty:ty, $bytes:expr) => {
         // SAFETY: we know we are setting the correct array length
-        unsafe { <$ty>::from_le_bytes($bytes[0..size_of::<$ty>()].try_into().unwrap_unchecked()) }
+        <$ty>::from_le_bytes($bytes[0..size_of::<$ty>()].try_into().unwrap_unchecked())
     };
 }
 
@@ -138,9 +152,12 @@ macro_rules! impl_u {
                     Ok(())
                 }
 
-                async unsafe fn read(state: &State) -> io::Result<$ty> {
-                    let buf = request_bytes!(state, size_of::<$ty>());
-                    Ok(from_le_bytes!($ty, buf))
+                async unsafe fn read() -> io::Result<$ty> {
+                    // SAFETY: we are only awaiting via request_bytes
+                    unsafe {
+                        let buf = request_bytes!(size_of::<$ty>());
+                        Ok(from_le_bytes!($ty, buf))
+                    }
                 }
             }
         )+
@@ -176,12 +193,15 @@ impl NineP for String {
         Ok(())
     }
 
-    async unsafe fn read(state: &State) -> io::Result<Self> {
-        let buf = request_bytes!(state, size_of::<u16>());
-        let len = from_le_bytes!(u16, buf) as usize;
-        let buf = request_bytes!(state, len);
+    async unsafe fn read() -> io::Result<Self> {
+        // SAFETY: we are only awaiting via request_bytes
+        unsafe {
+            let len = u16::read().await? as usize;
+            let buf = request_bytes!(len);
 
-        String::from_utf8(buf).map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
+            String::from_utf8(buf)
+                .map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
+        }
     }
 }
 
@@ -212,16 +232,17 @@ impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
         Ok(())
     }
 
-    async unsafe fn read(state: &State) -> io::Result<Self> {
-        let buf = request_bytes!(state, size_of::<u16>());
-        let len = from_le_bytes!(u16, buf) as usize;
+    async unsafe fn read() -> io::Result<Self> {
+        // SAFETY: we are only awaiting via request_bytes
+        unsafe {
+            let len = u16::read().await? as usize;
+            let mut buf = Vec::with_capacity(len);
+            for _ in 0..len {
+                buf.push(T::read().await?);
+            }
 
-        let mut buf = Vec::with_capacity(len);
-        for _ in 0..len {
-            buf.push(T::read(state).await?);
+            Ok(buf)
         }
-
-        Ok(buf)
     }
 }
 
@@ -293,17 +314,19 @@ impl NineP for Data {
         Ok(())
     }
 
-    async unsafe fn read(state: &State) -> io::Result<Self> {
-        let buf = request_bytes!(state, size_of::<u32>());
-        let len = from_le_bytes!(u32, buf) as usize;
-        if len > MAX_DATA_LEN {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("data field too long: max={MAX_DATA_LEN} len={len}"),
-            ));
-        }
+    async unsafe fn read() -> io::Result<Self> {
+        // SAFETY: we are only awaiting via request_bytes
+        unsafe {
+            let len = u32::read().await? as usize;
+            if len > MAX_DATA_LEN {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("data field too long: max={MAX_DATA_LEN} len={len}"),
+                ));
+            }
 
-        Ok(Data(request_bytes!(state, len)))
+            Ok(Data(request_bytes!(len)))
+        }
     }
 }
 
@@ -364,37 +387,41 @@ impl NineP for RawStat {
         )
     }
 
-    async unsafe fn read(state: &State) -> io::Result<Self> {
-        let buf = request_bytes!(state, 41);
-        let bytes = buf.as_slice();
+    async unsafe fn read() -> io::Result<Self> {
+        // SAFETY: we are only awaiting via request_bytes
+        unsafe {
+            // Request the fixed sized data before the strings in one block up front
+            let buf = request_bytes!(41);
+            let bytes = buf.as_slice();
 
-        let size = from_le_bytes!(u16, bytes);
-        let ty = from_le_bytes!(u16, &bytes[2..]);
-        let dev = from_le_bytes!(u32, &bytes[4..]);
-        let qid = Qid::read_from(&mut &bytes[8..])?;
-        let mode = from_le_bytes!(u32, &bytes[21..]);
-        let atime = from_le_bytes!(u32, &bytes[25..]);
-        let mtime = from_le_bytes!(u32, &bytes[29..]);
-        let length = from_le_bytes!(u64, &bytes[33..]);
-        let name = String::read(state).await?;
-        let uid = String::read(state).await?;
-        let gid = String::read(state).await?;
-        let muid = String::read(state).await?;
+            let size = from_le_bytes!(u16, bytes);
+            let ty = from_le_bytes!(u16, &bytes[2..]);
+            let dev = from_le_bytes!(u32, &bytes[4..]);
+            let qid = Qid::read_from(&mut &bytes[8..])?;
+            let mode = from_le_bytes!(u32, &bytes[21..]);
+            let atime = from_le_bytes!(u32, &bytes[25..]);
+            let mtime = from_le_bytes!(u32, &bytes[29..]);
+            let length = from_le_bytes!(u64, &bytes[33..]);
+            let name = String::read().await?;
+            let uid = String::read().await?;
+            let gid = String::read().await?;
+            let muid = String::read().await?;
 
-        Ok(RawStat {
-            size,
-            ty,
-            dev,
-            qid,
-            mode,
-            atime,
-            mtime,
-            length,
-            name,
-            uid,
-            gid,
-            muid,
-        })
+            Ok(RawStat {
+                size,
+                ty,
+                dev,
+                qid,
+                mode,
+                atime,
+                mtime,
+                length,
+                name,
+                uid,
+                gid,
+                muid,
+            })
+        }
     }
 }
 
@@ -432,9 +459,12 @@ macro_rules! impl_message_datatype {
                 write_fields!(buf, self, $($field),*)
             }
 
-            async unsafe fn read(state: &State) -> io::Result<Self> {
-                $(let $field = <$ty>::read(&state).await?;)*
-                Ok($struct { $($field),* })
+            async unsafe fn read() -> io::Result<Self> {
+                // SAFETY: we are only awaiting via request_bytes
+                unsafe {
+                    $(let $field = <$ty>::read().await?;)*
+                    Ok($struct { $($field),* })
+                }
             }
         }
     };
@@ -565,30 +595,31 @@ macro_rules! impl_message_format {
             }
 
             #[allow(unused_assignments)]
-            async unsafe fn read(state: &State) -> io::Result<Self> {
-                let buf = request_bytes!(state, size_of::<u32>());
-                let len = from_le_bytes!(u32, buf) as usize;
+            async unsafe fn read() -> io::Result<Self> {
+                // SAFETY: we are only awaiting via request_bytes
+                unsafe {
+                    let len = u32::read().await? as usize;
+                    let bytes = request_bytes!(len-4);
+                    let ty = from_le_bytes!(u8, &bytes);
+                    let tag = from_le_bytes!(u16, &bytes[1..]);
+                    let mut cur = Cursor::new(bytes);
+                    cur.set_position(3);
 
-                let bytes = request_bytes!(state, len-4);
-                let ty = from_le_bytes!(u8, &bytes);
-                let tag = from_le_bytes!(u16, &bytes[1..]);
-                let mut cur = Cursor::new(bytes);
-                cur.set_position(3);
+                    let content = match MessageType(ty) {
+                        $(
+                            MessageType::$message_variant => $enum_ty::$enum_variant {
+                                $($field: <$ty>::read_from(&mut cur)?),*
+                            },
+                        )+
 
-                let content = match MessageType(ty) {
-                    $(
-                        MessageType::$message_variant => $enum_ty::$enum_variant {
-                            $($field: <$ty>::read_from(&mut cur)?),*
-                        },
-                    )+
+                        MessageType(ty) => return Err(io::Error::new(
+                            ErrorKind::InvalidData,
+                            format!($err, ty),
+                        )),
+                    };
 
-                    MessageType(ty) => return Err(io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!($err, ty),
-                    )),
-                };
-
-                Ok($message_ty { tag, content })
+                    Ok($message_ty { tag, content })
+                }
             }
         }
     };

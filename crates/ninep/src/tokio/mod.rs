@@ -1,8 +1,8 @@
 //! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
     sansio::{
-        protocol::{NineP, Rdata, Rmessage, State},
-        stub_waker,
+        protocol::{NineP, Rdata, Rmessage},
+        State,
     },
     Result,
 };
@@ -11,7 +11,8 @@ use std::{
     io,
     marker::Unpin,
     pin::pin,
-    task::{Context, Poll},
+    sync::Arc,
+    task::{Context, Poll, Waker},
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -64,22 +65,21 @@ where
     T: NineP + Send,
     R: AsyncRead + Unpin + Send,
 {
-    let waker = stub_waker();
-    let s = State::default();
+    let s = Arc::new(State::default());
+    let waker = Waker::from(s.clone());
 
     // SAFETY: assumes the impl of Read9p is a valid future for us to poll
-    let mut fut = unsafe { pin!(T::read(&s)) };
+    let mut fut = unsafe { pin!(T::read()) };
     loop {
         let poll = fut.as_mut().poll(&mut Context::from_waker(&waker));
         match poll {
             Poll::Ready(val) => return val,
-            // SAFETY: s is only shared with the future we're polling
-            Poll::Pending => unsafe {
-                let n = (*s.0.get()).n;
+            Poll::Pending => {
+                let n = s.inner.lock().unwrap().n;
                 let mut buf = vec![0; n];
                 r.read_exact(&mut buf).await?;
-                (*s.0.get()).buf = Some(buf);
-            },
+                s.inner.lock().unwrap().buf = Some(buf);
+            }
         }
     }
 }

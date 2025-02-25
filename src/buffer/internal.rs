@@ -1072,13 +1072,13 @@ unsafe fn decode_char_at(start: usize, bytes: &[u8]) -> char {
         // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
         let z = bytes[start + 2];
         let y_z = utf8_acc_cont_byte((y & CONT_MASK) as u32, z);
-        ch = init << 12 | y_z;
+        ch = (init << 12) | y_z;
         if x >= 0xF0 {
             // [x y z w] case
             // use only the lower 3 bits of `init`
             // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
             let w = bytes[start + 3];
-            ch = (init & 7) << 18 | utf8_acc_cont_byte(y_z, w);
+            ch = ((init & 7) << 18) | utf8_acc_cont_byte(y_z, w);
         }
     }
 

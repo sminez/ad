@@ -6,8 +6,8 @@ use crate::{
     Result,
 };
 use std::{
-    sync::Arc,
-    task::{Wake, Waker},
+    sync::{Arc, Mutex},
+    task::Wake,
 };
 
 pub mod protocol;
@@ -22,13 +22,19 @@ impl From<(u16, Result<Rdata>)> for Rmessage {
     }
 }
 
-struct StubWaker;
-impl Wake for StubWaker {
-    fn wake(self: Arc<Self>) {}
-    fn wake_by_ref(self: &Arc<Self>) {}
+/// Shared state between a NineP impl and a parent read loop that is performing IO.
+#[derive(Default, Debug)]
+pub(crate) struct State {
+    pub(crate) inner: Mutex<StateInner>,
 }
 
-/// A no-op waker that is just used to create a context for driving a NineP read loop.
-pub(crate) fn stub_waker() -> Waker {
-    Waker::from(Arc::new(StubWaker))
+#[derive(Default, Debug)]
+pub(crate) struct StateInner {
+    pub(crate) n: usize,
+    pub(crate) buf: Option<Vec<u8>>,
+}
+
+impl Wake for State {
+    fn wake(self: Arc<Self>) {}
+    fn wake_by_ref(self: &Arc<Self>) {}
 }
