@@ -20,6 +20,7 @@ tokio = ["dep:tokio"]
 [dependencies]
 bitflags = "2.6"
 tokio =  { version = "1.43.0", features = ["macros", "net", "io-util", "rt", "sync"], optional = true }
+simple_coro = { git = "https://github.com/sminez/crimes.git", package = "crimes" }
 
 [dev-dependencies]
 simple_test_case = "1"

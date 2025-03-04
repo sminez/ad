@@ -1,14 +1,18 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
-    fs::{FileMeta, FileType, QID_ROOT},
-    sansio::protocol::{Qid, Rdata, MAX_DATA_LEN},
+    fs::{FileMeta, FileType, Stat, QID_ROOT},
+    sansio::protocol::{Data, Qid, RawStat, Rdata, Tdata, Tmessage, MAX_DATA_LEN},
+    sync::SyncNineP,
     Result,
 };
+use simple_coro::{Coro, Handle, ReadyCoro};
 use std::{
     cmp::min,
     collections::btree_map::BTreeMap,
     env,
-    sync::{mpsc::Receiver, Arc},
+    future::Future,
+    ops::{Deref, DerefMut},
+    sync::Arc,
 };
 
 /// Marker afid to denode that auth is not required for establishing connections
@@ -17,6 +21,7 @@ pub const AFID_NO_AUTH: u32 = u32::MAX;
 // Error messages
 pub(crate) const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
 pub(crate) const E_UNATTACHED: &str = "session is not attached";
+pub(crate) const E_ALREADY_ATTACHED: &str = "session is already attached";
 pub(crate) const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
 pub(crate) const E_DUPLICATE_FID: &str = "duplicate fid";
 pub(crate) const E_UNKNOWN_FID: &str = "unknown fid";
@@ -48,13 +53,10 @@ pub fn socket_path(name: &str) -> String {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClientId(pub(crate) u64);
 
-/// The outcome of a client attempting to [read](Serve9p::read) a given file.
 #[derive(Debug)]
-pub enum ReadOutcome {
-    /// The data is immediately available.
-    Immediate(Vec<u8>),
-    /// No response should be sent until data is received on the provided channel
-    Blocked(Receiver<Vec<u8>>),
+pub(crate) enum Either<L, R> {
+    L(L),
+    R(R),
 }
 
 /// A 9p server wrapping an `S` that must implement an IO specific handler trait to provide the
@@ -139,6 +141,152 @@ impl Attached {
     }
 }
 
+/// Internal state for a running client session other than the user provided filesystem
+/// implementation. We keep this separate in order to allow for splitting borrows between this
+/// state and the filesystem impl when creating coroutine based helper methods.
+#[derive(Debug)]
+pub(crate) struct SessionState<T>
+where
+    T: SessionType,
+{
+    pub(crate) state: T,
+    pub(crate) client_id: ClientId,
+    pub(crate) msize: u32,
+    pub(crate) roots: BTreeMap<String, u64>,
+    pub(crate) qids: BTreeMap<u64, FileMeta>,
+}
+
+impl<T> SessionState<T>
+where
+    T: SessionType,
+{
+    pub(crate) fn qid(&self, qid: u64) -> Option<Qid> {
+        self.qids.get(&qid).map(|fm| fm.as_qid())
+    }
+}
+
+impl SessionState<Attached> {
+    pub(crate) fn try_file_meta(&self, fid: u32) -> Result<FileMeta> {
+        let opt = match self.state.fids.get(&fid) {
+            Some(&qid) => self.qids.get(&qid).cloned(),
+            None => None,
+        };
+
+        opt.ok_or_else(|| E_UNKNOWN_FID.to_string())
+    }
+
+    pub(crate) fn handle_attached_walk<'a, 's: 'a>(
+        &'s mut self,
+        fid: u32,
+        new_fid: u32,
+        wnames: &'a [String],
+    ) -> ReadyCoro<
+        (u64, &'a str, &'a str),
+        FileMeta,
+        Result<Rdata>,
+        impl Future<Output = Result<Rdata>> + use<'s, 'a>,
+    > {
+        Coro::from(
+            move |handle: Handle<(u64, &'a str, &'a str), FileMeta>| async move {
+                if new_fid != fid && self.state.fids.contains_key(&new_fid) {
+                    return Err(E_DUPLICATE_FID.to_string());
+                }
+
+                let fm = self.try_file_meta(fid)?;
+
+                if wnames.is_empty() {
+                    self.state.fids.insert(new_fid, fm.qid);
+                    return Ok(Rdata::Walk { wqids: vec![] });
+                } else if matches!(fm.ty, FileType::Regular) {
+                    return Err(E_WALK_NON_DIR.to_string());
+                }
+
+                let mut wqids = Vec::with_capacity(wnames.len());
+                let mut qid = fm.qid;
+
+                for name in wnames.iter() {
+                    let fm = handle.yield_value((qid, name, &self.state.uname)).await;
+                    qid = fm.qid;
+                    wqids.push(fm.as_qid());
+                    self.qids.insert(qid, fm);
+                }
+
+                if wqids.len() == wnames.len() {
+                    let qid = wqids.last().expect("empty was handled above").path;
+                    self.state.fids.insert(new_fid, qid);
+                }
+
+                Ok(Rdata::Walk { wqids })
+            },
+        )
+    }
+
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn handle_attached_read<'a, 's: 'a>(
+        &'s mut self,
+        fid: u32,
+        offset: u64,
+        count: u32,
+    ) -> ReadyCoro<
+        Either<(u64, &'a str), (u64, &'a str)>, // L=read_dir R=read
+        Vec<Stat>, // we never send or use a value in response to a read, only read-dir
+        Result<Option<Rdata>>,
+        impl Future<Output = Result<Option<Rdata>>> + use<'s, 'a>,
+    > {
+        Coro::from(
+            move |handle: Handle<Either<(u64, &'a str), (u64, &'a str)>, Vec<Stat>>| async move {
+                use FileType::*;
+
+                let fm = self.try_file_meta(fid)?;
+                if offset > u32::MAX as u64 {
+                    return Err(format!("offset too large: {offset} > {}", u32::MAX));
+                }
+
+                let stats = match fm.ty {
+                    Regular | AppendOnly | Exclusive => {
+                        handle
+                            .yield_value(Either::R((fm.qid, &self.state.uname)))
+                            .await;
+                        return Ok(None); // processing of the ReadOutcome is handled by the caller
+                    }
+
+                    Directory => {
+                        handle
+                            .yield_value(Either::L((fm.qid, &self.state.uname)))
+                            .await
+                    }
+                };
+
+                let mut buf = Vec::with_capacity(count as usize);
+                let mut to_skip = offset as usize;
+
+                for stat in stats.into_iter() {
+                    self.qids.entry(stat.fm.qid).or_insert(stat.fm.clone());
+                    let rstat: RawStat = stat.into();
+                    let mut tmp = Vec::new();
+                    rstat.write_to(&mut tmp).unwrap();
+
+                    if to_skip != 0 {
+                        if tmp.len() > to_skip {
+                            return Err(E_INVALID_OFFSET.to_string());
+                        } else {
+                            to_skip -= tmp.len();
+                            continue;
+                        }
+                    }
+
+                    if buf.len() + tmp.len() > count as usize {
+                        break;
+                    }
+                    buf.extend(tmp);
+                }
+
+                Ok(Some(Rdata::Read { data: Data(buf) }))
+            },
+        )
+    }
+}
+
 /// A connected client session over a given stream
 #[derive(Debug)]
 pub(crate) struct Session<T, S, U>
@@ -146,13 +294,31 @@ where
     T: SessionType,
     S: Send,
 {
-    pub(crate) client_id: ClientId,
-    pub(crate) state: T,
-    pub(crate) msize: u32,
-    pub(crate) roots: BTreeMap<String, u64>,
     pub(crate) s: Arc<S>,
-    pub(crate) qids: BTreeMap<u64, FileMeta>,
     pub(crate) stream: U,
+    pub(crate) session_state: SessionState<T>,
+}
+
+impl<T, S, U> Deref for Session<T, S, U>
+where
+    T: SessionType,
+    S: Send,
+{
+    type Target = SessionState<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.session_state
+    }
+}
+
+impl<T, S, U> DerefMut for Session<T, S, U>
+where
+    T: SessionType,
+    S: Send,
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.session_state
+    }
 }
 
 impl<T, S, U> Session<T, S, U>
@@ -160,10 +326,6 @@ where
     T: SessionType,
     S: Send,
 {
-    pub(crate) fn qid(&self, qid: u64) -> Option<Qid> {
-        self.qids.get(&qid).map(|fm| fm.as_qid())
-    }
-
     /// The version request negotiates the protocol version and message size to be used on the
     /// connection and initializes the connection for I/O. Tversion must be the first message sent
     /// on the 9P connection, and the client cannot issue any further requests until it has
@@ -191,17 +353,17 @@ where
     /// A successful version request initializes the connection. All outstanding I/O on the
     /// connection is aborted; all active fids are freed (‘clunked’) automatically. The set of
     /// messages between version requests is called a session.
-    pub(crate) fn handle_version(&mut self, msize: u32, version: String) -> Result<Rdata> {
+    pub(crate) fn handle_version(&mut self, msize: u32, version: String) -> Rdata {
         let server_version = if version != SUPPORTED_VERSION {
             UNKNOWN_VERSION
         } else {
             SUPPORTED_VERSION
         };
 
-        Ok(Rdata::Version {
+        Rdata::Version {
             msize: min(self.msize, msize),
             version: server_version.to_string(),
-        })
+        }
     }
 
     /// If the client does wish to authenticate, it must acquire and validate an afid using an auth
@@ -239,25 +401,74 @@ where
         stream: U,
     ) -> Self {
         Self {
-            client_id,
-            state: Unattached::default(),
-            msize,
-            roots,
             s,
-            qids,
             stream,
+            session_state: SessionState {
+                client_id,
+                state: Unattached::default(),
+                msize,
+                roots,
+                qids,
+            },
         }
+    }
+
+    pub(crate) fn handle_tmessage_unattached(
+        &mut self,
+        Tmessage { tag, content }: Tmessage,
+    ) -> Either<(u16, Result<Rdata>), (u16, Attached, Qid)> {
+        use Tdata::*;
+
+        let resp = match content {
+            Version { msize, version } => {
+                self.state.seen_version = version == SUPPORTED_VERSION;
+                Ok(self.handle_version(msize, version))
+            }
+
+            Auth { afid, uname, aname } => {
+                if !self.state.seen_version {
+                    return Either::L((tag, Err(E_NO_VERSION_MESSAGE.to_string())));
+                }
+
+                self.handle_auth(afid, uname, aname)
+            }
+
+            Attach {
+                fid,
+                afid,
+                uname,
+                aname,
+            } => {
+                if !self.state.seen_version {
+                    return Either::L((tag, Err(E_NO_VERSION_MESSAGE.to_string())));
+                }
+
+                let (st, aqid) = match self.handle_attach(fid, afid, uname, aname) {
+                    Err(e) => return Either::L((tag, Err(e))),
+                    Ok((st, aqid)) => (st, aqid),
+                };
+
+                return Either::R((tag, st, aqid));
+            }
+
+            _ => Err(E_UNATTACHED.into()),
+        };
+
+        Either::L((tag, resp))
     }
 
     pub(crate) fn into_attached(self, ty: Attached) -> Session<Attached, S, U> {
         let Self {
-            client_id,
-            msize,
-            roots,
             s,
-            qids,
             stream,
-            ..
+            session_state:
+                SessionState {
+                    client_id,
+                    msize,
+                    roots,
+                    qids,
+                    ..
+                },
         } = self;
 
         Session::new_attached(client_id, ty, msize, roots, s, qids, stream)
@@ -295,12 +506,6 @@ where
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum Either<L, R> {
-    L(L),
-    R(R),
-}
-
 impl<S, U> Session<Attached, S, U>
 where
     S: Send,
@@ -315,58 +520,15 @@ where
         stream: U,
     ) -> Self {
         Self {
-            client_id,
-            state,
-            msize,
-            roots,
             s,
-            qids,
             stream,
+            session_state: SessionState {
+                client_id,
+                state,
+                msize,
+                roots,
+                qids,
+            },
         }
-    }
-
-    pub(crate) fn try_file_meta(&self, fid: u32) -> Result<FileMeta> {
-        let opt = match self.state.fids.get(&fid) {
-            Some(&qid) => self.qids.get(&qid).cloned(),
-            None => None,
-        };
-
-        opt.ok_or_else(|| E_UNKNOWN_FID.to_string())
-    }
-
-    pub(crate) fn prep_walk(
-        &mut self,
-        fid: u32,
-        new_fid: u32,
-        wnames: &[String],
-    ) -> Result<Either<Rdata, FileMeta>> {
-        if new_fid != fid && self.state.fids.contains_key(&new_fid) {
-            return Err(E_DUPLICATE_FID.to_string());
-        }
-
-        let fm = self.try_file_meta(fid)?;
-
-        if wnames.is_empty() {
-            self.state.fids.insert(new_fid, fm.qid);
-            Ok(Either::L(Rdata::Walk { wqids: vec![] }))
-        } else if matches!(fm.ty, FileType::Regular) {
-            Err(E_WALK_NON_DIR.to_string())
-        } else {
-            Ok(Either::R(fm))
-        }
-    }
-
-    pub(crate) fn complete_walk(
-        &mut self,
-        new_fid: u32,
-        wqids: Vec<Qid>,
-        n_wnames: usize,
-    ) -> Rdata {
-        if wqids.len() == n_wnames {
-            let qid = wqids.last().expect("empty was handled in prep_walk").path;
-            self.state.fids.insert(new_fid, qid);
-        }
-
-        Rdata::Walk { wqids }
     }
 }

@@ -1,19 +1,13 @@
 //! A synchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::{
-        protocol::{NineP, Rdata, Rmessage},
-        State,
-    },
+    sansio::protocol::{NineP, Rdata, Rmessage},
     Result,
 };
+use simple_coro::{Coro, CoroState};
 use std::{
-    future::Future,
     io::{self, Read, Write},
     net::TcpStream,
     os::unix::net::UnixStream,
-    pin::pin,
-    sync::Arc,
-    task::{Context, Poll, Waker},
 };
 
 pub mod client;
@@ -32,24 +26,17 @@ pub trait SyncNineP: NineP {
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
     fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let s = Arc::new(State::default());
-        let waker = Waker::from(s.clone());
-        let mut ctx = Context::from_waker(&waker);
-
-        // SAFETY: assumes the impl of Read9p is a valid future for us to poll
-        let mut fut = unsafe { pin!(Self::read()) };
+        let mut coro = Coro::from(Self::read_9p);
         loop {
-            match fut.as_mut().poll(&mut ctx) {
-                Poll::Ready(val) => return val,
-                // SAFETY: the only other reference to the shared state is in the future we are
-                // polling so mutating its inner state is safe
-                Poll::Pending => unsafe {
-                    let n = s.requested_bytes();
+            coro = match coro.resume() {
+                CoroState::Pending(c, n) => {
                     let mut buf = vec![0; n];
                     r.read_exact(&mut buf)?;
-                    s.set_bytes(buf);
-                },
-            }
+                    c.send(buf)
+                }
+
+                CoroState::Complete(res) => return res,
+            };
         }
     }
 }

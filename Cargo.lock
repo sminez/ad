@@ -205,6 +205,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
+name = "crimes"
+version = "0.1.0"
+source = "git+https://github.com/sminez/crimes.git#6591acaba40572901ca6e2bbeaf1727562fa50c7"
+
+[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -447,6 +452,7 @@ name = "ninep"
 version = "0.4.0"
 dependencies = [
  "bitflags 2.8.0",
+ "crimes",
  "simple_test_case",
  "tokio",
 ]

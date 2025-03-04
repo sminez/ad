@@ -1,14 +1,13 @@
 //! Sans-io 9p protocol implementation
 //!
 //!   http://man.cat-v.org/plan_9/5/
-use crate::{sansio::State, sync::SyncNineP};
+use crate::sync::SyncNineP;
+use simple_coro::Handle;
 use std::{
     fmt,
     future::Future,
     io::{self, Cursor, ErrorKind},
     mem::size_of,
-    pin::Pin,
-    task::{Context, Poll},
 };
 
 /// The size of variable length data is denoted using a u16 so anything longer
@@ -70,61 +69,14 @@ pub trait NineP: Sized {
     /// # Safety
     /// Implementations of `read` need to ensure that the only await points they contain are
     /// from calls to the [request_bytes] macro.
-    unsafe fn read() -> impl Future<Output = io::Result<Self>> + Send;
-}
-
-/// Helper struct for awaiting a Future that returns pending once so we can return control to the
-/// poll loop and perform IO.
-struct RequestBytes {
-    polled: bool,
-    n: usize,
-}
-
-impl Future for RequestBytes {
-    type Output = Vec<u8>;
-    fn poll(mut self: Pin<&mut Self>, ctx: &mut Context<'_>) -> Poll<Vec<u8>> {
-        if self.polled {
-            // SAFETY: we can only poll this future using a waker wrapping State
-            let data = unsafe {
-                (ctx.waker().data() as *mut () as *mut State)
-                    .as_mut()
-                    .unwrap_unchecked()
-                    .take_bytes()
-            };
-
-            Poll::Ready(data)
-        } else {
-            self.polled = true;
-            // SAFETY: we can only poll this future using a waker wrapping State
-            unsafe {
-                (ctx.waker().data() as *mut () as *mut State)
-                    .as_mut()
-                    .unwrap_unchecked()
-                    .set_requested(self.n);
-            };
-
-            Poll::Pending
-        }
-    }
-}
-
-/// Request a specific number of bytes from the parent poll loop and then yield to that poll loop
-/// so it can perform IO and provide the requested data.
-macro_rules! request_bytes {
-    ($n:expr) => {{
-        RequestBytes {
-            polled: false,
-            n: $n,
-        }
-        .await
-    }};
+    fn read_9p(handle: Handle<usize, Vec<u8>>) -> impl Future<Output = io::Result<Self>> + Send;
 }
 
 /// wrapper around uX::from_le_bytes that accepts a slice rather than a fixed size array
 macro_rules! from_le_bytes {
     ($ty:ty, $bytes:expr) => {
         // SAFETY: we know we are setting the correct array length
-        <$ty>::from_le_bytes($bytes[0..size_of::<$ty>()].try_into().unwrap_unchecked())
+        unsafe { <$ty>::from_le_bytes($bytes[0..size_of::<$ty>()].try_into().unwrap_unchecked()) }
     };
 }
 
@@ -143,12 +95,9 @@ macro_rules! impl_u {
                     Ok(())
                 }
 
-                async unsafe fn read() -> io::Result<$ty> {
-                    // SAFETY: we are only awaiting via request_bytes
-                    unsafe {
-                        let buf = request_bytes!(size_of::<$ty>());
-                        Ok(from_le_bytes!($ty, buf))
-                    }
+                async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<$ty> {
+                    let buf = handle.yield_value(size_of::<$ty>()).await;
+                    Ok(from_le_bytes!($ty, buf))
                 }
             }
         )+
@@ -184,15 +133,11 @@ impl NineP for String {
         Ok(())
     }
 
-    async unsafe fn read() -> io::Result<Self> {
-        // SAFETY: we are only awaiting via request_bytes
-        unsafe {
-            let len = u16::read().await? as usize;
-            let buf = request_bytes!(len);
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        let len = u16::read_9p(handle).await? as usize;
+        let buf = handle.yield_value(len).await;
 
-            String::from_utf8(buf)
-                .map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
-        }
+        String::from_utf8(buf).map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
     }
 }
 
@@ -223,17 +168,14 @@ impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
         Ok(())
     }
 
-    async unsafe fn read() -> io::Result<Self> {
-        // SAFETY: we are only awaiting via request_bytes
-        unsafe {
-            let len = u16::read().await? as usize;
-            let mut buf = Vec::with_capacity(len);
-            for _ in 0..len {
-                buf.push(T::read().await?);
-            }
-
-            Ok(buf)
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        let len = u16::read_9p(handle).await? as usize;
+        let mut buf = Vec::with_capacity(len);
+        for _ in 0..len {
+            buf.push(T::read_9p(handle).await?);
         }
+
+        Ok(buf)
     }
 }
 
@@ -305,19 +247,16 @@ impl NineP for Data {
         Ok(())
     }
 
-    async unsafe fn read() -> io::Result<Self> {
-        // SAFETY: we are only awaiting via request_bytes
-        unsafe {
-            let len = u32::read().await? as usize;
-            if len > MAX_DATA_LEN {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("data field too long: max={MAX_DATA_LEN} len={len}"),
-                ));
-            }
-
-            Ok(Data(request_bytes!(len)))
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        let len = u32::read_9p(handle).await? as usize;
+        if len > MAX_DATA_LEN {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("data field too long: max={MAX_DATA_LEN} len={len}"),
+            ));
         }
+
+        Ok(Data(handle.yield_value(len).await))
     }
 }
 
@@ -378,41 +317,38 @@ impl NineP for RawStat {
         )
     }
 
-    async unsafe fn read() -> io::Result<Self> {
-        // SAFETY: we are only awaiting via request_bytes
-        unsafe {
-            // Request the fixed sized data before the strings in one block up front
-            let buf = request_bytes!(41);
-            let bytes = buf.as_slice();
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        // Request the fixed sized data before the strings in one block up front
+        let buf = handle.yield_value(41).await;
+        let bytes = buf.as_slice();
 
-            let size = from_le_bytes!(u16, bytes);
-            let ty = from_le_bytes!(u16, &bytes[2..]);
-            let dev = from_le_bytes!(u32, &bytes[4..]);
-            let qid = Qid::read_from(&mut &bytes[8..])?;
-            let mode = from_le_bytes!(u32, &bytes[21..]);
-            let atime = from_le_bytes!(u32, &bytes[25..]);
-            let mtime = from_le_bytes!(u32, &bytes[29..]);
-            let length = from_le_bytes!(u64, &bytes[33..]);
-            let name = String::read().await?;
-            let uid = String::read().await?;
-            let gid = String::read().await?;
-            let muid = String::read().await?;
+        let size = from_le_bytes!(u16, bytes);
+        let ty = from_le_bytes!(u16, &bytes[2..]);
+        let dev = from_le_bytes!(u32, &bytes[4..]);
+        let qid = Qid::read_from(&mut &bytes[8..])?;
+        let mode = from_le_bytes!(u32, &bytes[21..]);
+        let atime = from_le_bytes!(u32, &bytes[25..]);
+        let mtime = from_le_bytes!(u32, &bytes[29..]);
+        let length = from_le_bytes!(u64, &bytes[33..]);
+        let name = String::read_9p(handle).await?;
+        let uid = String::read_9p(handle).await?;
+        let gid = String::read_9p(handle).await?;
+        let muid = String::read_9p(handle).await?;
 
-            Ok(RawStat {
-                size,
-                ty,
-                dev,
-                qid,
-                mode,
-                atime,
-                mtime,
-                length,
-                name,
-                uid,
-                gid,
-                muid,
-            })
-        }
+        Ok(RawStat {
+            size,
+            ty,
+            dev,
+            qid,
+            mode,
+            atime,
+            mtime,
+            length,
+            name,
+            uid,
+            gid,
+            muid,
+        })
     }
 }
 
@@ -450,12 +386,9 @@ macro_rules! impl_message_datatype {
                 write_fields!(buf, self, $($field),*)
             }
 
-            async unsafe fn read() -> io::Result<Self> {
-                // SAFETY: we are only awaiting via request_bytes
-                unsafe {
-                    $(let $field = <$ty>::read().await?;)*
-                    Ok($struct { $($field),* })
-                }
+            async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+                $(let $field = <$ty>::read_9p(handle).await?;)*
+                Ok($struct { $($field),* })
             }
         }
     };
@@ -586,31 +519,28 @@ macro_rules! impl_message_format {
             }
 
             #[allow(unused_assignments)]
-            async unsafe fn read() -> io::Result<Self> {
-                // SAFETY: we are only awaiting via request_bytes
-                unsafe {
-                    let len = u32::read().await? as usize;
-                    let bytes = request_bytes!(len-4);
-                    let ty = from_le_bytes!(u8, &bytes);
-                    let tag = from_le_bytes!(u16, &bytes[1..]);
-                    let mut cur = Cursor::new(bytes);
-                    cur.set_position(3);
+            async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+                let len = u32::read_9p(handle).await? as usize;
+                let bytes = handle.yield_value(len-4).await;
+                let ty = from_le_bytes!(u8, &bytes);
+                let tag = from_le_bytes!(u16, &bytes[1..]);
+                let mut cur = Cursor::new(bytes);
+                cur.set_position(3);
 
-                    let content = match MessageType(ty) {
-                        $(
-                            MessageType::$message_variant => $enum_ty::$enum_variant {
-                                $($field: <$ty>::read_from(&mut cur)?),*
-                            },
-                        )+
+                let content = match MessageType(ty) {
+                    $(
+                        MessageType::$message_variant => $enum_ty::$enum_variant {
+                            $($field: <$ty>::read_from(&mut cur)?),*
+                        },
+                    )+
 
-                        MessageType(ty) => return Err(io::Error::new(
-                            ErrorKind::InvalidData,
-                            format!($err, ty),
-                        )),
-                    };
+                    MessageType(ty) => return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!($err, ty),
+                    )),
+                };
 
-                    Ok($message_ty { tag, content })
-                }
+                Ok($message_ty { tag, content })
             }
         }
     };

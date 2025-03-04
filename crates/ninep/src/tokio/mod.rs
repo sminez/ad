@@ -1,19 +1,10 @@
 //! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::{
-        protocol::{NineP, Rdata, Rmessage},
-        State,
-    },
+    sansio::protocol::{NineP, Rdata, Rmessage},
     Result,
 };
-use std::{
-    future::Future,
-    io,
-    marker::Unpin,
-    pin::pin,
-    sync::Arc,
-    task::{Context, Poll, Waker},
-};
+use simple_coro::{Coro, CoroState};
+use std::{future::Future, io, marker::Unpin};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpStream, UnixStream},
@@ -65,24 +56,17 @@ where
     T: NineP + Send,
     R: AsyncRead + Unpin + Send,
 {
-    let s = Arc::new(State::default());
-    let waker = Waker::from(s.clone());
-
-    // SAFETY: assumes the impl of Read9p is a valid future for us to poll
-    let mut fut = unsafe { pin!(T::read()) };
+    let mut coro = Coro::from(T::read_9p);
     loop {
-        let poll = fut.as_mut().poll(&mut Context::from_waker(&waker));
-        match poll {
-            Poll::Ready(val) => return val,
-            // SAFETY: the only other reference to the shared state is in the future we are
-            // polling so mutating its inner state is safe
-            Poll::Pending => unsafe {
-                let n = s.requested_bytes();
+        coro = match coro.resume() {
+            CoroState::Pending(c, n) => {
                 let mut buf = vec![0; n];
                 r.read_exact(&mut buf).await?;
-                s.set_bytes(buf);
-            },
-        }
+                c.send(buf)
+            }
+
+            CoroState::Complete(res) => return res,
+        };
     }
 }
 

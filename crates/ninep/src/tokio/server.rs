@@ -7,13 +7,13 @@ use crate::{
     sansio::{
         protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
         server::{
-            Attached, Either, Session, SessionType, Unattached, E_CREATE_NON_DIR, E_INVALID_OFFSET,
-            E_NO_VERSION_MESSAGE, E_UNATTACHED, E_UNKNOWN_FID, SUPPORTED_VERSION,
+            Attached, Either, Session, SessionType, Unattached, E_CREATE_NON_DIR, E_UNKNOWN_FID,
         },
     },
     tokio::{AsyncNineP, AsyncStream},
     Result,
 };
+use simple_coro::CoroState;
 use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of};
 use tokio::{
     net::{TcpListener, UnixListener},
@@ -24,7 +24,7 @@ use tokio::{
 // re-exports
 pub use crate::sansio::server::{socket_dir, socket_path, ClientId, Server};
 
-/// The outcome of a client attempting to [read](Serve9p::read) a given file.
+/// The outcome of a client attempting to [read](AsyncServe9p::read) a given file.
 #[derive(Debug)]
 pub enum ReadOutcome {
     /// The data is immediately available.
@@ -239,61 +239,19 @@ where
     U: AsyncStream,
 {
     async fn handle_connection_async(mut self) {
-        use Tdata::*;
-
         loop {
             let t = match Tmessage::read_from(&mut self.stream).await {
                 Ok(t) => t,
                 Err(_) => return,
             };
 
-            let Tmessage { tag, content } = t;
-
-            let resp = match content {
-                Version { msize, version } => {
-                    self.state.seen_version = version == SUPPORTED_VERSION;
-                    self.handle_version(msize, version)
-                }
-
-                Auth { afid, uname, aname } => {
-                    if !self.state.seen_version {
-                        self.reply_async(tag, Err(E_NO_VERSION_MESSAGE.to_string()))
-                            .await;
-                        continue;
-                    }
-
-                    self.handle_auth(afid, uname, aname)
-                }
-
-                Attach {
-                    fid,
-                    afid,
-                    uname,
-                    aname,
-                } => {
-                    if !self.state.seen_version {
-                        self.reply_async(tag, Err(E_NO_VERSION_MESSAGE.to_string()))
-                            .await;
-                        continue;
-                    }
-
-                    let (st, aqid) = match self.handle_attach(fid, afid, uname, aname) {
-                        Err(e) => {
-                            self.reply_async(tag, Err(e)).await;
-                            continue;
-                        }
-
-                        Ok((st, aqid)) => (st, aqid),
-                    };
-
+            match self.handle_tmessage_unattached(t) {
+                Either::L((tag, resp)) => self.reply_async(tag, resp).await,
+                Either::R((tag, st, aqid)) => {
                     self.reply_async(tag, Ok(Rdata::Attach { aqid })).await;
                     return self.into_attached(st).handle_connection_async().await;
                 }
-
-                _ => Err(E_UNATTACHED.into()),
-            };
-
-            self.reply_async(tag, resp).await;
+            }
         }
     }
 }
@@ -333,12 +291,10 @@ where
 
             let resp = match content {
                 Version { msize, version } => {
-                    let res = self.handle_version(msize, version);
-                    if res.is_ok() {
-                        self.clunk_and_clear_async().await;
-                    }
+                    let resp = self.handle_version(msize, version);
+                    self.clunk_and_clear_async().await;
 
-                    res
+                    Ok(resp)
                 }
                 Auth { .. } | Attach { .. } => Err("session is already attached".into()),
                 Flush { .. } => Ok(Rdata::Flush {}),
@@ -426,25 +382,20 @@ where
         new_fid: u32,
         wnames: Vec<String>,
     ) -> Result<Rdata> {
-        let fm = match self.prep_walk(fid, new_fid, &wnames)? {
-            Either::L(rdata) => return Ok(rdata),
-            Either::R(fm) => fm,
-        };
+        let client_id = self.client_id;
+        let mut coro = self
+            .session_state
+            .handle_attached_walk(fid, new_fid, &wnames);
 
-        let mut wqids = Vec::with_capacity(wnames.len());
-        let mut qid = fm.qid;
-
-        for name in wnames.iter() {
-            let fm = self
-                .s
-                .walk(self.client_id, qid, name, &self.state.uname)
-                .await?;
-            qid = fm.qid;
-            wqids.push(fm.as_qid());
-            self.qids.insert(qid, fm);
+        loop {
+            coro = match coro.resume() {
+                CoroState::Complete(res) => return res,
+                CoroState::Pending(c, (qid, name, uname)) => {
+                    let fm = self.s.walk(client_id, qid, name, uname).await?;
+                    c.send(fm)
+                }
+            };
         }
-
-        Ok(self.complete_walk(new_fid, wqids, wnames.len()))
     }
 
     async fn handle_clunk_async(&mut self, fid: u32) -> Result<Rdata> {
@@ -538,32 +489,20 @@ where
         count: u32,
         tx: &UnboundedSender<(u16, Vec<u8>)>,
     ) -> Result<Option<Rdata>> {
-        use FileType::*;
+        let cid = self.client_id;
+        let coro = self.session_state.handle_attached_read(fid, offset, count);
+        let (offset, count) = (offset as usize, count as usize);
 
-        let fm = self.try_file_meta(fid)?;
-        if offset > u32::MAX as u64 {
-            return Err(format!("offset too large: {offset} > {}", u32::MAX));
-        }
-
-        let data = match fm.ty {
-            Directory => {
-                self.read_dir_async(fm.qid, offset as usize, count as usize)
-                    .await?
+        match coro.resume() {
+            CoroState::Complete(res) => res,
+            CoroState::Pending(c, Either::L((qid, uname))) => {
+                let stats = self.s.read_dir(cid, qid, uname).await?;
+                c.send(stats).resume().unwrap()
             }
-            Regular | AppendOnly | Exclusive => {
-                let outcome = self
-                    .s
-                    .read(
-                        self.client_id,
-                        fm.qid,
-                        offset as usize,
-                        count as usize,
-                        &self.state.uname,
-                    )
-                    .await?;
-
+            CoroState::Pending(_, Either::R((qid, uname))) => {
+                let outcome = self.s.read(cid, qid, offset, count, uname).await?;
                 match outcome {
-                    ReadOutcome::Immediate(data) => data,
+                    ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(mut chan) => {
                         let tx = tx.clone();
                         spawn(async move {
@@ -571,55 +510,19 @@ where
                             tx.send((tag, data))
                         });
 
-                        return Ok(None);
+                        Ok(None)
                     }
                 }
             }
-        };
-
-        Ok(Some(Rdata::Read { data: Data(data) }))
-    }
-
-    async fn read_dir_async(&mut self, qid: u64, offset: usize, count: usize) -> Result<Vec<u8>> {
-        let stats = self
-            .s
-            .read_dir(self.client_id, qid, &self.state.uname)
-            .await?;
-
-        let mut buf = Vec::with_capacity(count);
-        let mut to_skip = offset;
-
-        for stat in stats.into_iter() {
-            self.qids.entry(stat.fm.qid).or_insert(stat.fm.clone());
-
-            let rstat: RawStat = stat.into();
-            let mut tmp = Vec::new();
-            rstat.write_to(&mut tmp).await.unwrap();
-
-            if to_skip != 0 {
-                if tmp.len() > to_skip {
-                    return Err(E_INVALID_OFFSET.to_string());
-                } else {
-                    to_skip -= tmp.len();
-                    continue;
-                }
-            }
-
-            if buf.len() + tmp.len() > count {
-                break;
-            }
-            buf.extend(tmp);
         }
-
-        Ok(buf)
     }
 
     async fn handle_write_async(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
-        let fm = self.try_file_meta(fid)?;
         if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
+        let fm = self.try_file_meta(fid)?;
         let count = self
             .s
             .write(
@@ -636,7 +539,6 @@ where
 
     async fn handle_remove_async(&mut self, fid: u32) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
-
         self.s
             .remove(self.client_id, fm.qid, &self.state.uname)
             .await?;
