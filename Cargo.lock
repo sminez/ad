@@ -205,11 +205,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f46ad14479a25103f283c0f10005961cf086d8dc42205bb44c46ac563475dca6"
 
 [[package]]
-name = "crimes"
-version = "0.1.0"
-source = "git+https://github.com/sminez/crimes.git#6591acaba40572901ca6e2bbeaf1727562fa50c7"
-
-[[package]]
 name = "criterion"
 version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -452,7 +447,7 @@ name = "ninep"
 version = "0.4.0"
 dependencies = [
  "bitflags 2.8.0",
- "crimes",
+ "simple_coro",
  "simple_test_case",
  "tokio",
 ]
@@ -703,6 +698,12 @@ name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
+
+[[package]]
+name = "simple_coro"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fa9c4b3d9397b286092543bdfc5289ba7bd09295187176367b6545e01882911f"
 
 [[package]]
 name = "simple_test_case"
