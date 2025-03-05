@@ -635,12 +635,12 @@ impl GapBuffer {
             self.next_gap = clamp_gap_size(self.len() + n, n.next_power_of_two());
         }
 
-        let gap_increase = self.next_gap + n - self.gap();
+        let gap_increase = self.next_gap + n;
         let cap = self.cap + self.next_gap + n;
         let mut buf = Vec::with_capacity(cap);
 
         buf.extend_from_slice(&self.data[..self.gap_start]); // data to gap
-        buf.resize(buf.len() + self.next_gap + n, 0); // the new gap (zeroed)
+        buf.resize(buf.len() + self.next_gap + self.gap() + n, 0); // the new gap (zeroed)
         buf.extend_from_slice(&self.data[self.gap_end..]); // data after gap
 
         let start = self.gap_start;
