@@ -777,6 +777,17 @@ impl GapBuffer {
     ) -> usize {
         let mut to = usize::MAX;
 
+        if self.line_endings.is_empty() && char_idx == self.len_chars().saturating_sub(1) {
+            return if self.gap_end == self.cap {
+                self.gap_start.saturating_sub(1)
+            } else {
+                // SAFETY: we know that we have valid data at the end of the buffer as
+                // self.gap_end != self.cap, so decoding the final character is valid
+                let ch = unsafe { decode_char_ending_at(self.cap - 1, &self.data) };
+                self.cap - ch.len_utf8()
+            };
+        }
+
         for (&b, &c) in self
             .line_endings
             .iter()
@@ -800,8 +811,10 @@ impl GapBuffer {
             cur = chars.cur + byte_offset;
         }
 
-        if cur > self.gap_start && cur < self.gap_end {
-            cur += self.gap()
+        let slice_enclosed_gap = self.gap_start >= byte_offset && self.gap_end <= to;
+        // Cur landed inside the gap or we counted over the gap while iterating the slice above
+        if cur > self.gap_start && (cur <= self.gap_end || slice_enclosed_gap) {
+            cur += self.gap();
         }
 
         cur
@@ -1732,5 +1745,22 @@ mod tests {
         for (idx, ch) in s.chars().enumerate() {
             assert_eq!(gb.char(idx), ch);
         }
+    }
+
+    #[test]
+    fn char_to_raw_byte_line_end_with_no_newlines() {
+        let mut gb =
+            GapBuffer::from("// does it need to be a doc comment? that is a long enough line to");
+        gb.move_gap_to(0);
+        assert_eq!(gb.char_to_raw_byte(65), 129);
+        gb.move_gap_to(10);
+        assert_eq!(gb.char_to_raw_byte(65), 129);
+        gb.move_gap_to(66);
+        assert_eq!(gb.char_to_raw_byte(65), 65);
+        gb.insert_char(66, '\n');
+        assert_eq!(
+            gb.to_string(),
+            "// does it need to be a doc comment? that is a long enough line to\n"
+        );
     }
 }

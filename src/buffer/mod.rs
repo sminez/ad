@@ -1461,4 +1461,20 @@ pub(crate) mod tests {
         b.handle_raw_input(Input::Return);
         assert_eq!(b.txt.to_string(), "  foo\n  ");
     }
+
+    #[test]
+    fn set_dot_eob_single_line_buffer() {
+        let mut b = Buffer::new_virtual(
+            0,
+            "test",
+            "// does it need to be a doc comment? that is a long enough line to",
+        );
+        b.set_dot(TextObject::BufferEnd, 1);
+        b.handle_raw_input(Input::Return);
+
+        assert_eq!(
+            b.txt.to_string(),
+            "// does it need to be a doc comment? that is a long enough line to\n"
+        );
+    }
 }

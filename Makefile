@@ -4,7 +4,6 @@ test:
 
 .PHONY: watch-test
 watch-test:
-	cargo nextest run --workspace
 	git ls-files | entr -ac cargo nextest run --workspace $(ARGS)
 
 .PHONY: doc
