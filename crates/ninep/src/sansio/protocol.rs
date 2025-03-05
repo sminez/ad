@@ -568,6 +568,13 @@ pub struct Tmessage {
     pub content: Tdata,
 }
 
+impl Tmessage {
+    /// Construct a new [Tmessage]
+    pub const fn new(tag: u16, content: Tdata) -> Self {
+        Self { tag, content }
+    }
+}
+
 /// Generate the Tdata enum along with the wrapped T-message types and their implementations of NineP
 macro_rules! impl_tdata {
     ($(
