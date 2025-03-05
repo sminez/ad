@@ -1,5 +1,5 @@
 //! A simple demo of the 9p client interface
-use ninep::client::UnixClient;
+use ninep::sync::client::UnixClient;
 use std::io;
 
 fn main() -> io::Result<()> {

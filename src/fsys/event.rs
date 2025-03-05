@@ -8,7 +8,7 @@ use crate::{
     input::Event,
 };
 use ad_event::{FsysEvent, Kind, Source};
-use ninep::server::ReadOutcome;
+use ninep::sync::server::ReadOutcome;
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
     thread::spawn,

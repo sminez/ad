@@ -1,4 +1,4 @@
-use ninep::server::{ClientId, ReadOutcome};
+use ninep::sync::server::{ClientId, ReadOutcome};
 use std::{
     collections::HashMap,
     mem::swap,

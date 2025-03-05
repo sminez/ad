@@ -1,9 +1,12 @@
-//! 9p protocol implementation
+//! Sans-io 9p protocol implementation
 //!
 //!   http://man.cat-v.org/plan_9/5/
+use crate::sync::SyncNineP;
+use simple_coro::Handle;
 use std::{
     fmt,
-    io::{self, Cursor, ErrorKind, Read, Write},
+    future::Future,
+    io::{self, Cursor, ErrorKind},
     mem::size_of,
 };
 
@@ -16,42 +19,88 @@ pub const MAX_DATA_SIZE_FIELD: usize = u32::MAX as usize;
 /// to use more than this is an error.
 pub const MAX_DATA_LEN: usize = 32 * 1024 * 1024;
 
+/// Non IO releated errors that can occur when attempting to serialize a [NineP] type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WriteError {
+    /// The maximum number of bytes we allow in a Data buffer is [MAX_DATA_LEN]: a client
+    /// attempting to use more than this is an error.
+    DataLength(usize),
+    /// The size of variable length data is denoted using a u16 so anything longer
+    /// than u16::MAX is not something we can handle.
+    FieldLength(usize),
+}
+
+impl fmt::Display for WriteError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::DataLength(n_bytes) => write!(
+                f,
+                "data field too long: max={MAX_DATA_SIZE_FIELD} len={n_bytes}"
+            ),
+            Self::FieldLength(len) => write!(f, "string too long: max={MAX_SIZE_FIELD} len={len}"),
+        }
+    }
+}
+
 /// Something that can be encoded to and decoded 9p protocol messages.
 ///
 /// From [INTRO(5)](http://man.cat-v.org/plan_9/5/intro):
 ///   Each message consists of a sequence of bytes. Two-, four-, and eight-byte fields hold
 ///   unsigned integers represented in little-endian order (least significant byte first).
-pub trait Format9p: Sized {
+pub trait NineP: Sized {
     /// Number of bytes required to encode
     fn n_bytes(&self) -> usize;
 
-    /// Encode self as bytes for the 9p protocol and write to the given Writer
-    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()>;
+    /// Encode self as bytes for the 9p protocol into a given buffer which the caller must
+    /// ensure is sized to be at least [NineP::n_bytes].
+    fn write_bytes(&self, buf: &mut [u8]) -> Result<(), WriteError>;
 
-    /// Decode self from 9p protocol bytes coming from the given Reader
-    fn read_from<R: Read>(r: &mut R) -> io::Result<Self>;
+    /// Serialize into a byte buffer ready for transmission.
+    fn write_9p_bytes(&self) -> Result<Vec<u8>, WriteError> {
+        let mut buf = vec![0; self.n_bytes()];
+        self.write_bytes(&mut buf)?;
+
+        Ok(buf)
+    }
+
+    /// This is not a normal async function. It is used to set up a sans-io state machine that
+    /// can be driven by a concrete implementation.
+    ///
+    /// # Safety
+    /// Implementations of `read` need to ensure that the only await points they contain are
+    /// from calls to the [request_bytes] macro.
+    fn read_9p(handle: Handle<usize, Vec<u8>>) -> impl Future<Output = io::Result<Self>> + Send;
+}
+
+/// wrapper around uX::from_le_bytes that accepts a slice rather than a fixed size array
+macro_rules! from_le_bytes {
+    ($ty:ty, $bytes:expr) => {
+        // SAFETY: we know we are setting the correct array length
+        unsafe { <$ty>::from_le_bytes($bytes[0..size_of::<$ty>()].try_into().unwrap_unchecked()) }
+    };
 }
 
 // Unsigned integer types can all be treated the same way so we stamp them out using a macro.
 // They are written and read in their little-endian byte form.
 macro_rules! impl_u {
     ($($ty:ty),+) => {
-        $(impl Format9p for $ty {
-            fn n_bytes(&self) -> usize {
-                size_of::<$ty>()
-            }
+        $(
+            impl NineP for $ty {
+                fn n_bytes(&self) -> usize {
+                    size_of::<$ty>()
+                }
 
-            fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
-                w.write_all(&self.to_le_bytes())
-            }
+                fn write_bytes(&self, buf: &mut [u8]) -> Result<(), WriteError> {
+                    buf[0..size_of::<$ty>()].copy_from_slice(&self.to_le_bytes());
+                    Ok(())
+                }
 
-            fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-                let mut buf = [0u8; size_of::<$ty>()];
-                r.read_exact(&mut buf)?;
-
-                Ok(<$ty>::from_le_bytes(buf))
+                async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<$ty> {
+                    let buf = handle.yield_value(size_of::<$ty>()).await;
+                    Ok(from_le_bytes!($ty, buf))
+                }
             }
-        })+
+        )+
     };
 }
 
@@ -67,38 +116,28 @@ impl_u!(u8, u16, u32, u64);
 //   Text strings in 9P messages are not NUL- terminated: n counts the bytes of UTF-8 data,
 //   which include no final zero byte.  The NUL character is illegal in all text strings
 //   in 9P, and is therefore excluded from file names, user names, and so on.
-impl Format9p for String {
+impl NineP for String {
     fn n_bytes(&self) -> usize {
         size_of::<u16>() + self.len()
     }
 
-    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn write_bytes(&self, buf: &mut [u8]) -> Result<(), WriteError> {
         let len = self.len();
         if len > MAX_SIZE_FIELD {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("string too long: max={MAX_SIZE_FIELD} len={len}"),
-            ));
+            return Err(WriteError::FieldLength(len));
         }
 
-        (len as u16).write_to(w)?;
-        w.write_all(self.as_bytes())
+        (len as u16).write_bytes(&mut buf[0..2])?;
+        buf[2..len + 2].copy_from_slice(self.as_bytes());
+
+        Ok(())
     }
 
-    fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u16::read_from(r)? as usize;
-        let mut s = String::with_capacity(len);
-        r.take(len as u64).read_to_string(&mut s)?;
-        let actual = s.len();
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        let len = u16::read_9p(handle).await? as usize;
+        let buf = handle.yield_value(len).await;
 
-        if actual < len {
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                format!("unexpected end of string: wanted {len}, got {actual}"),
-            ));
-        }
-
-        Ok(s)
+        String::from_utf8(buf).map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
     }
 }
 
@@ -107,34 +146,33 @@ impl Format9p for String {
 // From [INTRO(5)](http://man.cat-v.org/plan_9/5/intro):
 //   Data items of larger or variable lengths are represented by a two-byte field specifying
 //   a count, n, followed by n bytes of data.
-impl<T: Format9p + std::fmt::Debug> Format9p for Vec<T> {
+impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
     fn n_bytes(&self) -> usize {
         size_of::<u16>() + self.iter().map(|t| t.n_bytes()).sum::<usize>()
     }
 
-    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn write_bytes(&self, mut buf: &mut [u8]) -> Result<(), WriteError> {
         let n_bytes = self.iter().map(|t| t.n_bytes()).sum::<usize>();
         if n_bytes > MAX_SIZE_FIELD {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("vec too long: max={MAX_SIZE_FIELD} len={n_bytes}"),
-            ));
+            return Err(WriteError::FieldLength(n_bytes));
         }
 
-        (self.len() as u16).write_to(w)?;
+        (self.len() as u16).write_bytes(&mut buf[0..2])?;
+        buf = &mut buf[2..];
         for t in self {
-            t.write_to(w)?;
+            let n = t.n_bytes();
+            t.write_bytes(buf)?;
+            buf = &mut buf[n..];
         }
 
         Ok(())
     }
 
-    fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let n = u16::read_from(r)? as usize;
-        let mut buf = Vec::with_capacity(n);
-
-        for _ in 0..n {
-            buf.push(T::read_from(r)?);
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        let len = u16::read_9p(handle).await? as usize;
+        let mut buf = Vec::with_capacity(len);
+        for _ in 0..len {
+            buf.push(T::read_9p(handle).await?);
         }
 
         Ok(buf)
@@ -155,7 +193,7 @@ impl<T: Format9p + std::fmt::Debug> Format9p for Vec<T> {
 ///       size[4] Rwrite tag[2] count[4]
 /// ```
 #[derive(Clone, PartialEq, Eq)]
-pub struct Data(pub(super) Vec<u8>);
+pub struct Data(pub(crate) Vec<u8>);
 
 impl fmt::Debug for Data {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -172,13 +210,17 @@ impl From<Vec<u8>> for Data {
 impl TryFrom<Data> for Vec<RawStat> {
     type Error = io::Error;
 
-    fn try_from(value: Data) -> Result<Self, io::Error> {
-        let mut r = Cursor::new(value.0);
+    fn try_from(Data(bytes): Data) -> Result<Self, io::Error> {
         let mut buf = Vec::new();
+        let mut bytes = bytes.as_slice();
+        let n = size_of::<RawStat>();
 
         loop {
-            match RawStat::read_from(&mut r) {
-                Ok(rs) => buf.push(rs),
+            match RawStat::read_from(&mut bytes) {
+                Ok(rs) => {
+                    buf.push(rs);
+                    bytes = &bytes[n..];
+                }
                 Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e),
             }
@@ -188,26 +230,25 @@ impl TryFrom<Data> for Vec<RawStat> {
     }
 }
 
-impl Format9p for Data {
+impl NineP for Data {
     fn n_bytes(&self) -> usize {
         size_of::<u32>() + self.0.len()
     }
 
-    fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
+    fn write_bytes(&self, buf: &mut [u8]) -> Result<(), WriteError> {
         let n_bytes = self.0.len();
         if n_bytes > MAX_DATA_SIZE_FIELD {
-            return Err(io::Error::new(
-                ErrorKind::InvalidInput,
-                format!("data field too long: max={MAX_DATA_SIZE_FIELD} len={n_bytes}"),
-            ));
+            return Err(WriteError::DataLength(n_bytes));
         }
 
-        (n_bytes as u32).write_to(w)?;
-        w.write_all(&self.0)
+        (n_bytes as u32).write_bytes(&mut buf[0..4])?;
+        buf[4..].copy_from_slice(&self.0);
+
+        Ok(())
     }
 
-    fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let len = u32::read_from(r)? as usize;
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        let len = u32::read_9p(handle).await? as usize;
         if len > MAX_DATA_LEN {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
@@ -215,20 +256,161 @@ impl Format9p for Data {
             ));
         }
 
-        let mut buf = Vec::with_capacity(len);
-        r.take(len as u64).read_to_end(&mut buf)?;
-        let actual = buf.len();
-
-        if actual < len {
-            return Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                format!("unexpected end of data: wanted {len}, got {actual}"),
-            ));
-        }
-
-        Ok(Data(buf))
+        Ok(Data(handle.yield_value(len).await))
     }
 }
+
+/// A machine-independent directory entry
+/// http://man.cat-v.org/plan_9/5/stat
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RawStat {
+    /// size[2]      total byte count of the following data
+    pub size: u16,
+    /// type[2]      for kernel use
+    pub ty: u16,
+    /// dev[4]       for kernel use
+    pub dev: u32,
+    /// Qid type, version and path
+    pub qid: Qid,
+    /// mode[4]      permissions and flags
+    pub mode: u32,
+    /// atime[4]     last access time
+    pub atime: u32,
+    /// mtime[4]     last modification time
+    pub mtime: u32,
+    /// length[8]    length of file in bytes
+    pub length: u64,
+    /// name[ s ]    file name; must be / if the file is the root directory of the server
+    pub name: String,
+    /// uid[ s ]     owner name
+    pub uid: String,
+    /// gid[ s ]     group name
+    pub gid: String,
+    /// muid[ s ]    name of the user who last modified the file
+    pub muid: String,
+}
+
+macro_rules! write_fields {
+    ($buf:expr, $self:expr, $($field:ident),+) => {
+        #[allow(unused_assignments)]
+        {
+            $(
+                let len = $self.$field.n_bytes();
+                $self.$field.write_bytes(&mut $buf[0..len])?;
+                $buf = &mut $buf[len..];
+            )+
+            Ok(())
+        }
+
+    };
+}
+
+impl NineP for RawStat {
+    fn n_bytes(&self) -> usize {
+        // 2 2 4 13 4 4 4 8 -> 41
+        41 + self.name.n_bytes() + self.uid.n_bytes() + self.gid.n_bytes() + self.muid.n_bytes()
+    }
+
+    fn write_bytes(&self, mut buf: &mut [u8]) -> Result<(), WriteError> {
+        write_fields!(
+            buf, self, size, ty, dev, qid, mode, atime, mtime, length, name, uid, gid, muid
+        )
+    }
+
+    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+        // Request the fixed sized data before the strings in one block up front
+        let buf = handle.yield_value(41).await;
+        let bytes = buf.as_slice();
+
+        let size = from_le_bytes!(u16, bytes);
+        let ty = from_le_bytes!(u16, &bytes[2..]);
+        let dev = from_le_bytes!(u32, &bytes[4..]);
+        let qid = Qid::read_from(&mut &bytes[8..])?;
+        let mode = from_le_bytes!(u32, &bytes[21..]);
+        let atime = from_le_bytes!(u32, &bytes[25..]);
+        let mtime = from_le_bytes!(u32, &bytes[29..]);
+        let length = from_le_bytes!(u64, &bytes[33..]);
+        let name = String::read_9p(handle).await?;
+        let uid = String::read_9p(handle).await?;
+        let gid = String::read_9p(handle).await?;
+        let muid = String::read_9p(handle).await?;
+
+        Ok(RawStat {
+            size,
+            ty,
+            dev,
+            qid,
+            mode,
+            atime,
+            mtime,
+            length,
+            name,
+            uid,
+            gid,
+            muid,
+        })
+    }
+}
+
+/// Helper for defining a struct that implements Format9p by just serialising their
+/// fields directly without a size field.
+macro_rules! impl_message_datatype {
+    (
+        $reader:ident;
+        $(#[$docs:meta])+
+        struct $struct:ident {
+            $(
+                $(#[$field_docs:meta])*
+                $field:ident: $ty:ty,
+            )*
+        }
+    ) => {
+        $(#[$docs])+
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub struct $struct {
+            $(
+                $(#[$field_docs])*
+                pub $field: $ty,
+            )*
+        }
+
+        impl NineP for $struct {
+            fn n_bytes(&self) -> usize {
+                #[allow(unused_mut)]
+                let mut n = 0;
+                $(n += self.$field.n_bytes();)*
+                n
+            }
+
+            fn write_bytes(&self, mut buf: &mut [u8]) -> Result<(), WriteError> {
+                write_fields!(buf, self, $($field),*)
+            }
+
+            async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+                $(let $field = <$ty>::read_9p(handle).await?;)*
+                Ok($struct { $($field),* })
+            }
+        }
+    };
+}
+
+impl_message_datatype!(
+    QidReader;
+
+    /// A qid represents the server's unique identification for the file being accessed: two files
+    /// on the same server hierarchy are the same if and only if their qids are the same.
+    #[derive(Copy)]
+    struct Qid {
+        /// qid.type[1]
+        /// the type of the file (directory, etc.), repre- sented as a bit vector corresponding to the
+        /// high 8 bits of the file's mode word.
+        ty: u8,
+        /// qid.vers[4]  version number for given path
+        version: u32,
+        /// qid.path[8]  the file server's unique identification for the file
+        path: u64,
+    }
+);
 
 /// Taken from the enum in fcall.h in the plan9 source.
 ///   https://github.com/9fans/plan9port/blob/master/include/fcall.h#L80
@@ -286,48 +468,7 @@ impl MessageType {
     // Ropenfd = 99,
 }
 
-/// Helper for defining a struct that implements Format9p by just serialising their
-/// fields directly without a size field.
-macro_rules! impl_message_datatype {
-    (
-        $(#[$docs:meta])+
-        struct $struct:ident {
-            $(
-                $(#[$field_docs:meta])*
-                $field:ident: $ty:ty,
-            )*
-        }
-    ) => {
-        $(#[$docs])+
-        #[derive(Debug, Clone, PartialEq, Eq)]
-        pub struct $struct {
-            $(
-                $(#[$field_docs])*
-                pub $field: $ty,
-            )*
-        }
-
-        impl Format9p for $struct {
-            fn n_bytes(&self) -> usize {
-                #[allow(unused_mut)]
-                let mut n = 0;
-                $(n += self.$field.n_bytes();)*
-                n
-            }
-
-            fn write_to<W: Write>(&self, _w: &mut W) -> io::Result<()> {
-                $(self.$field.write_to(_w)?;)*
-                Ok(())
-            }
-
-            fn read_from<R: Read>(_r: &mut R) -> io::Result<Self> {
-                $(let $field = <$ty>::read_from(_r)?;)*
-                Ok(Self { $($field,)* })
-            }
-        }
-    };
-}
-
+/// Helper for implementing Tmessage and Rmessage
 macro_rules! impl_message_format {
     (
         $message_ty:ident, $enum_ty:ident, $err:expr;
@@ -335,7 +476,7 @@ macro_rules! impl_message_format {
             $($field:ident: $ty:ty,)*
         })+
     ) => {
-        impl Format9p for $message_ty {
+        impl NineP for $message_ty {
             fn n_bytes(&self) -> usize {
                 let content_size = match &self.content {
                     $(
@@ -352,19 +493,24 @@ macro_rules! impl_message_format {
                 4 + 1 + 2 + content_size
             }
 
-            fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
+            #[allow(unused_assignments)]
+            fn write_bytes(&self, buf: &mut [u8]) -> Result<(), WriteError> {
                 let ty = match self.content {
                     $($enum_ty::$enum_variant { .. } => MessageType::$message_variant.0,)+
                 };
 
-                (self.n_bytes() as u32).write_to(w)?;
-                ty.write_to(w)?;
-                self.tag.write_to(w)?;
+                (self.n_bytes() as u32).write_bytes(buf)?; // 4
+                ty.write_bytes(&mut buf[4..])?; // 1
+                self.tag.write_bytes(&mut buf[5..])?; // 2
+                let mut offset = 7;
 
                 match &self.content {
                     $(
                         $enum_ty::$enum_variant { $($field,)* } => {
-                            $($field.write_to(w)?;)*
+                            $(
+                                $field.write_bytes(&mut buf[offset..])?;
+                                offset += $field.n_bytes();
+                            )*
                         },
                     )+
                 }
@@ -372,20 +518,19 @@ macro_rules! impl_message_format {
                 Ok(())
             }
 
-            fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-                // the size field includes the number of bytes for the field itself so we
-                // trim that off before decoding the rest of the message
-                let size = u32::read_from(r)?;
-                let r = &mut r.take((size - 4) as u64);
+            #[allow(unused_assignments)]
+            async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+                let len = u32::read_9p(handle).await? as usize;
+                let bytes = handle.yield_value(len-4).await;
+                let ty = from_le_bytes!(u8, &bytes);
+                let tag = from_le_bytes!(u16, &bytes[1..]);
+                let mut cur = Cursor::new(bytes);
+                cur.set_position(3);
 
-                let mut ty_buf = [0u8];
-                r.read_exact(&mut ty_buf)?;
-
-                let tag = u16::read_from(r)?;
-                let content = match MessageType(ty_buf[0]) {
+                let content = match MessageType(ty) {
                     $(
                         MessageType::$message_variant => $enum_ty::$enum_variant {
-                            $($field: Format9p::read_from(r)?,)*
+                            $($field: <$ty>::read_from(&mut cur)?),*
                         },
                     )+
 
@@ -395,16 +540,43 @@ macro_rules! impl_message_format {
                     )),
                 };
 
-                Ok(Self { tag, content })
+                Ok($message_ty { tag, content })
             }
         }
-
     };
 }
 
-/// Generate the Tmessage enum along with the wrapped T-message types
-/// and their implementations of Format9p
-macro_rules! impl_tmessages {
+/// The Plan 9 File Protocol, 9P, is used for messages between clients and servers. A client
+/// transmits requests (T- messages) to a server, which subsequently returns replies (R-messages)
+/// to the client. The combined acts of transmitting (receiving) a request of a particular type,
+/// and receiving (transmitting) its reply is called a transaction of that type.
+///
+/// The data we decode into this struct is of the following form:
+/// ```txt
+///   size[4] type[1] tag[2] | content[...]
+/// ```
+/// where the [MessageType] is a T variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tmessage {
+    /// Each T-message has a tag field, chosen and used by the client to identify the message. The
+    /// reply to the message will have the same tag. Clients must arrange that no two outstanding
+    /// messages on the same connection have the same tag. An exception is the tag NOTAG, defined
+    /// as (ushort)~0 in <fcall.h>: the client can use it, when establishing a connection, to
+    /// override tag matching in version messages.
+    pub tag: u16,
+    /// The t-message variant specific data sent by the client
+    pub content: Tdata,
+}
+
+impl Tmessage {
+    /// Construct a new [Tmessage]
+    pub const fn new(tag: u16, content: Tdata) -> Self {
+        Self { tag, content }
+    }
+}
+
+/// Generate the Tdata enum along with the wrapped T-message types and their implementations of NineP
+macro_rules! impl_tdata {
     ($(
         $(#[$docs:meta])+
         $enum_variant:ident => $message_variant:ident {
@@ -432,106 +604,7 @@ macro_rules! impl_tmessages {
     };
 }
 
-/// Generate the Rmessage enum along with the wrapped R-message types
-/// and their implementations of Format9p
-macro_rules! impl_rmessages {
-    ($(
-        $(#[$docs:meta])+
-        $enum_variant:ident => $message_variant:ident {
-            $(
-                $(#[$field_docs:meta])+
-                $field:ident: $ty:ty,
-            )*
-        }
-    )+) => {
-        /// R-message data variants
-        ///
-        /// The [Rmessage] struct is used to encode and send R-messages to clients.
-        /// See the individual message structs for docs on the format and semantics of each variant.
-        #[derive(Debug, Clone, PartialEq, Eq)]
-        pub enum Rdata {
-            $( $(#[$docs])+ $enum_variant { $($(#[$field_docs])+ $field: $ty,)* }, )+
-        }
-
-        impl_message_format!(
-            Rmessage, Rdata, "invalid message type for r-message: {}";
-            $($enum_variant => $message_variant {
-                $($field: $ty,)*
-            })+
-        );
-    };
-}
-
-impl_message_datatype!(
-    /// A machine-independent directory entry
-    /// http://man.cat-v.org/plan_9/5/stat
-    struct RawStat {
-        /// size[2]      total byte count of the following data
-        size: u16,
-        /// type[2]      for kernel use
-        ty: u16,
-        /// dev[4]       for kernel use
-        dev: u32,
-        /// Qid type, version and path
-        qid: Qid,
-        /// mode[4]      permissions and flags
-        mode: u32,
-        /// atime[4]     last access time
-        atime: u32,
-        /// mtime[4]     last modification time
-        mtime: u32,
-        /// length[8]    length of file in bytes
-        length: u64,
-        /// name[ s ]    file name; must be / if the file is the root directory of the server
-        name: String,
-        /// uid[ s ]     owner name
-        uid: String,
-        /// gid[ s ]     group name
-        gid: String,
-        /// muid[ s ]    name of the user who last modified the file
-        muid: String,
-    }
-);
-
-impl_message_datatype!(
-    /// A qid represents the server's unique identification for the file being accessed: two files
-    /// on the same server hierarchy are the same if and only if their qids are the same.
-    #[derive(Copy)]
-    struct Qid {
-        /// qid.type[1]
-        /// the type of the file (directory, etc.), repre- sented as a bit vector corresponding to the
-        /// high 8 bits of the file's mode word.
-        ty: u8,
-        /// qid.vers[4]  version number for given path
-        version: u32,
-        /// qid.path[8]  the file server's unique identification for the file
-        path: u64,
-    }
-);
-
-/// The Plan 9 File Protocol, 9P, is used for messages between clients and servers. A client
-/// transmits requests (T- messages) to a server, which subsequently returns replies (R-messages)
-/// to the client. The combined acts of transmitting (receiving) a request of a particular type,
-/// and receiving (transmitting) its reply is called a transaction of that type.
-///
-/// The data we decode into this struct is of the following form:
-/// ```txt
-///   size[4] type[1] tag[2] | content[...]
-/// ```
-/// where the [MessageType] is a T variant.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Tmessage {
-    /// Each T-message has a tag field, chosen and used by the client to identify the message. The
-    /// reply to the message will have the same tag. Clients must arrange that no two outstanding
-    /// messages on the same connection have the same tag. An exception is the tag NOTAG, defined
-    /// as (ushort)~0 in <fcall.h>: the client can use it, when establishing a connection, to
-    /// override tag matching in version messages.
-    pub tag: u16,
-    /// The t-message variant specific data sent by the client
-    pub content: Tdata,
-}
-
-impl_tmessages! {
+impl_tdata! {
     /// http://man.cat-v.org/plan_9/5/version
     /// size[4] Tversion tag[2] | msize[4] version[s]
     Version => Tversion {
@@ -682,7 +755,37 @@ pub struct Rmessage {
     pub content: Rdata,
 }
 
-impl_rmessages! {
+/// Generate the Rdata enum along with the wrapped R-message types
+/// and their implementations of Format9p
+macro_rules! impl_rdata {
+    ($(
+        $(#[$docs:meta])+
+        $enum_variant:ident => $message_variant:ident {
+            $(
+                $(#[$field_docs:meta])+
+                $field:ident: $ty:ty,
+            )*
+        }
+    )+) => {
+        /// R-message data variants
+        ///
+        /// The [Rmessage] struct is used to encode and send R-messages to clients.
+        /// See the individual message structs for docs on the format and semantics of each variant.
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        pub enum Rdata {
+            $( $(#[$docs])+ $enum_variant { $($(#[$field_docs])+ $field: $ty,)* }, )+
+        }
+
+        impl_message_format!(
+            Rmessage, Rdata, "invalid message type for r-message: {}";
+            $($enum_variant => $message_variant {
+                $($field: $ty,)*
+            })+
+        );
+    };
+}
+
+impl_rdata! {
     /// http://man.cat-v.org/plan_9/5/version
     /// size[4] Rversion tag[2] | msize[4] version[s]
     Version => Rversion {
@@ -782,36 +885,19 @@ impl_rmessages! {
 mod tests {
     use super::*;
     use simple_test_case::test_case;
-    use std::{cmp::PartialEq, io::Cursor};
-
-    #[test]
-    fn uint_n_bytes_is_correct() {
-        assert_eq!(0u8.n_bytes(), 1, "u8");
-        assert_eq!(0u16.n_bytes(), 2, "u16");
-        assert_eq!(0u32.n_bytes(), 4, "u32");
-        assert_eq!(0u64.n_bytes(), 8, "u64");
-    }
-
-    #[test_case("test", 2 + 4; "single byte chars only")]
-    #[test_case("", 2; "empty string")]
-    #[test_case("Hello, 世界", 2 + 7 + 3 + 3; "including multi-byte chars")]
-    #[test]
-    fn string_n_bytes_is_correct(s: &str, expected: usize) {
-        assert_eq!(s.to_string().n_bytes(), expected);
-    }
+    use std::cmp::PartialEq;
 
     #[test]
     fn uint_decode() {
-        let buf: [u8; 8] = [0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
-        let mut cur = Cursor::new(&buf);
+        let buf: Vec<u8> = vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
 
-        assert_eq!(0x01, u8::read_from(&mut cur).unwrap());
-        cur.set_position(0);
-        assert_eq!(0x2301, u16::read_from(&mut cur).unwrap());
-        cur.set_position(0);
-        assert_eq!(0x67452301, u32::read_from(&mut cur).unwrap());
-        cur.set_position(0);
-        assert_eq!(0xefcdab8967452301, u64::read_from(&mut cur).unwrap());
+        assert_eq!(0x01, u8::read_from(&mut buf.as_slice()).unwrap());
+        assert_eq!(0x2301, u16::read_from(&mut buf.as_slice()).unwrap());
+        assert_eq!(0x67452301, u32::read_from(&mut buf.as_slice()).unwrap());
+        assert_eq!(
+            0xefcdab8967452301,
+            u64::read_from(&mut buf.as_slice()).unwrap()
+        );
     }
 
     #[test_case("test", &[0x04, 0x00, 0x74, 0x65, 0x73, 0x74]; "single byte chars only")]
@@ -823,8 +909,8 @@ mod tests {
     )]
     #[test]
     fn string_encode(s: &str, bytes: &[u8]) {
-        let mut buf: Vec<u8> = vec![];
-        s.to_string().write_to(&mut buf).unwrap();
+        let s = s.to_string();
+        let buf = s.write_9p_bytes().unwrap();
         assert_eq!(&buf, bytes);
     }
 
@@ -836,6 +922,7 @@ mod tests {
         S(&'static str),
         V(Vec<String>),
         D(Vec<u8>),
+        RawStat,
         Clunk,
         Walk,
     }
@@ -845,13 +932,10 @@ mod tests {
     // into the inner types before calling this instead.
     fn round_trip_inner<T>(t1: T)
     where
-        T: Format9p + PartialEq + fmt::Debug,
+        T: NineP + PartialEq + fmt::Debug,
     {
-        let mut buf = Cursor::new(Vec::new());
-        t1.write_to(&mut buf).unwrap();
-        buf.set_position(0);
-
-        let t2 = T::read_from(&mut buf).unwrap();
+        let buf = t1.write_9p_bytes().unwrap();
+        let t2 = T::read_from(&mut buf.as_slice()).unwrap();
 
         assert_eq!(t1, t2);
     }
@@ -864,6 +948,7 @@ mod tests {
     #[test_case(F9::S("Hello, 世界"); "multi-byte char string")]
     #[test_case(F9::V(vec!["foo".to_string(), "bar".to_string()]); "vec String")]
     #[test_case(F9::D(vec![5, 6, 7, 8, u8::MAX]); "data")]
+    #[test_case(F9::RawStat; "raw stat")]
     #[test_case(F9::Clunk; "clunk")]
     #[test_case(F9::Walk; "walk")]
     #[test]
@@ -876,6 +961,24 @@ mod tests {
             F9::S(t) => round_trip_inner(t.to_string()),
             F9::V(t) => round_trip_inner(t),
             F9::D(t) => round_trip_inner(Data(t)),
+            F9::RawStat => round_trip_inner(RawStat {
+                size: 1,
+                ty: 2,
+                dev: 3,
+                qid: Qid {
+                    ty: 1,
+                    version: 2,
+                    path: 3,
+                },
+                mode: 4,
+                atime: 5,
+                mtime: 6,
+                length: 7,
+                name: "test name".to_string(),
+                uid: "test uid".to_string(),
+                gid: "test gid".to_string(),
+                muid: "test muid".to_string(),
+            }),
             F9::Clunk => round_trip_inner(Rmessage {
                 tag: 0,
                 content: Rdata::Clunk {},

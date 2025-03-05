@@ -1,5 +1,5 @@
 //! A simple demo of the 9p client interface
-use ninep::{client::UnixClient, fs::FileType};
+use ninep::{fs::FileType, sync::client::UnixClient};
 use std::io;
 
 fn main() -> io::Result<()> {
@@ -7,7 +7,7 @@ fn main() -> io::Result<()> {
     tree(&mut client, "", 0)?;
 
     for line in client.iter_lines("blocking")? {
-        print!("{line}");
+        println!("{line}");
     }
 
     Ok(())
