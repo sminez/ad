@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# A simple ad helper script to preview markdown in ad using pandoc and w3m
+
+. "$HOME/.ad/lib/ad.sh"
+
+requireAd
+
+processMarkdown() {
+  clearBuffer "$1"
+  bufRead "$2" body | pandoc | w3m -T text/html 2>&1 | bufWrite "$1" body
+  curToBof "$1"
+  markClean "$1"  
+}
+
+currentId="$(currentBufferId)"
+adCtl "open-in-new-window ./+markdown-preview"
+id="$(adIndex | grep "+markdown-preview" | cut -f1)"
+focusBuffer "$currentId"
+processMarkdown "$id" "$currentId"
