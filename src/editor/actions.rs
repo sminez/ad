@@ -464,18 +464,19 @@ where
         _ = tx.send(s);
     }
 
+    /// Use the minibuffer to select an open buffer and focus it in the active window
     pub(super) fn select_buffer(&mut self) {
         let selection = self.minibuffer_select_from("> ", self.layout.as_buffer_list());
         if let MiniBufferSelection::Line { line, .. } = selection {
             // unwrap is fine here because we know the format of the buf list we are supplying
             if let Ok(id) = line.split_once(' ').unwrap().0.parse::<usize>() {
-                self.focus_buffer(id);
+                self.focus_buffer(id, true);
             }
         }
     }
 
-    pub(super) fn focus_buffer(&mut self, id: usize) {
-        self.layout.focus_id(id);
+    pub(super) fn focus_buffer(&mut self, id: usize, force_active: bool) {
+        self.layout.focus_id(id, force_active);
         _ = self.tx_fsys.send(LogEvent::Focus(id));
     }
 

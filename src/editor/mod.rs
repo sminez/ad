@@ -408,7 +408,7 @@ where
             ExpandDot => self.expand_current_dot(),
             FindFile { new_window } => self.find_file(new_window),
             FindRepoFile { new_window } => self.find_repo_file(new_window),
-            FocusBuffer { id } => self.focus_buffer(id),
+            FocusBuffer { id } => self.focus_buffer(id, false), // allow focusing another window
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
             LoadDot { new_window } => self.default_load_dot(source, new_window),

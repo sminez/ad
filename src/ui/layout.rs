@@ -186,9 +186,9 @@ impl Layout {
         false
     }
 
-    pub(crate) fn focus_id(&mut self, id: BufferId) {
+    pub(crate) fn focus_id(&mut self, id: BufferId, force_active: bool) {
         if let Some(id) = self.buffers.focus_id(id) {
-            if self.buffer_is_visible(id) {
+            if !force_active && self.buffer_is_visible(id) {
                 self.focus_first_window_with_buffer(id);
             } else {
                 self.show_buffer_in_active_window(id);
@@ -498,33 +498,6 @@ impl Layout {
         let mut x_offset = 0;
         let mut y_offset = 0;
 
-        let apply = |b: &mut Buffer, win: &mut Window, n_cols: usize, focused: bool| {
-            let n_rows = win.n_rows;
-            let view = &mut win.view;
-
-            if focused {
-                let (y, x) = b.dot.active_cur().as_yx(b);
-
-                if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
-                    b.dot.set_active_cur(Cur::from_yx(y - 1, x, b));
-                } else if !up && y == view.row_off && view.row_off < b.txt.len_lines() - 1 {
-                    b.dot.set_active_cur(Cur::from_yx(y + 1, x, b));
-                    b.dot.clamp_idx(b.txt.len_chars());
-                    b.xdot.clamp_idx(b.txt.len_chars());
-                }
-            }
-
-            view.row_off = if up {
-                view.row_off.saturating_sub(1)
-            } else {
-                view.row_off + 1
-            };
-
-            if focused {
-                view.clamp_scroll(b, n_rows, n_cols);
-            }
-        };
-
         for (focused_col, col) in self.cols.iter_mut() {
             if x > x_offset + col.n_cols {
                 x_offset += col.n_cols + 1;
@@ -537,8 +510,7 @@ impl Layout {
                 }
 
                 let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-                apply(b, win, col.n_cols, focused_col && focused_win);
-
+                apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
                 return;
             }
         }
@@ -546,7 +518,7 @@ impl Layout {
         let n_cols = self.cols.focus.n_cols;
         let win = &mut self.cols.focus.wins.focus;
         let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-        apply(b, win, n_cols, true);
+        apply_scroll(b, win, n_cols, true, up);
     }
 
     pub(crate) fn force_cursor_to_be_in_view(&mut self) {
@@ -783,6 +755,7 @@ pub(crate) struct View {
     pub(crate) col_off: usize,
     pub(crate) row_off: usize,
     pub(crate) rx: usize,
+    cur: Cur,
 }
 
 impl View {
@@ -792,6 +765,7 @@ impl View {
             col_off: 0,
             row_off: 0,
             rx: 0,
+            cur: Cur::default(),
         }
     }
 
@@ -824,34 +798,15 @@ impl View {
     }
 
     /// Force the contained Buffer cursor to be visible if it currently isn't
-    fn force_cursor_to_be_in_view(&self, b: &mut Buffer, rows: usize, cols: usize) {
-        let (mut y, x) = b.dot.active_cur().as_yx(b);
-        let (_, w_sgncol) = b.sign_col_dims();
-        let mut rx = self.rx_from_x(b, y, x);
-
-        if y < self.row_off {
-            y = self.row_off;
-        }
-
-        if y >= self.row_off + rows {
-            y = self.row_off + rows - 1;
-        }
-
-        if rx < self.col_off {
-            rx = self.col_off;
-        }
-
-        if rx > self.col_off + cols - w_sgncol {
-            rx = self.col_off + cols - w_sgncol - 1;
-        }
-
-        let x = b.x_from_provided_rx(y, rx);
-        b.dot = Cur::from_yx(y, x, b).into();
+    fn force_cursor_to_be_in_view(&mut self, b: &mut Buffer, rows: usize, cols: usize) {
+        b.dot = self.cur.into();
+        self.clamp_scroll(b, rows, cols);
     }
 
     /// Clamp the current viewport to include the [Dot].
     pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer, rows: usize, cols: usize) {
-        let (y, x) = b.dot.active_cur().as_yx(b);
+        self.cur = b.dot.active_cur();
+        let (y, x) = self.cur.as_yx(b);
         let (_, w_sgncol) = b.sign_col_dims();
         self.rx = self.rx_from_x(b, y, x);
         b.cached_rx = self.rx;
@@ -908,6 +863,48 @@ fn calculate_dims(t: usize, n: usize) -> (usize, usize) {
     let slop = t + 1 - n * (size + 1);
 
     (size, slop)
+}
+
+/// When we apply scrolling to a [View] we need to keep track of a preferred cursor position so
+/// that when the user bounces between windows they don't get reset to a default position based on
+/// the viewport alone.
+fn apply_scroll(b: &mut Buffer, win: &mut Window, n_cols: usize, focused: bool, up: bool) {
+    let n_rows = win.n_rows;
+    let view = &mut win.view;
+    let mut cur = if focused {
+        b.dot.active_cur()
+    } else {
+        view.cur
+    };
+    let (y, x) = cur.as_yx(b);
+    let mut need_clamp = false;
+
+    if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
+        cur = Cur::from_yx(y - 1, x, b);
+    } else if !up && y == view.row_off && view.row_off < b.txt.len_lines() - 1 {
+        cur = Cur::from_yx(y + 1, x, b);
+        need_clamp = true;
+    };
+
+    if focused {
+        b.dot.set_active_cur(cur);
+        if need_clamp {
+            b.dot.clamp_idx(b.txt.len_chars());
+            b.xdot.clamp_idx(b.txt.len_chars());
+        }
+    } else {
+        view.cur = cur;
+    }
+
+    view.row_off = if up {
+        view.row_off.saturating_sub(1)
+    } else {
+        view.row_off + 1
+    };
+
+    if focused {
+        view.clamp_scroll(b, n_rows, n_cols);
+    }
 }
 
 #[cfg(test)]
