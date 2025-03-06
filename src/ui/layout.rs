@@ -303,24 +303,28 @@ impl Layout {
     /// Move focus to the column to the right of current focus (wrapping)
     pub(crate) fn next_column(&mut self) {
         self.cols.focus_down();
+        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
     }
 
     /// Move focus to the column to the left of current focus (wrapping)
     pub(crate) fn prev_column(&mut self) {
         self.cols.focus_up();
+        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
     }
 
     /// Move focus to the window below in the current column (wrapping)
     pub(crate) fn next_window_in_column(&mut self) {
         self.cols.focus.wins.focus_down();
+        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
     }
 
     /// Move focus to the window above in the current column (wrapping)
     pub(crate) fn prev_window_in_column(&mut self) {
         self.cols.focus.wins.focus_up();
+        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
     }
 
@@ -490,38 +494,70 @@ impl Layout {
         self.update_screen_size(self.screen_rows, self.screen_cols);
     }
 
-    pub(crate) fn scroll_up(&mut self) {
-        let cols = self.cols.focus.n_cols;
-        let rows = self.cols.focus.wins.focus.n_rows;
-        let view = self.cols.focus.focused_view_mut();
-        let b = self.buffers.active_mut();
-        let c = b.dot.active_cur();
-        let (y, x) = c.as_yx(b);
+    pub(crate) fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
+        let mut x_offset = 0;
+        let mut y_offset = 0;
 
-        if view.row_off > 0 && y == view.row_off + rows - 1 {
-            b.dot.set_active_cur(Cur::from_yx(y - 1, x, b));
+        let apply = |b: &mut Buffer, win: &mut Window, n_cols: usize, focused: bool| {
+            let n_rows = win.n_rows;
+            let view = &mut win.view;
+
+            if focused {
+                let (y, x) = b.dot.active_cur().as_yx(b);
+
+                if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
+                    b.dot.set_active_cur(Cur::from_yx(y - 1, x, b));
+                } else if !up && y == view.row_off && view.row_off < b.txt.len_lines() - 1 {
+                    b.dot.set_active_cur(Cur::from_yx(y + 1, x, b));
+                    b.dot.clamp_idx(b.txt.len_chars());
+                    b.xdot.clamp_idx(b.txt.len_chars());
+                }
+            }
+
+            view.row_off = if up {
+                view.row_off.saturating_sub(1)
+            } else {
+                view.row_off + 1
+            };
+
+            if focused {
+                view.clamp_scroll(b, n_rows, n_cols);
+            }
+        };
+
+        for (focused_col, col) in self.cols.iter_mut() {
+            if x > x_offset + col.n_cols {
+                x_offset += col.n_cols + 1;
+                continue;
+            }
+            for (focused_win, win) in col.wins.iter_mut() {
+                if y > y_offset + win.n_rows {
+                    y_offset += win.n_rows + 1;
+                    continue;
+                }
+
+                let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+                apply(b, win, col.n_cols, focused_col && focused_win);
+
+                return;
+            }
         }
 
-        view.row_off = view.row_off.saturating_sub(1);
-        view.clamp_scroll(b, rows, cols);
+        let n_cols = self.cols.focus.n_cols;
+        let win = &mut self.cols.focus.wins.focus;
+        let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+        apply(b, win, n_cols, true);
     }
 
-    pub(crate) fn scroll_down(&mut self) {
+    pub(crate) fn force_cursor_to_be_in_view(&mut self) {
+        let b = self.buffers.active_mut();
         let cols = self.cols.focus.n_cols;
         let rows = self.cols.focus.wins.focus.n_rows;
-        let view = self.cols.focus.focused_view_mut();
-        let b = self.buffers.active_mut();
-        let c = b.dot.active_cur();
-        let (y, x) = c.as_yx(b);
 
-        if y == view.row_off && view.row_off < b.txt.len_lines() - 1 {
-            b.dot.set_active_cur(Cur::from_yx(y + 1, x, b));
-            b.dot.clamp_idx(b.txt.len_chars());
-            b.xdot.clamp_idx(b.txt.len_chars());
-        }
-
-        view.row_off += 1;
-        view.clamp_scroll(b, rows, cols);
+        self.cols
+            .focus
+            .focused_view_mut()
+            .force_cursor_to_be_in_view(b, rows, cols);
     }
 
     pub(crate) fn clamp_scroll(&mut self) {
@@ -787,8 +823,34 @@ impl View {
         rx
     }
 
+    /// Force the contained Buffer cursor to be visible if it currently isn't
+    fn force_cursor_to_be_in_view(&self, b: &mut Buffer, rows: usize, cols: usize) {
+        let (mut y, x) = b.dot.active_cur().as_yx(b);
+        let (_, w_sgncol) = b.sign_col_dims();
+        let mut rx = self.rx_from_x(b, y, x);
+
+        if y < self.row_off {
+            y = self.row_off;
+        }
+
+        if y >= self.row_off + rows {
+            y = self.row_off + rows - 1;
+        }
+
+        if rx < self.col_off {
+            rx = self.col_off;
+        }
+
+        if rx > self.col_off + cols - w_sgncol {
+            rx = self.col_off + cols - w_sgncol - 1;
+        }
+
+        let x = b.x_from_provided_rx(y, rx);
+        b.dot = Cur::from_yx(y, x, b).into();
+    }
+
     /// Clamp the current viewport to include the [Dot].
-    pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer, screen_rows: usize, screen_cols: usize) {
+    pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer, rows: usize, cols: usize) {
         let (y, x) = b.dot.active_cur().as_yx(b);
         let (_, w_sgncol) = b.sign_col_dims();
         self.rx = self.rx_from_x(b, y, x);
@@ -798,16 +860,16 @@ impl View {
             self.row_off = y;
         }
 
-        if y >= self.row_off + screen_rows {
-            self.row_off = y + 1 - screen_rows;
+        if y >= self.row_off + rows {
+            self.row_off = y + 1 - rows;
         }
 
         if self.rx < self.col_off {
             self.col_off = self.rx;
         }
 
-        if self.rx >= self.col_off + screen_cols - w_sgncol {
-            self.col_off = self.rx + w_sgncol + 1 - screen_cols;
+        if self.rx >= self.col_off + cols - w_sgncol {
+            self.col_off = self.rx + w_sgncol + 1 - cols;
         }
     }
 

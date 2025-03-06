@@ -123,16 +123,12 @@ where
 
             (Press, _, WheelUp) => {
                 self.last_click_was_left = false;
-                let id = self.layout.focus_buffer_for_screen_coords(x, y);
-                self.layout.scroll_up();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
+                self.layout.scroll_view(x, y, true);
             }
 
             (Press, _, WheelDown) => {
                 self.last_click_was_left = false;
-                let id = self.layout.focus_buffer_for_screen_coords(x, y);
-                self.layout.scroll_down();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
+                self.layout.scroll_view(x, y, false);
             }
 
             (Release, m, b) => {
