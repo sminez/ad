@@ -701,9 +701,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "simple_coro"
-version = "0.1.0"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa9c4b3d9397b286092543bdfc5289ba7bd09295187176367b6545e01882911f"
+checksum = "1df0dc72c5c2ebdd0606c9cfa8839efda28e0fe38280e15ec683e6e24a6740d7"
 
 [[package]]
 name = "simple_test_case"
