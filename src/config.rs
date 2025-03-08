@@ -97,14 +97,17 @@ impl Config {
 
     /// Check to see if there is a known tree-sitter configuration for this buffer
     pub fn ts_lang_for_buffer(&self, b: &Buffer) -> Option<&str> {
-        let os_ext = b.path()?.extension().unwrap_or_default();
+        let path = b.path()?;
+        let fname = path.file_name()?.to_string_lossy();
+        let os_ext = path.extension().unwrap_or_default();
         let ext = os_ext.to_str().unwrap_or_default();
         let first_line = b.line(0).map(|l| l.to_string()).unwrap_or_default();
 
         self.languages
             .iter()
             .find(|c| {
-                c.extensions.iter().any(|e| e == ext)
+                c.filenames.iter().any(|f| *f == fname)
+                    || c.extensions.iter().any(|e| e == ext)
                     || c.first_lines.iter().any(|l| first_line.starts_with(l))
             })
             .map(|c| c.name.as_str())
@@ -219,9 +222,12 @@ impl Default for TsConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct LangConfig {
     pub name: String,
+    #[serde(default)]
     pub extensions: Vec<String>,
     #[serde(default)]
     pub first_lines: Vec<String>,
+    #[serde(default)]
+    pub filenames: Vec<String>,
     #[serde(default)]
     pub lsp: Option<LspConfig>,
 }
