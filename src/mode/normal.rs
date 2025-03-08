@@ -14,7 +14,7 @@ pub(crate) fn normal_mode() -> Mode {
 
     let mut keymap = keymap! {
         // Exiting
-        [ leader, Char('q') ] => [ Exit { force: false } ],
+        [ leader, Char('q') ] => [ DeleteWindow { force: false } ],
         [ leader, Char('Q') ] => [ Exit { force: true } ],
 
         // Modes
