@@ -303,29 +303,29 @@ impl Layout {
     /// Move focus to the column to the right of current focus (wrapping)
     pub(crate) fn next_column(&mut self) {
         self.cols.focus_down();
-        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
+        self.force_cursor_to_be_in_view();
     }
 
     /// Move focus to the column to the left of current focus (wrapping)
     pub(crate) fn prev_column(&mut self) {
         self.cols.focus_up();
-        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
+        self.force_cursor_to_be_in_view();
     }
 
     /// Move focus to the window below in the current column (wrapping)
     pub(crate) fn next_window_in_column(&mut self) {
         self.cols.focus.wins.focus_down();
-        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
+        self.force_cursor_to_be_in_view();
     }
 
     /// Move focus to the window above in the current column (wrapping)
     pub(crate) fn prev_window_in_column(&mut self) {
         self.cols.focus.wins.focus_up();
-        self.force_cursor_to_be_in_view();
         self.buffers.focus_id(self.focused_view().bufid);
+        self.force_cursor_to_be_in_view();
     }
 
     /// Drag the focused window up through the column containing it (wrapping)

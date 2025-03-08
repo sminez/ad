@@ -577,7 +577,7 @@ where
                 };
             }
 
-            None => self.load_explicit_string(id, s, load_in_new_window),
+            None => self.load_explicit_string(id, &s, load_in_new_window),
         }
     }
 
@@ -614,12 +614,7 @@ where
         }
     }
 
-    pub(super) fn load_explicit_string(
-        &mut self,
-        bufid: usize,
-        s: String,
-        load_in_new_window: bool,
-    ) {
+    pub(super) fn load_explicit_string(&mut self, bufid: usize, s: &str, load_in_new_window: bool) {
         if s.is_empty() {
             return;
         }
@@ -638,7 +633,7 @@ where
                     Err(_) => (s, None),
                 }
             }
-            None => (s.as_str(), None),
+            None => (s, None),
         };
 
         let mut path = Path::new(&maybe_path).to_path_buf();
@@ -661,7 +656,7 @@ where
                 self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
             }
         } else {
-            b.find_forward(&s);
+            b.find_forward(s);
             self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
         }
     }
@@ -698,7 +693,9 @@ where
         }
     }
 
-    pub(super) fn execute_explicit_string(&mut self, bufid: usize, s: String, source: Source) {
+    /// Silently focus `bufid` (no jumplist record) and execute the given string. If executing the
+    /// string doesn't change the focused buffer we then reset back to the buffer that was active.
+    pub(super) fn execute_explicit_string(&mut self, bufid: usize, s: &str, source: Source) {
         let current_id = self.active_buffer_id();
         self.layout.focus_id_silent(bufid);
 
@@ -707,7 +704,9 @@ where
             None => self.run_shell_cmd(s.trim()),
         }
 
-        self.layout.focus_id_silent(current_id);
+        if self.active_buffer_id() == bufid {
+            self.layout.focus_id_silent(current_id);
+        }
     }
 
     pub(super) fn execute_command(&mut self, cmd: &str) {
@@ -900,5 +899,29 @@ recv {}({})",
             assert_recv!(brx, Open, expected);
             assert_recv!(brx, Focus, expected);
         }
+    }
+
+    #[test_case("next-column", 2, 1; "move focus to foo")]
+    #[test_case("next-column", 1, 2; "move focus to bar executed in foo")]
+    #[test_case("echo hello", 2, 2; "no change of focus")]
+    #[test]
+    fn execute_explicit_string_handles_focus_correctly(cmd: &str, bufid: usize, active: usize) {
+        let mut ed = Editor::new(
+            Config::default(),
+            PlumbingRules::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+        );
+        ed.update_window_size(400, 800);
+
+        ed.open_file("foo", false);
+        assert_eq!(ed.active_buffer_id(), 1);
+
+        ed.layout.new_column();
+        ed.open_file("bar", false);
+        assert_eq!(ed.active_buffer_id(), 2);
+
+        ed.execute_explicit_string(bufid, cmd, Source::Keyboard);
+        assert_eq!(ed.active_buffer_id(), active);
     }
 }

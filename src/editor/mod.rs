@@ -348,7 +348,7 @@ where
             }
 
             ExecuteInBuffer { id, txt } => {
-                self.execute_explicit_string(id, txt, Source::Fsys);
+                self.execute_explicit_string(id, &txt, Source::Fsys);
                 default_handled();
             }
         }
@@ -403,7 +403,9 @@ where
             EditCommand { cmd } => self.execute_edit_command(&cmd),
             EnsureFileIsOpen { path } => self.layout.ensure_file_is_open(&path),
             ExecuteDot => self.default_execute_dot(None, source),
-            ExecuteString { s } => self.execute_explicit_string(self.active_buffer_id(), s, source),
+            ExecuteString { s } => {
+                self.execute_explicit_string(self.active_buffer_id(), &s, source)
+            }
             Exit { force } => self.exit(force),
             ExpandDot => self.expand_current_dot(),
             FindFile { new_window } => self.find_file(new_window),
