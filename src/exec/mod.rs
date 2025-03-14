@@ -22,6 +22,14 @@ use expr::{Expr, ParseOutput};
 /// Variable usable in templates for injecting the current filename.
 /// (Following the naming convention used in Awk)
 const FNAME_VAR: &str = "$FILENAME";
+/// Variable usable in templates for injecting the row that the current match starts at
+const ROW_VAR: &str = "$ROW";
+/// Variable usable in templates for injecting the column that the current match starts at
+const COL_VAR: &str = "$COL";
+/// Variable usable in templates for injecting the row that the current match ends at
+const ROW_END_VAR: &str = "$ROW_END";
+/// Variable usable in templates for injecting the column that the current match ends at
+const COL_END_VAR: &str = "$COL_END";
 
 /// Errors that can be returned by the exec engine
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +42,8 @@ pub enum Error {
     EmptyProgram,
     /// Unexpected end of file
     Eof,
+    /// Invalid match generated (indices out of bounds)
+    InvalidMatchIndices,
     /// Invalid regex
     InvalidRegex(regex::Error),
     /// Invalid substitution
@@ -425,6 +435,22 @@ where
     } else {
         s.to_string()
     };
+
+    // the _END variants are found by this as well
+    if output.contains(ROW_VAR) || output.contains(COL_VAR) {
+        let (from, to) = m.loc();
+        let row = ed.char_to_line(from).ok_or(Error::InvalidMatchIndices)?;
+        let row_end = ed.char_to_line(to).ok_or(Error::InvalidMatchIndices)?;
+        let col = from - ed.line_to_char(row).ok_or(Error::InvalidMatchIndices)?;
+        let col_end = to - ed.line_to_char(row_end).ok_or(Error::InvalidMatchIndices)?;
+
+        // Need to replace the _END variants first so that we don't clobber them
+        output = output
+            .replace(ROW_END_VAR, &row_end.to_string())
+            .replace(ROW_VAR, &row.to_string())
+            .replace(COL_END_VAR, &col_end.to_string())
+            .replace(COL_VAR, &col.to_string());
+    }
 
     // replace newline and tab escapes with their literal equivalents
     output = output.replace("\\n", "\n").replace("\\t", "\t");
