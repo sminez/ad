@@ -6,7 +6,7 @@ x/^(?:impl<.*?>|impl).*? (\w+)@*?^\}/
 v/^(?:impl<.*?>|impl).*? for @*?\{/
 {
 # We print the impl block and file name as before...
-    p/\nimpl $1 ($FILENAME)/;
+    p/\nimpl $1 ($FILENAME:$ROW:$COL)\n/;
 # ...but this time we loop over the full function declarations first
 # without extracting anything.
     x/fn@*?\{/
