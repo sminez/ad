@@ -126,6 +126,15 @@ impl DefaultSystem {
             running_children: Vec::new(),
         }
     }
+
+    #[cfg(test)]
+    pub fn without_clipboard_provider() -> Self {
+        Self {
+            selection: String::new(),
+            cp: None,
+            running_children: Vec::new(),
+        }
+    }
 }
 
 impl System for DefaultSystem {

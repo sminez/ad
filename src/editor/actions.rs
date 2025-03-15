@@ -807,6 +807,7 @@ where
 
         if let Err(e) = res {
             self.set_status_message(&format!("Error running external command: {e}"));
+            panic!("{e}");
         }
     }
 

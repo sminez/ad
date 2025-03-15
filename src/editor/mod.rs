@@ -575,3 +575,58 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::system::DefaultSystem;
+    use std::{thread::sleep, time::Duration};
+
+    // We need access to the internals of Editor for this but really this is a test of the
+    // behaviour of the System trait and DefaultSystem.
+    #[test]
+    fn process_control_works() {
+        let mut ed = Editor::new_with_system(
+            Config::default(),
+            PlumbingRules::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+            DefaultSystem::without_clipboard_provider(),
+        );
+
+        ed.update_window_size(100, 80);
+        ed.open_file(ed.cwd.join("test"), false);
+        ed.handle_action(
+            Action::ShellRun {
+                cmd: "test-data/echo-loop.sh".to_string(),
+            },
+            Source::Keyboard,
+        );
+
+        // Allow the script to write to the output buffer
+        let evt = ed.rx_events.recv().unwrap();
+        ed.handle_event(evt);
+
+        // Should have the test file and now the output buffer
+        assert_eq!(ed.layout.buffers().len(), 2);
+        assert_eq!(ed.system.running_children().len(), 1);
+
+        ed.system.kill_child(0);
+        assert_eq!(ed.system.running_children().len(), 0);
+
+        // drain any pending writes from the script
+        while let Ok(evt) = ed.rx_events.try_recv() {
+            assert!(matches!(
+                evt,
+                Event::Action(Action::AppendToOutputBuffer { .. })
+            ));
+        }
+
+        ed.layout.close_buffer(1);
+        assert_eq!(ed.layout.buffers().len(), 1);
+
+        sleep(Duration::from_secs(1));
+        let recv = ed.rx_events.try_recv();
+        assert!(recv.is_err(), "{recv:?}");
+    }
+}
