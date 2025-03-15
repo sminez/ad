@@ -598,7 +598,7 @@ mod tests {
         ed.open_file(ed.cwd.join("test"), false);
         ed.handle_action(
             Action::ShellRun {
-                cmd: "test-data/echo-loop.sh".to_string(),
+                cmd: "test-data/spawned-long-running.sh".to_string(),
             },
             Source::Keyboard,
         );
