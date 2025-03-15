@@ -5,7 +5,7 @@ use std::{
     env,
     ffi::OsStr,
     fmt,
-    io::{self, Read, Write},
+    io::{self, BufRead, BufReader, Read, Write},
     path::Path,
     process::{Command, Stdio},
     sync::mpsc::Sender,
@@ -187,35 +187,52 @@ where
     Ok(normalize_line_endings(stdout))
 }
 
+// TODO: this needs to return a handle to the running process so it can be killed by the user if
+// needed
 fn run_command<I, S>(cmd: &str, args: I, cwd: &Path, bufid: usize, tx: Sender<Event>)
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut command = prepare_command(cmd, args, cwd, bufid);
+    let res = prepare_command(cmd, args, cwd, bufid)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn();
 
-    spawn(move || {
-        let output = match command.output() {
-            Ok(output) => output,
-            Err(err) => {
-                _ = tx.send(Event::Action(Action::SetStatusMessage {
-                    message: err.to_string(),
-                }));
-                return;
-            }
-        };
-
-        let mut content = String::from_utf8(output.stdout).unwrap_or_default();
-        let stderr = String::from_utf8(output.stderr).unwrap_or_default();
-        content.push_str(&stderr);
-        if content.is_empty() {
+    let mut child = match res {
+        Ok(child) => child,
+        Err(err) => {
+            _ = tx.send(Event::Action(Action::SetStatusMessage {
+                message: err.to_string(),
+            }));
             return;
         }
-        _ = tx.send(Event::Action(Action::AppendToOutputBuffer {
-            bufid,
-            content: normalize_line_endings(content),
-        }));
+    };
+
+    spawn(move || {
+        let stdout = BufReader::new(child.stdout.take().unwrap());
+        let stderr = BufReader::new(child.stderr.take().unwrap());
+        let tx2 = tx.clone();
+
+        spawn(move || send_lines(bufid, stderr.lines(), tx2));
+        send_lines(bufid, stdout.lines(), tx);
+        _ = child.wait();
     });
+}
+
+fn send_lines(bufid: usize, it: impl Iterator<Item = io::Result<String>>, tx: Sender<Event>) {
+    for res in it {
+        match res {
+            Ok(mut line) => {
+                line.push('\n');
+                _ = tx.send(Event::Action(Action::AppendToOutputBuffer {
+                    bufid,
+                    content: normalize_line_endings(line),
+                }));
+            }
+            Err(_) => break,
+        }
+    }
 }
 
 /// Pipe input text through an external command, returning the output
