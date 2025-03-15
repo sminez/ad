@@ -617,10 +617,10 @@ mod tests {
 
         // drain any pending writes from the script
         while let Ok(evt) = ed.rx_events.try_recv() {
-            assert!(matches!(
-                evt,
-                Event::Action(Action::AppendToOutputBuffer { .. })
-            ));
+            match evt {
+                Event::Action(Action::AppendToOutputBuffer { .. }) => (),
+                _ => panic!("expected AppendToOutputBuffer but got {evt:?}"),
+            }
         }
 
         ed.layout.close_buffer(1);
