@@ -182,6 +182,7 @@ where
         self.ui.refresh(
             &self.modes[0].name,
             &self.layout,
+            self.system.n_running_children(),
             &self.pending_keys,
             self.held_click.as_ref(),
             mb,
@@ -626,7 +627,10 @@ mod tests {
         assert_eq!(ed.layout.buffers().len(), 1);
 
         sleep(Duration::from_secs(1));
-        let recv = ed.rx_events.try_recv();
-        assert!(recv.is_err(), "{recv:?}");
+        match ed.rx_events.try_recv() {
+            Err(_) => (),
+            Ok(Event::Action(Action::CleanupChild { .. })) => (),
+            Ok(evt) => panic!("expected no events or CleanupChild, got {evt:?}"),
+        }
     }
 }

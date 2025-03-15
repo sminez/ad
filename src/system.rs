@@ -25,6 +25,11 @@ pub trait System: fmt::Debug {
     /// Provide an ordered list of currently running child processes by their command string
     fn running_children(&self) -> Vec<String>;
 
+    /// The number of currently running child processes
+    fn n_running_children(&self) -> usize {
+        self.running_children().len()
+    }
+
     /// Cleanup any resources associated with a child process that is now complete
     fn cleanup_child(&mut self, id: u32);
 
@@ -177,6 +182,10 @@ impl System for DefaultSystem {
             .iter()
             .map(|(cmd, _)| cmd.clone())
             .collect()
+    }
+
+    fn n_running_children(&self) -> usize {
+        self.running_children.len()
     }
 
     fn cleanup_child(&mut self, id: u32) {

@@ -143,7 +143,13 @@ impl Tui {
         lines
     }
 
-    fn render_status_bar(&self, cs: &ColorScheme, mode_name: &str, b: &Buffer) -> String {
+    fn render_status_bar(
+        &self,
+        cs: &ColorScheme,
+        mode_name: &str,
+        n_running: usize,
+        b: &Buffer,
+    ) -> String {
         let lstatus = format!(
             "{} {} - {} lines {}",
             mode_name,
@@ -151,7 +157,15 @@ impl Tui {
             b.len_lines(),
             if b.dirty { "[+]" } else { "" }
         );
-        let rstatus = b.dot.addr(b);
+        let rstatus = format!(
+            "{}{}",
+            if n_running == 0 {
+                String::new()
+            } else {
+                format!("[{n_running} running] ")
+            },
+            b.dot.addr(b)
+        );
         let width = self.screen_cols - lstatus.len();
 
         format!(
@@ -312,6 +326,7 @@ impl UserInterface for Tui {
         &mut self,
         mode_name: &str,
         layout: &Layout,
+        n_running: usize,
         pending_keys: &[Input],
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
@@ -356,7 +371,7 @@ impl UserInterface for Tui {
             ));
         }
 
-        lines.push(self.render_status_bar(cs, mode_name, active_buffer));
+        lines.push(self.render_status_bar(cs, mode_name, n_running, active_buffer));
 
         if w_minibuffer {
             lines.append(&mut self.render_minibuffer_state(&mb, tabstop, cs));
