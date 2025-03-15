@@ -384,6 +384,7 @@ where
                 .layout
                 .write_output_for_buffer(bufid, content, &self.cwd),
             ChangeDirectory { path } => self.change_directory(path),
+            CleanupChild { id } => self.system.cleanup_child(id),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.active_buffer_id(), force),
             DeleteColumn { force } => self.delete_active_column(force),
@@ -413,6 +414,7 @@ where
             FocusBuffer { id } => self.focus_buffer(id, false), // allow focusing another window
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
+            KillRunningChild => self.kill_running_child(),
             LoadDot { new_window } => self.default_load_dot(source, new_window),
             LspShowCapabilities => {
                 if let Some((name, txt)) = self

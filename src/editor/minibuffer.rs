@@ -14,7 +14,6 @@ use crate::{
 use ad_event::Source;
 use std::{
     cmp::{self, min},
-    ffi::OsStr,
     fmt,
     path::Path,
 };
@@ -284,21 +283,16 @@ where
     }
 
     /// Use a [MiniBuffer] to select from the newline delimited output of running a shell command.
-    pub(crate) fn minibuffer_select_from_command_output<T, I>(
+    pub(crate) fn minibuffer_select_from_command_output(
         &mut self,
         prompt: &str,
         cmd: &str,
-        args: I,
         dir: &Path,
-    ) -> MiniBufferSelection
-    where
-        I: IntoIterator<Item = T>,
-        T: AsRef<OsStr>,
-    {
+    ) -> MiniBufferSelection {
         let initial_lines =
             match self
                 .system
-                .run_command_blocking(cmd, args, dir, self.active_buffer_id())
+                .run_command_blocking(cmd, dir, self.active_buffer_id())
             {
                 Ok(s) => s.lines().map(String::from).collect(),
                 Err(e) => {

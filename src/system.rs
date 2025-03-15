@@ -2,12 +2,10 @@
 //! platform specific behaviour
 use crate::{editor::Action, input::Event, util::normalize_line_endings};
 use std::{
-    env,
-    ffi::OsStr,
-    fmt,
+    env, fmt,
     io::{self, BufRead, BufReader, Read, Write},
     path::Path,
-    process::{Command, Stdio},
+    process::{Child, Command, Stdio},
     sync::mpsc::Sender,
     thread::spawn,
 };
@@ -21,45 +19,48 @@ pub trait System: fmt::Debug {
     /// Read the current contents of the clipboard
     fn read_clipboard(&self) -> io::Result<String>;
 
+    /// Store a handle to a running [Child] followinga  call to [System::run_command].
+    fn store_child_handle(&mut self, cmd: &str, child: Child);
+
+    /// Provide an ordered list of currently running child processes by their command string
+    fn running_children(&self) -> Vec<String>;
+
+    /// Cleanup any resources associated with a child process that is now complete
+    fn cleanup_child(&mut self, id: u32);
+
+    /// Kill a child process by its index in the list returned from [System::running_children].
+    fn kill_child(&mut self, idx: usize);
+
     /// Run an external command and collect its output.
-    fn run_command_blocking<I, S>(
-        &self,
-        cmd: &str,
-        args: I,
-        cwd: &Path,
-        bufid: usize,
-    ) -> io::Result<String>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        run_command_blocking(cmd, args, cwd, bufid)
+    fn run_command_blocking(&self, cmd: &str, cwd: &Path, bufid: usize) -> io::Result<String> {
+        run_command_blocking(cmd, cwd, bufid)
     }
 
     /// Run an external command and append its output to the output buffer for `bufid` from a
-    /// background thread.
-    fn run_command<I, S>(&self, cmd: &str, args: I, cwd: &Path, bufid: usize, tx: Sender<Event>)
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        run_command(cmd, args, cwd, bufid, tx)
+    /// background thread. If the command is successfully spawned then a [Child] should be stored
+    /// for later resource cleanup and support for user initiated killing.
+    fn run_command(
+        &mut self,
+        cmd: &str,
+        cwd: &Path,
+        bufid: usize,
+        tx: Sender<Event>,
+    ) -> io::Result<()> {
+        let child = run_command(cmd, cwd, bufid, tx)?;
+        self.store_child_handle(cmd, child);
+
+        Ok(())
     }
 
     /// Pipe input text through an external command, returning the output
-    fn pipe_through_command<I, S>(
+    fn pipe_through_command(
         &self,
         cmd: &str,
-        args: I,
         input: &str,
         cwd: &Path,
         bufid: usize,
-    ) -> io::Result<String>
-    where
-        I: IntoIterator<Item = S>,
-        S: AsRef<OsStr>,
-    {
-        pipe_through_command(cmd, args, input, cwd, bufid)
+    ) -> io::Result<String> {
+        pipe_through_command(cmd, input, cwd, bufid)
     }
 }
 
@@ -110,10 +111,11 @@ impl ClipboardProvider {
 }
 
 /// A default implementation for system interactions
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DefaultSystem {
     selection: String,
     cp: Option<ClipboardProvider>,
+    running_children: Vec<(String, Child)>,
 }
 
 impl DefaultSystem {
@@ -121,6 +123,7 @@ impl DefaultSystem {
         Self {
             selection: String::new(),
             cp: ClipboardProvider::try_from_env(),
+            running_children: Vec::new(),
         }
     }
 }
@@ -155,13 +158,42 @@ impl System for DefaultSystem {
             None => Ok(self.selection.clone()),
         }
     }
+
+    fn store_child_handle(&mut self, cmd: &str, child: Child) {
+        self.running_children.push((cmd.to_owned(), child));
+    }
+
+    fn running_children(&self) -> Vec<String> {
+        self.running_children
+            .iter()
+            .map(|(cmd, _)| cmd.clone())
+            .collect()
+    }
+
+    fn cleanup_child(&mut self, id: u32) {
+        for (_, child) in self.running_children.iter_mut() {
+            if child.id() == id {
+                _ = child.wait();
+            }
+        }
+
+        self.running_children.retain(|(_, child)| child.id() != id);
+    }
+
+    fn kill_child(&mut self, idx: usize) {
+        let (_, mut child) = self.running_children.remove(idx);
+        _ = child.kill();
+        _ = child.wait();
+    }
 }
 
-fn prepare_command<I, S>(cmd: &str, args: I, cwd: &Path, bufid: usize) -> Command
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
+fn prepare_command(cmd: &str, cwd: &Path, bufid: usize) -> Command {
+    let mut args: Vec<&str> = cmd.split_whitespace().collect();
+    if args.is_empty() {
+        return Command::new("");
+    }
+
+    let cmd = args.remove(0);
     let path = env::var("PATH").unwrap();
     let home = env::var("HOME").unwrap();
     let mut command = Command::new(cmd);
@@ -174,12 +206,8 @@ where
     command
 }
 
-fn run_command_blocking<I, S>(cmd: &str, args: I, cwd: &Path, bufid: usize) -> io::Result<String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let output = prepare_command(cmd, args, cwd, bufid).output()?;
+fn run_command_blocking(cmd: &str, cwd: &Path, bufid: usize) -> io::Result<String> {
+    let output = prepare_command(cmd, cwd, bufid).output()?;
     let mut stdout = String::from_utf8(output.stdout).unwrap_or_default();
     let stderr = String::from_utf8(output.stderr).unwrap_or_default();
     stdout.push_str(&stderr);
@@ -187,37 +215,24 @@ where
     Ok(normalize_line_endings(stdout))
 }
 
-// TODO: this needs to return a handle to the running process so it can be killed by the user if
-// needed
-fn run_command<I, S>(cmd: &str, args: I, cwd: &Path, bufid: usize, tx: Sender<Event>)
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let res = prepare_command(cmd, args, cwd, bufid)
+fn run_command(cmd: &str, cwd: &Path, bufid: usize, tx: Sender<Event>) -> io::Result<Child> {
+    let mut child = prepare_command(cmd, cwd, bufid)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn();
+        .spawn()?;
 
-    let mut child = match res {
-        Ok(child) => child,
-        Err(err) => {
-            _ = tx.send(Event::Action(Action::SetStatusMessage {
-                message: err.to_string(),
-            }));
-            return;
-        }
-    };
+    let stdout = BufReader::new(child.stdout.take().unwrap());
+    let stderr = BufReader::new(child.stderr.take().unwrap());
+    let id = child.id();
 
     spawn(move || {
-        let stdout = BufReader::new(child.stdout.take().unwrap());
-        let stderr = BufReader::new(child.stderr.take().unwrap());
         let tx2 = tx.clone();
-
         spawn(move || send_lines(bufid, stderr.lines(), tx2));
-        send_lines(bufid, stdout.lines(), tx);
-        _ = child.wait();
+        send_lines(bufid, stdout.lines(), tx.clone());
+        _ = tx.send(Event::Action(Action::CleanupChild { id }));
     });
+
+    Ok(child)
 }
 
 fn send_lines(bufid: usize, it: impl Iterator<Item = io::Result<String>>, tx: Sender<Event>) {
@@ -236,18 +251,13 @@ fn send_lines(bufid: usize, it: impl Iterator<Item = io::Result<String>>, tx: Se
 }
 
 /// Pipe input text through an external command, returning the output
-pub fn pipe_through_command<I, S>(
+pub fn pipe_through_command(
     cmd: &str,
-    args: I,
     input: &str,
     cwd: &Path,
     bufid: usize,
-) -> io::Result<String>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let mut child = prepare_command(cmd, args, cwd, bufid)
+) -> io::Result<String> {
+    let mut child = prepare_command(cmd, cwd, bufid)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
