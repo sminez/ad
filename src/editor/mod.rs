@@ -619,7 +619,8 @@ mod tests {
         while let Ok(evt) = ed.rx_events.try_recv() {
             match evt {
                 Event::Action(Action::AppendToOutputBuffer { .. }) => (),
-                _ => panic!("expected AppendToOutputBuffer but got {evt:?}"),
+                Event::Action(Action::CleanupChild { .. }) => (),
+                _ => panic!("expected AppendToOutputBuffer or CleanupChild but got {evt:?}"),
             }
         }
 
