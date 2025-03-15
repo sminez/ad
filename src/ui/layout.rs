@@ -295,8 +295,6 @@ impl Layout {
         let id = self.buffers.write_output_for_buffer(id, s, cwd);
         if !self.buffer_is_visible(id) {
             self.show_buffer_in_new_window(id);
-        } else {
-            self.show_buffer_in_active_window(id);
         }
     }
 

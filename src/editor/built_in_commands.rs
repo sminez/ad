@@ -63,6 +63,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "smart expand the current cursor position into a range",
         ),
         (vec!["help"], "display this help file"),
+        (vec!["kill"], "interactively kill a running child process"),
         (
             vec!["Load"],
             "load the contents of the current dot in the focused buffer",

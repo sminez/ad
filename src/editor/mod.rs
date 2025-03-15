@@ -182,6 +182,7 @@ where
         self.ui.refresh(
             &self.modes[0].name,
             &self.layout,
+            self.system.n_running_children(),
             &self.pending_keys,
             self.held_click.as_ref(),
             mb,
@@ -384,6 +385,7 @@ where
                 .layout
                 .write_output_for_buffer(bufid, content, &self.cwd),
             ChangeDirectory { path } => self.change_directory(path),
+            CleanupChild { id } => self.system.cleanup_child(id),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.active_buffer_id(), force),
             DeleteColumn { force } => self.delete_active_column(force),
@@ -413,6 +415,7 @@ where
             FocusBuffer { id } => self.focus_buffer(id, false), // allow focusing another window
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
+            KillRunningChild => self.kill_running_child(),
             LoadDot { new_window } => self.default_load_dot(source, new_window),
             LspShowCapabilities => {
                 if let Some((name, txt)) = self
@@ -570,6 +573,64 @@ where
     pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
         if let Some(b) = self.layout.buffer_with_id_mut(bufid) {
             b.input_filter = None;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::system::DefaultSystem;
+    use std::{thread::sleep, time::Duration};
+
+    // We need access to the internals of Editor for this but really this is a test of the
+    // behaviour of the System trait and DefaultSystem.
+    #[test]
+    fn process_control_works() {
+        let mut ed = Editor::new_with_system(
+            Config::default(),
+            PlumbingRules::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+            DefaultSystem::without_clipboard_provider(),
+        );
+
+        ed.update_window_size(100, 80);
+        ed.open_file(ed.cwd.join("test"), false);
+        ed.handle_action(
+            Action::ShellRun {
+                cmd: "test-data/spawned-long-running.sh".to_string(),
+            },
+            Source::Keyboard,
+        );
+
+        // Allow the script to write to the output buffer
+        let evt = ed.rx_events.recv().unwrap();
+        ed.handle_event(evt);
+
+        // Should have the test file and now the output buffer
+        assert_eq!(ed.layout.buffers().len(), 2);
+        assert_eq!(ed.system.running_children().len(), 1);
+
+        ed.system.kill_child(0);
+        assert_eq!(ed.system.running_children().len(), 0);
+
+        // drain any pending writes from the script
+        while let Ok(evt) = ed.rx_events.try_recv() {
+            match evt {
+                Event::Action(Action::AppendToOutputBuffer { .. }) => (),
+                _ => panic!("expected AppendToOutputBuffer but got {evt:?}"),
+            }
+        }
+
+        ed.layout.close_buffer(1);
+        assert_eq!(ed.layout.buffers().len(), 1);
+
+        sleep(Duration::from_secs(1));
+        match ed.rx_events.try_recv() {
+            Err(_) => (),
+            Ok(Event::Action(Action::CleanupChild { .. })) => (),
+            Ok(evt) => panic!("expected no events or CleanupChild, got {evt:?}"),
         }
     }
 }

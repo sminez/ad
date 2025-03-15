@@ -283,6 +283,13 @@ mod tests {
         fn read_clipboard(&self) -> io::Result<String> {
             Ok(self.clipboard.clone())
         }
+
+        fn store_child_handle(&mut self, _: &str, _: std::process::Child) {}
+        fn running_children(&self) -> Vec<String> {
+            vec![]
+        }
+        fn cleanup_child(&mut self, _: u32) {}
+        fn kill_child(&mut self, _: usize) {}
     }
 
     fn r(start: usize, end: usize, start_active: bool) -> Range {

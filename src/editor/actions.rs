@@ -48,6 +48,7 @@ pub enum ViewPort {
 pub enum Action {
     AppendToOutputBuffer { bufid: usize, content: String },
     ChangeDirectory { path: Option<String> },
+    CleanupChild { id: u32 },
     CommandMode,
     Delete,
     DeleteBuffer { force: bool },
@@ -74,6 +75,7 @@ pub enum Action {
     InsertString { s: String },
     JumpListForward,
     JumpListBack,
+    KillRunningChild,
     LoadDot { new_window: bool },
     LspGotoDeclaration,
     LspGotoDefinition,
@@ -214,18 +216,7 @@ where
 
     fn find_file_under_dir(&mut self, d: &Path, new_window: bool) {
         let cmd = config_handle!().find_command.clone();
-
-        let selection = match cmd.split_once(' ') {
-            Some((cmd, args)) => {
-                self.minibuffer_select_from_command_output("> ", cmd, args.split_whitespace(), d)
-            }
-            None => self.minibuffer_select_from_command_output(
-                "> ",
-                &cmd,
-                std::iter::empty::<&str>(),
-                d,
-            ),
-        };
+        let selection = self.minibuffer_select_from_command_output("> ", &cmd, d);
 
         if let MiniBufferSelection::Line { line, .. } = selection {
             self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), new_window);
@@ -252,8 +243,7 @@ where
             .unwrap_or(&self.cwd)
             .to_owned();
         let s = match self.system.run_command_blocking(
-            "git",
-            ["rev-parse", "--show-toplevel"],
+            "git rev-parse --show-toplevel",
             &d,
             self.active_buffer_id(),
         ) {
@@ -789,9 +779,7 @@ where
         };
 
         let id = self.active_buffer_id();
-        let res = self
-            .system
-            .pipe_through_command("sh", ["-c", raw_cmd_str], &s, d, id);
+        let res = self.system.pipe_through_command(raw_cmd_str, &s, d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
@@ -802,9 +790,7 @@ where
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.layout.active_buffer().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        let res = self
-            .system
-            .run_command_blocking("sh", ["-c", raw_cmd_str], d, id);
+        let res = self.system.run_command_blocking(raw_cmd_str, d, id);
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
@@ -815,8 +801,21 @@ where
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
         let d = self.layout.active_buffer().dir().unwrap_or(&self.cwd);
         let id = self.active_buffer_id();
-        self.system
-            .run_command("sh", ["-c", raw_cmd_str], d, id, self.tx_events.clone());
+        let res = self
+            .system
+            .run_command(raw_cmd_str, d, id, self.tx_events.clone());
+
+        if let Err(e) = res {
+            self.set_status_message(&format!("Error running external command: {e}"));
+            panic!("{e}");
+        }
+    }
+
+    pub(super) fn kill_running_child(&mut self) {
+        let known = self.system.running_children();
+        if let MiniBufferSelection::Line { cy, .. } = self.minibuffer_select_from("kill", known) {
+            self.system.kill_child(cy);
+        }
     }
 }
 

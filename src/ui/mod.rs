@@ -30,6 +30,7 @@ pub(crate) trait UserInterface {
         &mut self,
         mode_name: &str,
         layout: &Layout,
+        n_running: usize,
         pending_keys: &[Input],
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
@@ -109,13 +110,16 @@ impl UserInterface for Ui {
         &mut self,
         mode_name: &str,
         layout: &Layout,
+        n_running: usize,
         pending_keys: &[Input],
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
     ) {
         match self {
             Self::Headless => (),
-            Self::Tui(tui) => tui.refresh(mode_name, layout, pending_keys, held_click, mb),
+            Self::Tui(tui) => {
+                tui.refresh(mode_name, layout, n_running, pending_keys, held_click, mb)
+            }
         }
     }
 
