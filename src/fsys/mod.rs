@@ -320,7 +320,7 @@ impl AdFs {
         spawn_log_listener(brx, listener_tx, log_rx);
 
         let buffer_nodes = BufferNodes::new(tx.clone(), listener_rx, log_tx);
-        let auto_mount = config_handle!().auto_mount;
+        let auto_mount = config_handle!().filesystem.auto_mount;
 
         Self {
             state: Arc::new(Mutex::new(State {

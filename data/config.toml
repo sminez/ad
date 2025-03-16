@@ -1,8 +1,6 @@
 # Config file for the ad text editor
 # For details of the TOML file format see https://toml.io/en/v1.0.0
 
-# Whether or not the 9p filesystem interface should attempt to automount via fuse on startup
-auto_mount = false
 # Whether or not tab characters should be automatically replaced with `tabstop` spaces
 expand_tab = true
 # The number of spaces to render tab characters with
@@ -17,6 +15,12 @@ double_click_ms = 200
 minibuffer_lines = 8
 # Shell command to be used for listing files when running the `find file` and `find repo file` commands
 find_command = "fd -t f"
+
+[filesystem]
+# Whether or not the 9p filesystem interface should be enabled or not
+enabled = true
+# Whether or not the 9p filesystem interface should attempt to automount via fuse on startup
+auto_mount = false
 
 
 # Configuration for tree-sitter based syntax highlighting. See :help for details on the required

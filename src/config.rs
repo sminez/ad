@@ -29,13 +29,14 @@ pub(crate) fn config_path() -> String {
 pub struct Config {
     pub tabstop: usize,
     pub expand_tab: bool,
-    pub auto_mount: bool,
     pub match_indent: bool,
     pub status_timeout: u64,
     pub double_click_ms: u64,
     pub minibuffer_lines: usize,
     pub find_command: String,
 
+    #[serde(default)]
+    pub filesystem: FsysConfig,
     #[serde(default)]
     pub colorscheme: ColorScheme,
     #[serde(default)]
@@ -117,6 +118,22 @@ impl Config {
         warn!("ignoring runtime config update: {input}");
 
         Err("runtime config updates are not currently supported".to_owned())
+    }
+}
+
+/// Configuration for the 9p filesystem interface
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct FsysConfig {
+    pub enabled: bool,
+    pub auto_mount: bool,
+}
+
+impl Default for FsysConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            auto_mount: false,
+        }
     }
 }
 

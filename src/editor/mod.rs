@@ -2,7 +2,7 @@
 use crate::{
     buffer::{ActionOutcome, Buffer},
     config::Config,
-    die,
+    config_handle, die,
     dot::TextObject,
     exec::{Addr, Address},
     fsys::{AdFs, InputFilter, LogEvent, Message, Req},
@@ -159,9 +159,12 @@ where
 
     /// Initialise any UI state required for our [EditorMode] and run the main event loop.
     pub fn run(mut self) {
-        let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
-        AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
-        self.ensure_correct_fsys_state();
+        if config_handle!().filesystem.enabled {
+            let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
+            AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
+            self.ensure_correct_fsys_state();
+        }
+
         self.run_event_loop();
     }
 
