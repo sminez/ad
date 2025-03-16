@@ -82,8 +82,9 @@ impl TsState {
     }
 
     fn try_new_explicit(mut p: Parser, query: &str, gb: &GapBuffer) -> Result<Self, String> {
-        let tree = p.parse_with(
+        let tree = p.parse_with_options(
             &mut |byte_offset, _| gb.maximal_slice_from_offset(byte_offset),
+            None,
             None,
         );
 
@@ -109,9 +110,10 @@ impl TsState {
             new_end_position: ts::Point::new(0, 0),
         });
 
-        let new_tree = self.p.parse_with(
+        let new_tree = self.p.parse_with_options(
             &mut |byte_offset, _| gb.maximal_slice_from_offset(byte_offset),
             Some(&self.tree),
+            None,
         );
 
         if let Some(tree) = new_tree {
@@ -261,10 +263,10 @@ impl Parser {
                 lib.get(lang_fn.as_bytes()).map_err(|e| e.to_string())?;
 
             let lang = ts::Language::from_raw(func());
-            if lang.version() < ts::MIN_COMPATIBLE_LANGUAGE_VERSION {
+            if lang.abi_version() < ts::MIN_COMPATIBLE_LANGUAGE_VERSION {
                 return Err(format!(
                     "incompatible .so tree-sitter parser version: {} < {}",
-                    lang.version(),
+                    lang.abi_version(),
                     ts::MIN_COMPATIBLE_LANGUAGE_VERSION
                 ));
             }
