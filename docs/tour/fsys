@@ -4,11 +4,11 @@ interacting with ad from other programs:
 
         http://man.cat-v.org/plan_9/5/
 
-    - if you have the 9p(1) command line utility installed you can explore the filesystem
+    - ad can be used as a simple 9p client using the -9p command line flag to explore the filesystem
       
-        9p ls ad
-        9p ls ad/buffers/1
-        9p read ad/buffers/1/dot
+        ad -9p ls ad
+        ad -9p ls ad/buffers/1
+        ad -9p read ad/buffers/1/dot
 
     - if you have the fusermount(1) and 9pfuse(4) programs installed then you can set the
       "auto-mount" property in ../../data/config.toml to true and mount the filesystem directly

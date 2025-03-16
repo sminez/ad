@@ -5,13 +5,13 @@
 
 # Write a control message to ad.
 # The format accepted is the same as when using the internal command line
-adCtl() { echo -n "$*" | 9p write ad/ctl; }
+adCtl() { echo -n "$*" | ad -9p write ad/ctl; }
 
 # Execute an Edit script within the current buffer
 adEdit() { adCtl "Edit $*"; }
 
 # Read the contents of the index file
-adIndex() { 9p read ad/buffers/index; }
+adIndex() { ad -9p read ad/buffers/index; }
 
 # Display an error in the editor status line and exit
 adError() {
@@ -25,19 +25,19 @@ requireAd() {
 }
 
 # Read the contents of an fsys file for the specified buffer
-bufRead() { 9p read "ad/buffers/$1/$2"; }
+bufRead() { ad -9p read "ad/buffers/$1/$2"; }
 
 # Write a string to the specified buffer file
-bufWrite() { 9p write "ad/buffers/$1/$2"; }
+bufWrite() { ad -9p write "ad/buffers/$1/$2"; }
 
 # Follow the ad log stream of ongoing buffer events
-adLog() { 9p read ad/log; }
+adLog() { ad -9p read ad/log; }
 
 # Fetch the id of the currently focused buffer
-currentBufferId() { 9p read ad/buffers/current; }
+currentBufferId() { ad -9p read ad/buffers/current; }
 
 # Set focus to the buffer with the specified id
-focusBuffer() { echo "$1" | 9p write ad/buffers/current; }
+focusBuffer() { echo "$1" | ad -9p write ad/buffers/current; }
 
 # Clear the contents of the current buffer
 clearBuffer() {
@@ -56,7 +56,7 @@ curToEof() { echo -n '$' | bufWrite "$1" addr; }
 
 # dmenu style selection from newline delimited input on stdin
 minibufferSelect() {
-  9p write ad/minibuffer
+  ad -9p write ad/minibuffer
   [ -n "$1" ] && adCtl "minibuffer-prompt $1"
-  9p read ad/minibuffer
+  ad -9p read ad/minibuffer
 }

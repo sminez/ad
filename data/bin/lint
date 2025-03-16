@@ -2,12 +2,13 @@
 # Run lint for the current project and show the results so errors can be jumped to
 set -eou pipefail
 
-[ -e "$HOME/.profile" ] && source ~/.profile
+. "$HOME/.ad/lib/ad.sh"
+
 root="$(git rev-parse --show-toplevel)"
 
 # Determine project type
 if [ -e "$root/Cargo.toml" ]; then
-  echo "echo running 'cargo clippy'..." | 9p write ad/ctl
+  adCtl "echo running 'cargo clippy'..."
   cmd="cd $root && cargo clippy -q --message-format=short --color=never --all-targets 2>&1"
   line="$(tmux-select -c "$cmd" | cut -d' ' -f1)"
   if [ -z "$line" ]; then
@@ -16,11 +17,11 @@ if [ -e "$root/Cargo.toml" ]; then
   fname="$(echo "$line" | cut -d':' -f1)"
   lnum="$(echo "$line" | cut -d':' -f2)"
   col="$(echo "$line" | cut -d':' -f3)"
-  echo -n "open $root/$fname" | 9p write ad/ctl
-  bufid=$(9p read "ad/buffers/current")
-  echo -n "$lnum:$col" | 9p write "ad/buffers/$bufid/addr"
-  echo -n "viewport-center" | 9p write "ad/ctl"
+  adCtl "open $root/$fname"
+  bufid=$(currentBufferId)
+  echo -n "$lnum:$col" | bufWrite "$bufid" "addr"
+  adCtl "viewport-center"
 else
-  echo "echo not linters configured for this file/project type" | 9p write ad/ctl
+  adCtl "echo not linters configured for this file/project type"
   exit 1
 fi
