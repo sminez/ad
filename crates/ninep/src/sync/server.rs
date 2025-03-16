@@ -11,7 +11,7 @@ use crate::{
             E_CREATE_NON_DIR, E_UNKNOWN_FID,
         },
     },
-    sync::{SyncNineP, SyncStream},
+    sync::{SyncNineP, SyncServerStream, SyncStream},
     Result,
 };
 use simple_coro::CoroState;
@@ -206,7 +206,7 @@ where
 impl<S, U> Session<Unattached, S, U>
 where
     S: Serve9p,
-    U: SyncStream,
+    U: SyncServerStream,
 {
     fn handle_connection(mut self) {
         loop {
@@ -229,7 +229,7 @@ where
 impl<S, U> Session<Attached, S, U>
 where
     S: Serve9p,
-    U: SyncStream,
+    U: SyncServerStream,
 {
     /// Explicitly clunk all
     fn clunk_and_clear(&mut self) {
