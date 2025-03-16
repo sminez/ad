@@ -1,8 +1,5 @@
 //! A synchronous implementation of 9p Servers and Clients
-use crate::{
-    sansio::protocol::{NineP, Rdata, Rmessage},
-    Result,
-};
+use crate::{sansio::protocol::NineP, Result};
 use simple_coro::{Coro, CoroState};
 use std::{
     io::{self, Read, Write},
@@ -47,13 +44,6 @@ impl<T> SyncNineP for T where T: NineP {}
 pub trait SyncStream: Read + Write + Send + Sized + 'static {
     /// Clone this stream, accounting for operating system errors
     fn try_clone(&self) -> Result<Self>;
-
-    /// Reply to the specified tag with a given Result. Err's will be converted to 9p error
-    /// messages automatically.
-    fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
-        let _ = r.write_to(self);
-    }
 }
 
 impl SyncStream for UnixStream {

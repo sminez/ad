@@ -5,7 +5,7 @@
 use crate::{
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat},
     sansio::{
-        protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
+        protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
             Attached, Either, Session, SessionType, Unattached, E_ALREADY_ATTACHED,
             E_CREATE_NON_DIR, E_UNKNOWN_FID,
@@ -198,7 +198,8 @@ where
     U: SyncStream,
 {
     fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        self.stream.reply(tag, resp);
+        let r: Rmessage = (tag, resp).into();
+        let _ = r.write_to(&mut self.stream);
     }
 }
 
@@ -444,7 +445,9 @@ where
                         let mut stream = self.stream.try_clone()?;
                         spawn(move || {
                             let data = chan.recv().unwrap_or_default();
-                            stream.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                            let resp = Ok(Rdata::Read { data: Data(data) });
+                            let r: Rmessage = (tag, resp).into();
+                            let _ = r.write_to(&mut stream);
                         });
 
                         Ok(None)
