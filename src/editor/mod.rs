@@ -602,7 +602,7 @@ mod tests {
         ed.open_file(ed.cwd.join("test"), false);
         ed.handle_action(
             Action::ShellRun {
-                cmd: "test-data/spawned-long-running.sh".to_string(),
+                cmd: "yes".to_string(),
             },
             Source::Keyboard,
         );
@@ -618,6 +618,10 @@ mod tests {
         ed.system.kill_child(0);
         assert_eq!(ed.system.running_children().len(), 0);
 
+        // hack: avoid race between the child thread pushing lines to the output buffer and the
+        // attempt to drain the event queue below
+        sleep(Duration::from_millis(100));
+
         // drain any pending writes from the script
         while let Ok(evt) = ed.rx_events.try_recv() {
             match evt {
@@ -630,7 +634,6 @@ mod tests {
         ed.layout.close_buffer(1);
         assert_eq!(ed.layout.buffers().len(), 1);
 
-        sleep(Duration::from_secs(1));
         match ed.rx_events.try_recv() {
             Err(_) => (),
             Ok(Event::Action(Action::CleanupChild { .. })) => (),
