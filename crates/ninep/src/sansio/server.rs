@@ -1,8 +1,7 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     fs::{FileMeta, FileType, Stat, QID_ROOT},
-    sansio::protocol::{Data, Qid, RawStat, Rdata, Tdata, Tmessage, MAX_DATA_LEN},
-    sync::SyncNineP,
+    sansio::protocol::{Data, NineP, Qid, RawStat, Rdata, Tdata, Tmessage, MAX_DATA_LEN},
     Result,
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -263,8 +262,7 @@ impl SessionState<Attached> {
                 for stat in stats.into_iter() {
                     self.qids.entry(stat.fm.qid).or_insert(stat.fm.clone());
                     let rstat: RawStat = stat.into();
-                    let mut tmp = Vec::new();
-                    rstat.write_to(&mut tmp).unwrap();
+                    let tmp = rstat.write_9p_bytes().unwrap();
 
                     if to_skip != 0 {
                         if tmp.len() > to_skip {
