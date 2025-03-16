@@ -34,10 +34,9 @@ impl<S> Clone for Client<S> {
 }
 
 impl<S> Client<S> {
-    fn new(uname: impl Into<String>, fids: HashMap<String, u32>, stream: S) -> Self {
+    fn new(fids: HashMap<String, u32>, stream: S) -> Self {
         Self {
             state: Arc::new(Mutex::new(State {
-                uname: uname.into(),
                 msize: MSIZE,
                 fids,
                 next_fid: 1,
@@ -64,8 +63,8 @@ impl Client<UnixStream> {
         let mut fids = HashMap::new();
         fids.insert(String::new(), 0);
 
-        let mut client = Self::new(uname, fids, stream);
-        client.connect(aname).await?;
+        let mut client = Self::new(fids, stream);
+        client.connect(uname, aname).await?;
 
         Ok(client)
     }
@@ -98,8 +97,8 @@ impl Client<TcpStream> {
         let mut fids = HashMap::new();
         fids.insert(String::new(), 0);
 
-        let mut client = Self::new(uname, fids, stream);
-        client.connect(aname).await?;
+        let mut client = Self::new(fids, stream);
+        client.connect(uname, aname).await?;
 
         Ok(client)
     }
@@ -149,8 +148,12 @@ where
     }
 
     /// Establish our connection to the target 9p server and begin the session.
-    async fn connect(&mut self, aname: impl Into<String>) -> io::Result<()> {
-        run_9p_coro!(self, handle_connect, aname.into())
+    async fn connect(
+        &mut self,
+        uname: impl Into<String>,
+        aname: impl Into<String>,
+    ) -> io::Result<()> {
+        run_9p_coro!(self, handle_connect, uname.into(), aname.into())
     }
 
     /// Associate the given path with a new fid.

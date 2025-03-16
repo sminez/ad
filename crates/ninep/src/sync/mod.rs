@@ -1,8 +1,5 @@
 //! A synchronous implementation of 9p Servers and Clients
-use crate::{
-    sansio::protocol::{NineP, Rdata, Rmessage},
-    Result,
-};
+use crate::{sansio::protocol::NineP, Result};
 use simple_coro::{Coro, CoroState};
 use std::{
     io::{self, Read, Write},
@@ -44,25 +41,25 @@ pub trait SyncNineP: NineP {
 impl<T> SyncNineP for T where T: NineP {}
 
 /// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
-pub trait SyncStream: Read + Write + Send + Sized + 'static {
+pub trait SyncStream: Read + Write + Send + Sized + 'static {}
+
+impl SyncStream for UnixStream {}
+impl SyncStream for TcpStream {}
+
+/// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
+/// and additionally supports cloning the stream.
+pub trait SyncServerStream: SyncStream {
     /// Clone this stream, accounting for operating system errors
     fn try_clone(&self) -> Result<Self>;
-
-    /// Reply to the specified tag with a given Result. Err's will be converted to 9p error
-    /// messages automatically.
-    fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
-        let _ = r.write_to(self);
-    }
 }
 
-impl SyncStream for UnixStream {
+impl SyncServerStream for UnixStream {
     fn try_clone(&self) -> Result<Self> {
         self.try_clone().map_err(|e| e.to_string())
     }
 }
 
-impl SyncStream for TcpStream {
+impl SyncServerStream for TcpStream {
     fn try_clone(&self) -> Result<Self> {
         self.try_clone().map_err(|e| e.to_string())
     }

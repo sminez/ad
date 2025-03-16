@@ -5,13 +5,13 @@
 use crate::{
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat},
     sansio::{
-        protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
+        protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
             Attached, Either, Session, SessionType, Unattached, E_ALREADY_ATTACHED,
             E_CREATE_NON_DIR, E_UNKNOWN_FID,
         },
     },
-    sync::{SyncNineP, SyncStream},
+    sync::{SyncNineP, SyncServerStream, SyncStream},
     Result,
 };
 use simple_coro::CoroState;
@@ -198,14 +198,15 @@ where
     U: SyncStream,
 {
     fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        self.stream.reply(tag, resp);
+        let r: Rmessage = (tag, resp).into();
+        let _ = r.write_to(&mut self.stream);
     }
 }
 
 impl<S, U> Session<Unattached, S, U>
 where
     S: Serve9p,
-    U: SyncStream,
+    U: SyncServerStream,
 {
     fn handle_connection(mut self) {
         loop {
@@ -228,7 +229,7 @@ where
 impl<S, U> Session<Attached, S, U>
 where
     S: Serve9p,
-    U: SyncStream,
+    U: SyncServerStream,
 {
     /// Explicitly clunk all
     fn clunk_and_clear(&mut self) {
@@ -444,7 +445,9 @@ where
                         let mut stream = self.stream.try_clone()?;
                         spawn(move || {
                             let data = chan.recv().unwrap_or_default();
-                            stream.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                            let resp = Ok(Rdata::Read { data: Data(data) });
+                            let r: Rmessage = (tag, resp).into();
+                            let _ = r.write_to(&mut stream);
                         });
 
                         Ok(None)
