@@ -240,7 +240,7 @@ where
 {
     async fn handle_connection_async(mut self) {
         loop {
-            let t = match Tmessage::read_from(&mut self.stream).await {
+            let t = match Tmessage::read_from(&self.buf, &mut self.stream).await {
                 Ok(t) => t,
                 Err(_) => return,
             };
@@ -282,7 +282,7 @@ where
                         .await;
                     continue;
                 },
-                res = Tmessage::read_from(&mut self.stream) => match res {
+                res = Tmessage::read_from(&self.buf, &mut self.stream) => match res {
                     Ok(t) => t,
                     Err(_) => return self.clunk_and_clear_async().await,
                 },

@@ -1,6 +1,9 @@
 //! A synchronous implementation of 9p Servers and Clients
-use crate::{sansio::protocol::NineP, Result};
-use simple_coro::{Coro, CoroState};
+use crate::{
+    sansio::protocol::{NineP, SharedBuf},
+    Result,
+};
+use simple_coro::CoroState;
 use std::{
     io::{self, Read, Write},
     net::TcpStream,
@@ -22,14 +25,16 @@ pub trait SyncNineP: NineP {
     }
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
-    fn read_from<R: Read>(r: &mut R) -> io::Result<Self> {
-        let mut coro = Coro::from(Self::read_9p);
+    fn read_from<R: Read>(buf: &SharedBuf, r: &mut R) -> io::Result<Self> {
+        let mut coro = Self::read_9p_coro(buf);
         loop {
             coro = match coro.resume() {
                 CoroState::Pending(c, n) => {
-                    let mut buf = vec![0; n];
-                    r.read_exact(&mut buf)?;
-                    c.send(buf)
+                    // SAFETY: coro is currently suspended and unable to take a reference to buf
+                    let mut_buf = unsafe { buf.as_inner_mut() };
+                    mut_buf.resize(n, 0);
+                    r.read_exact(mut_buf)?;
+                    c.send(())
                 }
 
                 CoroState::Complete(res) => return res,

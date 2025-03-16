@@ -210,7 +210,7 @@ where
 {
     fn handle_connection(mut self) {
         loop {
-            let t = match Tmessage::read_from(&mut self.stream) {
+            let t = match Tmessage::read_from(&self.buf, &mut self.stream) {
                 Ok(t) => t,
                 Err(_) => return,
             };
@@ -243,7 +243,7 @@ where
         use Tdata::*;
 
         loop {
-            let t = match Tmessage::read_from(&mut self.stream) {
+            let t = match Tmessage::read_from(&self.buf, &mut self.stream) {
                 Ok(t) => t,
                 Err(_) => return self.clunk_and_clear(),
             };

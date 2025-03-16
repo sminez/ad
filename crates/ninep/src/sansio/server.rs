@@ -1,7 +1,9 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     fs::{FileMeta, FileType, Stat, QID_ROOT},
-    sansio::protocol::{Data, NineP, Qid, RawStat, Rdata, Tdata, Tmessage, MAX_DATA_LEN},
+    sansio::protocol::{
+        Data, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage, MAX_DATA_LEN,
+    },
     Result,
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -107,6 +109,7 @@ where
             self.s.clone(),
             self.qids.clone(),
             stream,
+            SharedBuf::new(),
         );
         self.next_client_id += 1;
 
@@ -295,6 +298,7 @@ where
     pub(crate) s: Arc<S>,
     pub(crate) stream: U,
     pub(crate) session_state: SessionState<T>,
+    pub(crate) buf: SharedBuf,
 }
 
 impl<T, S, U> Deref for Session<T, S, U>
@@ -397,6 +401,7 @@ where
         s: Arc<S>,
         qids: BTreeMap<u64, FileMeta>,
         stream: U,
+        buf: SharedBuf,
     ) -> Self {
         Self {
             s,
@@ -408,6 +413,7 @@ where
                 roots,
                 qids,
             },
+            buf,
         }
     }
 
@@ -467,9 +473,10 @@ where
                     qids,
                     ..
                 },
+            buf,
         } = self;
 
-        Session::new_attached(client_id, ty, msize, roots, s, qids, stream)
+        Session::new_attached(client_id, ty, msize, roots, s, qids, stream, buf)
     }
 
     /// The attach message serves as a fresh introduction from a user on the client machine to the
@@ -508,6 +515,7 @@ impl<S, U> Session<Attached, S, U>
 where
     S: Send,
 {
+    #[allow(clippy::too_many_arguments)]
     fn new_attached(
         client_id: ClientId,
         state: Attached,
@@ -516,6 +524,7 @@ where
         s: Arc<S>,
         qids: BTreeMap<u64, FileMeta>,
         stream: U,
+        buf: SharedBuf,
     ) -> Self {
         Self {
             s,
@@ -527,6 +536,7 @@ where
                 roots,
                 qids,
             },
+            buf,
         }
     }
 }

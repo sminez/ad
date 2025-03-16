@@ -2,13 +2,59 @@
 //!
 //!   http://man.cat-v.org/plan_9/5/
 use crate::sync::SyncNineP;
-use simple_coro::Handle;
+use simple_coro::{Coro, CoroState, Handle, ReadyCoro};
 use std::{
+    cell::UnsafeCell,
     fmt,
     future::Future,
-    io::{self, Cursor, ErrorKind},
+    io::{self, ErrorKind},
     mem::size_of,
 };
+
+/// A shared byte buffer that can be accessed inside of 9p parsing functions.
+///
+/// This is wildly unsafe as a general purpose API and only makes any sort of sense as a
+/// communication mechanism between a running `Coro` and the code that is driving it as we can
+/// guarantee that both are never executing at the same time.
+#[derive(Debug)]
+pub struct SharedBuf(UnsafeCell<Vec<u8>>);
+
+/// SAFETY: requres that the safety guarantees for as_inner_mut are upheld
+unsafe impl Send for SharedBuf {}
+/// SAFETY: requres that the safety guarantees for as_inner_mut are upheld
+unsafe impl Sync for SharedBuf {}
+
+impl Default for SharedBuf {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SharedBuf {
+    /// Construct a new SharedBuf
+    pub fn new() -> Self {
+        Self(UnsafeCell::new(Vec::new()))
+    }
+
+    /// Get an exclusive reference to the inner buffer from a shared reference to the outer
+    /// [SharedBuf].
+    ///
+    /// # Safety
+    /// The caller must guarantee that no concurrent access to the inner buffer takes place while
+    /// this exclusive reference is held. In practice this is only safe to do as part of the IO
+    /// loop that is parsing a 9p message using a `Coro` that this [SharedBuf] is shared with.
+    #[allow(clippy::mut_from_ref)]
+    pub(crate) unsafe fn as_inner_mut(&self) -> &mut Vec<u8> {
+        // SAFETY: the caller must guarantee that no concurrent access takes place
+        unsafe { &mut *self.0.get() }
+    }
+
+    /// Get a shared reference to the inner buffer.
+    pub(crate) fn as_slice(&self) -> &[u8] {
+        // SAFETY: the caller must guarantee that no concurrent access takes place
+        unsafe { &*self.0.get() }
+    }
+}
 
 /// The size of variable length data is denoted using a u16 so anything longer
 /// than u16::MAX is not something we can handle.
@@ -65,11 +111,18 @@ pub trait NineP: Sized {
 
     /// This is not a normal async function. It is used to set up a sans-io state machine that
     /// can be driven by a concrete implementation.
-    ///
-    /// # Safety
-    /// Implementations of `read` need to ensure that the only await points they contain are
-    /// from calls to the [request_bytes] macro.
-    fn read_9p(handle: Handle<usize, Vec<u8>>) -> impl Future<Output = io::Result<Self>> + Send;
+    fn read_9p(
+        buf: &SharedBuf,
+        handle: Handle<usize>,
+    ) -> impl Future<Output = io::Result<Self>> + Send;
+
+    /// Create a new [Coro] that reads from a [SharedBuf] to parse 9p protocol messages with
+    /// minimal allocation.
+    fn read_9p_coro(
+        buf: &SharedBuf,
+    ) -> ReadyCoro<usize, (), io::Result<Self>, impl Future<Output = io::Result<Self>> + Send> {
+        Coro::from(async move |handle: Handle<usize>| Self::read_9p(buf, handle).await)
+    }
 }
 
 /// wrapper around uX::from_le_bytes that accepts a slice rather than a fixed size array
@@ -95,9 +148,9 @@ macro_rules! impl_u {
                     Ok(())
                 }
 
-                async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<$ty> {
-                    let buf = handle.yield_value(size_of::<$ty>()).await;
-                    Ok(from_le_bytes!($ty, buf))
+                async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<$ty> {
+                    handle.yield_value(size_of::<$ty>()).await;
+                    Ok(from_le_bytes!($ty, buf.as_slice()))
                 }
             }
         )+
@@ -133,11 +186,12 @@ impl NineP for String {
         Ok(())
     }
 
-    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
-        let len = u16::read_9p(handle).await? as usize;
-        let buf = handle.yield_value(len).await;
+    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let len = u16::read_9p(buf, handle).await? as usize;
+        handle.yield_value(len).await;
 
-        String::from_utf8(buf).map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
+        String::from_utf8(buf.as_slice()[..len].to_vec())
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
     }
 }
 
@@ -168,14 +222,14 @@ impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
         Ok(())
     }
 
-    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
-        let len = u16::read_9p(handle).await? as usize;
-        let mut buf = Vec::with_capacity(len);
+    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let len = u16::read_9p(buf, handle).await? as usize;
+        let mut elems = Vec::with_capacity(len);
         for _ in 0..len {
-            buf.push(T::read_9p(handle).await?);
+            elems.push(T::read_9p(buf, handle).await?);
         }
 
-        Ok(buf)
+        Ok(elems)
     }
 }
 
@@ -214,9 +268,10 @@ impl TryFrom<Data> for Vec<RawStat> {
         let mut buf = Vec::new();
         let mut bytes = bytes.as_slice();
         let n = size_of::<RawStat>();
+        let sb = SharedBuf::new();
 
         loop {
-            match RawStat::read_from(&mut bytes) {
+            match RawStat::read_from(&sb, &mut bytes) {
                 Ok(rs) => {
                     buf.push(rs);
                     bytes = &bytes[n..];
@@ -247,16 +302,17 @@ impl NineP for Data {
         Ok(())
     }
 
-    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
-        let len = u32::read_9p(handle).await? as usize;
+    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let len = u32::read_9p(buf, handle).await? as usize;
         if len > MAX_DATA_LEN {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
                 format!("data field too long: max={MAX_DATA_LEN} len={len}"),
             ));
         }
+        handle.yield_value(len).await;
 
-        Ok(Data(handle.yield_value(len).await))
+        Ok(Data(buf.as_slice()[..len].to_vec()))
     }
 }
 
@@ -317,23 +373,23 @@ impl NineP for RawStat {
         )
     }
 
-    async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
+    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
         // Request the fixed sized data before the strings in one block up front
-        let buf = handle.yield_value(41).await;
+        handle.yield_value(41).await;
         let bytes = buf.as_slice();
 
         let size = from_le_bytes!(u16, bytes);
         let ty = from_le_bytes!(u16, &bytes[2..]);
         let dev = from_le_bytes!(u32, &bytes[4..]);
-        let qid = Qid::read_from(&mut &bytes[8..])?;
+        let qid = Qid::read_from(buf, &mut &bytes[8..])?;
         let mode = from_le_bytes!(u32, &bytes[21..]);
         let atime = from_le_bytes!(u32, &bytes[25..]);
         let mtime = from_le_bytes!(u32, &bytes[29..]);
         let length = from_le_bytes!(u64, &bytes[33..]);
-        let name = String::read_9p(handle).await?;
-        let uid = String::read_9p(handle).await?;
-        let gid = String::read_9p(handle).await?;
-        let muid = String::read_9p(handle).await?;
+        let name = String::read_9p(buf, handle).await?;
+        let uid = String::read_9p(buf, handle).await?;
+        let gid = String::read_9p(buf, handle).await?;
+        let muid = String::read_9p(buf, handle).await?;
 
         Ok(RawStat {
             size,
@@ -386,8 +442,8 @@ macro_rules! impl_message_datatype {
                 write_fields!(buf, self, $($field),*)
             }
 
-            async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
-                $(let $field = <$ty>::read_9p(handle).await?;)*
+            async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+                $(let $field = <$ty>::read_9p(buf, handle).await?;)*
                 Ok($struct { $($field),* })
             }
         }
@@ -519,18 +575,25 @@ macro_rules! impl_message_format {
             }
 
             #[allow(unused_assignments)]
-            async fn read_9p(handle: Handle<usize, Vec<u8>>) -> io::Result<Self> {
-                let len = u32::read_9p(handle).await? as usize;
-                let bytes = handle.yield_value(len-4).await;
-                let ty = from_le_bytes!(u8, &bytes);
-                let tag = from_le_bytes!(u16, &bytes[1..]);
-                let mut cur = Cursor::new(bytes);
-                cur.set_position(3);
+            async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+                let len = u32::read_9p(buf, handle).await? as usize;
+                handle.yield_value(len-4).await;
+
+                let (ty, tag) = {
+                    // SAFETY: this is inside a running coro so the outer code is unable to take a
+                    //         reference to buf
+                    let bytes = unsafe { buf.as_inner_mut() };
+                    let ty = from_le_bytes!(u8, &bytes);
+                    let tag = from_le_bytes!(u16, &bytes[1..]);
+                    bytes.rotate_left(3);
+
+                    (ty, tag)
+                };
 
                 let content = match MessageType(ty) {
                     $(
                         MessageType::$message_variant => $enum_ty::$enum_variant {
-                            $($field: <$ty>::read_from(&mut cur)?),*
+                            $($field: read_from_exact_sized_buffer::<$ty>(buf)?),*
                         },
                     )+
 
@@ -544,6 +607,30 @@ macro_rules! impl_message_format {
             }
         }
     };
+}
+
+/// Helper for reading a single [NineP] value from a [SharedBuf] that has already been filled with
+/// the correct number of bytes for parsing the entire message without any further IO.
+fn read_from_exact_sized_buffer<T: NineP>(buf: &SharedBuf) -> io::Result<T> {
+    let mut coro = T::read_9p_coro(buf);
+    let mut prev_n = 0;
+
+    loop {
+        coro = {
+            let state = coro.resume();
+            // SAFETY: coro is currently suspended and unable to take a reference to buf
+            let mut_buf = unsafe { buf.as_inner_mut() };
+            mut_buf.rotate_left(prev_n);
+
+            match state {
+                CoroState::Complete(res) => return res,
+                CoroState::Pending(c, n) => {
+                    prev_n = n;
+                    c.send(())
+                }
+            }
+        };
+    }
 }
 
 /// The Plan 9 File Protocol, 9P, is used for messages between clients and servers. A client
@@ -890,13 +977,17 @@ mod tests {
     #[test]
     fn uint_decode() {
         let buf: Vec<u8> = vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
+        let sb = SharedBuf::new();
 
-        assert_eq!(0x01, u8::read_from(&mut buf.as_slice()).unwrap());
-        assert_eq!(0x2301, u16::read_from(&mut buf.as_slice()).unwrap());
-        assert_eq!(0x67452301, u32::read_from(&mut buf.as_slice()).unwrap());
+        assert_eq!(0x01, u8::read_from(&sb, &mut buf.as_slice()).unwrap());
+        assert_eq!(0x2301, u16::read_from(&sb, &mut buf.as_slice()).unwrap());
+        assert_eq!(
+            0x67452301,
+            u32::read_from(&sb, &mut buf.as_slice()).unwrap()
+        );
         assert_eq!(
             0xefcdab8967452301,
-            u64::read_from(&mut buf.as_slice()).unwrap()
+            u64::read_from(&sb, &mut buf.as_slice()).unwrap()
         );
     }
 
@@ -925,6 +1016,7 @@ mod tests {
         RawStat,
         Clunk,
         Walk,
+        Rwalk,
     }
 
     // simple_test_case doesn't handle generic args for parameterised
@@ -935,7 +1027,8 @@ mod tests {
         T: NineP + PartialEq + fmt::Debug,
     {
         let buf = t1.write_9p_bytes().unwrap();
-        let t2 = T::read_from(&mut buf.as_slice()).unwrap();
+        let sb = SharedBuf::new();
+        let t2 = T::read_from(&sb, &mut buf.as_slice()).unwrap();
 
         assert_eq!(t1, t2);
     }
@@ -951,6 +1044,7 @@ mod tests {
     #[test_case(F9::RawStat; "raw stat")]
     #[test_case(F9::Clunk; "clunk")]
     #[test_case(F9::Walk; "walk")]
+    #[test_case(F9::Rwalk; "rwalk")]
     #[test]
     fn round_trip_is_fine(data: F9) {
         match data {
@@ -989,6 +1083,23 @@ mod tests {
                     fid: 0,
                     new_fid: 2,
                     wnames: vec!["bar".to_string()],
+                },
+            }),
+            F9::Rwalk => round_trip_inner(Rmessage {
+                tag: 0,
+                content: Rdata::Walk {
+                    wqids: vec![
+                        Qid {
+                            ty: 0,
+                            version: 1,
+                            path: 2,
+                        },
+                        Qid {
+                            ty: 3,
+                            version: 4,
+                            path: 5,
+                        },
+                    ],
                 },
             }),
         }

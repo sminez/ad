@@ -1,5 +1,5 @@
 //! Types for describing files in a 9p virtual filesystem
-use super::sansio::protocol::{NineP, Qid, RawStat};
+use crate::sansio::protocol::{NineP, Qid, RawStat};
 use std::{
     mem::size_of,
     time::{Duration, SystemTime, UNIX_EPOCH},

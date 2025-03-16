@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p client
 use crate::{
     fs::{Mode, Perm, Stat},
-    sansio::protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
+    sansio::protocol::{Data, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
     sync::SyncNineP,
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -211,9 +211,10 @@ impl State {
             let bytes = handle.yield_from(self._read_all(path, Mode::DIR)).await?;
             let mut buf = io::Cursor::new(bytes);
             let mut stats: Vec<Stat> = Vec::new();
+            let sb = SharedBuf::new();
 
             loop {
-                match RawStat::read_from(&mut buf) {
+                match RawStat::read_from(&sb, &mut buf) {
                     Ok(rs) => match rs.try_into() {
                         Ok(s) => stats.push(s),
                         Err(e) => return err(e),
