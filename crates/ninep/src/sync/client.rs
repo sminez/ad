@@ -37,12 +37,12 @@ impl<S> Clone for Client<S> {
 }
 
 impl<S> Client<S> {
-    fn new(uname: impl Into<String>, fids: HashMap<String, u32>, stream: S) -> Self {
+    fn new(uname: impl Into<String>, stream: S) -> Self {
         Self {
             state: Arc::new(Mutex::new(State {
                 uname: uname.into(),
                 msize: MSIZE,
-                fids,
+                fids: HashMap::from([(String::new(), 0)]),
                 next_fid: 1,
             })),
             stream: Arc::new(Mutex::new(stream)),
@@ -80,10 +80,8 @@ impl Client<UnixStream> {
         aname: impl Into<String>,
     ) -> io::Result<Self> {
         let stream = UnixStream::connect(path.as_ref())?;
-        let mut fids = HashMap::new();
-        fids.insert(String::new(), 0);
 
-        let mut client = Self::new(uname, fids, stream);
+        let mut client = Self::new(uname, stream);
         client.connect(aname)?;
 
         Ok(client)
@@ -114,10 +112,8 @@ impl Client<TcpStream> {
         aname: impl Into<String>,
     ) -> io::Result<Self> {
         let stream = TcpStream::connect(addr)?;
-        let mut fids = HashMap::new();
-        fids.insert(String::new(), 0);
 
-        let mut client = Self::new(uname, fids, stream);
+        let mut client = Self::new(uname, stream);
         client.connect(aname)?;
 
         Ok(client)
