@@ -43,7 +43,6 @@ where
 /// to implement a concrete Client.
 #[derive(Debug)]
 pub(crate) struct State {
-    pub(crate) uname: String,
     pub(crate) msize: u32,
     pub(crate) fids: HashMap<String, u32>,
     pub(crate) next_fid: u32,
@@ -60,6 +59,7 @@ impl State {
     /// Establish our connection to the target 9p server and begin the session.
     pub(crate) fn handle_connect(
         &mut self,
+        uname: String,
         aname: String,
     ) -> Coro9p<(), impl Future<Output = io::Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
@@ -84,7 +84,7 @@ impl State {
                     Tdata::Attach {
                         fid: 0,
                         afid: u32::MAX, // no auth
-                        uname: self.uname.clone(),
+                        uname,
                         aname,
                     },
                 ))
