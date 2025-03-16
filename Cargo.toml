@@ -1,6 +1,6 @@
 [package]
 name = "ad-editor"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
@@ -31,6 +31,13 @@ path = "src/main.rs"
 [profile.release]
 strip = true
 lto = true
+codegen-units = 1
+
+# For a release optimised build that is quicker to run while iterating locally
+[profile.release-test]
+inherits = "release"
+lto = false
+codegen-units = 16
 
 [[bench]]
 name = "bench_main"
@@ -39,17 +46,17 @@ harness = false
 [dependencies]
 ad_event = { version = "0.3", path = "crates/ad_event" }
 ninep = { version = "0.4", path = "crates/ninep", default-features = false }
-libc = "0.2.159"
+libc = "0.2.171"
 lsp-types = "0.97.0"
-serde = "1.0.215"
-serde_json = "1.0.133"
-tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = [ "fmt" ] }
+serde = "1.0.219"
+serde_json = "1.0.140"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = [ "fmt" ] }
 unicode-width = "0.2.0"
-tree-sitter = "0.24.4"
+tree-sitter = "0.24.7"
 libloading = "0.8.6"
 streaming-iterator = "0.1.9"
-toml = "0.8.19"
+toml = "0.8.20"
 
 [dev-dependencies]
 simple_test_case = "1.2.0"
