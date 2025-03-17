@@ -211,7 +211,7 @@ impl State {
             let bytes = handle.yield_from(self._read_all(path, Mode::DIR)).await?;
             let mut buf = io::Cursor::new(bytes);
             let mut stats: Vec<Stat> = Vec::new();
-            let sb = SharedBuf::new();
+            let sb = SharedBuf::default();
 
             loop {
                 match RawStat::read_from(&sb, &mut buf) {

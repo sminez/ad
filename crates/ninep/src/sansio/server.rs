@@ -109,7 +109,7 @@ where
             self.s.clone(),
             self.qids.clone(),
             stream,
-            SharedBuf::new(),
+            SharedBuf::default(),
         );
         self.next_client_id += 1;
 
@@ -461,22 +461,19 @@ where
         Either::L((tag, resp))
     }
 
-    pub(crate) fn into_attached(self, ty: Attached) -> Session<Attached, S, U> {
-        let Self {
-            s,
-            stream,
-            session_state:
-                SessionState {
-                    client_id,
-                    msize,
-                    roots,
-                    qids,
-                    ..
-                },
-            buf,
-        } = self;
-
-        Session::new_attached(client_id, ty, msize, roots, s, qids, stream, buf)
+    pub(crate) fn into_attached(self, state: Attached) -> Session<Attached, S, U> {
+        Session {
+            s: self.s,
+            stream: self.stream,
+            session_state: SessionState {
+                client_id: self.session_state.client_id,
+                state,
+                msize: self.session_state.msize,
+                roots: self.session_state.roots,
+                qids: self.session_state.qids,
+            },
+            buf: self.buf,
+        }
     }
 
     /// The attach message serves as a fresh introduction from a user on the client machine to the
@@ -508,35 +505,5 @@ where
         let aqid = self.qid(root_qid).expect("to have root qid");
 
         Ok((st, aqid))
-    }
-}
-
-impl<S, U> Session<Attached, S, U>
-where
-    S: Send,
-{
-    #[allow(clippy::too_many_arguments)]
-    fn new_attached(
-        client_id: ClientId,
-        state: Attached,
-        msize: u32,
-        roots: BTreeMap<String, u64>,
-        s: Arc<S>,
-        qids: BTreeMap<u64, FileMeta>,
-        stream: U,
-        buf: SharedBuf,
-    ) -> Self {
-        Self {
-            s,
-            stream,
-            session_state: SessionState {
-                client_id,
-                state,
-                msize,
-                roots,
-                qids,
-            },
-            buf,
-        }
     }
 }

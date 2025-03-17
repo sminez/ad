@@ -30,7 +30,7 @@ impl<S> Clone for Client<S> {
         Self {
             state: Arc::clone(&self.state),
             stream: Arc::clone(&self.stream),
-            buf: SharedBuf::new(),
+            buf: SharedBuf::default(),
         }
     }
 }
@@ -44,7 +44,7 @@ impl<S> Client<S> {
                 next_fid: 1,
             })),
             stream: Arc::new(Mutex::new(stream)),
-            buf: SharedBuf::new(),
+            buf: SharedBuf::default(),
         }
     }
 }
