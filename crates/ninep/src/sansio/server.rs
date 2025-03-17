@@ -1,7 +1,9 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     fs::{FileMeta, FileType, Stat, QID_ROOT},
-    sansio::protocol::{Data, NineP, Qid, RawStat, Rdata, Tdata, Tmessage, MAX_DATA_LEN},
+    sansio::protocol::{
+        Data, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage, MAX_DATA_LEN,
+    },
     Result,
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -107,6 +109,7 @@ where
             self.s.clone(),
             self.qids.clone(),
             stream,
+            SharedBuf::default(),
         );
         self.next_client_id += 1;
 
@@ -295,6 +298,7 @@ where
     pub(crate) s: Arc<S>,
     pub(crate) stream: U,
     pub(crate) session_state: SessionState<T>,
+    pub(crate) buf: SharedBuf,
 }
 
 impl<T, S, U> Deref for Session<T, S, U>
@@ -397,6 +401,7 @@ where
         s: Arc<S>,
         qids: BTreeMap<u64, FileMeta>,
         stream: U,
+        buf: SharedBuf,
     ) -> Self {
         Self {
             s,
@@ -408,6 +413,7 @@ where
                 roots,
                 qids,
             },
+            buf,
         }
     }
 
@@ -455,21 +461,19 @@ where
         Either::L((tag, resp))
     }
 
-    pub(crate) fn into_attached(self, ty: Attached) -> Session<Attached, S, U> {
-        let Self {
-            s,
-            stream,
-            session_state:
-                SessionState {
-                    client_id,
-                    msize,
-                    roots,
-                    qids,
-                    ..
-                },
-        } = self;
-
-        Session::new_attached(client_id, ty, msize, roots, s, qids, stream)
+    pub(crate) fn into_attached(self, state: Attached) -> Session<Attached, S, U> {
+        Session {
+            s: self.s,
+            stream: self.stream,
+            session_state: SessionState {
+                client_id: self.session_state.client_id,
+                state,
+                msize: self.session_state.msize,
+                roots: self.session_state.roots,
+                qids: self.session_state.qids,
+            },
+            buf: self.buf,
+        }
     }
 
     /// The attach message serves as a fresh introduction from a user on the client machine to the
@@ -501,32 +505,5 @@ where
         let aqid = self.qid(root_qid).expect("to have root qid");
 
         Ok((st, aqid))
-    }
-}
-
-impl<S, U> Session<Attached, S, U>
-where
-    S: Send,
-{
-    fn new_attached(
-        client_id: ClientId,
-        state: Attached,
-        msize: u32,
-        roots: BTreeMap<String, u64>,
-        s: Arc<S>,
-        qids: BTreeMap<u64, FileMeta>,
-        stream: U,
-    ) -> Self {
-        Self {
-            s,
-            stream,
-            session_state: SessionState {
-                client_id,
-                state,
-                msize,
-                roots,
-                qids,
-            },
-        }
     }
 }

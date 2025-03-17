@@ -1,9 +1,9 @@
 //! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::protocol::{NineP, Rdata, Rmessage},
+    sansio::protocol::{NineP, Rdata, Rmessage, SharedBuf},
     Result,
 };
-use simple_coro::{Coro, CoroState};
+use simple_coro::CoroState;
 use std::{future::Future, io, marker::Unpin};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
@@ -24,11 +24,11 @@ pub trait AsyncNineP: NineP + Send + Sync {
     }
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
-    fn read_from<R>(r: &mut R) -> impl Future<Output = io::Result<Self>> + Send
+    fn read_from<R>(buf: &SharedBuf, r: &mut R) -> impl Future<Output = io::Result<Self>> + Send
     where
         R: AsyncRead + Unpin + Send,
     {
-        read_from(r)
+        read_from(buf, r)
     }
 }
 
@@ -51,18 +51,20 @@ where
 }
 
 #[inline(always)]
-async fn read_from<T, R>(r: &mut R) -> io::Result<T>
+async fn read_from<T, R>(buf: &SharedBuf, r: &mut R) -> io::Result<T>
 where
     T: NineP + Send,
     R: AsyncRead + Unpin + Send,
 {
-    let mut coro = Coro::from(T::read_9p);
+    let mut coro = T::read_9p_coro(buf);
     loop {
         coro = match coro.resume() {
             CoroState::Pending(c, n) => {
-                let mut buf = vec![0; n];
-                r.read_exact(&mut buf).await?;
-                c.send(buf)
+                // SAFETY: coro is currently suspended and unable to take a reference to buf
+                let mut_buf = unsafe { buf.as_inner_mut() };
+                mut_buf.resize(n, 0);
+                r.read_exact(mut_buf).await?;
+                c.send(())
             }
 
             CoroState::Complete(res) => return res,

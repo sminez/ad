@@ -3,7 +3,7 @@ use crate::{
     fs::{Mode, Perm, Stat},
     sansio::{
         client::{err, State, MSIZE},
-        protocol::{Rdata, Rmessage, Tdata, Tmessage},
+        protocol::{Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
     },
     tokio::{AsyncNineP, AsyncStream},
 };
@@ -22,6 +22,7 @@ use tokio::{
 pub struct Client<S> {
     state: Arc<Mutex<State>>,
     stream: Arc<Mutex<S>>,
+    buf: SharedBuf,
 }
 
 impl<S> Clone for Client<S> {
@@ -29,6 +30,7 @@ impl<S> Clone for Client<S> {
         Self {
             state: Arc::clone(&self.state),
             stream: Arc::clone(&self.stream),
+            buf: SharedBuf::default(),
         }
     }
 }
@@ -42,6 +44,7 @@ impl<S> Client<S> {
                 next_fid: 1,
             })),
             stream: Arc::new(Mutex::new(stream)),
+            buf: SharedBuf::default(),
         }
     }
 }
@@ -116,7 +119,7 @@ macro_rules! run_9p_coro {
                         let mut stream = $self.stream.lock().await;
                         t.write_to(&mut *stream).await?;
 
-                        match Rmessage::read_from(&mut *stream).await? {
+                        match Rmessage::read_from(&$self.buf, &mut *stream).await? {
                             Rmessage {
                                 content: Rdata::Error { ename },
                                 ..
@@ -138,7 +141,7 @@ where
         let mut stream = self.stream.lock().await;
         Tmessage { tag, content }.write_to(&mut *stream).await?;
 
-        match Rmessage::read_from(&mut *stream).await? {
+        match Rmessage::read_from(&self.buf, &mut *stream).await? {
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
