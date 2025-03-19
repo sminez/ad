@@ -60,3 +60,6 @@ minibufferSelect() {
   [ -n "$1" ] && adCtl "minibuffer-prompt $1"
   ad -9p read ad/minibuffer
 }
+
+# Prompt the user for input
+minibufferPrompt() { echo '' | minibufferSelect "$@"; }
