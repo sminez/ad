@@ -98,6 +98,7 @@ pub enum Action {
     OpenFileInNewWindow { path: String },
     OpenVirtualFile { name: String, txt: String },
     Paste,
+    Plumb { txt: String, new_window: bool },
     PreviousBuffer,
     PreviousColumn,
     PreviousWindowInColumn,
@@ -532,6 +533,11 @@ where
 
         let id = b.id;
         self.load_string_in_buffer(id, s, load_in_new_window);
+    }
+
+    pub(super) fn plumb(&mut self, txt: String, load_in_new_window: bool) {
+        let id = self.layout.active_buffer().id;
+        self.load_string_in_buffer(id, txt, load_in_new_window);
     }
 
     pub(super) fn load_string_in_buffer(&mut self, id: usize, s: String, load_in_new_window: bool) {

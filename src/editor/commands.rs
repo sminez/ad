@@ -78,10 +78,14 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             }
         }
 
-        "Execute" => Ok(Single(ExecuteDot)),
+        "execute" => Ok(Single(ExecuteDot)),
         "help" => Ok(Single(ShowHelp)),
         "kill" => Ok(Single(KillRunningChild)),
-        "Load" => Ok(Single(LoadDot { new_window: false })),
+        "load" => Ok(Single(LoadDot { new_window: false })),
+        "plumb" => Ok(Single(Plumb {
+            txt: args.to_string(),
+            new_window: false,
+        })),
 
         "lsp-find-references" => Ok(Single(LspReferences)),
         "lsp-goto-declaration" => Ok(Single(LspGotoDeclaration)),

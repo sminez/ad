@@ -476,6 +476,7 @@ where
             OpenFileInNewWindow { path } => self.open_file_relative_to_cwd(&path, true),
             OpenVirtualFile { name, txt } => self.layout.open_virtual(name, txt, true),
             Paste => self.paste_from_clipboard(source),
+            Plumb { txt, new_window } => self.plumb(txt, new_window),
             PreviousBuffer => {
                 let id = self.layout.focus_previous_buffer();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
