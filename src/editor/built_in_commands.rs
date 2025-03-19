@@ -55,7 +55,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "run an Edit command (See 'Running Edit Commands')",
         ),
         (
-            vec!["Execute"],
+            vec!["execute"],
             "execute the contents of the current dot in the focused buffer",
         ),
         (
@@ -65,7 +65,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         (vec!["help"], "display this help file"),
         (vec!["kill"], "interactively kill a running child process"),
         (
-            vec!["Load"],
+            vec!["load"],
             "load the contents of the current dot in the focused buffer",
         ),
         (
@@ -79,6 +79,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         (
             vec!["O", "open-in-new-window"],
             "open the given file path in a new buffer placed in a new window ('open-in-new-window README.md')",
+        ),
+        (
+            vec!["plumb"],
+            "plumb the provided string as if it had been loaded within the active buffer",
         ),
         (vec!["pwd"], "print the current editor working directory"),
         (
