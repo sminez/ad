@@ -439,12 +439,19 @@ where
     pub(super) fn fsys_minibuffer(
         &mut self,
         prompt: Option<String>,
-        lines: String,
+        raw_lines: String,
         tx: Sender<String>,
     ) {
-        let lines: Vec<String> = lines.split('\n').map(|s| s.to_string()).collect();
-        let prompt: &str = prompt.as_deref().unwrap_or("> ");
+        // Depending on how the user has provided input for us to work with we may have ended up
+        // with an empty input or entirely whitespace. In both cases we want to avoid presenting
+        // blank minibuffer lines to the user as they just result in visual noise.
+        let lines = if raw_lines.is_empty() || raw_lines.chars().all(|c| c.is_whitespace()) {
+            Vec::new()
+        } else {
+            raw_lines.split('\n').map(|s| s.to_string()).collect()
+        };
 
+        let prompt: &str = prompt.as_deref().unwrap_or("> ");
         let selection = self.minibuffer_select_from(prompt, lines);
         let s = match selection {
             MiniBufferSelection::Line { line, .. } => line,
