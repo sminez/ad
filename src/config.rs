@@ -8,8 +8,13 @@ use crate::{
     trie::Trie,
     util::parent_dir_containing,
 };
-use serde::{de, Deserialize, Deserializer};
-use std::{collections::HashMap, env, fs, io, iter::successors, path::Path};
+use serde::{
+    de::{self, DeserializeOwned, MapAccess, Visitor},
+    Deserialize, Deserializer,
+};
+use std::{
+    collections::HashMap, env, fmt, fs, io, iter::successors, marker::PhantomData, path::Path,
+};
 use tracing::{error, warn};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../data/config.toml");
@@ -37,7 +42,7 @@ pub struct Config {
 
     #[serde(default)]
     pub filesystem: FsysConfig,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "path_or_struct")]
     pub colorscheme: ColorScheme,
     #[serde(default)]
     pub tree_sitter: TsConfig,
@@ -62,7 +67,10 @@ impl Config {
         let mut cfg = match fs::read_to_string(&path) {
             Ok(s) => match toml::from_str(&s) {
                 Ok(cfg) => cfg,
-                Err(e) => return Err(format!("Invalid config file: {e}")),
+                Err(e) => {
+                    error!("invalid config file: {e}");
+                    return Err(format!("Invalid config file: {e}"));
+                }
             },
 
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -80,6 +88,7 @@ impl Config {
 
         // Use default colorscheme's background color if none is specified
         for style in cfg.colorscheme.syntax.values_mut() {
+            style.fg = style.fg.or(Some(cfg.colorscheme.fg));
             style.bg = style.bg.or(Some(cfg.colorscheme.bg));
         }
 
@@ -351,6 +360,45 @@ where
     }
 
     Trie::from_pairs(raw).map_err(de::Error::custom)
+}
+
+/// Helper for supporting specifying a path to an aditional file containing part of the config as
+/// well as the contents of the config inline.
+fn path_or_struct<'de, T, D>(deserializer: D) -> Result<T, D::Error>
+where
+    T: DeserializeOwned,
+    D: Deserializer<'de>,
+{
+    struct StringOrStruct<T>(PhantomData<fn() -> T>);
+
+    impl<'de, T> Visitor<'de> for StringOrStruct<T>
+    where
+        T: DeserializeOwned,
+    {
+        type Value = T;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("string or map")
+        }
+
+        fn visit_str<E: de::Error>(self, value: &str) -> Result<T, E> {
+            let res = if value.starts_with("~/") {
+                let home = env::var("HOME").map_err(|e| E::custom(e.to_string()))?;
+                fs::read_to_string(value.replacen("~", &home, 1))
+            } else {
+                fs::read_to_string(value)
+            };
+
+            let raw = res.map_err(|e| E::custom(e.to_string()))?;
+            toml::from_str(&raw).map_err(|e| E::custom(e.to_string()))
+        }
+
+        fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<T, M::Error> {
+            Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
+        }
+    }
+
+    deserializer.deserialize_any(StringOrStruct(PhantomData))
 }
 
 #[cfg(test)]

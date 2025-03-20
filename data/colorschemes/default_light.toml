@@ -1,0 +1,36 @@
+bg = "#EBDBB2"
+fg = "#282828"
+bar_bg = "#83A598"
+signcol_fg = "#458488"
+minibuffer_hl = "#458488"
+
+[syntax]
+default = { bg = "#EBDBB2", fg = "#282828" }
+dot = { bg = "#D5C4A1" }
+load = { bg = "#957FB8" }
+exec = { bg = "#Bf616A" }
+boolean = { fg = "#DCA561", bold = true }
+character = { fg = "#61DCA5", italic = true }
+comment = { fg = "#624354", italic = true }
+constant = { fg = "#FFA066" }
+function = { fg = "#8793B5" }
+"function.macro" = { fg = "#FFA066" }
+keyword = { fg = "#Bf616A" }
+module = { fg = "#2D4F67" }
+number = { fg = "#D27E99" }
+operator = { fg = "#DCA561" }
+punctuation = { fg = "#9CABCA" }
+string = { fg = "#61DCA5" }
+type = { fg = "#9AB292" }
+variable = { fg = "#E6D29E" }
+"markup.italic" = { italic = true } 
+"markup.bold" = { bold = true } 
+"markup.heading" = { fg = "#8793B5", bold = true }
+"markup.raw" = { fg = "#624354", italic = true }
+"markup.quote" = { fg = "#957FB8", italic = true }
+"markup.link.url" = { fg = "#9CABCA", underline = true }
+"markup.link.label" = { fg = "#2D4F67", bold = true }
+"markup.list.unchecked" = { fg = "#DCA561", bold = true }
+"markup.list.checked" = { fg = "#9AB292", bold = true }
+"markup.list" = { fg = "#9CABCA", bold = true } 
+label = { fg = "#E6C384" }

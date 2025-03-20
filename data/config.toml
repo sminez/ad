@@ -33,6 +33,12 @@ syntax_query_dir = "~/.ad/tree-sitter/queries"
 
 
 # Global color scheme settings
+#
+# It is also possible to specify an absolute path to a colorscheme TOML file containing this section of the config
+# like so:
+#   colorscheme = "~/.ad/colorschemes/default_dark.toml"
+#
+# NOTE: You will need to place this key at the top of the file before any other [sections]
 [colorscheme]
 # The default background color for all UI elements
 bg = "#1B1720"
