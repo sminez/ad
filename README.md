@@ -6,11 +6,11 @@
 and `kakoune` with the approach to extensibility of Plan9's `Acme`. Inside of `ad` text is
 something you can execute as well as edit.
 
-It is primarily intended as playground for experimenting with implementing various text editor
-features and currently is not at all optimised or feature complete enough for use as your main
-text editor.
+:warning: In the spirit of Plan9 itself, `ad` is primarily intended as playground for experimenting with
+implementing various text editor features and currently is not recommended for use as your
+primary text editor.
 
-That said, if this sounds like something you might find interesting then please to take a
+That said, if this sounds like something you might find interesting then please do take a
 look and see what you think! For now there isn't a whole lot of user facing documentation other
 than the built in `:help` section, so you will need to read through the source code and GitHub
 issues to learn about what is and is not implemented.
@@ -25,7 +25,11 @@ issues to learn about what is and is not implemented.
 you think. That said, there is currently very little documentation and there are likely to be
 a variety of bugs and crashes in places that I've not managed to fully track down yet. If
 you do try it out and spot something that is broken, please raise an issue on GitHub so I
-can look into it.
+can look into it. The project is also under active development and while I aim to avoid arbitrary
+incompatible changes to the way the edior works, I am not yet committing to a stable interface,
+keybindings or default behaviours. If you are using `ad` and you find that something is no longer
+working as expected following an update, please refer to the git log for details of what has
+changed.
 
 You have been warned!
 
@@ -77,6 +81,14 @@ integrat**ing** development environment (rather than integrat**ed**). By which I
 that the aim is to provide a comfortable editing environment to work in that supports
 direct interaction with external tools and programs from the outside rather than pulling
 everything **in**.
+
+
+### Building on top of ad
+
+In addition to the `data/bin` directory of this repo you might want to check out the following links for examples of
+what you can achieve with `ad`'s filesystem interface:
+
+- A [Zettelkasten note taking application](https://gist.github.com/davcam/a4570acb520dce3a25a98cf2ddbb9ef2) from @davcam
 
 
 ## Repo structure
