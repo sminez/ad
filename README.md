@@ -88,7 +88,7 @@ everything **in**.
 In addition to the `data/bin` directory of this repo you might want to check out the following links for examples of
 what you can achieve with `ad`'s filesystem interface:
 
-- A [Zettelkasten note taking application](https://gist.github.com/davcam/a4570acb520dce3a25a98cf2ddbb9ef2) from @davcam
+- A [Zettelkasten note taking application](https://gist.github.com/davcam/a4570acb520dce3a25a98cf2ddbb9ef2) from [@davcam](https://github.com/davcam)
 
 
 ## Repo structure
