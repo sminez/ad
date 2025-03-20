@@ -1,5 +1,6 @@
 //! vim style insert mode where most keys are directly modifying the buffer
 use crate::{
+    config_handle,
     dot::TextObject::*,
     editor::{Action::*, Actions},
     key::{Arrow::*, Input::*},
@@ -10,7 +11,7 @@ use crate::{
 };
 
 pub(crate) fn insert_mode() -> Mode {
-    let mut keymap = keymap! {
+    let keymap = keymap! {
         [ Esc ] => [ SetMode { m: "NORMAL" }, NewEditLogTransaction ],
         [ Backspace ] => [ DotSet(Arr(Left), 1), Delete ],
         [ Del ] => [ Delete ],
@@ -31,19 +32,26 @@ pub(crate) fn insert_mode() -> Mode {
 
     };
 
-    // By default we just let the buffer try to handle this
-    keymap.set_default(|&i| Some(Actions::Single(RawInput { i })));
-
     Mode {
         name: "INSERT".to_string(),
         cur_shape: CurShape::Bar,
         keymap,
         handle_expired_pending: |keys| {
-            QueryResult::Val(if keys.len() == 1 {
-                Actions::Single(RawInput { i: keys[0] })
-            } else {
-                Actions::Multi(keys.iter().map(|&i| RawInput { i }).collect())
-            })
+            let res = config_handle!()
+                .keys
+                .insert
+                .get(keys)
+                .map(|ka| ka.as_actions());
+
+            match res {
+                QueryResult::Val(_) => res,
+                QueryResult::Partial => QueryResult::Partial,
+                QueryResult::Missing => QueryResult::Val(if keys.len() == 1 {
+                    Actions::Single(RawInput { i: keys[0] })
+                } else {
+                    Actions::Multi(keys.iter().map(|&i| RawInput { i }).collect())
+                }),
+            }
         },
     }
 }

@@ -33,6 +33,20 @@ where
     }
 }
 
+impl<K, V> Default for Trie<K, V>
+where
+    K: Clone + PartialEq,
+    V: Clone,
+{
+    fn default() -> Self {
+        Self {
+            parent_key: None,
+            roots: Vec::new(),
+            default: None,
+        }
+    }
+}
+
 impl<K, V> Trie<K, V>
 where
     K: Clone + PartialEq,

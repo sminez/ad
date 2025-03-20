@@ -112,6 +112,7 @@ pub enum Action {
     SaveBuffer { force: bool },
     SaveBufferAs { path: String, force: bool },
     SearchInCurrentBuffer,
+    SendKeys { ks: Vec<Input> },
     SelectBuffer,
     SetViewPort(ViewPort),
     SetMode { m: &'static str },

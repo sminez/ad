@@ -3,7 +3,6 @@ use crate::{
     buffer::Buffer,
     editor::{Action, Actions},
     key::Input,
-    mode::normal_mode,
     term::{Color, Styles},
     trie::Trie,
     util::parent_dir_containing,
@@ -285,14 +284,17 @@ impl LspConfig {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct KeyBindings {
-    #[serde(deserialize_with = "de_serde_trie")]
+    #[serde(default, deserialize_with = "de_serde_trie")]
     pub normal: Trie<Input, KeyAction>,
+    #[serde(default, deserialize_with = "de_serde_trie")]
+    pub insert: Trie<Input, KeyAction>,
 }
 
 impl Default for KeyBindings {
     fn default() -> Self {
         KeyBindings {
             normal: Trie::from_pairs(Vec::new()).unwrap(),
+            insert: Trie::from_pairs(Vec::new()).unwrap(),
         }
     }
 }
@@ -300,18 +302,41 @@ impl Default for KeyBindings {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 pub enum KeyAction {
-    External { run: String },
+    Execute { run: String },
+    Keys { send_keys: Inputs },
 }
 
 impl KeyAction {
     pub fn as_actions(&self) -> Actions {
         match self {
-            Self::External { run } => Actions::Single(Action::ExecuteString { s: run.clone() }),
+            Self::Execute { run } => Actions::Single(Action::ExecuteString { s: run.clone() }),
+            Self::Keys { send_keys } => Actions::Single(Action::SendKeys {
+                ks: send_keys.0.clone(),
+            }),
         }
     }
 }
 
-pub fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, KeyAction>, D::Error>
+/// Raw inputs to be sent through to the main editor event loop
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(try_from = "String")]
+pub struct Inputs(Vec<Input>);
+
+impl TryFrom<String> for Inputs {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let mut inputs = Vec::new();
+
+        for s in value.split_whitespace() {
+            inputs.push(Input::try_from_str_template(s)?);
+        }
+
+        Ok(Self(inputs))
+    }
+}
+
+fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, KeyAction>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -339,24 +364,6 @@ where
             .collect();
 
         raw.push((keys, action));
-    }
-
-    // Make sure that none of the user provided bindings clash with Normal mode
-    // bindings as that will mean they never get run
-    let nm = normal_mode();
-    for (keys, _) in raw.iter() {
-        if nm.keymap.contains_key_or_prefix(keys) {
-            let mut s = String::new();
-            for k in keys {
-                if let Input::Char(c) = k {
-                    s.push(*c);
-                }
-            }
-
-            return Err(de::Error::custom(format!(
-                "mapping '{s}' collides with a Normal mode mapping"
-            )));
-        }
     }
 
     Trie::from_pairs(raw).map_err(de::Error::custom)

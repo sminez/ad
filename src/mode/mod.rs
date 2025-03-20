@@ -10,8 +10,6 @@ use std::fmt;
 mod insert;
 mod normal;
 
-pub(crate) use normal::normal_mode;
-
 /// The modes available for ad
 pub(crate) fn modes() -> Vec<Mode> {
     vec![normal::normal_mode(), insert::insert_mode()]

@@ -43,6 +43,34 @@ pub enum Input {
 }
 
 impl Input {
+    /// Only supporting a subset of inputs for now
+    pub fn try_from_str_template(s: &str) -> Result<Self, String> {
+        if s.len() == 1 {
+            Ok(Input::Char(s.chars().next().unwrap()))
+        } else if let Some(suffix) = s.strip_prefix("C-") {
+            if suffix.len() == 1 {
+                Ok(Input::Ctrl(suffix.chars().next().unwrap()))
+            } else {
+                Err(format!("invalid send_key value: C-{suffix}"))
+            }
+        } else if let Some(suffix) = s.strip_prefix("A-") {
+            if suffix.len() == 1 {
+                Ok(Input::Alt(suffix.chars().next().unwrap()))
+            } else {
+                Err(format!("invalid send_key value: A-{suffix}"))
+            }
+        } else {
+            let i = match s {
+                "<esc>" => Input::Esc,
+                "<space>" => Input::Char(' '),
+                "<tab>" => Input::Tab,
+                _ => return Err(format!("unknown key {s}")),
+            };
+
+            Ok(i)
+        }
+    }
+
     pub fn from_char(c: char) -> Self {
         match c {
             '\x1b' => Input::Esc,

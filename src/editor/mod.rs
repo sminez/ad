@@ -366,6 +366,12 @@ where
         }
     }
 
+    fn handle_explicit_inputs(&mut self, inputs: &mut Vec<Input>) {
+        if let Some(actions) = self.modes[0].handle_keys(inputs) {
+            self.handle_actions(actions, Source::Keyboard);
+        }
+    }
+
     fn handle_actions(&mut self, actions: Actions, source: Source) {
         match actions {
             Actions::Single(action) => self.handle_action(action, source),
@@ -499,6 +505,7 @@ where
             SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),
             SaveBuffer { force } => self.save_current_buffer(None, force),
             SearchInCurrentBuffer => self.search_in_current_buffer(),
+            SendKeys { mut ks } => self.handle_explicit_inputs(&mut ks),
             SelectBuffer => self.select_buffer(),
             SetMode { m } => self.set_mode(m),
             SetStatusMessage { message } => self.set_status_message(&message),
