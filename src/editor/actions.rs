@@ -107,6 +107,7 @@ pub enum Action {
     ReloadActiveBuffer,
     ReloadBuffer { id: usize },
     ReloadConfig,
+    RenameActiveBuffer { name: String },
     RunMode,
     SamMode,
     SaveBuffer { force: bool },

@@ -139,6 +139,10 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             }
         }
 
+        "rename-buffer" => Ok(Single(RenameActiveBuffer {
+            name: args.to_string(),
+        })),
+
         "set" => Ok(Single(UpdateConfig {
             input: input.to_string(),
         })),

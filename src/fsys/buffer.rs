@@ -246,7 +246,7 @@ impl BufferNodes {
             XADDR => Req::SetBufferXAddr { id, s },
             OUTPUT => Req::AppendOutput { id, s },
             EVENT => return send_event_to_editor(id, &s, &self.tx),
-            FILENAME => return Err(E_UNKNOWN_FILE.to_string()),
+            FILENAME => Req::SetBufferName { id, s },
             _ => return Err(E_UNKNOWN_FILE.to_string()),
         };
 

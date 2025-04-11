@@ -181,20 +181,27 @@ impl Buffer {
             ts_state: None,
         };
 
+        b.try_set_ts_state();
+
+        Ok(b)
+    }
+
+    /// Clear any existing tree-sitter state and then attempt to detect and set the state
+    /// based on this buffer's BufferKind
+    fn try_set_ts_state(&mut self) {
+        self.ts_state = None;
         let cfg = config_handle!();
-        if let Some(lang) = cfg.ts_lang_for_buffer(&b) {
+        if let Some(lang) = cfg.ts_lang_for_buffer(self) {
             match TsState::try_new(
                 lang,
                 &cfg.tree_sitter.parser_dir,
                 &cfg.tree_sitter.syntax_query_dir,
-                &b.txt,
+                &self.txt,
             ) {
-                Ok(state) => b.ts_state = Some(state),
+                Ok(state) => self.ts_state = Some(state),
                 Err(msg) => error!("unable to initialise tree-sitter: {msg}"),
             }
         }
-
-        Ok(b)
     }
 
     pub(crate) fn state_changed_on_disk(&self) -> Result<bool, String> {
@@ -213,6 +220,31 @@ impl Buffer {
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
             Err(e) => Err(format!("Error checking file state: {e}")),
         }
+    }
+
+    /// Set this buffer's filename (an therefore kind) to the provided path.
+    /// -> This will also re-set / clear any tree-sitter state that is currently held
+    pub(crate) fn set_filename<P: AsRef<Path>>(&mut self, path: P) -> Option<ActionOutcome> {
+        let path = match path.as_ref().canonicalize() {
+            Ok(p) => p,
+            Err(e) if e.kind() == ErrorKind::NotFound => path.as_ref().to_path_buf(),
+            Err(e) => {
+                return Some(ActionOutcome::SetStatusMessage(format!(
+                    "invalid file path: {e}"
+                )))
+            }
+        };
+
+        let kind = if path.is_dir() {
+            BufferKind::Directory(path)
+        } else {
+            BufferKind::File(path)
+        };
+
+        self.kind = kind;
+        self.try_set_ts_state();
+
+        None
     }
 
     pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> String {
@@ -756,6 +788,7 @@ impl Buffer {
             Action::DotSet(t, count) => self.set_dot(t, count),
             Action::DotSetFromCoords { coords } => self.set_dot_from_coords(coords),
 
+            Action::RenameActiveBuffer { name } => return self.set_filename(name),
             Action::RawInput { i } => return self.handle_raw_input(i),
 
             _ => (),
