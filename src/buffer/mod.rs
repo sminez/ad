@@ -186,7 +186,7 @@ impl Buffer {
         Ok(b)
     }
 
-    /// Clear any existing tree-sitter state and then attempt to detect and set the state 
+    /// Clear any existing tree-sitter state and then attempt to detect and set the state
     /// based on this buffer's BufferKind
     fn try_set_ts_state(&mut self) {
         self.ts_state = None;
