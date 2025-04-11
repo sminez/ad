@@ -102,6 +102,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "reload the editor config file located at ~/.ad/config.toml",
         ),
         (
+            vec!["rename-buffer"],
+            "rename the active buffer so that subsequent file operations will apply to the new path"
+        ),
+        (
             vec!["set"],
             "set a config property ('set bg-color=#ebdbb2')",
         ),

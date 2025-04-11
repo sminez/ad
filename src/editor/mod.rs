@@ -292,6 +292,10 @@ where
             ReadBufferXDot { id } => self.send_buffer_resp(id, tx, |b| b.xdot_contents()),
             ReadBufferBody { id } => self.send_buffer_resp(id, tx, |b| b.str_contents()),
 
+            SetBufferName { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
+                b.set_filename(s.trim());
+            }),
+
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
                     b.dot = b.map_addr(&mut expr);

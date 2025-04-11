@@ -16,7 +16,7 @@
 # > Example index content:
 #   intro
 #   body
-#   conclusion 
+#   conclusion
 
 . "$HOME/.ad/lib/ad.sh"
 
@@ -27,8 +27,7 @@ f="$(basename "$fname")"
 d="$(dirname "$fname")"
 
 [ ! -f "$d/index" ] && adError "not in a slideshow directory"
-index="$(cat "$d/index")"
-toLoad="$(cat "$d/index" | head -n1)"
+toLoad="$(head -n1 "$d/index")"
 
 case "$1" in
   next)
@@ -46,11 +45,8 @@ case "$1" in
     ;;
 esac
 
-# TODO: being able to replace the current buffer with a new one
-#       rather than opening new buffers each time would be nice
-adCtl "open $d/$toLoad"
+echo "$d/$toLoad" | bufWrite "$bufid" filename
 adCtl "Get"
 adEdit "0 i/[PrevSlide] [NextSlide]\n\n/"
-id="$(currentBufferId)"
-curToBof "$id"
-markClean "$id"
+curToBof "$bufid"
+markClean "$bufid"
