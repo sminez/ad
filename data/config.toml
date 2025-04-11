@@ -143,6 +143,10 @@ name = "make"
 filenames = ["Makefile"]
 
 [[languages]]
+name = "markdown"
+extensions = ["md"]
+
+[[languages]]
 name = "proto"
 extensions = ["proto"]
 
@@ -174,6 +178,13 @@ name = "sql"
 extensions = ["sql"]
 
 [[languages]]
+name = "swift"
+extensions = ["swift"]
+
+[[languages]]
 name = "toml"
 extensions = ["toml"]
 
+[[languages]]
+name = "yaml"
+extensions = ["yaml", "yml"]
