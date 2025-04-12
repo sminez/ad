@@ -18,6 +18,7 @@ use std::{
 };
 
 pub mod buffer;
+pub mod cli;
 pub mod config;
 pub mod dot;
 pub mod editor;
@@ -39,6 +40,7 @@ pub mod util;
 pub mod ziplist;
 
 pub use buffer::GapBuffer;
+pub use cli::Args;
 pub use config::Config;
 pub use editor::{Editor, EditorMode};
 pub use exec::{CachedStdin, Edit, Program};
