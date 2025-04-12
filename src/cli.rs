@@ -56,7 +56,6 @@ impl Args {
                     return Err(("no files provided".to_string(), 1));
                 }
 
-
                 Ok(Args {
                     script,
                     files,

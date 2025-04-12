@@ -1,6 +1,6 @@
 use ad_editor::{
-    CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, PlumbingRules, Program,
-    LOG_LEVEL_ENV_VAR, Args
+    Args, CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, PlumbingRules, Program,
+    LOG_LEVEL_ENV_VAR,
 };
 use ninep::sync::client::UnixClient;
 use std::{
