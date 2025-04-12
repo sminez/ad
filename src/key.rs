@@ -1,4 +1,5 @@
 //! Keypresses and related user interactions.
+use std::fmt;
 use tracing::trace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,6 +41,34 @@ pub enum Input {
     PageDown,
     Esc,
     Mouse(MouseEvent),
+}
+
+impl fmt::Display for Input {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Char(c) if *c == ' ' => write!(f, "<space>"),
+            Self::Char(c) => write!(f, "{c}"),
+            Self::Ctrl(c) if *c == ' ' => write!(f, "C-<space>"),
+            Self::Ctrl(c) => write!(f, "C-{c}"),
+            Self::Alt(c) if *c == ' ' => write!(f, "A-<space>"),
+            Self::Alt(c) => write!(f, "A-{c}"),
+            Self::CtrlAlt(c) if *c == ' ' => write!(f, "C-A-<space>"),
+            Self::CtrlAlt(c) => write!(f, "C-A-{c}"),
+            Self::Tab => write!(f, "<tab>"),
+            Self::BackTab => write!(f, "S-<tab>"),
+            Self::AltReturn => write!(f, "A-<return>"),
+            Self::Return => write!(f, "<return>"),
+            Self::Backspace => write!(f, "<backspace>"),
+            Self::Arrow(a) => write!(f, "<{a:?}>"),
+            Self::Del => write!(f, "<delete>"),
+            Self::Home => write!(f, "<home>"),
+            Self::End => write!(f, "<end>"),
+            Self::PageUp => write!(f, "<page-up>"),
+            Self::PageDown => write!(f, "<page-down>"),
+            Self::Esc => write!(f, "<escape>"),
+            Self::Mouse(m) => write!(f, "<{m:?}>"), // TODO: actual impl
+        }
+    }
 }
 
 impl Input {

@@ -12,7 +12,15 @@ mod normal;
 
 /// The modes available for ad
 pub(crate) fn modes() -> Vec<Mode> {
-    vec![normal::normal_mode(), insert::insert_mode()]
+    vec![normal::normal_mode().0, insert::insert_mode().0]
+}
+
+/// Docs for the differnt keybindings available in each mode
+pub(crate) fn keybindings() -> Vec<(&'static str, Vec<(String, &'static str)>)> {
+    vec![
+        ("NORMAL", normal::normal_mode().1),
+        ("INSERT", insert::insert_mode().1),
+    ]
 }
 
 #[derive(Debug)]
@@ -67,17 +75,21 @@ impl Mode {
 /// Construct a new [Trie] based keymap
 #[macro_export]
 macro_rules! keymap {
-    ($([$($k:expr),+] => [ $($v:expr),+ ]),+,) => {
+    ($($docs:expr; [$($k:expr),+] => [ $($v:expr),+ ]),+,) => {
         {
             let mut pairs = Vec::new();
+            let mut docs = Vec::new();
 
             $(
                 let key = vec![$($k),+];
                 let value = $crate::keymap!(@action $($v),+);
                 pairs.push((key, value));
+
+                let doc_key = vec![$($k.to_string()),+].join(" ");
+                docs.push((doc_key, $docs));
             )+
 
-            $crate::trie::Trie::from_pairs(pairs).unwrap()
+            ($crate::trie::Trie::from_pairs(pairs).unwrap(), docs)
         }
     };
 

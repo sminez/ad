@@ -1,5 +1,5 @@
 //! Utility functions
-use crate::{config::config_path, editor::built_in_commands};
+use crate::{config::config_path, editor::built_in_commands, mode::keybindings};
 use std::{
     iter::Peekable,
     path::Path,
@@ -31,8 +31,27 @@ pub(crate) fn gen_help_docs() -> String {
     let help_template = include_str!("../data/help-template.txt");
 
     help_template
+        .replace("{{KEY_BINDINGS}}", &keybindings_section())
         .replace("{{BUILT_IN_COMMANDS}}", &commands_section())
         .replace("{{CONFIG_PATH}}", &config_path())
+}
+
+fn keybindings_section() -> String {
+    let raw = keybindings();
+    let mut sections = Vec::with_capacity(raw.len());
+
+    for (mode, bindings) in raw.into_iter() {
+        let w_max = bindings.iter().map(|(s, _)| s.len()).max().unwrap();
+        let mut section = format!("{mode} mode\n");
+
+        for (keys, desc) in bindings.into_iter() {
+            section.push_str(&format!("  {:width$} -- {desc}\n", keys, width = w_max));
+        }
+
+        sections.push(section);
+    }
+
+    sections.join("\n\n")
 }
 
 fn commands_section() -> String {

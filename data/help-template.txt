@@ -27,6 +27,7 @@ About
 The Tour
 Configuration
 Editor Modes
+Key Bindings
 Loading Text
 Executing Text
 Running Built In Commands
@@ -103,7 +104,8 @@ will be written to that file on startup if it is currently missing.
 >> Editor Modes
 
 ad provides a number of distinct "modes" for interacting with the editor. Depending on the
-mode you are in you will find that the keys that you press have a different effect.
+mode you are in you will find that the keys that you press have a different effect. See the
+"Key Bindings" section for more details.
 
   NORMAL mode
     This is the default mode that ad will open in. Key bindings in this mode are primarily
@@ -167,6 +169,31 @@ mode you are in you will find that the keys that you press have a different effe
     https://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf
 
     To enter EDIT mode from NORMAL mode, type "."
+
+---
+
+>> Key Bindings
+
+The following key bindings are built into ad. You can specify additional key bindings as
+part of your config file under the [keys.normal] and [keys.insert] sections like so:
+
+    [keys.normal]
+    # Window & Column management
+    "<space> w /" = { run = "new-column" }
+    "<space> w -" = { run = "new-window" }
+    "<space> w h" = { run = "prev-column" }
+    "<space> w j" = { run = "next-window" }
+    "<space> w k" = { run = "prev-window" }
+    "<space> w l" = { run = "next-column" }
+
+    [keys.insert]
+    # Custom escape sequence to return to normal mode
+    "f d" = { send_keys = "<esc>" }
+
+Any key bindings that you specify need to be distinct from the ones shown below in the
+default key maps.
+
+{{KEY_BINDINGS}}
 
 ---
 
