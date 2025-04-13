@@ -12,10 +12,9 @@ use crate::{
     },
 };
 use lsp_types::{
-    GotoDefinitionParams, GotoDefinitionResponse, Location, TextDocumentIdentifier,
-    TextDocumentPositionParams, Uri, WorkDoneProgressCreateParams,
+    DynamicRegistrationClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, Location,
+    TextDocumentIdentifier, TextDocumentPositionParams, Uri, WorkDoneProgressCreateParams,
 };
-use serde_json::Value;
 use std::{borrow::Cow, process, str::FromStr};
 use tracing::{error, warn};
 
@@ -256,7 +255,7 @@ impl LspRequest for lsp_types::request::HoverRequest {
 
 impl LspRequest for lsp_types::request::Initialize {
     type Pending = (String, Vec<PendingParams>);
-    type Data = String;
+    type Data = (String, Option<serde_json::Value>);
 
     // Need a custom send impl for initialize as the default one checks that the client is running
     fn send(lsp_id: usize, data: Self::Data, p: Self::Pending, man: &mut LspManager) {
@@ -286,13 +285,12 @@ impl LspRequest for lsp_types::request::Initialize {
         man.pending.insert((client.id, id), Self::pending(p));
     }
 
-    fn prepare(root: Self::Data) -> Self::Params {
+    fn prepare((root, initialization_options): Self::Data) -> Self::Params {
         use lsp_types::{
-            ClientCapabilities, DiagnosticClientCapabilities,
-            DiagnosticWorkspaceClientCapabilities, GeneralClientCapabilities,
-            HoverClientCapabilities, InitializeParams, MarkupKind, NumberOrString,
-            PositionEncodingKind, TextDocumentClientCapabilities, Uri, WindowClientCapabilities,
-            WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
+            ClientCapabilities, GeneralClientCapabilities, HoverClientCapabilities,
+            InitializeParams, MarkupKind, NumberOrString, PositionEncodingKind,
+            TextDocumentClientCapabilities, Uri, WindowClientCapabilities, WorkDoneProgressParams,
+            WorkspaceClientCapabilities, WorkspaceFolder,
         };
 
         let basename = root.split("/").last().unwrap_or_default();
@@ -309,20 +307,18 @@ impl LspRequest for lsp_types::request::Initialize {
                 uri: Uri::from_str(&format!("file://{root}")).unwrap(),
                 name: basename.to_string(),
             }]),
+            initialization_options,
             capabilities: ClientCapabilities {
                 workspace: Some(WorkspaceClientCapabilities {
                     // https://docs.rs/lsp-types/0.97.0/lsp_types/struct.WorkspaceClientCapabilities.html
                     workspace_folders: Some(true),
-                    diagnostic: Some(DiagnosticWorkspaceClientCapabilities {
-                        refresh_support: Some(true),
+                    configuration: Some(true),
+                    did_change_configuration: Some(DynamicRegistrationClientCapabilities {
+                        dynamic_registration: Some(false),
                     }),
                     ..Default::default()
                 }),
                 text_document: Some(TextDocumentClientCapabilities {
-                    diagnostic: Some(DiagnosticClientCapabilities {
-                        dynamic_registration: Some(true),
-                        related_document_support: Some(true),
-                    }),
                     hover: Some(HoverClientCapabilities {
                         dynamic_registration: Some(true),
                         content_format: Some(vec![MarkupKind::PlainText]),
@@ -616,13 +612,7 @@ impl LspServerRequest for lsp_types::request::WorkDoneProgressCreate {
     ) -> (Response, Option<Actions>) {
         man.progress_tokens(lsp_id).insert(token, String::new());
 
-        (
-            Response::Result {
-                id: req_id,
-                result: Value::Null,
-            },
-            None,
-        )
+        (Response::null_resp(req_id), None)
     }
 }
 

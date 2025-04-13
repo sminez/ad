@@ -130,6 +130,13 @@ impl Response {
             Self::Error { id, .. } => id.clone(),
         }
     }
+
+    pub fn null_resp(id: RequestId) -> Self {
+        Self::Result {
+            id,
+            result: Value::Null,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

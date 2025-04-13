@@ -23,7 +23,8 @@ use std::{
         mpsc::{channel, Receiver, Sender},
         Arc, RwLock,
     },
-    thread::spawn,
+    thread::{sleep, spawn},
+    time::Duration,
 };
 use tracing::{debug, error, warn};
 
@@ -42,6 +43,7 @@ pub(crate) enum Req {
         lang: String,
         cmd: String,
         args: Vec<String>,
+        init_opts: Option<serde_json::Value>,
         root: String,
         open_bufs: Vec<PendingParams>,
     },
@@ -120,6 +122,7 @@ impl LspManagerHandle {
             lang: lang.to_owned(),
             cmd: config.command.clone(),
             args: config.args.clone(),
+            init_opts: config.init_opts.clone(),
             root,
             open_bufs,
         })
@@ -162,7 +165,11 @@ impl LspManagerHandle {
     }
 
     pub fn show_diagnostics(&self, b: &Buffer) -> Action {
-        self.document_changed(b); // to ensure that diagnostics are up to date
+        if b.dirty {
+            // give diagnostics a chance to update
+            self.document_changed(b);
+            sleep(Duration::from_millis(300));
+        }
         debug!("showing LSP diagnostics");
         let guard = self.diagnostics.read().unwrap();
         let mut diags: Vec<Diagnostic> = guard.values().flatten().cloned().collect();
@@ -207,13 +214,14 @@ impl LspManagerHandle {
             debug!("sending LSP textDocument/didChange ({id})");
             let path = b.full_name().to_string();
             let content = b.str_contents();
+            let version = b.next_edit_version();
 
             self.send(
                 id,
                 PendingParams::DocumentChange {
                     path,
                     content,
-                    version: 2,
+                    version,
                 },
             )
         }
@@ -318,9 +326,10 @@ impl LspManager {
                     lang,
                     cmd,
                     args,
+                    init_opts,
                     root,
                     open_bufs,
-                } => self.start_client(lang, cmd, args, root, open_bufs),
+                } => self.start_client(lang, cmd, args, init_opts, root, open_bufs),
                 Req::Stop { lsp_id } => self.stop_client(lsp_id),
                 Req::Pending(p) => self.handle_pending(p),
                 Req::Message(LspMessage { lsp_id, msg }) => match msg {
@@ -444,6 +453,7 @@ impl LspManager {
         lang: String,
         cmd: String,
         args: Vec<String>,
+        init_opts: Option<serde_json::Value>,
         root: String,
         open_bufs: Vec<PendingParams>,
     ) {
@@ -455,7 +465,7 @@ impl LspManager {
             }
         };
 
-        Initialize::send(lsp_id, root, (lang, open_bufs), self);
+        Initialize::send(lsp_id, (root, init_opts), (lang, open_bufs), self);
         self.send_status("LSP server started");
     }
 

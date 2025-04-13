@@ -17,6 +17,7 @@ use std::{
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicUsize, Ordering},
     time::SystemTime,
 };
 use tracing::{debug, error};
@@ -176,6 +177,7 @@ pub struct Buffer {
     pub(crate) dirty: bool,
     pub(crate) input_filter: Option<InputFilter>,
     pub(crate) ts_state: Option<TsState>,
+    version: AtomicUsize,
     edit_log: EditLog,
 }
 
@@ -195,6 +197,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            version: AtomicUsize::new(1),
         };
 
         b.try_set_ts_state();
@@ -218,6 +221,10 @@ impl Buffer {
                 Err(msg) => error!("unable to initialise tree-sitter: {msg}"),
             }
         }
+    }
+
+    pub(crate) fn next_edit_version(&self) -> usize {
+        self.version.fetch_add(1, Ordering::Relaxed)
     }
 
     pub(crate) fn state_changed_on_disk(&self) -> Result<bool, String> {
@@ -339,6 +346,7 @@ impl Buffer {
             edit_log: Default::default(),
             input_filter: None,
             ts_state: None,
+            version: AtomicUsize::new(1),
         }
     }
 
@@ -356,6 +364,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            version: AtomicUsize::new(1),
         }
     }
 
@@ -381,6 +390,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            version: AtomicUsize::new(1),
         }
     }
 
@@ -399,6 +409,7 @@ impl Buffer {
             edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            version: AtomicUsize::new(1),
         }
     }
 

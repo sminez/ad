@@ -269,6 +269,9 @@ pub struct LspConfig {
     pub args: Vec<String>,
     /// Files or directories to search for in order to determine the project root
     pub roots: Vec<String>,
+    /// Additional initialization options to be passed when the server is started
+    #[serde(default)]
+    pub init_opts: Option<serde_json::Value>,
 }
 
 impl LspConfig {
