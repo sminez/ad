@@ -142,6 +142,24 @@ impl fmt::Display for GapBuffer {
     }
 }
 
+impl<'a> PartialEq<&'a str> for GapBuffer {
+    fn eq(&self, other: &&'a str) -> bool {
+        let b = other.as_bytes();
+        if b.len() != self.len() {
+            return false;
+        }
+
+        b[..self.gap_start] == self.data[..self.gap_start]
+            && b[self.gap_start..] == self.data[self.gap_end..]
+    }
+}
+
+impl PartialEq<String> for GapBuffer {
+    fn eq(&self, other: &String) -> bool {
+        *self == other.as_str()
+    }
+}
+
 /// One of the most common "hard to find" bugs I encounter around the GapBuffer is detecting
 /// when and where the tracking of line endings becomes corrupted. This macro is called at
 /// points where the line_endings map is modified guarded by #[cfg(test)] so that it does not
@@ -930,9 +948,12 @@ impl fmt::Display for Slice<'_> {
     }
 }
 
-impl<'b> PartialEq<&'b str> for Slice<'_> {
-    fn eq(&self, other: &&'b str) -> bool {
+impl<'a> PartialEq<&'a str> for Slice<'_> {
+    fn eq(&self, other: &&'a str) -> bool {
         let b = other.as_bytes();
+        if b.len() != self.left.len() + self.right.len() {
+            return false;
+        }
 
         &b[..self.left.len()] == self.left && &b[self.left.len()..] == self.right
     }

@@ -18,7 +18,7 @@ use crate::{
         layout::{Column, Window},
         Layout, StateChange, UserInterface,
     },
-    ziplist, ORIGINAL_TERMIOS, VERSION,
+    ziplist, ORIGINAL_TERMIOS,
 };
 use std::{
     cell::RefCell,
@@ -105,42 +105,6 @@ impl Tui {
         self.vh = format!("{vstr}{hstr}");
         self.vstr = vstr;
         self.style_cache.borrow_mut().clear();
-    }
-
-    fn render_banner(&self, screen_rows: usize, cs: &ColorScheme) -> Vec<String> {
-        let mut lines = Vec::with_capacity(screen_rows);
-        let (w_lnum, w_sgncol) = (1, 3);
-        let y_banner = self.screen_rows / 3;
-
-        let banner_line = |mut banner: String| {
-            let mut buf = String::new();
-            banner.truncate(self.screen_cols - w_sgncol);
-            let padding = (self.screen_cols - w_sgncol - banner.len()) / 2;
-            buf.push_str(&" ".repeat(padding));
-            buf.push_str(&banner);
-
-            buf
-        };
-
-        for y in 0..screen_rows {
-            let mut line = format!(
-                "{}{}~ {VLINE:>width$}{}",
-                Style::Fg(cs.signcol_fg),
-                Style::Bg(cs.bg),
-                Style::Fg(cs.fg),
-                width = w_lnum
-            );
-
-            if y == y_banner && y < screen_rows {
-                line.push_str(&banner_line(format!("ad editor :: version {VERSION}")));
-            } else if y == y_banner + 1 && y + 1 < screen_rows {
-                line.push_str(&banner_line("type :help to view help".to_string()));
-            }
-            line.push_str(&format!("{}\r\n", Cursor::ClearRight));
-            lines.push(line);
-        }
-
-        lines
     }
 
     fn render_status_bar(
@@ -357,20 +321,14 @@ impl UserInterface for Tui {
         // We need space for each visible line plus the two commands to hide/show the cursor
         let mut lines = Vec::with_capacity(self.screen_rows + 2);
         lines.push(format!("{}{}", Cursor::Hide, Cursor::ToStart));
-
-        if layout.is_empty_scratch() {
-            lines.append(&mut self.render_banner(effective_screen_rows, cs));
-        } else {
-            lines.extend(WinsIter::new(
-                layout,
-                load_exec_range,
-                effective_screen_rows,
-                tabstop,
-                self,
-                cs,
-            ));
-        }
-
+        lines.extend(WinsIter::new(
+            layout,
+            load_exec_range,
+            effective_screen_rows,
+            tabstop,
+            self,
+            cs,
+        ));
         lines.push(self.render_status_bar(cs, mode_name, n_running, active_buffer));
 
         if w_minibuffer {

@@ -1,6 +1,6 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
-    buffer::{ActionOutcome, Buffer},
+    buffer::{ActionOutcome, Buffer, SPLASH},
     config::Config,
     config_handle, die,
     dot::TextObject,
@@ -15,7 +15,7 @@ use crate::{
     system::{DefaultSystem, System},
     term::CurShape,
     ui::{Layout, StateChange, Ui, UserInterface},
-    LogBuffer,
+    LogBuffer, VERSION,
 };
 use ad_event::Source;
 use std::{
@@ -111,9 +111,14 @@ where
         let (tx_events, rx_events) = channel();
         let (tx_fsys, rx_fsys) = channel();
 
+        let show_splash = cfg.show_splash;
         set_config(cfg);
+
         let lsp_manager = Arc::new(LspManager::spawn(tx_events.clone()));
-        let layout = Layout::new(0, 0, lsp_manager.clone());
+        let mut layout = Layout::new(0, 0, lsp_manager.clone());
+        if show_splash && layout.is_empty_scratch() {
+            layout.active_buffer_mut().txt.insert_str(0, SPLASH);
+        }
 
         Self {
             system,
@@ -211,10 +216,9 @@ where
     }
 
     /// Update the status line to contain the given message.
-    pub fn set_status_message(&mut self, msg: &str) {
-        self.ui.state_change(StateChange::StatusMessage {
-            msg: msg.to_string(),
-        });
+    pub fn set_status_message(&mut self, msg: impl Into<String>) {
+        self.ui
+            .state_change(StateChange::StatusMessage { msg: msg.into() });
     }
 
     pub(crate) fn current_cursor_shape(&self) -> CurShape {

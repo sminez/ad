@@ -296,7 +296,7 @@ where
             {
                 Ok(s) => s.lines().map(String::from).collect(),
                 Err(e) => {
-                    self.set_status_message(&format!("unable to get minibuffer input: {e}"));
+                    self.set_status_message(format!("unable to get minibuffer input: {e}"));
                     return MiniBufferSelection::Cancelled;
                 }
             };

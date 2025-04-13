@@ -1,6 +1,8 @@
 # Config file for the ad text editor
 # For details of the TOML file format see https://toml.io/en/v1.0.0
 
+# Display a welcome message when opening the editor without any files
+show_splash = true
 # Whether or not tab characters should be automatically replaced with `tabstop` spaces
 expand_tab = true
 # The number of spaces to render tab characters with

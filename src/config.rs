@@ -31,6 +31,8 @@ pub(crate) fn config_path() -> String {
 /// Editor level configuration
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct Config {
+    #[serde(default)]
+    pub show_splash: bool,
     pub tabstop: usize,
     pub expand_tab: bool,
     pub match_indent: bool,

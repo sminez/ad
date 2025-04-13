@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur},
+    buffer::{Buffer, BufferKind, Cur, SPLASH},
     dot::TextObject,
     lsp::LspManagerHandle,
     ziplist,
@@ -307,7 +307,9 @@ impl Buffers {
 
     #[inline]
     pub fn is_empty_scratch(&self) -> bool {
-        self.inner.len() == 1 && self.inner.focus.is_unnamed() && self.inner.focus.txt.is_empty()
+        self.inner.len() == 1
+            && self.inner.focus.is_unnamed()
+            && (self.inner.focus.txt.is_empty() || self.inner.focus.txt == SPLASH)
     }
 
     /// Append to the +output buffer assigned to the buffer with provided id.

@@ -24,11 +24,13 @@ pub fn generate_manpage() -> DynResult {
         .option(
             Opt::new("script")
                 .short("-e")
+                .long("--expression")
                 .help("Execute an edit script on file(s)"),
         )
         .option(
             Opt::new("script-file")
                 .short("-f")
+                .long("--script-file")
                 .help("Execute an edit script loaded from a script-file on file(s)"),
         )
         .arg(Arg::new("[file...]"))

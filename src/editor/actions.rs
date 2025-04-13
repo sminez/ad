@@ -144,8 +144,8 @@ where
                 Ok(p) => p,
                 Err(e) => {
                     let msg = format!("Unable to determine home directory: {e}");
-                    self.set_status_message(&msg);
                     warn!("{msg}");
+                    self.set_status_message(msg);
                     return;
                 }
             },
@@ -154,21 +154,21 @@ where
         let new_cwd = match fs::canonicalize(p) {
             Ok(cwd) => cwd,
             Err(e) => {
-                self.set_status_message(&format!("Invalid path: {e}"));
+                self.set_status_message(format!("Invalid path: {e}"));
                 return;
             }
         };
 
         if let Err(e) = env::set_current_dir(&new_cwd) {
             let msg = format!("Unable to set working directory: {e}");
-            self.set_status_message(&msg);
             error!("{msg}");
+            self.set_status_message(msg);
             return;
         };
 
         debug!(new_cwd=%new_cwd.as_os_str().to_string_lossy(), "setting working directory");
         self.cwd = new_cwd;
-        self.set_status_message(&self.cwd.display().to_string());
+        self.set_status_message(self.cwd.display().to_string());
     }
 
     /// Open a file within the editor using a path that is relative to the current working
@@ -185,7 +185,7 @@ where
         let current_id = self.active_buffer_id();
 
         match self.layout.open_or_focus(path, new_window) {
-            Err(e) => self.set_status_message(&format!("Error opening file: {e}")),
+            Err(e) => self.set_status_message(format!("Error opening file: {e}")),
 
             Ok(Some(new_id)) => {
                 if was_empty_scratch {
@@ -207,7 +207,7 @@ where
                         }
                     }
                     Ok(false) => (),
-                    Err(e) => self.set_status_message(&e),
+                    Err(e) => self.set_status_message(e),
                 }
                 let id = self.active_buffer_id();
                 if id != current_id {
@@ -252,7 +252,7 @@ where
         ) {
             Ok(s) => s,
             Err(e) => {
-                self.set_status_message(&format!("unable to find git root: {e}"));
+                self.set_status_message(format!("unable to find git root: {e}"));
                 return;
             }
         };
@@ -304,7 +304,7 @@ where
         let b = self.layout.active_buffer_mut();
         let msg = b.save_to_disk_at(p, force);
         self.lsp_manager.document_changed(b);
-        self.set_status_message(&msg);
+        self.set_status_message(msg);
         let id = self.active_buffer_id();
         _ = self.tx_fsys.send(LogEvent::Save(id));
     }
@@ -336,7 +336,7 @@ where
                 }
             }
             Err(e) => {
-                self.set_status_message(&format!("Unable to check path: {e}"));
+                self.set_status_message(format!("Unable to check path: {e}"));
                 return None;
             }
         }
@@ -353,7 +353,7 @@ where
             None => return,
         };
 
-        self.set_status_message(&msg);
+        self.set_status_message(msg);
     }
 
     pub(super) fn reload_config(&mut self) {
@@ -367,19 +367,19 @@ where
         };
         info!("{msg}");
 
-        self.set_status_message(&msg);
+        self.set_status_message(msg);
         self.ui.state_change(StateChange::ConfigUpdated);
     }
 
     pub(super) fn reload_active_buffer(&mut self) {
         let msg = self.layout.active_buffer_mut().reload_from_disk();
-        self.set_status_message(&msg);
+        self.set_status_message(msg);
     }
 
     pub(super) fn update_config(&mut self, input: &str) {
         info!(%input, "updating config");
         if let Err(msg) = update_config(input) {
-            self.set_status_message(&msg);
+            self.set_status_message(msg);
         }
         self.ui.state_change(StateChange::ConfigUpdated);
     }
@@ -406,7 +406,7 @@ where
         trace!("setting clipboard content");
         match self.system.set_clipboard(&s) {
             Ok(_) => self.set_status_message("Yanked selection to system clipboard"),
-            Err(e) => self.set_status_message(&format!("Error setting system clipboard: {e}")),
+            Err(e) => self.set_status_message(format!("Error setting system clipboard: {e}")),
         }
     }
 
@@ -414,7 +414,7 @@ where
         trace!("pasting from clipboard");
         match self.system.read_clipboard() {
             Ok(s) => self.handle_action(Action::InsertString { s }, source),
-            Err(e) => self.set_status_message(&format!("Error reading system clipboard: {e}")),
+            Err(e) => self.set_status_message(format!("Error reading system clipboard: {e}")),
         }
     }
 
@@ -578,7 +578,7 @@ where
                     .stdout(Stdio::null())
                     .stderr(Stdio::null());
                 if let Err(e) = command.spawn() {
-                    self.set_status_message(&format!("error spawning process: {e}"));
+                    self.set_status_message(format!("error spawning process: {e}"));
                 };
             }
 
@@ -612,7 +612,7 @@ where
                             let b = self.layout.active_buffer_mut();
                             b.dot = b.map_addr(&mut addr);
                         }
-                        Err(e) => self.set_status_message(&format!("malformed addr: {e:?}")),
+                        Err(e) => self.set_status_message(format!("malformed addr: {e:?}")),
                     }
                 }
             }
@@ -727,7 +727,7 @@ where
             Ok(prog) => prog,
             Err(error) => {
                 warn!(?error, "invalid edit command");
-                self.set_status_message(&format!("Invalid edit command: {error:?}"));
+                self.set_status_message(format!("Invalid edit command: {error:?}"));
                 return;
             }
         };
@@ -740,7 +740,7 @@ where
                 self.layout.active_buffer_mut().dot = new_dot;
             }
 
-            Err(e) => self.set_status_message(&format!("Error running edit command: {e:?}")),
+            Err(e) => self.set_status_message(format!("Error running edit command: {e:?}")),
         }
 
         if !buf.is_empty() {
@@ -770,7 +770,7 @@ where
         self.modes.insert(0, Mode::ephemeral_mode("RUN"));
 
         if let Some(input) = self.minibuffer_prompt("!") {
-            self.set_status_message(&format!("running {input:?}..."));
+            self.set_status_message(format!("running {input:?}..."));
             self.run_shell_cmd(&input);
         }
 
@@ -798,7 +798,7 @@ where
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
-            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+            Err(e) => self.set_status_message(format!("Error running external command: {e}")),
         }
     }
 
@@ -809,7 +809,7 @@ where
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
-            Err(e) => self.set_status_message(&format!("Error running external command: {e}")),
+            Err(e) => self.set_status_message(format!("Error running external command: {e}")),
         }
     }
 
@@ -821,7 +821,7 @@ where
             .run_command(raw_cmd_str, d, id, self.tx_events.clone());
 
         if let Err(e) = res {
-            self.set_status_message(&format!("Error running external command: {e}"));
+            self.set_status_message(format!("Error running external command: {e}"));
         }
     }
 
