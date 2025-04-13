@@ -426,18 +426,18 @@ fn handle_char(
 
 /// Three variants of submatch / group are supported by this engine:
 ///   1) "(...)"
-///       Capturing: the position of this sub-expression will be extracted as submatch
-///       and made available through a numeric index based on it's position within the
-///       regular expression.
+///      Capturing: the position of this sub-expression will be extracted as submatch
+///      and made available through a numeric index based on it's position within the
+///      regular expression.
 ///   2) "(?<name>...)"
-///       Named capturing: the position of this subexpression will be extracted as a submatch
-///       and made available through the provided name rather than an index. To avoid confusion
-///       with mixing and matching named capture groups and positional ones, the presence of a
-///       named capture group will mark all unnamed capture groups within that regex to be
-///       treated as non-capturing. If they are required, they will also need to be named.
+///      Named capturing: the position of this subexpression will be extracted as a submatch
+///      and made available through the provided name rather than an index. To avoid confusion
+///      with mixing and matching named capture groups and positional ones, the presence of a
+///      named capture group will mark all unnamed capture groups within that regex to be
+///      treated as non-capturing. If they are required, they will also need to be named.
 ///   3) "(?:...)"
-///       Non-capturing: allows for grouping and application of repetition / alternation
-///       of compund expressions without contributing to the captured sub-expressions.
+///      Non-capturing: allows for grouping and application of repetition / alternation
+///      of compund expressions without contributing to the captured sub-expressions.
 fn handle_subexp(it: &mut Peekable<Chars<'_>>, root: &mut Vec<Ast>) -> Result<(), Error> {
     let mut sub = Vec::new();
     let kind = match it.peek() {

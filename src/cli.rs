@@ -28,7 +28,7 @@ impl Args {
         Self::try_parse_iter(args)
     }
 
-    fn try_parse_iter<'a>(mut args: impl Iterator<Item = String>) -> Result<Self, (String, i32)> {
+    fn try_parse_iter(mut args: impl Iterator<Item = String>) -> Result<Self, (String, i32)> {
         match args.next().as_deref() {
             // no files to open
             None => Ok(Args {
