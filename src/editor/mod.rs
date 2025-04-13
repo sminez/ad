@@ -15,7 +15,7 @@ use crate::{
     system::{DefaultSystem, System},
     term::CurShape,
     ui::{Layout, StateChange, Ui, UserInterface},
-    LogBuffer, VERSION,
+    LogBuffer,
 };
 use ad_event::Source;
 use std::{

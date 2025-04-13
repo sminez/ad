@@ -1,5 +1,6 @@
 //! CLI parser
 //! See main.rs for the usage of the parsed arguments
+use crate::VERSION;
 use std::{env, fs};
 
 const USAGE: &str = "\
@@ -95,7 +96,7 @@ impl Args {
 
             // help and version info
             Some("-h" | "--help") => Err((USAGE.to_string(), 0)),
-            Some("-v" | "--version") => Err((format!("ad v{}", env!("CARGO_PKG_VERSION")), 0)),
+            Some("-v" | "--version") => Err((format!("ad v{VERSION}"), 0)),
 
             // files to open
             Some(fname) => {
