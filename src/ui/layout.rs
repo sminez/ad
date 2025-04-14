@@ -1,14 +1,15 @@
 //! Layout of UI windows
 use crate::{
-    buffer::{Buffer, BufferId, Buffers},
+    buffer::{ActionOutcome, Buffer, BufferId, Buffers},
     config_handle,
     dot::{Cur, Dot},
-    editor::ViewPort,
+    editor::{Action, ViewPort},
     lsp::LspManagerHandle,
     ziplist,
     ziplist::{Position, ZipList},
 };
-use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
+use ad_event::Source;
+use std::{cmp::min, io, iter::repeat_n, mem::swap, path::Path, sync::Arc};
 use tracing::debug;
 use unicode_width::UnicodeWidthChar;
 
@@ -83,6 +84,21 @@ impl Layout {
     fn focus_first_window_with_buffer(&mut self, id: BufferId) {
         self.cols
             .focus_element_by_mut(|c| c.wins.focus_element_by_mut(|w| w.view.bufid == id));
+    }
+
+    /// Handle an action in the active window, targeting either the buffer or its tag depending on
+    /// what currently has focus
+    pub(crate) fn handle_action_in_active_window(
+        &mut self,
+        a: Action,
+        source: Source,
+    ) -> Option<ActionOutcome> {
+        let win = &mut self.cols.focus.wins.focus;
+        if win.buffer_focused {
+            self.buffers.active_mut().handle_action(a, source)
+        } else {
+            win.tag.handle_action(a, source)
+        }
     }
 
     pub(crate) fn open_or_focus<P: AsRef<Path>>(
@@ -462,7 +478,15 @@ impl Layout {
     pub(crate) fn new_window(&mut self) {
         let view = self.focused_view().clone();
         let wins = &mut self.cols.focus.wins;
-        wins.insert_at(Position::Tail, Window { n_rows: 0, view });
+        wins.insert_at(
+            Position::Tail,
+            Window {
+                n_rows: 0,
+                view,
+                tag: Buffer::new_unnamed(0, ""),
+                buffer_focused: true,
+            },
+        );
         wins.focus_tail();
         self.update_screen_size(self.screen_rows, self.screen_cols);
     }
@@ -484,7 +508,15 @@ impl Layout {
             self.cols.insert_at(Position::Tail, col);
         } else {
             let wins = &mut self.cols.last_mut().wins;
-            wins.insert_at(Position::Tail, Window { n_rows: 0, view });
+            wins.insert_at(
+                Position::Tail,
+                Window {
+                    n_rows: 0,
+                    view,
+                    tag: Buffer::new_unnamed(0, ""),
+                    buffer_focused: true,
+                },
+            );
             wins.focus_tail();
         }
 
@@ -637,7 +669,7 @@ impl Layout {
         let b = self
             .buffers
             .with_id_mut(bufid)
-            .expect("windows state is stale");
+            .expect("layout state is stale");
         let (_, w_sgncol) = b.sign_col_dims();
         let rx = x
             .saturating_sub(1)
@@ -675,14 +707,15 @@ impl Layout {
         });
 
         for (bufid, from, n_rows) in it {
-            // SAFETY: we know this id is valid
-            let b = unsafe { self.buffers.with_id_mut(bufid).unwrap_unchecked() };
-            b.update_ts_state(from, n_rows);
+            self.buffers
+                .with_id_mut(bufid)
+                .expect("layout state is stale")
+                .update_ts_state(from, n_rows);
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Column {
     /// Number of character columns wide
     pub(crate) n_cols: usize,
@@ -730,20 +763,76 @@ impl Column {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct Window {
     /// Number of character rows high
     pub(crate) n_rows: usize,
     /// Buffer view details currently shown in this window
     pub(crate) view: View,
+    /// The current user defined tag content
+    pub(crate) tag: Buffer,
+    /// Whether or not the buffer or tag is currently focused
+    pub(crate) buffer_focused: bool,
 }
 
 impl Window {
-    pub(crate) fn new(n_rows: usize, bufid: BufferId) -> Self {
+    pub(crate) fn new(n_rows: usize, buf_id: BufferId) -> Self {
         Self {
             n_rows,
-            view: View::new(bufid),
+            view: View::new(buf_id),
+            tag: Buffer::new_unnamed(0, ""),
+            buffer_focused: true,
         }
+    }
+
+    pub(crate) fn tag_lines(&self, tabstop: usize, n_cols: usize, buf_name: &str) -> Vec<String> {
+        let it = buf_name
+            .chars()
+            .chain(" | ".chars())
+            .chain(self.tag.txt.chars());
+        let mut lines = Vec::new();
+        let mut buf = String::new();
+        let mut cols = 0;
+
+        for ch in it {
+            if ch == '\n' {
+                buf.extend(repeat_n(' ', n_cols - buf.len()));
+                let mut s = String::new();
+                swap(&mut buf, &mut s);
+                lines.push(s);
+                cols = 0;
+                continue;
+            }
+
+            let w = if ch == '\t' {
+                tabstop
+            } else {
+                UnicodeWidthChar::width(ch).unwrap_or(1)
+            };
+
+            if cols + w <= n_cols {
+                if ch == '\t' {
+                    buf.extend(repeat_n(' ', tabstop));
+                } else {
+                    buf.push(ch);
+                }
+                cols += w;
+            } else {
+                let mut s = String::new();
+                swap(&mut buf, &mut s);
+                lines.push(s);
+                buf.push(ch);
+                cols = w;
+                continue;
+            }
+        }
+
+        if !buf.is_empty() {
+            buf.extend(repeat_n(' ', n_cols - buf.len()));
+            lines.push(buf);
+        }
+
+        lines
     }
 }
 
@@ -1173,5 +1262,54 @@ mod tests {
             view.clamp_scroll(&mut b, 80, 80);
             offset += widths[idx];
         }
+    }
+
+    #[test_case(
+        "this is a test",
+        &[
+            "/home/foo/",
+            "bar.txt | ",
+            "this is a ",
+            "test      "
+        ];
+        "simple tag"
+    )]
+    #[test_case(
+        "this is\na test",
+        &[
+            "/home/foo/",
+            "bar.txt | ",
+            "this is   ",
+            "a test    "
+        ];
+        "tag with explicit newline"
+    )]
+    #[test_case(
+        "this 🦊 is a test",
+        &[
+            "/home/foo/",
+            "bar.txt | ",
+            "this 🦊 is",
+            " a test   "
+        ];
+        "tag with multibyte character"
+    )]
+    #[test]
+    fn tag_lines_works(tag: &str, expected: &[&str]) {
+        let (tx, _rx) = channel();
+        let mut buffers = Buffers::new_stubbed(&[0], tx);
+        buffers.open_virtual("/home/foo/bar.txt".to_string(), String::new());
+
+        let win = Window {
+            n_rows: 10,
+            view: View::new(0),
+            tag: Buffer::new_unnamed(0, tag),
+            buffer_focused: true,
+        };
+
+        let lines = win.tag_lines(4, 10, "/home/foo/bar.txt");
+        let str_lines: Vec<_> = lines.iter().map(|s| s.as_str()).collect();
+
+        assert_eq!(&str_lines, expected);
     }
 }

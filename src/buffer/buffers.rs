@@ -47,7 +47,7 @@ impl Buffers {
     #[cfg(test)]
     pub(crate) fn new_stubbed(ids: &[usize], tx_req: Sender<Req>) -> Self {
         Self {
-            next_id: ids.last().unwrap() + 1,
+            next_id: ids.last().copied().unwrap_or_default() + 1,
             inner: ZipList::try_from_iter(
                 ids.iter()
                     .map(|i| Buffer::new_virtual(*i, "".to_owned(), "".to_owned())),

@@ -1,5 +1,13 @@
 :: TODO
 
+- [ ] TAG SUPPORT
+  - Need to update cur_from_screen_coords to be aware of tags
+  - Need to update window size calculations to be aware of tags taking up screen space
+  - Tags also need to be truncated if there is insufficient screen space
+  - Exposing through fsys will mean having to have window state as well as buffer state
+  - Events need updating to say whether they came from buffers or tags
+
+
 -- Misc / Editor features --
 - [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
       - The matcher can be reused if needed or used as a oneshot for the common case of

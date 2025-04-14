@@ -537,7 +537,7 @@ where
                     Arrow::Down
                 };
 
-                self.forward_action_to_active_buffer(
+                self.forward_action_to_active_window(
                     DotSet(TextObject::Arr(arr), self.layout.active_window_rows()),
                     Source::Keyboard,
                 );
@@ -546,7 +546,7 @@ where
                 i: Input::Mouse(evt),
             } => self.handle_mouse_event(evt),
 
-            a => self.forward_action_to_active_buffer(a, source),
+            a => self.forward_action_to_active_window(a, source),
         }
     }
 
@@ -562,8 +562,8 @@ where
         }
     }
 
-    fn forward_action_to_active_buffer(&mut self, a: Action, source: Source) {
-        if let Some(o) = self.layout.active_buffer_mut().handle_action(a, source) {
+    fn forward_action_to_active_window(&mut self, a: Action, source: Source) {
+        if let Some(o) = self.layout.handle_action_in_active_window(a, source) {
             match o {
                 ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),

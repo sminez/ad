@@ -188,7 +188,7 @@ where
                         click.paste_handled = true;
                         self.held_click = Some(click);
                     } else if !is_right && !click.cut_handled {
-                        self.forward_action_to_active_buffer(Action::Delete, Source::Mouse);
+                        self.forward_action_to_active_window(Action::Delete, Source::Mouse);
                         click.selection = self.layout.active_buffer().dot.as_range();
                         click.cut_handled = true;
                         self.held_click = Some(click);

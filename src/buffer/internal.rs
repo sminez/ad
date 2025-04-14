@@ -229,6 +229,11 @@ impl GapBuffer {
         v
     }
 
+    /// Iterate over the characters of the buffer
+    pub fn chars(&self) -> Chars<'_> {
+        self.slice(0, self.n_chars).chars()
+    }
+
     /// Iterate over the lines of the buffer
     pub fn iter_lines(&self) -> impl Iterator<Item = Slice<'_>> {
         let mut line_idx = 0;
