@@ -35,14 +35,15 @@ impl Layout {
         screen_cols: usize,
         lsp_handle: Arc<LspManagerHandle>,
     ) -> Self {
-        let buffers = Buffers::new(lsp_handle);
+        let mut buffers = Buffers::new(lsp_handle);
         let id = buffers.active().id;
+        let cols = ziplist![Column::new(screen_rows, screen_cols, &[id], &mut buffers)];
 
         Self {
             buffers,
             screen_rows,
             screen_cols,
-            cols: ziplist![Column::new(screen_rows, screen_cols, &[id])],
+            cols,
             views: vec![],
         }
     }
@@ -179,7 +180,8 @@ impl Layout {
             self.cols = ziplist![Column::new(
                 self.screen_rows,
                 self.screen_cols,
-                &[focused_id]
+                &[focused_id],
+                &mut self.buffers,
             )];
             if let Some(view) = existing_view {
                 self.cols.focus.wins.focus.view = view;
@@ -369,7 +371,12 @@ impl Layout {
                 return;
             }
             let win = self.cols.focus.wins.remove_focused_unchecked();
-            let mut col = Column::new(self.screen_rows, self.screen_cols, &[win.view.bufid]);
+            let mut col = Column::new(
+                self.screen_rows,
+                self.screen_cols,
+                &[win.view.bufid],
+                &mut self.buffers,
+            );
             col.wins.focus = win;
             self.cols.insert_at(Position::Head, col);
             self.cols.focus_up();
@@ -397,7 +404,7 @@ impl Layout {
                 return;
             }
             let win = self.cols.focus.wins.remove_focused_unchecked();
-            let mut col = Column::new(self.screen_rows, self.screen_cols, &[0]);
+            let mut col = Column::new(self.screen_rows, self.screen_cols, &[0], &mut self.buffers);
             col.wins.focus = win;
             self.cols.insert_at(Position::Tail, col);
             self.cols.focus_down();
@@ -466,7 +473,12 @@ impl Layout {
     /// current active window.
     pub(crate) fn new_column(&mut self) {
         let view = self.focused_view().clone();
-        let mut col = Column::new(self.screen_rows, self.screen_cols, &[view.bufid]);
+        let mut col = Column::new(
+            self.screen_rows,
+            self.screen_cols,
+            &[view.bufid],
+            &mut self.buffers,
+        );
         col.wins.last_mut().view = view;
         self.cols.insert_at(Position::Tail, col);
         self.cols.focus_tail();
@@ -483,7 +495,7 @@ impl Layout {
             Window {
                 n_rows: 0,
                 view,
-                tag: Buffer::new_unnamed(0, ""),
+                tag: self.buffers.new_tag_buffer(),
                 buffer_focused: true,
             },
         );
@@ -503,7 +515,7 @@ impl Layout {
         };
 
         if self.cols.len() == 1 {
-            let mut col = Column::new(self.screen_rows, self.screen_cols, &[id]);
+            let mut col = Column::new(self.screen_rows, self.screen_cols, &[id], &mut self.buffers);
             col.wins.last_mut().view = view;
             self.cols.insert_at(Position::Tail, col);
         } else {
@@ -513,7 +525,7 @@ impl Layout {
                 Window {
                     n_rows: 0,
                     view,
-                    tag: Buffer::new_unnamed(0, ""),
+                    tag: self.buffers.new_tag_buffer(),
                     buffer_focused: true,
                 },
             );
@@ -665,6 +677,16 @@ impl Layout {
         } else {
             self.buffer_for_screen_coords(x, y)
         };
+
+        self.cur_from_screen_coords_and_bufid(x, y, bufid)
+    }
+
+    fn cur_from_screen_coords_and_bufid(
+        &mut self,
+        x: usize,
+        y: usize,
+        bufid: BufferId,
+    ) -> (BufferId, Cur) {
         let (x_offset, y_offset) = self.xy_offsets();
         let b = self
             .buffers
@@ -724,13 +746,22 @@ pub(crate) struct Column {
 }
 
 impl Column {
-    pub(crate) fn new(n_rows: usize, n_cols: usize, buf_ids: &[BufferId]) -> Self {
+    pub(crate) fn new(
+        n_rows: usize,
+        n_cols: usize,
+        buf_ids: &[BufferId],
+        buffers: &mut Buffers,
+    ) -> Self {
         if buf_ids.is_empty() {
             panic!("cant have an empty column");
         }
         let win_rows = n_rows / buf_ids.len();
-        let mut wins =
-            ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
+        let mut wins = ZipList::try_from_iter(
+            buf_ids
+                .iter()
+                .map(|id| Window::new(win_rows, *id, buffers.new_tag_buffer())),
+        )
+        .unwrap();
 
         let slop = n_rows - (win_rows * buf_ids.len()) + buf_ids.len() - 1;
         wins.focus.n_rows += slop;
@@ -776,11 +807,11 @@ pub(crate) struct Window {
 }
 
 impl Window {
-    pub(crate) fn new(n_rows: usize, buf_id: BufferId) -> Self {
+    pub(crate) fn new(n_rows: usize, buf_id: BufferId, tag: Buffer) -> Self {
         Self {
             n_rows,
             view: View::new(buf_id),
-            tag: Buffer::new_unnamed(0, ""),
+            tag,
             buffer_focused: true,
         }
     }
@@ -1004,21 +1035,32 @@ mod tests {
     use simple_test_case::test_case;
     use std::sync::mpsc::channel;
 
-    fn test_windows(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Layout {
+    fn test_layout(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Layout {
         let mut cols = Vec::with_capacity(col_wins.len());
         let mut n = 0;
         let mut all_ids = Vec::new();
 
+        // Build up the list of all IDs first so we can construct the Buffers instance needed for
+        // calling Column::new
         for m in col_wins.iter() {
             let ids: Vec<usize> = (n..(n + m)).collect();
             n += m;
-            cols.push(Column::new(n_rows, n_cols, &ids));
             all_ids.extend(ids);
         }
 
         let (tx, _) = channel();
+        let mut buffers = Buffers::new_stubbed(&all_ids, tx);
+        n = 0;
+
+        // Now create the columns
+        for m in col_wins.iter() {
+            let ids: Vec<usize> = (n..(n + m)).collect();
+            n += m;
+            cols.push(Column::new(n_rows, n_cols, &ids, &mut buffers));
+        }
+
         let mut ws = Layout {
-            buffers: Buffers::new_stubbed(&all_ids, tx),
+            buffers,
             screen_rows: n_rows,
             screen_cols: n_cols,
             cols: ZipList::try_from_iter(cols).unwrap(),
@@ -1038,7 +1080,7 @@ mod tests {
 
     #[test]
     fn drag_left_works() {
-        let mut ws = test_windows(&[1, 1, 2], 80, 100);
+        let mut ws = test_layout(&[1, 1, 2], 80, 100);
         ws.next_column();
         assert_eq!(ws.active_buffer().id, 1);
         ws.drag_left();
@@ -1065,7 +1107,7 @@ mod tests {
 
     #[test]
     fn drag_right_works() {
-        let mut ws = test_windows(&[1, 1, 2], 80, 100);
+        let mut ws = test_layout(&[1, 1, 2], 80, 100);
         assert_eq!(ws.active_buffer().id, 0);
         ws.drag_right();
 
@@ -1091,7 +1133,7 @@ mod tests {
 
     #[test]
     fn next_prev_column_methods_work() {
-        let mut ws = test_windows(&[1, 1, 2], 80, 100);
+        let mut ws = test_layout(&[1, 1, 2], 80, 100);
         assert_eq!(ws.focused_view().bufid, 0);
 
         // next wrapping
@@ -1113,7 +1155,7 @@ mod tests {
 
     #[test]
     fn next_prev_window_methods_work() {
-        let mut ws = test_windows(&[3, 1], 80, 100);
+        let mut ws = test_layout(&[3, 1], 80, 100);
         assert_eq!(ws.focused_view().bufid, 0);
 
         // next wrapping
@@ -1144,7 +1186,7 @@ mod tests {
     #[test_case(&[1, 4], 60, 70, 4; "two cols second with four click in fourth window")]
     #[test]
     fn buffer_for_screen_coords_works(col_wins: &[usize], x: usize, y: usize, expected: BufferId) {
-        let mut ws = test_windows(col_wins, 80, 100);
+        let mut ws = test_layout(col_wins, 80, 100);
         println!("{ws:#?}");
 
         assert_eq!(
@@ -1174,7 +1216,7 @@ mod tests {
     #[test_case(4, &[0, 1, 2, 3]; "4")]
     #[test]
     fn close_buffer_works(id: usize, expected: &[usize]) {
-        let mut ws = test_windows(&[1, 4], 80, 100);
+        let mut ws = test_layout(&[1, 4], 80, 100);
         assert_eq!(&ordered_window_ids(&ws), &[0, 1, 2, 3, 4], "initial ids");
 
         ws.close_buffer(id);
@@ -1201,7 +1243,7 @@ mod tests {
     fn focus_buffer_for_screen_coords_doesnt_reorder_windows() {
         let (x, y) = (60, 70);
         let expected = 4;
-        let mut ws = test_windows(&[1, 4], 80, 100);
+        let mut ws = test_layout(&[1, 4], 80, 100);
 
         assert_eq!(
             &ordered_window_ids(&ws),

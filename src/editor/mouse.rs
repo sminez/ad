@@ -150,7 +150,7 @@ where
                 let (bufid, cur) = self.layout.cur_from_screen_coords(x, y, false);
                 // Support releasing the mouse over a different window as actioning the selection
                 // as it was present in the active buffer
-                if bufid == self.active_buffer_id() {
+                if bufid == self.layout.active_buffer().id {
                     click.selection.set_active_cursor(cur);
                 }
 
@@ -164,14 +164,6 @@ where
 
             _ => (),
         }
-    }
-
-    #[inline]
-    fn click_from_button(&mut self, btn: MouseButton, x: usize, y: usize) -> Click {
-        let (id, cur) = self.layout.cur_from_screen_coords(x, y, true);
-        _ = self.tx_fsys.send(LogEvent::Focus(id));
-
-        Click::new(btn, Range::from_cursors(cur, cur, false))
     }
 
     #[inline]
@@ -200,7 +192,10 @@ where
 
             None => {
                 let btn = if is_right { Right } else { Middle };
-                self.held_click = Some(self.click_from_button(btn, x, y));
+                let (id, cur) = self.layout.cur_from_screen_coords(x, y, true);
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+
+                self.held_click = Some(Click::new(btn, Range::from_cursors(cur, cur, false)));
             }
         };
     }

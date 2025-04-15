@@ -29,6 +29,7 @@ pub type BufferId = usize;
 #[derive(Debug)]
 pub struct Buffers {
     next_id: BufferId,
+    next_tag_id: BufferId,
     inner: ZipList<Buffer>,
     jump_list: JumpList,
     lsp_handle: Arc<LspManagerHandle>,
@@ -38,6 +39,7 @@ impl Buffers {
     pub fn new(lsp_handle: Arc<LspManagerHandle>) -> Self {
         Self {
             next_id: 1,
+            next_tag_id: usize::MAX,
             inner: ziplist![Buffer::new_unnamed(0, "")],
             jump_list: JumpList::default(),
             lsp_handle,
@@ -48,11 +50,9 @@ impl Buffers {
     pub(crate) fn new_stubbed(ids: &[usize], tx_req: Sender<Req>) -> Self {
         Self {
             next_id: ids.last().copied().unwrap_or_default() + 1,
-            inner: ZipList::try_from_iter(
-                ids.iter()
-                    .map(|i| Buffer::new_virtual(*i, "".to_owned(), "".to_owned())),
-            )
-            .unwrap(),
+            next_tag_id: usize::MAX,
+            inner: ZipList::try_from_iter(ids.iter().map(|i| Buffer::new_virtual(*i, "", "")))
+                .unwrap(),
             jump_list: JumpList::default(),
             lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
         }
@@ -156,6 +156,20 @@ impl Buffers {
 
     fn push_buffer(&mut self, buf: Buffer) {
         self.inner.insert(buf);
+    }
+
+    /// Create a new tag buffer with a unique ID that is not tracked within the main buffer state
+    pub(crate) fn new_tag_buffer(&mut self) -> Buffer {
+        // We need the tag IDs to be unique in order to distinguish them from our regular buffer
+        // state but we also don't want to make use of the normal next_id counter as that would
+        // result in disjoint buffer IDs for the user which is going to be confusing.
+        //
+        // If this ever collides with self.next_id (or hits 0) we have a problem but the chances of
+        // actually hitting that are so low we don't bother to check for it.
+        let id = self.next_tag_id;
+        self.next_tag_id -= 1;
+
+        Buffer::new_unnamed(id, "")
     }
 
     pub(crate) fn open_virtual(&mut self, name: String, content: String) -> BufferId {
