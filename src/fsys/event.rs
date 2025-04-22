@@ -19,25 +19,52 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct InputFilter {
     tx: Sender<FsysEvent>,
+    is_buffer: bool,
 }
 
 impl InputFilter {
     pub(crate) fn new(tx: Sender<FsysEvent>) -> Self {
-        Self { tx }
+        Self {
+            tx,
+            is_buffer: true,
+        }
+    }
+
+    /// Create a copy of this filter for events coming from the tag
+    pub(crate) fn paired_tag_filter(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            is_buffer: false,
+        }
     }
 
     pub fn notify_insert(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
-        let evt = FsysEvent::new(source, Kind::InsertBody, ch_from, ch_to, txt);
+        let k = if self.is_buffer {
+            Kind::InsertBody
+        } else {
+            Kind::InsertTag
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 
     pub fn notify_delete(&self, source: Source, ch_from: usize, ch_to: usize) {
-        let evt = FsysEvent::new(source, Kind::DeleteBody, ch_from, ch_to, "");
+        let k = if self.is_buffer {
+            Kind::DeleteBody
+        } else {
+            Kind::DeleteTag
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, "");
         _ = self.tx.send(evt);
     }
 
     pub fn notify_load(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
-        let evt = FsysEvent::new(source, Kind::LoadBody, ch_from, ch_to, txt);
+        let k = if self.is_buffer {
+            Kind::LoadBody
+        } else {
+            Kind::LoadTag
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 
@@ -55,7 +82,12 @@ impl InputFilter {
             _ = self.tx.send(evt);
         }
 
-        let evt = FsysEvent::new(source, Kind::ExecuteBody, ch_from, ch_to, txt);
+        let k = if self.is_buffer {
+            Kind::ExecuteBody
+        } else {
+            Kind::ExecuteTag
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 }

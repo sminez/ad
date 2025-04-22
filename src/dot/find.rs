@@ -86,8 +86,11 @@ fn rev_find_between<F: Find>(f: &F, from: usize, to: usize, b: &Buffer) -> Optio
 }
 
 // Functions that check a single character
-impl Find for fn(char) -> bool {
-    type Reversed = fn(char) -> bool;
+impl<F> Find for F
+where
+    F: Fn(char) -> bool + Copy,
+{
+    type Reversed = F;
 
     fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
     where

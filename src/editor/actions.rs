@@ -896,6 +896,7 @@ recv {}({})",
             EditorMode::Headless,
             LogBuffer::default(),
         );
+        ed.update_window_size(400, 800);
         let brx = ed.rx_fsys.take().expect("to have fsys channels");
 
         for file in files {

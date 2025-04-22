@@ -109,8 +109,8 @@ where
                         return;
                     }
 
-                    let (bufid, cur) = self.layout.cur_from_screen_coords(x, y, false);
-                    if bufid != self.layout.active_buffer().id {
+                    let (is_active, cur) = self.layout.cur_from_screen_coords(x, y);
+                    if !is_active {
                         return;
                     }
                     click.selection.set_active_cursor(cur);
@@ -147,10 +147,10 @@ where
                     return;
                 }
 
-                let (bufid, cur) = self.layout.cur_from_screen_coords(x, y, false);
+                let (is_active, cur) = self.layout.cur_from_screen_coords(x, y);
                 // Support releasing the mouse over a different window as actioning the selection
                 // as it was present in the active buffer
-                if bufid == self.layout.active_buffer().id {
+                if is_active {
                     click.selection.set_active_cursor(cur);
                 }
 
@@ -192,7 +192,7 @@ where
 
             None => {
                 let btn = if is_right { Right } else { Middle };
-                let (id, cur) = self.layout.cur_from_screen_coords(x, y, true);
+                let (id, cur) = self.layout.focus_cur_from_screen_coords(x, y);
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
 
                 self.held_click = Some(Click::new(btn, Range::from_cursors(cur, cur, false)));

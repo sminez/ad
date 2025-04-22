@@ -1,6 +1,7 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur, SPLASH},
-    dot::TextObject,
+    buffer::{Buffer, BufferKind, Tag, SPLASH},
+    die,
+    dot::{Cur, TextObject},
     lsp::LspManagerHandle,
     ziplist,
     ziplist::{Position, ZipList},
@@ -159,7 +160,18 @@ impl Buffers {
     }
 
     /// Create a new tag buffer with a unique ID that is not tracked within the main buffer state
-    pub(crate) fn new_tag_buffer(&mut self) -> Buffer {
+    ///
+    /// This will panic if the given parent ID is not a known buffer.
+    pub(crate) fn new_tag_buffer(
+        &mut self,
+        initial_parent_id: BufferId,
+        tabstop: usize,
+        n_cols: usize,
+    ) -> Tag {
+        if !self.contains_bufid(initial_parent_id) {
+            die!("attempt to create tag for unknown buffer");
+        }
+
         // We need the tag IDs to be unique in order to distinguish them from our regular buffer
         // state but we also don't want to make use of the normal next_id counter as that would
         // result in disjoint buffer IDs for the user which is going to be confusing.
@@ -169,7 +181,10 @@ impl Buffers {
         let id = self.next_tag_id;
         self.next_tag_id -= 1;
 
-        Buffer::new_unnamed(id, "")
+        // checked the existence of the parent above
+        let parent = self.with_id(initial_parent_id).unwrap();
+
+        Tag::new(parent, id, tabstop, n_cols)
     }
 
     pub(crate) fn open_virtual(&mut self, name: String, content: String) -> BufferId {

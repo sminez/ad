@@ -1,6 +1,6 @@
 //! Layout of UI windows
 use crate::{
-    buffer::{ActionOutcome, Buffer, BufferId, Buffers},
+    buffer::{ActionOutcome, Buffer, BufferId, Buffers, Tag},
     config_handle,
     dot::{Cur, Dot},
     editor::{Action, ViewPort},
@@ -9,7 +9,7 @@ use crate::{
     ziplist::{Position, ZipList},
 };
 use ad_event::Source;
-use std::{cmp::min, io, iter::repeat_n, mem::swap, path::Path, sync::Arc};
+use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
 use tracing::debug;
 use unicode_width::UnicodeWidthChar;
 
@@ -488,14 +488,18 @@ impl Layout {
     /// Create a new window at the end of the current column showing the same view
     /// found in the current active window.
     pub(crate) fn new_window(&mut self) {
+        let tabstop = config_handle!().tabstop;
+        let n_cols = self.cols.focus.n_cols;
         let view = self.focused_view().clone();
+        let tag = self.buffers.new_tag_buffer(view.bufid, tabstop, n_cols);
+
         let wins = &mut self.cols.focus.wins;
         wins.insert_at(
             Position::Tail,
             Window {
                 n_rows: 0,
                 view,
-                tag: self.buffers.new_tag_buffer(),
+                tag,
                 buffer_focused: true,
             },
         );
@@ -519,13 +523,16 @@ impl Layout {
             col.wins.last_mut().view = view;
             self.cols.insert_at(Position::Tail, col);
         } else {
+            let tabstop = config_handle!().tabstop;
+            let n_cols = self.cols.last().n_cols;
+            let tag = self.buffers.new_tag_buffer(view.bufid, tabstop, n_cols);
             let wins = &mut self.cols.last_mut().wins;
             wins.insert_at(
                 Position::Tail,
                 Window {
                     n_rows: 0,
                     view,
-                    tag: self.buffers.new_tag_buffer(),
+                    tag,
                     buffer_focused: true,
                 },
             );
@@ -666,27 +673,35 @@ impl Layout {
         self.active_buffer().id
     }
 
-    pub(crate) fn cur_from_screen_coords(
-        &mut self,
-        x: usize,
-        y: usize,
-        set_focus: bool,
-    ) -> (BufferId, Cur) {
-        let bufid = if set_focus {
-            self.focus_buffer_for_screen_coords(x, y)
-        } else {
-            self.buffer_for_screen_coords(x, y)
-        };
+    pub(crate) fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> (bool, Cur) {
+        let bufid = self.buffer_for_screen_coords(x, y);
+        let is_active = bufid == self.active_buffer().id;
+        let cur = self.cur_from_screen_coords_and_bufid(x, y, bufid);
 
-        self.cur_from_screen_coords_and_bufid(x, y, bufid)
+        (is_active, cur)
     }
 
-    fn cur_from_screen_coords_and_bufid(
-        &mut self,
-        x: usize,
-        y: usize,
-        bufid: BufferId,
-    ) -> (BufferId, Cur) {
+    pub(crate) fn focus_cur_from_screen_coords(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
+        let bufid = self.focus_buffer_for_screen_coords(x, y);
+        let cur = self.cur_from_screen_coords_and_bufid(x, y, bufid);
+
+        (bufid, cur)
+    }
+
+    /// Set the active buffer and dot based on a mouse click.
+    ///
+    /// Returns true if the click was in the currently active buffer and false if this click has
+    /// changed the active buffer.
+    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) -> bool {
+        let current_bufid = self.buffers.active().id;
+        let bufid = self.focus_buffer_for_screen_coords(x, y);
+        let c = self.cur_from_screen_coords_and_bufid(x, y, bufid);
+        self.buffers.active_mut().dot = Dot::Cur { c };
+
+        bufid == current_bufid
+    }
+
+    fn cur_from_screen_coords_and_bufid(&mut self, x: usize, y: usize, bufid: BufferId) -> Cur {
         let (x_offset, y_offset) = self.xy_offsets();
         let b = self
             .buffers
@@ -698,6 +713,7 @@ impl Layout {
             .saturating_sub(w_sgncol)
             .saturating_sub(x_offset);
 
+        // TODO: should this be happening here? Or should it only be in focus_cur_from_screen_coords?
         let view = self.cols.focus.focused_view_mut();
         view.rx = rx;
         b.cached_rx = rx;
@@ -706,19 +722,7 @@ impl Layout {
         let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, view.rx), b);
         cur.clamp_idx(b.txt.len_chars());
 
-        (bufid, cur)
-    }
-
-    /// Set the active buffer and dot based on a mouse click.
-    ///
-    /// Returns true if the click was in the currently active buffer and false if this click has
-    /// changed the active buffer.
-    pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) -> bool {
-        let current_bufid = self.buffers.active().id;
-        let (bufid, c) = self.cur_from_screen_coords(x, y, true);
-        self.buffers.active_mut().dot = Dot::Cur { c };
-
-        bufid == current_bufid
+        cur
     }
 
     pub(crate) fn update_visible_ts_state(&mut self) {
@@ -755,13 +759,13 @@ impl Column {
         if buf_ids.is_empty() {
             panic!("cant have an empty column");
         }
+        let tabstop = config_handle!().tabstop;
         let win_rows = n_rows / buf_ids.len();
-        let mut wins = ZipList::try_from_iter(
-            buf_ids
-                .iter()
-                .map(|id| Window::new(win_rows, *id, buffers.new_tag_buffer())),
-        )
-        .unwrap();
+        let mut wins =
+            ZipList::try_from_iter(buf_ids.iter().map(|id| {
+                Window::new(win_rows, *id, buffers.new_tag_buffer(*id, tabstop, n_cols))
+            }))
+            .unwrap();
 
         let slop = n_rows - (win_rows * buf_ids.len()) + buf_ids.len() - 1;
         wins.focus.n_rows += slop;
@@ -801,13 +805,13 @@ pub(crate) struct Window {
     /// Buffer view details currently shown in this window
     pub(crate) view: View,
     /// The current user defined tag content
-    pub(crate) tag: Buffer,
+    pub(crate) tag: Tag,
     /// Whether or not the buffer or tag is currently focused
     pub(crate) buffer_focused: bool,
 }
 
 impl Window {
-    pub(crate) fn new(n_rows: usize, buf_id: BufferId, tag: Buffer) -> Self {
+    pub(crate) fn new(n_rows: usize, buf_id: BufferId, tag: Tag) -> Self {
         Self {
             n_rows,
             view: View::new(buf_id),
@@ -816,55 +820,16 @@ impl Window {
         }
     }
 
-    pub(crate) fn tag_lines(&self, tabstop: usize, n_cols: usize, buf_name: &str) -> Vec<String> {
-        let it = buf_name
-            .chars()
-            .chain(" | ".chars())
-            .chain(self.tag.txt.chars());
-        let mut lines = Vec::new();
-        let mut buf = String::new();
-        let mut cols = 0;
+    // /// For a given y offset from the top of the window, check whether are we inside of the tag or
+    // /// inside of the buffer itself and return the appropriate buffer ID
+    // fn bufid_for_y_offset(&self, y: usize) -> BufferId {
+    //     todo!()
+    // }
 
-        for ch in it {
-            if ch == '\n' {
-                buf.extend(repeat_n(' ', n_cols - buf.len()));
-                let mut s = String::new();
-                swap(&mut buf, &mut s);
-                lines.push(s);
-                cols = 0;
-                continue;
-            }
-
-            let w = if ch == '\t' {
-                tabstop
-            } else {
-                UnicodeWidthChar::width(ch).unwrap_or(1)
-            };
-
-            if cols + w <= n_cols {
-                if ch == '\t' {
-                    buf.extend(repeat_n(' ', tabstop));
-                } else {
-                    buf.push(ch);
-                }
-                cols += w;
-            } else {
-                let mut s = String::new();
-                swap(&mut buf, &mut s);
-                lines.push(s);
-                buf.push(ch);
-                cols = w;
-                continue;
-            }
-        }
-
-        if !buf.is_empty() {
-            buf.extend(repeat_n(' ', n_cols - buf.len()));
-            lines.push(buf);
-        }
-
-        lines
-    }
+    // /// Same as bufid_for_y_offset but also set the buffer_focused flag
+    // fn focus_y_offset(&mut self, y: usize) -> BufferId {
+    //     todo!()
+    // }
 }
 
 #[derive(Debug, Clone)]
@@ -1304,54 +1269,5 @@ mod tests {
             view.clamp_scroll(&mut b, 80, 80);
             offset += widths[idx];
         }
-    }
-
-    #[test_case(
-        "this is a test",
-        &[
-            "/home/foo/",
-            "bar.txt | ",
-            "this is a ",
-            "test      "
-        ];
-        "simple tag"
-    )]
-    #[test_case(
-        "this is\na test",
-        &[
-            "/home/foo/",
-            "bar.txt | ",
-            "this is   ",
-            "a test    "
-        ];
-        "tag with explicit newline"
-    )]
-    #[test_case(
-        "this 🦊 is a test",
-        &[
-            "/home/foo/",
-            "bar.txt | ",
-            "this 🦊 is",
-            " a test   "
-        ];
-        "tag with multibyte character"
-    )]
-    #[test]
-    fn tag_lines_works(tag: &str, expected: &[&str]) {
-        let (tx, _rx) = channel();
-        let mut buffers = Buffers::new_stubbed(&[0], tx);
-        buffers.open_virtual("/home/foo/bar.txt".to_string(), String::new());
-
-        let win = Window {
-            n_rows: 10,
-            view: View::new(0),
-            tag: Buffer::new_unnamed(0, tag),
-            buffer_focused: true,
-        };
-
-        let lines = win.tag_lines(4, 10, "/home/foo/bar.txt");
-        let str_lines: Vec<_> = lines.iter().map(|s| s.as_str()).collect();
-
-        assert_eq!(&str_lines, expected);
     }
 }

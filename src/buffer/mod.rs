@@ -25,11 +25,13 @@ use tracing::{debug, error};
 mod buffers;
 mod edit;
 mod internal;
+mod tag;
 
 use edit::{Edit, EditLog, Kind, Txt};
 pub use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
 
 pub(crate) use buffers::{BufferId, Buffers};
+pub(crate) use tag::Tag;
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.
@@ -205,6 +207,87 @@ impl Buffer {
         Ok(b)
     }
 
+    /// Create a new anonymous minibuffer
+    pub(super) fn new_minibuffer() -> Self {
+        Self {
+            id: usize::MAX,
+            kind: BufferKind::MiniBuffer,
+            dot: Default::default(),
+            xdot: Default::default(),
+            txt: GapBuffer::from(""),
+            cached_rx: 0,
+            last_save: SystemTime::now(),
+            dirty: false,
+            edit_log: Default::default(),
+            input_filter: None,
+            ts_state: None,
+            version: AtomicUsize::new(1),
+        }
+    }
+
+    /// Create a new unnamed buffer with the given content
+    pub fn new_unnamed(id: usize, content: impl Into<String>) -> Self {
+        Self {
+            id,
+            kind: BufferKind::Unnamed,
+            dot: Dot::default(),
+            xdot: Dot::default(),
+            txt: GapBuffer::from(normalize_line_endings(content.into())),
+            cached_rx: 0,
+            last_save: SystemTime::now(),
+            dirty: false,
+            edit_log: EditLog::default(),
+            input_filter: None,
+            ts_state: None,
+            version: AtomicUsize::new(1),
+        }
+    }
+
+    /// Create a new virtual buffer with the given name and content.
+    ///
+    /// The buffer will not be included in the virtual filesystem and it will be removed when it
+    /// loses focus.
+    pub fn new_virtual(id: usize, name: impl Into<String>, content: impl Into<String>) -> Self {
+        let mut content = normalize_line_endings(content.into());
+        if content.ends_with('\n') {
+            content.pop();
+        }
+
+        Self {
+            id,
+            kind: BufferKind::Virtual(name.into()),
+            dot: Dot::default(),
+            xdot: Dot::default(),
+            txt: GapBuffer::from(content),
+            cached_rx: 0,
+            last_save: SystemTime::now(),
+            dirty: false,
+            edit_log: EditLog::default(),
+            input_filter: None,
+            ts_state: None,
+            version: AtomicUsize::new(1),
+        }
+    }
+
+    /// Construct a new +output buffer with the given name which must be a valid output buffer name
+    /// of the form '$dir/+output'.
+    pub(super) fn new_output(id: usize, name: String, content: String) -> Self {
+        Self {
+            id,
+            kind: BufferKind::Output(name),
+            dot: Dot::default(),
+            xdot: Dot::default(),
+            txt: GapBuffer::from(normalize_line_endings(content)),
+            cached_rx: 0,
+            last_save: SystemTime::now(),
+            dirty: false,
+            edit_log: EditLog::default(),
+            input_filter: None,
+            ts_state: None,
+            version: AtomicUsize::new(1),
+        }
+    }
+
     /// Clear any existing tree-sitter state and then attempt to detect and set the state
     /// based on this buffer's BufferKind
     fn try_set_ts_state(&mut self) {
@@ -331,86 +414,6 @@ impl Buffer {
         };
 
         format!("\"{display_path}\" {n_lines}L {n_bytes}B loaded")
-    }
-
-    pub(super) fn new_minibuffer() -> Self {
-        Self {
-            id: usize::MAX,
-            kind: BufferKind::MiniBuffer,
-            dot: Default::default(),
-            xdot: Default::default(),
-            txt: GapBuffer::from(""),
-            cached_rx: 0,
-            last_save: SystemTime::now(),
-            dirty: false,
-            edit_log: Default::default(),
-            input_filter: None,
-            ts_state: None,
-            version: AtomicUsize::new(1),
-        }
-    }
-
-    /// Create a new unnamed buffer with the given content
-    pub fn new_unnamed(id: usize, content: impl Into<String>) -> Self {
-        Self {
-            id,
-            kind: BufferKind::Unnamed,
-            dot: Dot::default(),
-            xdot: Dot::default(),
-            txt: GapBuffer::from(normalize_line_endings(content.into())),
-            cached_rx: 0,
-            last_save: SystemTime::now(),
-            dirty: false,
-            edit_log: EditLog::default(),
-            input_filter: None,
-            ts_state: None,
-            version: AtomicUsize::new(1),
-        }
-    }
-
-    /// Create a new virtual buffer with the given name and content.
-    ///
-    /// The buffer will not be included in the virtual filesystem and it will be removed when it
-    /// loses focus.
-    pub fn new_virtual(id: usize, name: impl Into<String>, content: impl Into<String>) -> Self {
-        let mut content = normalize_line_endings(content.into());
-        if content.ends_with('\n') {
-            content.pop();
-        }
-
-        Self {
-            id,
-            kind: BufferKind::Virtual(name.into()),
-            dot: Dot::default(),
-            xdot: Dot::default(),
-            txt: GapBuffer::from(content),
-            cached_rx: 0,
-            last_save: SystemTime::now(),
-            dirty: false,
-            edit_log: EditLog::default(),
-            input_filter: None,
-            ts_state: None,
-            version: AtomicUsize::new(1),
-        }
-    }
-
-    /// Construct a new +output buffer with the given name which must be a valid output buffer name
-    /// of the form '$dir/+output'.
-    pub(super) fn new_output(id: usize, name: String, content: String) -> Self {
-        Self {
-            id,
-            kind: BufferKind::Output(name),
-            dot: Dot::default(),
-            xdot: Dot::default(),
-            txt: GapBuffer::from(normalize_line_endings(content)),
-            cached_rx: 0,
-            last_save: SystemTime::now(),
-            dirty: false,
-            edit_log: EditLog::default(),
-            input_filter: None,
-            ts_state: None,
-            version: AtomicUsize::new(1),
-        }
     }
 
     /// Short name for displaying in the status line
@@ -546,6 +549,17 @@ impl Buffer {
     #[inline]
     pub fn len_chars(&self) -> usize {
         self.txt.len_chars()
+    }
+
+    /// Fully clear the contents of this buffer, notifying fsys of the change
+    pub fn clear(&mut self) {
+        self.handle_action(Action::DotSet(TextObject::BufferStart, 1), Source::Fsys);
+        self.handle_action(
+            Action::DotExtendForward(TextObject::BufferEnd, 1),
+            Source::Fsys,
+        );
+        self.handle_action(Action::Delete, Source::Fsys);
+        self.xdot.clamp_idx(self.txt.len_chars());
     }
 
     /// Whether or not the buffer is empty.
@@ -1132,6 +1146,15 @@ impl Buffer {
         self.mark_dirty();
 
         (r.start, Some(s))
+    }
+
+    /// Insert a string into the buffer using the current xdot rather than dot.
+    pub(crate) fn insert_xdot(&mut self, s: String) {
+        let dot = self.dot;
+        self.dot = self.xdot;
+        self.handle_action(Action::InsertString { s }, Source::Fsys);
+        (self.xdot, self.dot) = (self.dot, dot);
+        self.dot.clamp_idx(self.txt.len_chars()); // xdot clamped as part of handling the insert
     }
 
     pub(crate) fn find_forward(&mut self, s: &str) {

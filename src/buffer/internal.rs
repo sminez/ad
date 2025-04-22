@@ -427,6 +427,10 @@ impl GapBuffer {
         Slice::from_raw_offsets(from, to, self)
     }
 
+    pub fn as_slice(&self) -> Slice<'_> {
+        self.slice(0, self.len_chars())
+    }
+
     fn chars_in_raw_range(&self, raw_from: usize, raw_to: usize) -> usize {
         if raw_to <= self.gap_start || raw_from >= self.gap_end {
             count_chars(&self.data[raw_from..raw_to])

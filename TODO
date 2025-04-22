@@ -1,5 +1,10 @@
 :: TODO
 
+
+// FIXME!!! This is where the different range semantics are
+// -> GapBuffer.slice(from, to)            is [from, to)
+//    but Dot::from_char_indices(from, to) is [from, to]
+
 - [ ] TAG SUPPORT
   - Need to update cur_from_screen_coords to be aware of tags
     >> current usage
