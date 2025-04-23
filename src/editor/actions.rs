@@ -267,7 +267,7 @@ where
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 _ = self.tx_fsys.send(LogEvent::Close(id));
-                self.clear_input_filter(id);
+                self.layout.clear_input_filter(id);
                 let was_last_buffer = self.layout.close_buffer(id);
                 self.running = !was_last_buffer;
             }
@@ -513,7 +513,7 @@ where
     }
 
     pub(super) fn expand_current_dot(&mut self) {
-        self.layout.active_buffer_mut().expand_cur_dot();
+        self.layout.active_buffer_or_tag_mut().expand_cur_dot();
     }
 
     /// Default semantics for attempting to load the current dot:
@@ -676,7 +676,7 @@ where
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
     pub(super) fn default_execute_dot(&mut self, arg: Option<(Range, String)>, source: Source) {
-        let b = self.layout.active_buffer_mut();
+        let b = self.layout.active_buffer_or_tag_mut();
         b.expand_cur_dot();
         if b.notify_execute(source, arg.clone()) {
             return; // input filter in place

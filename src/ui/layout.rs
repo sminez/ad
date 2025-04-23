@@ -4,13 +4,14 @@ use crate::{
     config_handle,
     dot::{Cur, Dot},
     editor::{Action, ViewPort},
+    fsys::InputFilter,
     lsp::LspManagerHandle,
     ziplist,
     ziplist::{Position, ZipList},
 };
 use ad_event::Source;
 use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
-use tracing::debug;
+use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
 
 /// Layout is a screen layout of the windows available for displaying buffer
@@ -66,12 +67,27 @@ impl Layout {
             .any(|(_, c)| c.wins.iter().any(|(_, w)| w.view.bufid == id))
     }
 
+    /// The semantics of active_buffer are to always return the active Buffer held within the
+    /// active Window. This means that if currently a tag has input focus then this method
+    /// will return the Buffer the tag is attached to, not the tag itself.
     pub(crate) fn active_buffer(&self) -> &Buffer {
         self.buffers.active()
     }
 
+    /// The semantics of active_buffer_mut are to always return the active Buffer held within
+    /// the active Window. This means that if currently a tag has input focus then this method
+    /// will return the Buffer the tag is attached to, not the tag itself.
     pub(crate) fn active_buffer_mut(&mut self) -> &mut Buffer {
         self.buffers.active_mut()
+    }
+
+    pub(crate) fn active_buffer_or_tag_mut(&mut self) -> &mut Buffer {
+        let win = &mut self.cols.focus.wins.focus;
+        if win.buffer_focused {
+            self.buffers.active_mut()
+        } else {
+            &mut win.tag.b
+        }
     }
 
     pub(crate) fn buffer_with_id(&self, id: BufferId) -> Option<&Buffer> {
@@ -94,11 +110,19 @@ impl Layout {
         a: Action,
         source: Source,
     ) -> Option<ActionOutcome> {
+        let n_cols = self.cols.focus.n_cols;
         let win = &mut self.cols.focus.wins.focus;
         if win.buffer_focused {
             self.buffers.active_mut().handle_action(a, source)
         } else {
-            win.tag.handle_action(a, source)
+            let tabstop = config_handle!().tabstop;
+            win.tag.handle_action(
+                self.buffers.with_id_mut(win.view.bufid)?,
+                a,
+                source,
+                tabstop,
+                n_cols,
+            )
         }
     }
 
@@ -347,11 +371,13 @@ impl Layout {
     /// Drag the focused window up through the column containing it (wrapping)
     pub(crate) fn drag_up(&mut self) {
         self.cols.focus.wins.swap_up();
+        self.cols.focus.update_tag_lines(config_handle!().tabstop);
     }
 
     /// Drag the focused window down through the column containing it (wrapping)
     pub(crate) fn drag_down(&mut self) {
         self.cols.focus.wins.swap_down();
+        self.cols.focus.update_tag_lines(config_handle!().tabstop);
     }
 
     /// Drag the focused window to the column on the left.
@@ -393,6 +419,11 @@ impl Layout {
             self.cols.focus.wins.insert(win);
         }
         self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        let tabstop = config_handle!().tabstop;
+        for (_, col) in self.cols.iter_mut() {
+            col.update_tag_lines(tabstop);
+        }
     }
 
     /// Drag the focused window to the column on the right.
@@ -417,16 +448,16 @@ impl Layout {
             self.cols.focus.wins.insert(win);
         }
         self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        let tabstop = config_handle!().tabstop;
+        for (_, col) in self.cols.iter_mut() {
+            col.update_tag_lines(tabstop);
+        }
     }
 
     #[inline]
     pub(crate) fn focused_view(&self) -> &View {
         &self.cols.focus.wins.focus.view
-    }
-
-    #[inline]
-    pub(crate) fn focused_view_mut(&mut self) -> &mut View {
-        &mut self.cols.focus.wins.focus.view
     }
 
     pub(crate) fn active_window_rows(&self) -> usize {
@@ -459,14 +490,27 @@ impl Layout {
         if self.focused_view().bufid == id {
             return;
         }
+        let b = match self.buffers.with_id(id) {
+            Some(b) => b,
+            None => return,
+        };
 
         let mut view = match self.views.iter().position(|v| v.bufid == id) {
             Some(idx) => self.views.remove(idx),
             None => View::new(id),
         };
 
-        swap(self.focused_view_mut(), &mut view);
+        swap(&mut self.cols.focus.wins.focus.view, &mut view);
         self.views.push(view);
+
+        let tabstop = config_handle!().tabstop;
+        let n_cols = self.cols.focus.n_cols;
+        self.cols
+            .focus
+            .wins
+            .focus
+            .tag
+            .set_parent(b, tabstop, n_cols);
     }
 
     /// Create a new column containing a single window showing the same view found in the
@@ -603,52 +647,42 @@ impl Layout {
             .set_viewport(b, vp, rows, cols);
     }
 
-    /// Coordinate offsets from the top left of the window layout to the top left of the active window.
-    fn xy_offsets(&self) -> (usize, usize) {
-        let cols_before = &self.cols.up;
-        let wins_above = &self.cols.focus.wins.up;
-        let x_offset = cols_before.iter().map(|c| c.n_cols).sum::<usize>() + cols_before.len();
-        let y_offset = wins_above.iter().map(|w| w.n_rows).sum::<usize>() + wins_above.len();
-
-        (x_offset, y_offset)
-    }
-
     /// Locate the absolute cursor position based on the current window layout
     pub(crate) fn ui_xy(&self, b: &Buffer) -> (usize, usize) {
-        let (x_offset, y_offset) = self.xy_offsets();
+        let (x_offset, y_offset) = xy_offsets(&self.cols);
         let (x, y) = self.focused_view().ui_xy(b);
 
         (x + x_offset, y + y_offset)
     }
 
-    fn buffer_for_screen_coords(&self, x: usize, y: usize) -> BufferId {
+    fn buffer_for_screen_coords(&self, x: usize, y: usize) -> BufOrTag {
         let mut x_offset = 0;
         let mut y_offset = 0;
 
-        for (_, col) in self.cols.iter() {
+        for (i, (_, col)) in self.cols.iter().enumerate() {
             if x > x_offset + col.n_cols {
                 x_offset += col.n_cols + 1;
                 continue;
             }
-            for (_, win) in col.wins.iter() {
+            for (j, (_, win)) in col.wins.iter().enumerate() {
                 if y > y_offset + win.n_rows {
                     y_offset += win.n_rows + 1;
                     continue;
                 }
-                return win.view.bufid;
+                return win.bufid_for_y_offset(y).unwrap_or(BufOrTag::Tag(i, j));
             }
         }
 
         debug!("click out of bounds (x, y)=({x}, {y})");
-        self.active_buffer().id
+        BufOrTag::Buf(self.active_buffer().id)
     }
 
-    pub(crate) fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
+    fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufOrTag {
         let mut x_offset = 0;
         let mut y_offset = 0;
 
         self.cols.focus_head();
-        for _ in 0..self.cols.len() {
+        for i in 0..self.cols.len() {
             let col = &self.cols.focus;
             if x > x_offset + col.n_cols {
                 x_offset += col.n_cols + 1;
@@ -657,33 +691,41 @@ impl Layout {
             }
 
             self.cols.focus.wins.focus_head();
-            for _ in 0..self.cols.focus.wins.len() {
-                let win = &self.cols.focus.wins.focus;
+            for j in 0..self.cols.focus.wins.len() {
+                let win = &mut self.cols.focus.wins.focus;
                 if y > y_offset + win.n_rows {
                     y_offset += win.n_rows + 1;
                     self.cols.focus.wins.focus_down();
                     continue;
                 }
                 self.buffers.focus_id(win.view.bufid);
-                return win.view.bufid;
+                return win.focus_y_offset(y).unwrap_or(BufOrTag::Tag(i, j));
             }
         }
 
         debug!("click out of bounds (x, y)=({x}, {y})");
-        self.active_buffer().id
+        BufOrTag::Buf(self.active_buffer().id)
+    }
+
+    fn bufortag_as_id(&self, bt: BufOrTag) -> BufferId {
+        match bt {
+            BufOrTag::Buf(id) => id,
+            BufOrTag::Tag(c, w) => self.cols[c].wins[w].tag.b.id,
+        }
     }
 
     pub(crate) fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> (bool, Cur) {
-        let bufid = self.buffer_for_screen_coords(x, y);
-        let is_active = bufid == self.active_buffer().id;
-        let cur = self.cur_from_screen_coords_and_bufid(x, y, bufid);
+        let bt = self.buffer_for_screen_coords(x, y);
+        let is_active = self.bufortag_as_id(bt) == self.active_buffer().id;
+        let cur = self.cur_from_screen_coords_and_bufortag(x, y, bt);
 
         (is_active, cur)
     }
 
     pub(crate) fn focus_cur_from_screen_coords(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
-        let bufid = self.focus_buffer_for_screen_coords(x, y);
-        let cur = self.cur_from_screen_coords_and_bufid(x, y, bufid);
+        let bt = self.focus_buffer_for_screen_coords(x, y);
+        let bufid = self.bufortag_as_id(bt);
+        let cur = self.cur_from_screen_coords_and_bufortag(x, y, bt);
 
         (bufid, cur)
     }
@@ -694,33 +736,41 @@ impl Layout {
     /// changed the active buffer.
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) -> bool {
         let current_bufid = self.buffers.active().id;
-        let bufid = self.focus_buffer_for_screen_coords(x, y);
-        let c = self.cur_from_screen_coords_and_bufid(x, y, bufid);
+        let bt = self.focus_buffer_for_screen_coords(x, y);
+        let bufid = self.bufortag_as_id(bt);
+        let c = self.cur_from_screen_coords_and_bufortag(x, y, bt);
         self.buffers.active_mut().dot = Dot::Cur { c };
 
         bufid == current_bufid
     }
 
-    fn cur_from_screen_coords_and_bufid(&mut self, x: usize, y: usize, bufid: BufferId) -> Cur {
-        let (x_offset, y_offset) = self.xy_offsets();
-        let b = self
-            .buffers
-            .with_id_mut(bufid)
-            .expect("layout state is stale");
+    fn cur_from_screen_coords_and_bufortag(&mut self, x: usize, y: usize, bt: BufOrTag) -> Cur {
+        let (x_offset, y_offset) = xy_offsets(&self.cols);
+        // We need this later to compute cur.y but b is potentially borrowed from self.cols so we need
+        // to grab it here first. (Same for assigning rx later)
+        let row_off = self.cols.focus.wins.focus.view.row_off;
+
+        let b = match bt {
+            BufOrTag::Buf(id) => self
+                .buffers
+                .with_id_mut(id)
+                .expect("layout state is stale"),
+            BufOrTag::Tag(c, w) => &mut self.cols[c].wins[w].tag.b,
+        };
+
         let (_, w_sgncol) = b.sign_col_dims();
         let rx = x
             .saturating_sub(1)
             .saturating_sub(w_sgncol)
             .saturating_sub(x_offset);
 
-        // TODO: should this be happening here? Or should it only be in focus_cur_from_screen_coords?
-        let view = self.cols.focus.focused_view_mut();
-        view.rx = rx;
         b.cached_rx = rx;
 
-        let y = min(y.saturating_sub(y_offset) + view.row_off, b.len_lines()).saturating_sub(1);
-        let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, view.rx), b);
-        cur.clamp_idx(b.txt.len_chars());
+        let y = min(y.saturating_sub(y_offset) + row_off, b.len_lines()).saturating_sub(1);
+        let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, rx), b);
+        cur.clamp_idx(b.len_chars());
+
+        self.cols.focus.wins.focus.view.rx = rx;
 
         cur
     }
@@ -739,6 +789,63 @@ impl Layout {
                 .update_ts_state(from, n_rows);
         }
     }
+    /// Returns `true` if the filter was successfully set, false if there was already one in place.
+    pub(crate) fn try_set_input_filter(&mut self, bufid: BufferId, filter: InputFilter) -> bool {
+        let b = match self.buffer_with_id_mut(bufid) {
+            Some(b) => b,
+            None => return false,
+        };
+
+        if b.input_filter.is_some() {
+            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
+            return false;
+        }
+
+        b.input_filter = Some(filter.clone());
+
+        for (_, col) in self.cols.iter_mut() {
+            for (_, win) in col.wins.iter_mut() {
+                if win.view.bufid == bufid {
+                    win.tag.set_input_filter(&filter)
+                }
+            }
+        }
+
+        true
+    }
+
+    /// Remove the input filter for the given buffer if one exists.
+    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
+        if let Some(b) = self.buffer_with_id_mut(bufid) {
+            b.input_filter = None;
+        }
+
+        for (_, col) in self.cols.iter_mut() {
+            for (_, win) in col.wins.iter_mut() {
+                if win.view.bufid == bufid {
+                    win.tag.clear_input_filter();
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum BufOrTag {
+    /// ID of the buffer in Buffers
+    Buf(BufferId),
+    /// (col, win) indices for accessing the tag in cols
+    Tag(usize, usize),
+}
+
+/// Coordinate offsets from the top left of the window layout to the top left of the active window.
+fn xy_offsets(cols: &ZipList<Column>) -> (usize, usize) {
+    let cols_before = &cols.up;
+    let wins_above = &cols.focus.wins.up;
+    let x_offset = cols_before.iter().map(|c| c.n_cols).sum::<usize>() + cols_before.len();
+    let y_offset = wins_above.iter().map(|w| w.n_rows).sum::<usize>() + wins_above.len();
+
+    (x_offset, y_offset)
 }
 
 #[derive(Debug)]
@@ -781,6 +888,7 @@ impl Column {
             return;
         }
 
+        let tabstop = config_handle!().tabstop;
         let (h_win, slop) = calculate_dims(n_rows, self.wins.len());
         for (i, (_, win)) in self.wins.iter_mut().enumerate() {
             let mut h = h_win;
@@ -788,6 +896,13 @@ impl Column {
                 h += 1;
             }
             win.n_rows = h;
+            win.tag.compute_ui_lines(tabstop, n_cols);
+        }
+    }
+
+    fn update_tag_lines(&mut self, tabstop: usize) {
+        for (_, win) in self.wins.iter_mut() {
+            win.tag.compute_ui_lines(tabstop, self.n_cols);
         }
     }
 
@@ -820,16 +935,28 @@ impl Window {
         }
     }
 
-    // /// For a given y offset from the top of the window, check whether are we inside of the tag or
-    // /// inside of the buffer itself and return the appropriate buffer ID
-    // fn bufid_for_y_offset(&self, y: usize) -> BufferId {
-    //     todo!()
-    // }
+    /// For a given y offset from the top of the window, check whether are we inside of the tag or
+    /// inside of the buffer itself and return our view's buffer ID if it is focused, otherwise None.
+    /// Callers are then expected to build a [BufOrTag] to identify the current position of this Window
+    /// in cols for accessing the tag Buffer.
+    fn bufid_for_y_offset(&self, y: usize) -> Option<BufOrTag> {
+        if y < self.tag.ui_lines.len() {
+            None
+        } else {
+            Some(BufOrTag::Buf(self.view.bufid))
+        }
+    }
 
-    // /// Same as bufid_for_y_offset but also set the buffer_focused flag
-    // fn focus_y_offset(&mut self, y: usize) -> BufferId {
-    //     todo!()
-    // }
+    /// Same as bufid_for_y_offset but also set the buffer_focused flag
+    fn focus_y_offset(&mut self, y: usize) -> Option<BufOrTag> {
+        if y < self.tag.ui_lines.len() {
+            self.buffer_focused = false;
+            None
+        } else {
+            self.buffer_focused = true;
+            Some(BufOrTag::Buf(self.view.bufid))
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1156,7 +1283,7 @@ mod tests {
 
         assert_eq!(
             ws.buffer_for_screen_coords(x, y),
-            expected,
+            BufOrTag::Buf(expected),
             "bufid without mutation"
         );
         assert_eq!(
@@ -1165,11 +1292,12 @@ mod tests {
         );
         assert_eq!(
             ws.focus_buffer_for_screen_coords(x, y),
-            expected,
+            BufOrTag::Buf(expected),
             "bufid with mutation"
         );
         assert_eq!(
-            ws.cols.focus.wins.focus.view.bufid, expected,
+            ws.cols.focus.wins.focus.view.bufid,
+            expected,
             "focused id after mutation"
         );
     }
@@ -1218,7 +1346,7 @@ mod tests {
 
         assert_eq!(
             ws.focus_buffer_for_screen_coords(x, y),
-            expected,
+            BufOrTag::Buf(expected),
             "bufid with mutation"
         );
 
@@ -1230,7 +1358,7 @@ mod tests {
 
         assert_eq!(
             ws.focus_buffer_for_screen_coords(x, y),
-            expected,
+            BufOrTag::Buf(expected),
             "bufid with mutation"
         );
 

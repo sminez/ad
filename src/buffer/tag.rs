@@ -6,6 +6,7 @@ use crate::{
     buffer::{ActionOutcome, Buffer},
     dot::{find::find_forward, Cur, Dot},
     editor::Action,
+    fsys::InputFilter,
 };
 use ad_event::Source;
 use std::{iter::repeat_n, mem::swap};
@@ -24,9 +25,9 @@ const GET: &str = " Get";
 #[derive(Debug)]
 pub(crate) struct Tag {
     /// The full tag content including filename and | separator
-    pub(super) b: Buffer,
+    pub(crate) b: Buffer,
     /// Cached UI plaintext lines
-    pub(super) ui_lines: Vec<String>,
+    pub(crate) ui_lines: Vec<String>,
 }
 
 impl Tag {
@@ -48,7 +49,7 @@ impl Tag {
     /// and attempting to preserve any user edited portion of the tag rather than attempting to
     /// modify edits being made to the tag in order to ensure that the invariants are upheld.
     /// This is a similar approach to the one used in Acme.
-    fn set_parent(&mut self, b: &Buffer, tabstop: usize, n_cols: usize) {
+    pub(crate) fn set_parent(&mut self, b: &Buffer, tabstop: usize, n_cols: usize) {
         // parse the current tag content in order to see if we need to change anything
         let (eofname, mut sotag) = parse_tag(&self.b);
         let old_fname = self.b.txt.slice(0, eofname);
@@ -80,10 +81,17 @@ impl Tag {
         self.update_content(&fname, sotag, b, tabstop, n_cols);
     }
 
-    fn update_content(&mut self, fname: &str, sotag: Option<usize>, b: &Buffer, tabstop: usize, n_cols: usize) {
+    fn update_content(
+        &mut self,
+        fname: &str,
+        sotag: Option<usize>,
+        b: &Buffer,
+        tabstop: usize,
+        n_cols: usize,
+    ) {
         // Determine the new tag content and then replace the existing tag if they differ
         let mut new_tag = fname.to_string();
-        new_tag.reserve(self.b.txt.len() - fname.len()); // avoid repeated realloc
+        new_tag.reserve(self.b.txt.len().saturating_sub(fname.len())); // avoid repeated realloc
 
         if b.dirty && !b.kind.is_dir() {
             new_tag.push_str(PUT);
@@ -106,8 +114,23 @@ impl Tag {
         self.compute_ui_lines(tabstop, n_cols);
     }
 
-    pub(crate) fn handle_action(&mut self, a: Action, source: Source) -> Option<ActionOutcome> {
-        todo!("how this works varies depending on whether or not we are editing the filename {a:?} {source:?}")
+    pub(crate) fn handle_action(
+        &mut self,
+        b: &mut Buffer,
+        a: Action,
+        source: Source,
+        tabstop: usize,
+        n_cols: usize,
+    ) -> Option<ActionOutcome> {
+        let action = self.b.handle_action(a, source);
+        self.update_parent(b, tabstop, n_cols);
+
+        action
+    }
+
+    #[inline]
+    pub(crate) fn set_input_filter(&mut self, filter: &InputFilter) {
+        self.b.input_filter = Some(filter.paired_tag_filter());
     }
 
     #[inline]
@@ -115,11 +138,7 @@ impl Tag {
         self.b.input_filter = None;
     }
 
-    pub(crate) fn ui_lines(&self) -> &[String] {
-        &self.ui_lines
-    }
-
-    fn compute_ui_lines(&mut self, tabstop: usize, n_cols: usize) {
+    pub(crate) fn compute_ui_lines(&mut self, tabstop: usize, n_cols: usize) {
         if n_cols == 0 {
             return;
         }
