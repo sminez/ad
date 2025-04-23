@@ -6,6 +6,7 @@ use std::{
     fmt,
     iter::{once, IntoIterator},
     mem::{swap, take},
+    ops::{Index, IndexMut},
 };
 
 #[macro_export]
@@ -633,6 +634,34 @@ impl<T: PartialEq> ZipList<T> {
     }
 }
 
+impl<T> Index<usize> for ZipList<T> {
+    type Output = T;
+
+    fn index(&self, i: usize) -> &Self::Output {
+        let nup = self.up.len();
+        if i < nup {
+            &self.up[nup - i - 1]
+        } else if i == nup {
+            &self.focus
+        } else {
+            &self.down[i - nup - 1]
+        }
+    }
+}
+
+impl<T> IndexMut<usize> for ZipList<T> {
+    fn index_mut(&mut self, i: usize) -> &mut Self::Output {
+        let nup = self.up.len();
+        if i < nup {
+            &mut self.up[nup - i - 1]
+        } else if i == nup {
+            &mut self.focus
+        } else {
+            &mut self.down[i - nup - 1]
+        }
+    }
+}
+
 // Iteration
 
 /// An owned iterator over a [ZipList].
@@ -998,5 +1027,29 @@ mod tests {
         s.insert_at(pos, 6);
 
         assert_eq!(s, expected);
+    }
+
+    #[test_case(ziplist!([1,2,3,4], 5, []); "up and focus")]
+    #[test_case(ziplist!([], 1, [2,3,4,5]); "focus and down")]
+    #[test_case(ziplist!([1,2], 3, [4,5]); "all")]
+    #[test_case(ziplist!([], 1, []); "focus only")]
+    #[test]
+    fn index(zl: ZipList<usize>) {
+        for i in 0..zl.len() {
+            assert_eq!(zl[i], i + 1, "i={i}");
+        }
+    }
+
+    #[test_case(ziplist!([1,2,3,4], 5, []); "up and focus")]
+    #[test_case(ziplist!([], 1, [2,3,4,5]); "focus and down")]
+    #[test_case(ziplist!([1,2], 3, [4,5]); "all")]
+    #[test_case(ziplist!([], 1, []); "focus only")]
+    #[test]
+    fn index_mut(mut zl: ZipList<usize>) {
+        let expected = zl.clone().map(|_| 6);
+        for i in 0..zl.len() {
+            zl[i] = 6;
+        }
+        assert_eq!(zl, expected);
     }
 }
