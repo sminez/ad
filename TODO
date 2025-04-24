@@ -6,21 +6,9 @@
 //    but Dot::from_char_indices(from, to) is [from, to]
 
 - [ ] TAG SUPPORT
-  - Need to update cur_from_screen_coords to be aware of tags
-    >> current usage
-      * (set_focus=false) update mouse drag position
-      * (set_focus=false) mouse button release
-      * (set_focus=true)  handle_right_or_middle_click
-      * (set_focus=true)  set_dot_from_screen_coords
-        * only used inside of handle_mouse_event when handling a left click
-    >> So,
-      -> set_focus=false is used updating a held mouse drag (release logic is this as well)
-      -> set_focus=true is used when handling an initial click
-
-  - Need to update window size calculations to be aware of tags taking up screen space
-  - Tags also need to be truncated if there is insufficient screen space
-  - Exposing through fsys will mean having to have window state as well as buffer state
-  - Events need updating to say whether they came from buffers or tags
+  - [ ] Exposing through fsys will mean having to have window state as well as buffer state
+  - [ ] Load from tag seems to anchor at the first match in the buffer rather than searching
+        forward from the current buffer dot
 
 
 -- Misc / Editor features --

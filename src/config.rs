@@ -5,6 +5,7 @@ use crate::{
     key::Input,
     term::{Color, Styles},
     trie::Trie,
+    ts::{TK_BAR, TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
     util::parent_dir_containing,
 };
 use serde::{
@@ -17,11 +18,6 @@ use std::{
 use tracing::{error, warn};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../data/config.toml");
-
-pub const TK_DEFAULT: &str = "default";
-pub const TK_DOT: &str = "dot";
-pub const TK_LOAD: &str = "load";
-pub const TK_EXEC: &str = "exec";
 
 pub(crate) fn config_path() -> String {
     let home = env::var("HOME").unwrap();
@@ -92,6 +88,16 @@ impl Config {
             style.fg = style.fg.or(Some(cfg.colorscheme.fg));
             style.bg = style.bg.or(Some(cfg.colorscheme.bg));
         }
+
+        // Ensure that the bar token styling is set
+        cfg.colorscheme
+            .syntax
+            .entry(TK_BAR.to_string())
+            .or_insert(Styles {
+                fg: Some(cfg.colorscheme.fg),
+                bg: Some(cfg.colorscheme.bar_bg),
+                ..Default::default()
+            });
 
         // Replace "~/" shorthand notation in paths with the user's $HOME
         for s in [
@@ -165,6 +171,7 @@ impl Default for ColorScheme {
     fn default() -> Self {
         let bg: Color = "#1B1720".try_into().unwrap();
         let fg: Color = "#E6D29E".try_into().unwrap();
+        let bar_bg: Color = "#4E415C".try_into().unwrap();
         let dot_bg: Color = "#336677".try_into().unwrap();
         let load_bg: Color = "#957FB8".try_into().unwrap();
         let exec_bg: Color = "#Bf616A".try_into().unwrap();
@@ -181,6 +188,7 @@ impl Default for ColorScheme {
         #[rustfmt::skip]
         let syntax = [
             (TK_DEFAULT,    Styles { fg: Some(fg), bg: Some(bg), ..Default::default() }),
+            (TK_BAR,        Styles { fg: Some(fg), bg: Some(bar_bg), ..Default::default() }),
             (TK_DOT,        Styles { fg: Some(fg), bg: Some(dot_bg), ..Default::default() }),
             (TK_LOAD,       Styles { fg: Some(fg), bg: Some(load_bg), ..Default::default() }),
             (TK_EXEC,       Styles { fg: Some(fg), bg: Some(exec_bg), ..Default::default() }),
@@ -202,7 +210,7 @@ impl Default for ColorScheme {
         Self {
             bg,
             fg,
-            bar_bg: "#4E415C".try_into().unwrap(),
+            bar_bg,
             signcol_fg: "#544863".try_into().unwrap(),
             minibuffer_hl: "#3E3549".try_into().unwrap(),
             syntax,

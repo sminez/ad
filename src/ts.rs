@@ -38,6 +38,7 @@ use tracing::{error, info};
 use tree_sitter::{self as ts, ffi::TSLanguage};
 
 pub const TK_DEFAULT: &str = "default";
+pub const TK_BAR: &str = "bar";
 pub const TK_DOT: &str = "dot";
 pub const TK_LOAD: &str = "load";
 pub const TK_EXEC: &str = "exec";

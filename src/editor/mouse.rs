@@ -78,9 +78,9 @@ where
                     return;
                 }
 
-                let click_in_active_buffer = self.layout.set_dot_from_screen_coords(x, y);
-                let b = self.layout.active_buffer_mut();
-                if !click_in_active_buffer {
+                let (click_in_active_buffer, is_buf) = self.layout.set_dot_from_screen_coords(x, y);
+                let b = self.layout.active_buffer_or_tag_mut();
+                if is_buf && !click_in_active_buffer {
                     _ = self.tx_fsys.send(LogEvent::Focus(b.id));
                 }
 
@@ -109,14 +109,13 @@ where
                         return;
                     }
 
-                    let (is_active, cur) = self.layout.cur_from_screen_coords(x, y);
-                    if !is_active {
-                        return;
+                    match self.layout.try_active_cur_from_screen_coords(x, y) {
+                        Some(cur) => click.selection.set_active_cursor(cur),
+                        None => return,
                     }
-                    click.selection.set_active_cursor(cur);
 
                     if click.btn == Left {
-                        self.layout.active_buffer_mut().dot = Dot::from(click.selection);
+                        self.layout.active_buffer_or_tag_mut().dot = Dot::from(click.selection);
                     }
                 }
             }
@@ -147,10 +146,9 @@ where
                     return;
                 }
 
-                let (is_active, cur) = self.layout.cur_from_screen_coords(x, y);
                 // Support releasing the mouse over a different window as actioning the selection
                 // as it was present in the active buffer
-                if is_active {
+                if let Some(cur) = self.layout.try_active_cur_from_screen_coords(x, y) {
                     click.selection.set_active_cursor(cur);
                 }
 
@@ -679,7 +677,8 @@ mod tests {
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();
         let filter = InputFilter::new(tx);
-        ed.layout.try_set_input_filter(ed.active_buffer_id(), filter);
+        ed.layout
+            .try_set_input_filter(ed.active_buffer_id(), filter);
 
         for evt in evts.iter() {
             ed.handle_mouse_event(*evt);

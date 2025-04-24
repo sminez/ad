@@ -529,7 +529,11 @@ where
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
     pub(super) fn default_load_dot(&mut self, source: Source, load_in_new_window: bool) {
-        let b = self.layout.active_buffer_mut();
+        // When loading from a tag we take the content from the tag but run the load in the
+        // associated buffer.
+        let id = self.layout.active_buffer().id;
+        let b = self.layout.active_buffer_or_tag_mut();
+
         b.expand_cur_dot();
         if b.notify_load(source) {
             return; // input filter in place
@@ -540,7 +544,6 @@ where
             return;
         }
 
-        let id = b.id;
         self.load_string_in_buffer(id, s, load_in_new_window);
     }
 

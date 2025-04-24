@@ -3,10 +3,11 @@
 //!
 //! See ../ui/layout.rs:/struct.Window/
 use crate::{
-    buffer::{ActionOutcome, Buffer},
-    dot::{find::find_forward, Cur, Dot},
+    buffer::{ActionOutcome, Buffer, GapBuffer},
+    dot::{find::find_forward, Cur, Dot, Range},
     editor::Action,
     fsys::InputFilter,
+    ts::LineIter,
 };
 use ad_event::Source;
 use std::{iter::repeat_n, mem::swap};
@@ -24,19 +25,23 @@ const GET: &str = " Get";
 ///                                              ... <- uneditable
 #[derive(Debug)]
 pub(crate) struct Tag {
-    /// The full tag content including filename and | separator
+    /// The full editable tag content including filename and | separator
     pub(crate) b: Buffer,
-    /// Cached UI plaintext lines
-    pub(crate) ui_lines: Vec<String>,
+    /// Pre-computed, wrapped UI lines
+    pub(crate) gb: GapBuffer,
+    /// Number of UI tag lines
+    pub(crate) n_lines: usize,
 }
 
 impl Tag {
     /// Construct a new [Tag] associated with a given buffer.
     pub(super) fn new(parent: &Buffer, id: usize, tabstop: usize, n_cols: usize) -> Self {
         let content = format!("{} | ", parent.full_name());
+        let gb = GapBuffer::from(content.as_str());
         let mut tag = Self {
             b: Buffer::new_unnamed(id, content),
-            ui_lines: Vec::new(),
+            gb,
+            n_lines: 0,
         };
         tag.set_parent(parent, tabstop, n_cols);
 
@@ -73,7 +78,7 @@ impl Tag {
     /// the full tag content.
     fn update_parent(&mut self, b: &mut Buffer, tabstop: usize, n_cols: usize) {
         let (eofname, sotag) = parse_tag(&self.b);
-        let fname = self.b.txt.slice(0, eofname).to_string();
+        let fname = self.b.txt.slice(0, eofname + 1).to_string();
         if fname != b.full_name() {
             b.set_filename(&fname);
         }
@@ -114,6 +119,17 @@ impl Tag {
         self.compute_ui_lines(tabstop, n_cols);
     }
 
+    pub(crate) fn line_iter(&self, load_exec_range: Option<(bool, Range)>) -> LineIter<'_> {
+        LineIter::new(
+            0,
+            &self.gb,
+            self.b.dot.as_range(),
+            load_exec_range,
+            &[],
+            &[],
+        )
+    }
+
     pub(crate) fn handle_action(
         &mut self,
         b: &mut Buffer,
@@ -122,10 +138,10 @@ impl Tag {
         tabstop: usize,
         n_cols: usize,
     ) -> Option<ActionOutcome> {
-        let action = self.b.handle_action(a, source);
+        let outcome = self.b.handle_action(a, source);
         self.update_parent(b, tabstop, n_cols);
 
-        action
+        outcome
     }
 
     #[inline]
@@ -186,7 +202,9 @@ impl Tag {
             lines.push(buf);
         }
 
-        self.ui_lines = lines;
+        self.gb.clear();
+        self.gb.insert_str(0, &lines.join("\n"));
+        self.n_lines = lines.len();
     }
 }
 
@@ -203,7 +221,7 @@ fn parse_tag(b: &Buffer) -> (usize, Option<usize>) {
     // the tag is split by either " |" or "\t|"
     let sotag = find_forward(&SPACE_PIPE, Cur::new(0), b)
         .or_else(|| find_forward(&TAB_PIPE, Cur::new(0), b))
-        .map(&|dot: Dot| dot.last_cur().idx + 1); // starts the char after |
+        .map(|dot: Dot| dot.last_cur().idx + 1); // starts the char after |
 
     (eofname.saturating_sub(1), sotag)
 }
@@ -265,7 +283,8 @@ mod tests {
         tag.b.append(s.to_string(), Source::Fsys);
         tag.compute_ui_lines(4, 10);
 
-        let str_lines: Vec<_> = tag.ui_lines.iter().map(|s| s.as_str()).collect();
+        let string_lines: Vec<String> = tag.gb.iter_lines().map(|l| l.to_string()).collect();
+        let str_lines: Vec<&str> = string_lines.iter().map(|s| s.as_str()).collect();
 
         assert_eq!(&str_lines, expected);
     }
@@ -322,7 +341,7 @@ mod tests {
             b.kind = BufferKind::Directory("/home/bar/baz.json".into());
         }
         b.dirty = dirty;
-        tag.set_parent(&b, 4, 10);
+        tag.set_parent(b, 4, 10);
 
         let s_tag = tag.b.txt.to_string();
         assert_eq!(s_tag, format!("/home/bar/baz.json{pre} | {current}"));

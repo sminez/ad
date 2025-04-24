@@ -2,6 +2,7 @@
 //!
 //! Really this should be published as its own crate.
 use std::{
+    cmp::Ordering,
     collections::vec_deque::{self, VecDeque},
     fmt,
     iter::{once, IntoIterator},
@@ -639,12 +640,10 @@ impl<T> Index<usize> for ZipList<T> {
 
     fn index(&self, i: usize) -> &Self::Output {
         let nup = self.up.len();
-        if i < nup {
-            &self.up[nup - i - 1]
-        } else if i == nup {
-            &self.focus
-        } else {
-            &self.down[i - nup - 1]
+        match i.cmp(&nup) {
+            Ordering::Less => &self.up[nup - i - 1],
+            Ordering::Equal => &self.focus,
+            Ordering::Greater => &self.down[i - nup - 1],
         }
     }
 }
@@ -652,12 +651,10 @@ impl<T> Index<usize> for ZipList<T> {
 impl<T> IndexMut<usize> for ZipList<T> {
     fn index_mut(&mut self, i: usize) -> &mut Self::Output {
         let nup = self.up.len();
-        if i < nup {
-            &mut self.up[nup - i - 1]
-        } else if i == nup {
-            &mut self.focus
-        } else {
-            &mut self.down[i - nup - 1]
+        match i.cmp(&nup) {
+            Ordering::Less => &mut self.up[nup - i - 1],
+            Ordering::Equal => &mut self.focus,
+            Ordering::Greater => &mut self.down[i - nup - 1],
         }
     }
 }

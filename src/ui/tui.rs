@@ -13,7 +13,7 @@ use crate::{
         get_termsize, register_signal_handler, win_size_changed, CurShape, Cursor, Style, Styles,
         RESET_STYLE,
     },
-    ts::{LineIter, RangeToken},
+    ts::{LineIter, RangeToken, TK_BAR, TK_DEFAULT},
     ui::{
         layout::{Column, Window},
         Layout, StateChange, UserInterface,
@@ -341,7 +341,7 @@ impl UserInterface for Tui {
         let (x, y) = if w_minibuffer {
             (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
         } else {
-            layout.ui_xy(active_buffer)
+            layout.ui_xy()
         };
         lines.push(format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
@@ -477,15 +477,27 @@ impl<'a> ColIter<'a> {
             .expect("valid buffer id");
 
         let (w_lnum, _) = b.sign_col_dims();
-        let rng = if is_focus { self.load_exec_range } else { None };
+        let (rng, tag_rng) = if is_focus {
+            if w.buffer_focused {
+                (self.load_exec_range, None)
+            } else {
+                (None, self.load_exec_range)
+            }
+        } else {
+            (None, None)
+        };
         let it = b.iter_tokenized_lines_from(w.view.row_off, rng);
+        let tag_it = w.tag.line_iter(tag_rng);
 
         Some(WinIter {
             y: 0,
             w_lnum,
             n_cols: self.n_cols,
             tabstop: self.tabstop,
+            n_tag_lines: w.tag.n_lines,
+            tag_it,
             it,
+            tag_gb: &w.tag.gb,
             gb: &b.txt,
             w,
             cs: self.cs,
@@ -523,7 +535,10 @@ struct WinIter<'a> {
     w_lnum: usize,
     n_cols: usize,
     tabstop: usize,
+    n_tag_lines: usize,
+    tag_it: LineIter<'a>,
     it: LineIter<'a>,
+    tag_gb: &'a GapBuffer,
     gb: &'a GapBuffer,
     w: &'a Window,
     cs: &'a ColorScheme,
@@ -537,7 +552,24 @@ impl Iterator for WinIter<'_> {
         if self.y >= self.w.n_rows {
             return None;
         }
-        let file_row = self.y + self.w.view.row_off;
+        if let Some(it) = self.tag_it.next() {
+            self.y += 1;
+            return Some(render_line(
+                self.tag_gb,
+                it.map(|mut t| {
+                    if t.tag == TK_DEFAULT {
+                        t.tag = TK_BAR;
+                    }
+                    t
+                }),
+                0,
+                self.n_cols,
+                self.tabstop,
+                self.cs,
+                &mut self.style_cache,
+            ));
+        }
+        let file_row = self.y + self.w.view.row_off - self.n_tag_lines;
         self.y += 1;
 
         let next = self.it.next();
