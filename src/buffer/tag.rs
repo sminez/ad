@@ -283,7 +283,14 @@ mod tests {
         tag.b.append(s.to_string(), Source::Fsys);
         tag.compute_ui_lines(4, 10);
 
-        let string_lines: Vec<String> = tag.gb.iter_lines().map(|l| l.to_string()).collect();
+        let string_lines: Vec<String> = tag
+            .gb
+            .iter_lines()
+            .map(|l| {
+                let s = l.to_string();
+                s.trim_end_matches('\n').to_string()
+            })
+            .collect();
         let str_lines: Vec<&str> = string_lines.iter().map(|s| s.as_str()).collect();
 
         assert_eq!(&str_lines, expected);

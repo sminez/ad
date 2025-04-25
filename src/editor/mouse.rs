@@ -9,6 +9,7 @@ use crate::{
 };
 use ad_event::Source;
 use std::time::Instant;
+use tracing::trace;
 
 /// Transient state that we hold to track the last mouse click we saw while
 /// we wait for it to be released or if the buffer changes.
@@ -69,6 +70,7 @@ where
 
         let last_click_time = self.last_click_time;
         self.last_click_time = Instant::now();
+        trace!("handling mouse event: {k:?} {b:?} ({m:?}) @ ({x}, {y})");
 
         match (k, m, b) {
             (Press, NoMod, Left) => {
@@ -210,17 +212,17 @@ where
             // For Middle clicks, if there is also a range dot in the buffer then that is
             // used as an argument to the command being executed.
             if is_right {
-                self.layout.active_buffer_mut().dot = Dot::from(click.selection);
+                self.layout.active_buffer_or_tag_mut().dot = Dot::from(click.selection);
                 self.default_load_dot(Source::Mouse, load_in_new_window);
             } else {
-                let dot = self.layout.active_buffer().dot;
-                self.layout.active_buffer_mut().dot = Dot::from(click.selection);
+                let dot = self.layout.active_buffer_or_tag().dot;
+                self.layout.active_buffer_or_tag_mut().dot = Dot::from(click.selection);
 
                 if dot.is_range() {
                     // Execute as if the click selection was dot then reset dot
                     let arg = dot.content(self.layout.active_buffer()).trim().to_string();
                     self.default_execute_dot(Some((dot.as_range(), arg)), Source::Mouse);
-                    self.layout.active_buffer_mut().dot = dot;
+                    self.layout.active_buffer_or_tag_mut().dot = dot;
                 } else {
                     self.default_execute_dot(None, Source::Mouse);
                 }
@@ -231,11 +233,11 @@ where
             // dot (and allow smart expand to handle generating the selection) before we Load/Execute
             if !self
                 .layout
-                .active_buffer()
+                .active_buffer_or_tag()
                 .dot
                 .contains(&click.selection.start)
             {
-                self.layout.active_buffer_mut().dot = Dot::from(click.selection.start);
+                self.layout.active_buffer_or_tag_mut().dot = Dot::from(click.selection.start);
             }
 
             if is_right {
@@ -295,9 +297,9 @@ mod tests {
 
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         "some",
@@ -308,9 +310,9 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
         ],
         None,
         "some",
@@ -323,9 +325,9 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
         ],
         None,
         "some",
@@ -338,8 +340,8 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         Some(Click::new(Left, r(0, 3, false))),
         "some",
@@ -350,8 +352,8 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 2 },
         ],
         Some(Click::new(Right, r(0, 3, false))),
         "t",  // default dot position
@@ -362,8 +364,8 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 2 },
         ],
         Some(Click::new(Middle, r(0, 3, false))),
         "t",  // default dot position
@@ -374,10 +376,10 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 4, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 4, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 4, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 4, y: 2 },
         ],
         None,
         "some",
@@ -390,10 +392,10 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 4, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 4, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 4, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 4, y: 2 },
         ],
         None,
         "some",
@@ -406,12 +408,12 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 9, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 12, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 12, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 9, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 12, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 12, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
         ],
         None,
         "text",
@@ -425,11 +427,11 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         " ",
@@ -442,11 +444,11 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         " ",
@@ -460,13 +462,13 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         " ",
@@ -482,13 +484,13 @@ mod tests {
     // selection and clipboard end up as
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         "t",
@@ -503,13 +505,13 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         " ",
@@ -522,13 +524,13 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
         ],
         None,
         " ",
@@ -542,12 +544,12 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 3, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 3, y: 2 },
         ],
         None,
         " ",
@@ -561,12 +563,12 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Left, x: 2, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 2, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Left, x: 2, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 2, y: 2 },
         ],
         None,
         " ",
@@ -579,11 +581,11 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
         ],
         None,
         "t",
@@ -594,11 +596,11 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
         ],
         None,
         "t",
@@ -609,11 +611,11 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
         ],
         None,
         "t",
@@ -624,11 +626,11 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 1 },
-            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 2 },
+            MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Right, x: 7, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Middle, x: 7, y: 2 },
         ],
         None,
         "t",
@@ -639,10 +641,10 @@ mod tests {
     )]
     #[test_case(
         &[
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 9, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 9, y: 1 },
-            MouseEvent { k: Press, m: NoMod, b: Left, x: 9, y: 1 },
-            MouseEvent { k: Release, m: NoMod, b: Left, x: 9, y: 1 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 9, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 9, y: 2 },
+            MouseEvent { k: Press, m: NoMod, b: Left, x: 9, y: 2 },
+            MouseEvent { k: Release, m: NoMod, b: Left, x: 9, y: 2 },
         ],
         None,
         "text",
@@ -672,7 +674,7 @@ mod tests {
         ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
         ed.layout
             .open_virtual("test", "some text to test with", false);
-        ed.layout.active_buffer_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
+        ed.layout.active_buffer_or_tag_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
 
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();
@@ -685,8 +687,9 @@ mod tests {
         }
 
         let recvd_fsys_events: Vec<_> = rx.try_iter().collect();
-        let b = ed.layout.active_buffer();
+        let b = ed.layout.active_buffer_or_tag();
 
+        assert_eq!(ed.layout.active_buffer_or_tag().id, 1);
         assert_eq!(ed.held_click, click, "click");
         assert_eq!(b.dot.content(b), dot, "dot content");
         assert_eq!(b.str_contents(), content, "buffer content");

@@ -685,7 +685,10 @@ impl Layout {
                     y_offset += win.n_rows + 1;
                     continue;
                 }
-                return win.bufid_for_y_offset(y).unwrap_or(BufOrTag::Tag(i, j));
+                println!("CHECKING Y OFFSET {y}");
+                return win
+                    .bufid_for_y_offset(y - y_offset)
+                    .unwrap_or(BufOrTag::Tag(i, j));
             }
         }
 
@@ -715,7 +718,9 @@ impl Layout {
                     continue;
                 }
                 self.buffers.focus_id(win.view.bufid);
-                return win.focus_y_offset(y).unwrap_or(BufOrTag::Tag(i, j));
+                return win
+                    .focus_y_offset(y - y_offset)
+                    .unwrap_or(BufOrTag::Tag(i, j));
             }
         }
 
@@ -782,7 +787,7 @@ impl Layout {
 
         let (_, w_sgncol) = b.sign_col_dims();
         let mut rx = x.saturating_sub(1).saturating_sub(x_offset);
-        let mut y = min(y.saturating_sub(y_offset) + row_off, b.len_lines()).saturating_sub(1);
+        let mut y = min(y.saturating_sub(y_offset) + row_off, b.len_lines());
 
         if is_buf {
             rx = rx.saturating_sub(w_sgncol);
@@ -790,6 +795,8 @@ impl Layout {
             b.cached_rx = rx;
             y -= tag_lines;
         }
+
+        y = y.saturating_sub(1);
 
         let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, rx), b);
         cur.clamp_idx(b.len_chars());
@@ -963,7 +970,7 @@ impl Window {
     /// Callers are then expected to build a [BufOrTag] to identify the current position of this Window
     /// in cols for accessing the tag Buffer.
     fn bufid_for_y_offset(&self, y: usize) -> Option<BufOrTag> {
-        if y < self.tag.n_lines {
+        if y <= self.tag.n_lines {
             None
         } else {
             Some(BufOrTag::Buf(self.view.bufid))
@@ -1201,8 +1208,8 @@ mod tests {
         l
     }
 
-    fn ordered_window_ids(ws: &Layout) -> Vec<usize> {
-        ws.cols
+    fn ordered_window_ids(l: &Layout) -> Vec<usize> {
+        l.cols
             .iter()
             .flat_map(|(_, c)| c.wins.iter().map(|(_, w)| w.view.bufid))
             .collect::<Vec<_>>()
@@ -1210,20 +1217,20 @@ mod tests {
 
     #[test]
     fn drag_left_works() {
-        let mut ws = test_layout(&[1, 1, 2], 80, 100);
-        ws.next_column();
-        assert_eq!(ws.active_buffer().id, 1);
-        ws.drag_left();
+        let mut l = test_layout(&[1, 1, 2], 80, 100);
+        l.next_column();
+        assert_eq!(l.active_buffer().id, 1);
+        l.drag_left();
 
-        assert_eq!(ws.cols.len(), 2);
-        let first_col: Vec<usize> = ws
+        assert_eq!(l.cols.len(), 2);
+        let first_col: Vec<usize> = l
             .cols
             .head()
             .wins
             .iter()
             .map(|(_, w)| w.view.bufid)
             .collect();
-        let second_col: Vec<usize> = ws
+        let second_col: Vec<usize> = l
             .cols
             .last()
             .wins
@@ -1237,19 +1244,19 @@ mod tests {
 
     #[test]
     fn drag_right_works() {
-        let mut ws = test_layout(&[1, 1, 2], 80, 100);
-        assert_eq!(ws.active_buffer().id, 0);
-        ws.drag_right();
+        let mut l = test_layout(&[1, 1, 2], 80, 100);
+        assert_eq!(l.active_buffer().id, 0);
+        l.drag_right();
 
-        assert_eq!(ws.cols.len(), 2);
-        let first_col: Vec<usize> = ws
+        assert_eq!(l.cols.len(), 2);
+        let first_col: Vec<usize> = l
             .cols
             .head()
             .wins
             .iter()
             .map(|(_, w)| w.view.bufid)
             .collect();
-        let second_col: Vec<usize> = ws
+        let second_col: Vec<usize> = l
             .cols
             .last()
             .wins
@@ -1263,78 +1270,86 @@ mod tests {
 
     #[test]
     fn next_prev_column_methods_work() {
-        let mut ws = test_layout(&[1, 1, 2], 80, 100);
-        assert_eq!(ws.focused_view().bufid, 0);
+        let mut l = test_layout(&[1, 1, 2], 80, 100);
+        assert_eq!(l.focused_view().bufid, 0);
 
         // next wrapping
-        ws.next_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.next_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.next_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.next_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.next_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.next_column();
+        assert_eq!(l.focused_view().bufid, 0);
 
         // prev wrapping
-        ws.prev_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.prev_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.prev_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.prev_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.prev_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.prev_column();
+        assert_eq!(l.focused_view().bufid, 0);
     }
 
     #[test]
     fn next_prev_window_methods_work() {
-        let mut ws = test_layout(&[3, 1], 80, 100);
-        assert_eq!(ws.focused_view().bufid, 0);
+        let mut l = test_layout(&[3, 1], 80, 100);
+        assert_eq!(l.focused_view().bufid, 0);
 
         // next wrapping
-        ws.next_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.next_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.next_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.next_window_in_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.next_window_in_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.next_window_in_column();
+        assert_eq!(l.focused_view().bufid, 0);
 
         // prev wrapping
-        ws.prev_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.prev_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.prev_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.prev_window_in_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.prev_window_in_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.prev_window_in_column();
+        assert_eq!(l.focused_view().bufid, 0);
     }
 
-    #[test_case(&[1], 30, 40, 0; "one col one win")]
-    #[test_case(&[1, 1], 30, 40, 0; "two cols one win each click in first")]
-    #[test_case(&[1, 1], 60, 40, 1; "two cols one win each click in second")]
-    #[test_case(&[1, 2], 60, 40, 1; "two cols second with two click in second window")]
-    #[test_case(&[1, 2], 60, 60, 2; "two cols second with two click in third window")]
-    #[test_case(&[1, 3], 60, 15, 1; "two cols second with three click in first window")]
-    #[test_case(&[1, 3], 60, 35, 2; "two cols second with three click in second window")]
-    #[test_case(&[1, 3], 60, 60, 3; "two cols second with three click in third window")]
-    #[test_case(&[1, 4], 60, 70, 4; "two cols second with four click in fourth window")]
+    #[test_case(&[1], 30, 40, BufOrTag::Buf(0), 0; "one col one win")]
+    #[test_case(&[1, 1], 30, 40, BufOrTag::Buf(0), 0; "two cols one win each click in first")]
+    #[test_case(&[1, 1], 60, 40, BufOrTag::Buf(1), 1; "two cols one win each click in second")]
+    #[test_case(&[1, 2], 60, 40, BufOrTag::Buf(1), 1; "two cols second with two click in second window")]
+    #[test_case(&[1, 2], 60, 60, BufOrTag::Buf(2), 2; "two cols second with two click in third window")]
+    #[test_case(&[1, 3], 60, 15, BufOrTag::Buf(1), 1; "two cols second with three click in first window")]
+    #[test_case(&[1, 3], 60, 35, BufOrTag::Buf(2), 2; "two cols second with three click in second window")]
+    #[test_case(&[1, 3], 60, 60, BufOrTag::Buf(3), 3; "two cols second with three click in third window")]
+    #[test_case(&[1, 4], 60, 70, BufOrTag::Buf(4), 4; "two cols second with four click in fourth window")]
+    #[test_case(&[1], 30, 2, BufOrTag::Buf(0), 0; "one col one win click on first buffer line")]
+    #[test_case(&[1], 30, 1, BufOrTag::Tag(0, 0), usize::MAX; "one col one win click on first tag line")]
+    #[test_case(&[2], 30, 40, BufOrTag::Buf(0), 0; "one col two wins click on last line of first window")]
+    #[test_case(&[2], 30, 41, BufOrTag::Tag(0, 1), usize::MAX - 1; "one col two wins click on second tag line")]
     #[test]
-    fn buffer_for_screen_coords_works(col_wins: &[usize], x: usize, y: usize, expected: BufferId) {
-        let mut ws = test_layout(col_wins, 80, 100);
-        println!("{ws:#?}");
+    fn buffer_for_screen_coords_works(
+        col_wins: &[usize],
+        x: usize,
+        y: usize,
+        bufortag: BufOrTag,
+        expected: BufferId,
+    ) {
+        let mut l = test_layout(col_wins, 80, 100);
 
         assert_eq!(
-            ws.buffer_for_screen_coords(x, y),
-            BufOrTag::Buf(expected),
-            "bufid without mutation"
+            l.buffer_for_screen_coords(x, y),
+            bufortag,
+            "bufortag without mutation"
+        );
+        assert_eq!(l.active_buffer_or_tag().id, 0, "focused id before mutation");
+
+        assert_eq!(
+            l.focus_buffer_for_screen_coords(x, y),
+            bufortag,
+            "bufortag with mutation"
         );
         assert_eq!(
-            ws.cols.focus.wins.focus.view.bufid, 0,
-            "focused id before mutation"
-        );
-        assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
-            BufOrTag::Buf(expected),
-            "bufid with mutation"
-        );
-        assert_eq!(
-            ws.cols.focus.wins.focus.view.bufid, expected,
+            l.active_buffer_or_tag().id,
+            expected,
             "focused id after mutation"
         );
     }
@@ -1346,24 +1361,21 @@ mod tests {
     #[test_case(4, &[0, 1, 2, 3]; "4")]
     #[test]
     fn close_buffer_works(id: usize, expected: &[usize]) {
-        let mut ws = test_layout(&[1, 4], 80, 100);
-        assert_eq!(&ordered_window_ids(&ws), &[0, 1, 2, 3, 4], "initial ids");
+        let mut l = test_layout(&[1, 4], 80, 100);
+        assert_eq!(&ordered_window_ids(&l), &[0, 1, 2, 3, 4], "initial ids");
 
-        ws.close_buffer(id);
-        assert!(
-            !ws.buffers.contains_bufid(id),
-            "buffer id should be removed"
-        );
+        l.close_buffer(id);
+        assert!(!l.buffers.contains_bufid(id), "buffer id should be removed");
 
         for bufid in expected.iter() {
             assert!(
-                ws.buffers.contains_bufid(*bufid),
+                l.buffers.contains_bufid(*bufid),
                 "other buffers should still be there"
             );
         }
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             expected,
             "ids for each window should be correct"
         );
@@ -1373,34 +1385,34 @@ mod tests {
     fn focus_buffer_for_screen_coords_doesnt_reorder_windows() {
         let (x, y) = (60, 70);
         let expected = 4;
-        let mut ws = test_layout(&[1, 4], 80, 100);
+        let mut l = test_layout(&[1, 4], 80, 100);
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             &[0, 1, 2, 3, 4],
             "before first click"
         );
 
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            l.focus_buffer_for_screen_coords(x, y),
             BufOrTag::Buf(expected),
             "bufid with mutation"
         );
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             &[0, 1, 2, 3, 4],
             "after first click"
         );
 
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            l.focus_buffer_for_screen_coords(x, y),
             BufOrTag::Buf(expected),
             "bufid with mutation"
         );
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             &[0, 1, 2, 3, 4],
             "after second click"
         );
