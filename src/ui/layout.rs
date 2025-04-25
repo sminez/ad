@@ -685,7 +685,6 @@ impl Layout {
                     y_offset += win.n_rows + 1;
                     continue;
                 }
-                println!("CHECKING Y OFFSET {y}");
                 return win
                     .bufid_for_y_offset(y - y_offset)
                     .unwrap_or(BufOrTag::Tag(i, j));
