@@ -7,9 +7,6 @@
 
 - [ ] TAG SUPPORT
   - [ ] Exposing through fsys will mean having to have window state as well as buffer state
-  - [ ] Load from tag seems to anchor at the first match in the buffer rather than searching
-        forward from the current buffer dot
-
 
 -- Misc / Editor features --
 - [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable

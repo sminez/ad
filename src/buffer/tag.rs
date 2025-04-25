@@ -196,11 +196,9 @@ impl Tag {
             }
         }
 
-        if !buf.is_empty() {
-            debug_assert!(cols <= n_cols, "{cols} vs {n_cols}");
-            buf.extend(repeat_n(' ', n_cols - cols));
-            lines.push(buf);
-        }
+        debug_assert!(cols <= n_cols, "{cols} vs {n_cols}");
+        buf.extend(repeat_n(' ', n_cols - cols));
+        lines.push(buf);
 
         self.gb.clear();
         self.gb.insert_str(0, &lines.join("\n"));
@@ -264,6 +262,27 @@ mod tests {
         "tag with explicit newline"
     )]
     #[test_case(
+        "this is\na test\n",
+        &[
+            "/home/foo/",
+            "bar.txt | ",
+            "this is   ",
+            "a test    ",
+            "          "
+        ];
+        "tag with explicit trailing newline"
+    )]
+    #[test_case(
+        "this is\na test1234",
+        &[
+            "/home/foo/",
+            "bar.txt | ",
+            "this is   ",
+            "a test1234"
+        ];
+        "tag that exactly fits whole UI lines"
+    )]
+    #[test_case(
         "this 🦊 is a test",
         &[
             "/home/foo/",
@@ -294,6 +313,9 @@ mod tests {
         let str_lines: Vec<&str> = string_lines.iter().map(|s| s.as_str()).collect();
 
         assert_eq!(&str_lines, expected);
+
+        let n_iter_lines = tag.line_iter(None).count();
+        assert_eq!(n_iter_lines, expected.len());
     }
 
     #[test_case("/home/foo/bar.txt | ", "/home/foo/bar.txt", Some(" "); "default tag")]
