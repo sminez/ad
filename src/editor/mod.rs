@@ -14,7 +14,7 @@ use crate::{
     set_config,
     system::{DefaultSystem, System},
     term::CurShape,
-    ui::{Layout, StateChange, Ui, UserInterface},
+    ui::{Layout, StateChange, Ui, UserInterface, SCRATCH_ID},
     LogBuffer,
 };
 use ad_event::Source;
@@ -243,6 +243,11 @@ where
         tx: Sender<Result<String, String>>,
         f: fn(&Buffer) -> String,
     ) {
+        if id == SCRATCH_ID {
+            _ = tx.send(Ok((f)(&self.layout.scratch.b)));
+            return;
+        }
+
         match self.layout.buffer_with_id(id) {
             Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
@@ -259,6 +264,12 @@ where
         s: String,
         f: F,
     ) {
+        if id == SCRATCH_ID {
+            (f)(&mut self.layout.scratch.b, s);
+            _ = tx.send(Ok("handled".to_string()));
+            return;
+        }
+
         match self.layout.buffer_with_id_mut(id) {
             Some(b) => {
                 (f)(b, s);
@@ -393,6 +404,7 @@ where
                 .write_output_for_buffer(bufid, content, &self.cwd),
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
+            ClearScratch => self.layout.scratch.b.clear(),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.active_buffer_id(), force),
             DeleteColumn { force } => self.delete_active_column(force),

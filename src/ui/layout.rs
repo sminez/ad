@@ -13,7 +13,7 @@ use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
 use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
 
-const SCRATCH_ID: usize = usize::MAX;
+pub(crate) const SCRATCH_ID: usize = usize::MAX;
 
 /// Layout is a screen layout of the windows available for displaying buffer
 /// content to the user. The available screen space is split into a number of
@@ -24,7 +24,7 @@ pub(crate) struct Layout {
     buffers: Buffers,
     /// An anonymous buffer that sits outside of the main buffer state and acts as though it is the
     /// active buffer for the purposes of Load/Execute.
-    pub(super) scratch: Scratch,
+    pub(crate) scratch: Scratch,
     /// Available screen width in terms of characters
     pub(crate) screen_rows: usize,
     /// Available screen height in terms of characters
@@ -918,8 +918,8 @@ impl Column {
 
 /// State for the scratch buffer
 #[derive(Debug)]
-pub(super) struct Scratch {
-    pub(super) b: Buffer,
+pub(crate) struct Scratch {
+    pub(crate) b: Buffer,
     pub(super) w: Window,
     pub(super) is_visible: bool,
     pub(super) is_focused: bool,

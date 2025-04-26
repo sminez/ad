@@ -49,6 +49,7 @@ pub enum Action {
     AppendToOutputBuffer { bufid: usize, content: String },
     ChangeDirectory { path: Option<String> },
     CleanupChild { id: u32 },
+    ClearScratch,
     CommandMode,
     Delete,
     DeleteBuffer { force: bool },

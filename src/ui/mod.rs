@@ -10,7 +10,7 @@ use std::sync::mpsc::Sender;
 mod layout;
 mod tui;
 
-pub(crate) use layout::Layout;
+pub(crate) use layout::{Layout, SCRATCH_ID};
 pub use tui::Tui;
 
 pub(crate) trait UserInterface {
