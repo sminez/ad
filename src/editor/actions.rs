@@ -268,7 +268,7 @@ where
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 _ = self.tx_fsys.send(LogEvent::Close(id));
-                self.clear_input_filter(id);
+                self.layout.clear_input_filter(id);
                 let was_last_buffer = self.layout.close_buffer(id);
                 self.running = !was_last_buffer;
             }

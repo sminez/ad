@@ -19,25 +19,52 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct InputFilter {
     tx: Sender<FsysEvent>,
+    is_scratch: bool,
 }
 
 impl InputFilter {
     pub(crate) fn new(tx: Sender<FsysEvent>) -> Self {
-        Self { tx }
+        Self {
+            tx,
+            is_scratch: false,
+        }
+    }
+
+    /// Create a copy of this filter for events coming from the scratch buffer
+    pub(crate) fn paired_tag_filter(&self) -> Self {
+        Self {
+            tx: self.tx.clone(),
+            is_scratch: true,
+        }
     }
 
     pub fn notify_insert(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
-        let evt = FsysEvent::new(source, Kind::InsertBody, ch_from, ch_to, txt);
+        let k = if self.is_scratch {
+            Kind::InsertScratch
+        } else {
+            Kind::InsertBody
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 
     pub fn notify_delete(&self, source: Source, ch_from: usize, ch_to: usize) {
-        let evt = FsysEvent::new(source, Kind::DeleteBody, ch_from, ch_to, "");
+        let k = if self.is_scratch {
+            Kind::DeleteScratch
+        } else {
+            Kind::DeleteBody
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, "");
         _ = self.tx.send(evt);
     }
 
     pub fn notify_load(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
-        let evt = FsysEvent::new(source, Kind::LoadBody, ch_from, ch_to, txt);
+        let k = if self.is_scratch {
+            Kind::LoadScratch
+        } else {
+            Kind::LoadBody
+        };
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 
@@ -54,8 +81,13 @@ impl InputFilter {
             let evt = FsysEvent::new(source, Kind::ChordedArgument, from, to, &arg);
             _ = self.tx.send(evt);
         }
+        let k = if self.is_scratch {
+            Kind::ExecuteScratch
+        } else {
+            Kind::ExecuteBody
+        };
 
-        let evt = FsysEvent::new(source, Kind::ExecuteBody, ch_from, ch_to, txt);
+        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
         _ = self.tx.send(evt);
     }
 }
@@ -111,8 +143,8 @@ pub fn send_event_to_editor(id: usize, s: &str, tx: &Sender<Event>) -> Result<us
 
     let evt = FsysEvent::try_from_str(s)?;
     let req = match evt.kind {
-        Kind::LoadBody | Kind::LoadTag => Req::LoadInBuffer { id, txt: evt.txt },
-        Kind::ExecuteBody | Kind::ExecuteTag => Req::ExecuteInBuffer { id, txt: evt.txt },
+        Kind::LoadBody | Kind::LoadScratch => Req::LoadInBuffer { id, txt: evt.txt },
+        Kind::ExecuteBody | Kind::ExecuteScratch => Req::ExecuteInBuffer { id, txt: evt.txt },
         _ => return Ok(n_bytes_written),
     };
 

@@ -4,12 +4,13 @@ use crate::{
     config_handle,
     dot::{Cur, Dot},
     editor::ViewPort,
+    fsys::InputFilter,
     lsp::LspManagerHandle,
     ziplist,
     ziplist::{Position, ZipList},
 };
 use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
-use tracing::debug;
+use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
 
 const SCRATCH_ID: usize = usize::MAX;
@@ -653,11 +654,6 @@ impl Layout {
         (x + x_offset, y + y_offset)
     }
 
-    // TODO: the scratch buffer needs to be taken into account for mouse interactions:
-    // - Load / Exec is going to need to be behave differently but that is driven by pulling the
-    //   active buffer from Layout so it should be possible without messing with Buffer
-    // - The stub event types for the Tag instead need to be used for the scratch buffer
-
     /// Whether or not the given screen row is within a visible scratch buffer
     fn row_is_scratch(&self, y: usize) -> bool {
         if !self.scratch.is_visible {
@@ -838,10 +834,37 @@ impl Layout {
         });
 
         for (bufid, from, n_rows) in it {
-            // SAFETY: we know this id is valid
-            let b = unsafe { self.buffers.with_id_mut(bufid).unwrap_unchecked() };
+            let b = self.buffers.with_id_mut(bufid).unwrap();
             b.update_ts_state(from, n_rows);
         }
+    }
+
+    /// Returns `true` if the filter was successfully set, false if there was already one in place.
+    pub(crate) fn try_set_input_filter(&mut self, bufid: BufferId, filter: InputFilter) -> bool {
+        let b = match self.buffer_with_id_mut(bufid) {
+            Some(b) => b,
+            None => return false,
+        };
+
+        if b.input_filter.is_some() {
+            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
+            return false;
+        }
+
+        let scratch_filter = filter.paired_tag_filter();
+        b.input_filter = Some(filter);
+        self.scratch.b.input_filter = Some(scratch_filter);
+
+        true
+    }
+
+    /// Remove the input filter for the given buffer if one exists.
+    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
+        if let Some(b) = self.buffer_with_id_mut(bufid) {
+            b.input_filter = None;
+        }
+
+        self.scratch.b.input_filter = None;
     }
 }
 

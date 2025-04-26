@@ -29,13 +29,13 @@ pub enum Kind {
     #[serde(rename = "L")]
     LoadBody,
     #[serde(rename = "i")]
-    InsertTag,
+    InsertScratch,
     #[serde(rename = "d")]
-    DeleteTag,
+    DeleteScratch,
     #[serde(rename = "x")]
-    ExecuteTag,
+    ExecuteScratch,
     #[serde(rename = "l")]
-    LoadTag,
+    LoadScratch,
     #[serde(rename = "A")]
     ChordedArgument,
 }
@@ -57,7 +57,7 @@ impl FsysEvent {
     /// and will be truncated if larger. Delete events are always truncated to zero length.
     pub fn new(source: Source, kind: Kind, ch_from: usize, ch_to: usize, raw_txt: &str) -> Self {
         let (txt, truncated) = match kind {
-            Kind::DeleteTag | Kind::DeleteBody => (String::new(), true),
+            Kind::DeleteScratch | Kind::DeleteBody => (String::new(), true),
             _ => {
                 let txt = raw_txt.chars().take(MAX_CHARS).collect();
                 let truncated = txt != raw_txt;
@@ -127,7 +127,7 @@ mod tests {
     }
 
     #[test_case(Kind::DeleteBody; "delete in body")]
-    #[test_case(Kind::DeleteTag; "delete in tag")]
+    #[test_case(Kind::DeleteScratch; "delete in tag")]
     #[test]
     fn txt_is_removed_for_delete_events_if_provided(kind: Kind) {
         let e = FsysEvent::new(Source::Keyboard, kind, 42, 42 + 17, "some deleted text");

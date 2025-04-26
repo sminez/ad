@@ -676,7 +676,8 @@ mod tests {
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();
         let filter = InputFilter::new(tx);
-        ed.try_set_input_filter(ed.active_buffer_id(), filter);
+        ed.layout
+            .try_set_input_filter(ed.active_buffer_id(), filter);
 
         for evt in evts.iter() {
             ed.handle_mouse_event(*evt);

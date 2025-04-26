@@ -5,7 +5,7 @@ use crate::{
     config_handle, die,
     dot::TextObject,
     exec::{Addr, Address},
-    fsys::{AdFs, InputFilter, LogEvent, Message, Req},
+    fsys::{AdFs, LogEvent, Message, Req},
     input::Event,
     key::{Arrow, Input},
     lsp::{LspManager, LspManagerHandle},
@@ -27,7 +27,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 mod actions;
 mod built_in_commands;
@@ -331,7 +331,7 @@ where
             }
 
             AddInputEventFilter { id, filter } => {
-                let resp = if self.try_set_input_filter(id, filter) {
+                let resp = if self.layout.try_set_input_filter(id, filter) {
                     Ok("handled".to_string())
                 } else {
                     Err("filter already in place".to_string())
@@ -340,7 +340,7 @@ where
             }
 
             RemoveInputEventFilter { id } => {
-                self.clear_input_filter(id);
+                self.layout.clear_input_filter(id);
                 default_handled();
             }
 
@@ -559,30 +559,6 @@ where
                 ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
             }
-        }
-    }
-
-    /// Returns `true` if the filter was successfully set, false if there was already one in place.
-    pub(crate) fn try_set_input_filter(&mut self, bufid: usize, filter: InputFilter) -> bool {
-        let b = match self.layout.buffer_with_id_mut(bufid) {
-            Some(b) => b,
-            None => return false,
-        };
-
-        if b.input_filter.is_some() {
-            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
-            return false;
-        }
-
-        b.input_filter = Some(filter);
-
-        true
-    }
-
-    /// Remove the input filter for the given scope if one exists.
-    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
-        if let Some(b) = self.layout.buffer_with_id_mut(bufid) {
-            b.input_filter = None;
         }
     }
 }
