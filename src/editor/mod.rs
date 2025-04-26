@@ -144,7 +144,7 @@ where
     /// The id of the currently active buffer
     #[inline]
     pub fn active_buffer_id(&self) -> usize {
-        self.layout.active_buffer().id
+        self.layout.active_buffer_ignoring_scratch().id
     }
 
     /// Update the stored window size, accounting for the status and message bars

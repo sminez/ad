@@ -356,7 +356,8 @@ impl UserInterface for Tui {
                 cs,
                 self.style_cache.clone(),
             ));
-        } else {
+        }
+        if !w_minibuffer {
             lines.push(self.render_message_bar(cs, pending_keys, status_timeout));
         }
 

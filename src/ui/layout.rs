@@ -71,9 +71,17 @@ impl Layout {
             .any(|(_, c)| c.wins.iter().any(|(_, w)| w.view.bufid == id))
     }
 
-    /// The semantics of active_buffer are to always return the active Buffer held within the
-    /// active Window. This means that if currently a tag has input focus then this method
-    /// will return the Buffer the tag is attached to, not the tag itself.
+    /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
+    pub(crate) fn active_buffer_ignoring_scratch(&self) -> &Buffer {
+        self.buffers.active()
+    }
+
+    /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
+    pub(crate) fn active_buffer_mut_ignoring_scratch(&mut self) -> &mut Buffer {
+        self.buffers.active_mut()
+    }
+
+    /// Returns the active buffer or the scratch buffer if it is focused
     pub(crate) fn active_buffer(&self) -> &Buffer {
         if self.scratch.is_focused {
             &self.scratch.b
@@ -82,9 +90,7 @@ impl Layout {
         }
     }
 
-    /// The semantics of active_buffer_mut are to always return the active Buffer held within
-    /// the active Window. This means that if currently a tag has input focus then this method
-    /// will return the Buffer the tag is attached to, not the tag itself.
+    /// Returns the active buffer or the scratch buffer if it is focused
     pub(crate) fn active_buffer_mut(&mut self) -> &mut Buffer {
         if self.scratch.is_focused {
             &mut self.scratch.b

@@ -530,6 +530,9 @@ where
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
     pub(super) fn default_load_dot(&mut self, source: Source, load_in_new_window: bool) {
+        // Grabbing the ID in this way allows us to treat loads in the scratch buffer as being from
+        // the active buffer.
+        let id = self.layout.active_buffer_ignoring_scratch().id;
         let b = self.layout.active_buffer_mut();
         b.expand_cur_dot();
         if b.notify_load(source) {
@@ -541,12 +544,11 @@ where
             return;
         }
 
-        let id = b.id;
         self.load_string_in_buffer(id, s, load_in_new_window);
     }
 
     pub(super) fn plumb(&mut self, txt: String, load_in_new_window: bool) {
-        let id = self.layout.active_buffer().id;
+        let id = self.layout.active_buffer_ignoring_scratch().id;
         self.load_string_in_buffer(id, txt, load_in_new_window);
     }
 
@@ -734,11 +736,20 @@ where
         };
 
         let mut buf = Vec::new();
-        let fname = self.layout.active_buffer().full_name().to_string();
-        match prog.execute(self.layout.active_buffer_mut(), &fname, &mut buf) {
+        let fname = self
+            .layout
+            .active_buffer_ignoring_scratch()
+            .full_name()
+            .to_string();
+
+        match prog.execute(
+            self.layout.active_buffer_mut_ignoring_scratch(),
+            &fname,
+            &mut buf,
+        ) {
             Ok(new_dot) => {
                 self.layout.record_jump_position();
-                self.layout.active_buffer_mut().dot = new_dot;
+                self.layout.active_buffer_mut_ignoring_scratch().dot = new_dot;
             }
 
             Err(e) => self.set_status_message(format!("Error running edit command: {e:?}")),
