@@ -2,10 +2,12 @@
 //!
 //! Really this should be published as its own crate.
 use std::{
+    cmp::Ordering,
     collections::vec_deque::{self, VecDeque},
     fmt,
     iter::{once, IntoIterator},
     mem::{swap, take},
+    ops::{Index, IndexMut},
 };
 
 #[macro_export]
@@ -633,6 +635,30 @@ impl<T: PartialEq> ZipList<T> {
     }
 }
 
+impl<T> Index<usize> for ZipList<T> {
+    type Output = T;
+
+    fn index(&self, i: usize) -> &Self::Output {
+        let nup = self.up.len();
+        match i.cmp(&nup) {
+            Ordering::Less => &self.up[nup - i - 1],
+            Ordering::Equal => &self.focus,
+            Ordering::Greater => &self.down[i - nup - 1],
+        }
+    }
+}
+
+impl<T> IndexMut<usize> for ZipList<T> {
+    fn index_mut(&mut self, i: usize) -> &mut Self::Output {
+        let nup = self.up.len();
+        match i.cmp(&nup) {
+            Ordering::Less => &mut self.up[nup - i - 1],
+            Ordering::Equal => &mut self.focus,
+            Ordering::Greater => &mut self.down[i - nup - 1],
+        }
+    }
+}
+
 // Iteration
 
 /// An owned iterator over a [ZipList].
@@ -998,5 +1024,33 @@ mod tests {
         s.insert_at(pos, 6);
 
         assert_eq!(s, expected);
+    }
+
+    #[test_case(ziplist!([1,2,3,4], 5, []); "up and focus")]
+    #[test_case(ziplist!([], 1, [2,3,4,5]); "focus and down")]
+    #[test_case(ziplist!([1,2], 3, [4,5]); "all")]
+    #[test_case(ziplist!([], 1, []); "focus only")]
+    #[test]
+    fn index(zl: ZipList<usize>) {
+        for i in 0..zl.len() {
+            assert_eq!(zl[i], i + 1, "i={i}");
+        }
+    }
+
+    #[test_case(ziplist!([1,2,3,4], 5, []); "up and focus")]
+    #[test_case(ziplist!([], 1, [2,3,4,5]); "focus and down")]
+    #[test_case(ziplist!([1,2], 3, [4,5]); "all")]
+    #[test_case(ziplist!([], 1, []); "focus only")]
+    #[test]
+    fn index_mut(mut zl: ZipList<usize>) {
+        let expected = zl.clone().map(|_| 6);
+
+        // https://github.com/rust-lang/rust-clippy/issues/14685
+        #[allow(clippy::manual_slice_fill)]
+        for i in 0..zl.len() {
+            zl[i] = 6;
+        }
+
+        assert_eq!(zl, expected);
     }
 }

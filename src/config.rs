@@ -5,6 +5,7 @@ use crate::{
     key::Input,
     term::{Color, Styles},
     trie::Trie,
+    ts::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
     util::parent_dir_containing,
 };
 use serde::{
@@ -17,11 +18,6 @@ use std::{
 use tracing::{error, warn};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../data/config.toml");
-
-pub const TK_DEFAULT: &str = "default";
-pub const TK_DOT: &str = "dot";
-pub const TK_LOAD: &str = "load";
-pub const TK_EXEC: &str = "exec";
 
 pub(crate) fn config_path() -> String {
     let home = env::var("HOME").unwrap();

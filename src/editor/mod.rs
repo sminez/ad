@@ -314,21 +314,11 @@ where
                 };
             }),
             SetBufferXDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                let dot = b.dot;
-                b.dot = b.xdot;
-                b.handle_action(Action::InsertString { s }, Source::Fsys);
-                (b.xdot, b.dot) = (b.dot, dot);
-                b.dot.clamp_idx(b.txt.len_chars()); // xdot clamped as part of handling the insert
+                b.insert_xdot(s);
             }),
 
             ClearBufferBody { id } => self.handle_buffer_mutation(id, tx, String::new(), |b, _| {
-                b.handle_action(Action::DotSet(TextObject::BufferStart, 1), Source::Fsys);
-                b.handle_action(
-                    Action::DotExtendForward(TextObject::BufferEnd, 1),
-                    Source::Fsys,
-                );
-                b.handle_action(Action::Delete, Source::Fsys);
-                b.xdot.clamp_idx(b.txt.len_chars());
+                b.clear();
             }),
 
             AppendBufferBody { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {

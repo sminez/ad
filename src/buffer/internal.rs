@@ -229,6 +229,11 @@ impl GapBuffer {
         v
     }
 
+    /// Iterate over the characters of the buffer
+    pub fn chars(&self) -> Chars<'_> {
+        self.slice(0, self.n_chars).chars()
+    }
+
     /// Iterate over the lines of the buffer
     pub fn iter_lines(&self) -> impl Iterator<Item = Slice<'_>> {
         let mut line_idx = 0;
@@ -420,6 +425,10 @@ impl GapBuffer {
         let to = self.offset_char_to_raw_byte(char_to, from, char_from);
 
         Slice::from_raw_offsets(from, to, self)
+    }
+
+    pub fn as_slice(&self) -> Slice<'_> {
+        self.slice(0, self.len_chars())
     }
 
     fn chars_in_raw_range(&self, raw_from: usize, raw_to: usize) -> usize {

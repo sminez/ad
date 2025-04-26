@@ -64,10 +64,16 @@ impl Layout {
             .any(|(_, c)| c.wins.iter().any(|(_, w)| w.view.bufid == id))
     }
 
+    /// The semantics of active_buffer are to always return the active Buffer held within the
+    /// active Window. This means that if currently a tag has input focus then this method
+    /// will return the Buffer the tag is attached to, not the tag itself.
     pub(crate) fn active_buffer(&self) -> &Buffer {
         self.buffers.active()
     }
 
+    /// The semantics of active_buffer_mut are to always return the active Buffer held within
+    /// the active Window. This means that if currently a tag has input focus then this method
+    /// will return the Buffer the tag is attached to, not the tag itself.
     pub(crate) fn active_buffer_mut(&mut self) -> &mut Buffer {
         self.buffers.active_mut()
     }
@@ -592,7 +598,7 @@ impl Layout {
         self.active_buffer().id
     }
 
-    pub(crate) fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
+    fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
         let mut x_offset = 0;
         let mut y_offset = 0;
 
@@ -622,37 +628,50 @@ impl Layout {
         self.active_buffer().id
     }
 
-    pub(crate) fn cur_from_screen_coords(
-        &mut self,
-        x: usize,
-        y: usize,
-        set_focus: bool,
-    ) -> (BufferId, Cur) {
-        let bufid = if set_focus {
-            self.focus_buffer_for_screen_coords(x, y)
+    /// Determine the cursor position for a given set of coordinates and report whether or not
+    /// these coordinates are inside of the currently active buffer (or tag).
+    pub(crate) fn try_active_cur_from_screen_coords(&mut self, x: usize, y: usize) -> Option<Cur> {
+        let id = self.buffer_for_screen_coords(x, y);
+        let is_active = id == self.active_buffer().id;
+
+        if is_active {
+            Some(self.cur_from_screen_coords(x, y))
         } else {
-            self.buffer_for_screen_coords(x, y)
-        };
+            None
+        }
+    }
+
+    /// Focus the buffer (or tag) containing the given screen coordinates and return the current
+    /// cursor position for updating held mouse state.
+    pub(crate) fn focus_cur_from_screen_coords(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
+        let bufid = self.focus_buffer_for_screen_coords(x, y);
+        let cur = self.cur_from_screen_coords(x, y);
+
+        (bufid, cur)
+    }
+
+    /// Map a given (x, y) point into a Cur for the active buffer or tag
+    fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> Cur {
         let (x_offset, y_offset) = self.xy_offsets();
-        let b = self
-            .buffers
-            .with_id_mut(bufid)
-            .expect("windows state is stale");
+        let win = &mut self.cols.focus.wins.focus;
+        let row_off = win.view.row_off;
+
+        let b = self.buffers.active_mut();
+
         let (_, w_sgncol) = b.sign_col_dims();
         let rx = x
             .saturating_sub(1)
-            .saturating_sub(w_sgncol)
-            .saturating_sub(x_offset);
+            .saturating_sub(x_offset)
+            .saturating_sub(w_sgncol);
+        let y = min(y.saturating_sub(y_offset) + row_off, b.len_lines()).saturating_sub(1);
 
-        let view = self.cols.focus.focused_view_mut();
-        view.rx = rx;
+        win.view.rx = rx;
         b.cached_rx = rx;
 
-        let y = min(y.saturating_sub(y_offset) + view.row_off, b.len_lines()).saturating_sub(1);
-        let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, view.rx), b);
-        cur.clamp_idx(b.txt.len_chars());
+        let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, rx), b);
+        cur.clamp_idx(b.len_chars());
 
-        (bufid, cur)
+        cur
     }
 
     /// Set the active buffer and dot based on a mouse click.
@@ -661,7 +680,8 @@ impl Layout {
     /// changed the active buffer.
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) -> bool {
         let current_bufid = self.buffers.active().id;
-        let (bufid, c) = self.cur_from_screen_coords(x, y, true);
+        let bufid = self.focus_buffer_for_screen_coords(x, y);
+        let c = self.cur_from_screen_coords(x, y);
         self.buffers.active_mut().dot = Dot::Cur { c };
 
         bufid == current_bufid
