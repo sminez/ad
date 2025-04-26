@@ -123,6 +123,7 @@ pub enum Action {
     ShellRun { cmd: String },
     ShellSend { cmd: String },
     ShowHelp,
+    ToggleScratch,
     TsShowTree,
     Undo,
     UpdateConfig { input: String },

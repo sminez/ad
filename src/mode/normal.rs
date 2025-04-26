@@ -24,6 +24,8 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         [ leader, Char('b') ] => [ SelectBuffer ],
         "search in current buffer";
         [ Char('/') ] => [ SearchInCurrentBuffer ],
+        "toggle the visibility of the scratch buffer";
+        [ Alt(';') ] => [ ToggleScratch ],
         "enter COMMAND mode";
         [ Char(':') ] => [ CommandMode ],
         "enter RUN mode";

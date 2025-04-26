@@ -12,12 +12,18 @@ use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
 use tracing::debug;
 use unicode_width::UnicodeWidthChar;
 
+const SCRATCH_ID: usize = usize::MAX;
+
 /// Layout is a screen layout of the windows available for displaying buffer
 /// content to the user. The available screen space is split into a number of
 /// columns each containing a vertical stack of windows.
 #[derive(Debug)]
 pub(crate) struct Layout {
+    /// The managed buffer state
     buffers: Buffers,
+    /// An anonymous buffer that sits outside of the main buffer state and acts as though it is the
+    /// active buffer for the purposes of Load/Execute.
+    pub(super) scratch: Scratch,
     /// Available screen width in terms of characters
     pub(crate) screen_rows: usize,
     /// Available screen height in terms of characters
@@ -39,6 +45,7 @@ impl Layout {
 
         Self {
             buffers,
+            scratch: Scratch::new(config_handle!().minibuffer_lines),
             screen_rows,
             screen_cols,
             cols: ziplist![Column::new(screen_rows, screen_cols, &[id])],
@@ -68,14 +75,22 @@ impl Layout {
     /// active Window. This means that if currently a tag has input focus then this method
     /// will return the Buffer the tag is attached to, not the tag itself.
     pub(crate) fn active_buffer(&self) -> &Buffer {
-        self.buffers.active()
+        if self.scratch.is_focused {
+            &self.scratch.b
+        } else {
+            self.buffers.active()
+        }
     }
 
     /// The semantics of active_buffer_mut are to always return the active Buffer held within
     /// the active Window. This means that if currently a tag has input focus then this method
     /// will return the Buffer the tag is attached to, not the tag itself.
     pub(crate) fn active_buffer_mut(&mut self) -> &mut Buffer {
-        self.buffers.active_mut()
+        if self.scratch.is_focused {
+            &mut self.scratch.b
+        } else {
+            self.buffers.active_mut()
+        }
     }
 
     pub(crate) fn buffer_with_id(&self, id: BufferId) -> Option<&Buffer> {
@@ -87,8 +102,13 @@ impl Layout {
     }
 
     fn focus_first_window_with_buffer(&mut self, id: BufferId) {
+        self.scratch.is_focused = false;
         self.cols
             .focus_element_by_mut(|c| c.wins.focus_element_by_mut(|w| w.view.bufid == id));
+    }
+
+    pub(crate) fn toggle_scratch(&mut self) {
+        self.scratch.toggle();
     }
 
     pub(crate) fn open_or_focus<P: AsRef<Path>>(
@@ -96,6 +116,7 @@ impl Layout {
         path: P,
         mut new_window: bool,
     ) -> io::Result<Option<BufferId>> {
+        self.scratch.is_focused = false;
         if self.buffers.is_empty_scratch() {
             // in the case where we only have an empty scratch buffer present, we always
             // replace the current buffer with the one that is newly opened.
@@ -125,6 +146,7 @@ impl Layout {
         content: impl Into<String>,
         new_window: bool,
     ) {
+        self.scratch.is_focused = false;
         let id = self.buffers.open_virtual(name.into(), content.into());
 
         if self.buffer_is_visible(id) {
@@ -146,6 +168,12 @@ impl Layout {
     ///   - if there are no other columns then the "next buffer" is placed in the
     ///     first column
     pub(crate) fn close_buffer(&mut self, id: BufferId) -> bool {
+        self.scratch.is_focused = false;
+        if id == self.scratch.b.id {
+            self.scratch.is_visible = false;
+            return false;
+        }
+
         if self.buffers.len() == 1 {
             // We could have been asked to close a non-existant buffer.
             // If this was the last buffer then Editor::delete_buffer will exit
@@ -193,6 +221,14 @@ impl Layout {
     }
 
     pub(crate) fn focus_id(&mut self, id: BufferId, force_active: bool) {
+        if id == self.scratch.b.id {
+            self.scratch.is_focused = true;
+            self.scratch.is_visible = true;
+            return;
+        }
+
+        self.scratch.is_focused = false;
+
         if let Some(id) = self.buffers.focus_id(id) {
             if !force_active && self.buffer_is_visible(id) {
                 self.focus_first_window_with_buffer(id);
@@ -208,6 +244,7 @@ impl Layout {
     }
 
     pub(crate) fn focus_next_buffer(&mut self) -> BufferId {
+        self.scratch.is_focused = false;
         self.buffers.next();
         let id = self.active_buffer().id;
         self.show_buffer_in_active_window(id);
@@ -216,6 +253,7 @@ impl Layout {
     }
 
     pub(crate) fn focus_previous_buffer(&mut self) -> BufferId {
+        self.scratch.is_focused = false;
         self.buffers.previous();
         let id = self.active_buffer().id;
         self.show_buffer_in_active_window(id);
@@ -226,6 +264,11 @@ impl Layout {
     /// Close the active window, if this was the last remaining window then
     /// Editor::delete_active_window will exit.
     pub(crate) fn close_active_window(&mut self) -> bool {
+        if self.scratch.is_focused {
+            self.scratch.toggle();
+            return false;
+        }
+
         if self.cols.len() == 1 && self.cols.focus.wins.len() == 1 {
             return true;
         }
@@ -246,6 +289,11 @@ impl Layout {
     /// Close the active column, if this was the last remaining column then
     /// Editor::delete_active_column will exit.
     pub(crate) fn close_active_column(&mut self) -> bool {
+        if self.scratch.is_focused {
+            self.scratch.toggle();
+            return false;
+        }
+
         if self.cols.len() == 1 {
             return true;
         }
@@ -306,6 +354,7 @@ impl Layout {
 
     /// Move focus to the column to the right of current focus (wrapping)
     pub(crate) fn next_column(&mut self) {
+        self.scratch.is_focused = false;
         self.cols.focus_down();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
@@ -313,6 +362,7 @@ impl Layout {
 
     /// Move focus to the column to the left of current focus (wrapping)
     pub(crate) fn prev_column(&mut self) {
+        self.scratch.is_focused = false;
         self.cols.focus_up();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
@@ -320,6 +370,7 @@ impl Layout {
 
     /// Move focus to the window below in the current column (wrapping)
     pub(crate) fn next_window_in_column(&mut self) {
+        self.scratch.is_focused = false;
         self.cols.focus.wins.focus_down();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
@@ -327,6 +378,7 @@ impl Layout {
 
     /// Move focus to the window above in the current column (wrapping)
     pub(crate) fn prev_window_in_column(&mut self) {
+        self.scratch.is_focused = false;
         self.cols.focus.wins.focus_up();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
@@ -334,11 +386,13 @@ impl Layout {
 
     /// Drag the focused window up through the column containing it (wrapping)
     pub(crate) fn drag_up(&mut self) {
+        self.scratch.is_focused = false;
         self.cols.focus.wins.swap_up();
     }
 
     /// Drag the focused window down through the column containing it (wrapping)
     pub(crate) fn drag_down(&mut self) {
+        self.scratch.is_focused = false;
         self.cols.focus.wins.swap_down();
     }
 
@@ -354,6 +408,7 @@ impl Layout {
     ///   direction is towards other columns then the window is moved to that column
     ///   and the previous column is removed.
     pub(crate) fn drag_left(&mut self) {
+        self.scratch.is_focused = false;
         if self.cols.len() == 1 || self.cols.up.is_empty() {
             if self.cols.focus.wins.len() == 1 {
                 return;
@@ -382,6 +437,7 @@ impl Layout {
     ///
     /// See [Layout::drag_left] for semantics.
     pub(crate) fn drag_right(&mut self) {
+        self.scratch.is_focused = false;
         if self.cols.len() == 1 || self.cols.down.is_empty() {
             if self.cols.focus.wins.len() == 1 {
                 return;
@@ -413,7 +469,11 @@ impl Layout {
     }
 
     pub(crate) fn active_window_rows(&self) -> usize {
-        self.cols.focus.wins.focus.n_rows
+        if self.scratch.is_focused {
+            self.scratch.w.n_rows
+        } else {
+            self.cols.focus.wins.focus.n_rows
+        }
     }
 
     pub(crate) fn update_screen_size(&mut self, rows: usize, cols: usize) {
@@ -439,6 +499,7 @@ impl Layout {
 
     /// Set the currently focused window to contain the given buffer
     pub(crate) fn show_buffer_in_active_window(&mut self, id: BufferId) {
+        self.scratch.is_focused = false;
         if self.focused_view().bufid == id {
             return;
         }
@@ -455,6 +516,7 @@ impl Layout {
     /// Create a new column containing a single window showing the same view found in the
     /// current active window.
     pub(crate) fn new_column(&mut self) {
+        self.scratch.is_focused = false;
         let view = self.focused_view().clone();
         let mut col = Column::new(self.screen_rows, self.screen_cols, &[view.bufid]);
         col.wins.last_mut().view = view;
@@ -466,6 +528,7 @@ impl Layout {
     /// Create a new window at the end of the current column showing the same view
     /// found in the current active window.
     pub(crate) fn new_window(&mut self) {
+        self.scratch.is_focused = false;
         let view = self.focused_view().clone();
         let wins = &mut self.cols.focus.wins;
         wins.insert_at(Position::Tail, Window { n_rows: 0, view });
@@ -475,6 +538,7 @@ impl Layout {
 
     /// Set the currently focused window to contain the given buffer
     pub(crate) fn show_buffer_in_new_window(&mut self, id: BufferId) {
+        self.scratch.is_focused = false;
         let view = if self.focused_view().bufid == id {
             self.focused_view().clone()
         } else {
@@ -498,68 +562,71 @@ impl Layout {
         self.update_screen_size(self.screen_rows, self.screen_cols);
     }
 
-    pub(crate) fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
-        let mut x_offset = 0;
-        let mut y_offset = 0;
-
-        for (focused_col, col) in self.cols.iter_mut() {
-            if x > x_offset + col.n_cols {
-                x_offset += col.n_cols + 1;
-                continue;
-            }
-            for (focused_win, win) in col.wins.iter_mut() {
-                if y > y_offset + win.n_rows {
-                    y_offset += win.n_rows + 1;
-                    continue;
-                }
-
-                let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-                apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
-                return;
-            }
-        }
-
-        let n_cols = self.cols.focus.n_cols;
-        let win = &mut self.cols.focus.wins.focus;
-        let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-        apply_scroll(b, win, n_cols, true, up);
-    }
-
     pub(crate) fn force_cursor_to_be_in_view(&mut self) {
-        let b = self.buffers.active_mut();
-        let cols = self.cols.focus.n_cols;
-        let rows = self.cols.focus.wins.focus.n_rows;
+        if self.scratch.is_focused {
+            self.scratch.w.view.force_cursor_to_be_in_view(
+                &mut self.scratch.b,
+                self.scratch.w.n_rows,
+                self.screen_cols,
+            );
+        } else {
+            let b = self.buffers.active_mut();
+            let cols = self.cols.focus.n_cols;
+            let rows = self.cols.focus.wins.focus.n_rows;
 
-        self.cols
-            .focus
-            .focused_view_mut()
-            .force_cursor_to_be_in_view(b, rows, cols);
+            self.cols
+                .focus
+                .focused_view_mut()
+                .force_cursor_to_be_in_view(b, rows, cols);
+        }
     }
 
     pub(crate) fn clamp_scroll(&mut self) {
-        let b = self.buffers.active_mut();
-        let cols = self.cols.focus.n_cols;
-        let rows = self.cols.focus.wins.focus.n_rows;
+        if self.scratch.is_focused {
+            self.scratch.w.view.clamp_scroll(
+                &mut self.scratch.b,
+                self.scratch.w.n_rows,
+                self.screen_cols,
+            );
+        } else {
+            let b = self.buffers.active_mut();
+            let cols = self.cols.focus.n_cols;
+            let rows = self.cols.focus.wins.focus.n_rows;
 
-        self.cols
-            .focus
-            .focused_view_mut()
-            .clamp_scroll(b, rows, cols);
+            self.cols
+                .focus
+                .focused_view_mut()
+                .clamp_scroll(b, rows, cols);
+        }
     }
 
     pub(crate) fn set_viewport(&mut self, vp: ViewPort) {
-        let b = self.buffers.active_mut();
-        let cols = self.cols.focus.n_cols;
-        let rows = self.cols.focus.wins.focus.n_rows;
+        if self.scratch.is_focused {
+            self.scratch.w.view.set_viewport(
+                &mut self.scratch.b,
+                vp,
+                self.scratch.w.n_rows,
+                self.screen_cols,
+            );
+        } else {
+            let b = self.buffers.active_mut();
+            let cols = self.cols.focus.n_cols;
+            let rows = self.cols.focus.wins.focus.n_rows;
 
-        self.cols
-            .focus
-            .focused_view_mut()
-            .set_viewport(b, vp, rows, cols);
+            self.cols
+                .focus
+                .focused_view_mut()
+                .set_viewport(b, vp, rows, cols);
+        }
     }
 
     /// Coordinate offsets from the top left of the window layout to the top left of the active window.
     fn xy_offsets(&self) -> (usize, usize) {
+        if self.scratch.is_focused {
+            let y_offset = self.screen_rows - self.scratch.w.n_rows + 1; // +1 for status line
+            return (0, y_offset);
+        }
+
         let cols_before = &self.cols.up;
         let wins_above = &self.cols.focus.wins.up;
         let x_offset = cols_before.iter().map(|c| c.n_cols).sum::<usize>() + cols_before.len();
@@ -569,16 +636,40 @@ impl Layout {
     }
 
     /// Locate the absolute cursor position based on the current window layout
-    pub(crate) fn ui_xy(&self, b: &Buffer) -> (usize, usize) {
+    pub(crate) fn ui_xy(&self) -> (usize, usize) {
         let (x_offset, y_offset) = self.xy_offsets();
-        let (x, y) = self.focused_view().ui_xy(b);
+        let (x, y) = if self.scratch.is_focused {
+            self.scratch.w.view.ui_xy(&self.scratch.b)
+        } else {
+            self.focused_view().ui_xy(self.active_buffer())
+        };
 
         (x + x_offset, y + y_offset)
     }
 
+    // TODO: the scratch buffer needs to be taken into account for mouse interactions:
+    // - Load / Exec is going to need to be behave differently but that is driven by pulling the
+    //   active buffer from Layout so it should be possible without messing with Buffer
+    // - The stub event types for the Tag instead need to be used for the scratch buffer
+
+    /// Whether or not the given screen row is within a visible scratch buffer
+    fn row_is_scratch(&self, y: usize) -> bool {
+        if !self.scratch.is_visible {
+            return false;
+        }
+
+        y > (self.screen_rows - self.scratch.w.n_rows + 1)
+    }
+
+    /// If the given coordinates lie within the scratch buffer return None, otherwise return the ID
+    /// of the buffer containing the point.
     fn buffer_for_screen_coords(&self, x: usize, y: usize) -> BufferId {
         let mut x_offset = 0;
         let mut y_offset = 0;
+
+        if self.row_is_scratch(y) {
+            return SCRATCH_ID;
+        }
 
         for (_, col) in self.cols.iter() {
             if x > x_offset + col.n_cols {
@@ -601,6 +692,13 @@ impl Layout {
     fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
         let mut x_offset = 0;
         let mut y_offset = 0;
+
+        if self.row_is_scratch(y) {
+            self.scratch.is_focused = true;
+            return SCRATCH_ID;
+        }
+
+        self.scratch.is_focused = false;
 
         self.cols.focus_head();
         for _ in 0..self.cols.len() {
@@ -628,35 +726,16 @@ impl Layout {
         self.active_buffer().id
     }
 
-    /// Determine the cursor position for a given set of coordinates and report whether or not
-    /// these coordinates are inside of the currently active buffer (or tag).
-    pub(crate) fn try_active_cur_from_screen_coords(&mut self, x: usize, y: usize) -> Option<Cur> {
-        let id = self.buffer_for_screen_coords(x, y);
-        let is_active = id == self.active_buffer().id;
-
-        if is_active {
-            Some(self.cur_from_screen_coords(x, y))
-        } else {
-            None
-        }
-    }
-
-    /// Focus the buffer (or tag) containing the given screen coordinates and return the current
-    /// cursor position for updating held mouse state.
-    pub(crate) fn focus_cur_from_screen_coords(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
-        let bufid = self.focus_buffer_for_screen_coords(x, y);
-        let cur = self.cur_from_screen_coords(x, y);
-
-        (bufid, cur)
-    }
-
     /// Map a given (x, y) point into a Cur for the active buffer or tag
     fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> Cur {
         let (x_offset, y_offset) = self.xy_offsets();
-        let win = &mut self.cols.focus.wins.focus;
-        let row_off = win.view.row_off;
+        let (b, win) = if self.scratch.is_focused {
+            (&mut self.scratch.b, &mut self.scratch.w)
+        } else {
+            (self.buffers.active_mut(), &mut self.cols.focus.wins.focus)
+        };
 
-        let b = self.buffers.active_mut();
+        let row_off = win.view.row_off;
 
         let (_, w_sgncol) = b.sign_col_dims();
         let rx = x
@@ -674,17 +753,75 @@ impl Layout {
         cur
     }
 
+    /// Determine the cursor position for a given set of coordinates and report whether or not
+    /// these coordinates are inside of the currently active buffer (or tag).
+    pub(crate) fn try_active_cur_from_screen_coords(&mut self, x: usize, y: usize) -> Option<Cur> {
+        let id = self.buffer_for_screen_coords(x, y);
+        if id == self.active_buffer().id {
+            Some(self.cur_from_screen_coords(x, y))
+        } else {
+            None
+        }
+    }
+
+    /// Focus the buffer (or tag) containing the given screen coordinates and return the current
+    /// cursor position for updating held mouse state.
+    pub(crate) fn focus_cur_from_screen_coords(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
+        let bufid = self.focus_buffer_for_screen_coords(x, y);
+        let cur = self.cur_from_screen_coords(x, y);
+
+        (bufid, cur)
+    }
+
     /// Set the active buffer and dot based on a mouse click.
     ///
     /// Returns true if the click was in the currently active buffer and false if this click has
     /// changed the active buffer.
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) -> bool {
-        let current_bufid = self.buffers.active().id;
+        let current_bufid = self.active_buffer().id;
         let bufid = self.focus_buffer_for_screen_coords(x, y);
         let c = self.cur_from_screen_coords(x, y);
-        self.buffers.active_mut().dot = Dot::Cur { c };
+        self.active_buffer_mut().dot = Dot::Cur { c };
 
         bufid == current_bufid
+    }
+
+    /// Scroll the [View] under the given cursor coordinates up or down by a single line
+    pub(crate) fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
+        let mut x_offset = 0;
+        let mut y_offset = 0;
+
+        if self.row_is_scratch(y) {
+            return apply_scroll(
+                &mut self.scratch.b,
+                &mut self.scratch.w,
+                self.screen_cols,
+                self.scratch.is_focused,
+                up,
+            );
+        }
+
+        for (focused_col, col) in self.cols.iter_mut() {
+            if x > x_offset + col.n_cols {
+                x_offset += col.n_cols + 1;
+                continue;
+            }
+            for (focused_win, win) in col.wins.iter_mut() {
+                if y > y_offset + win.n_rows {
+                    y_offset += win.n_rows + 1;
+                    continue;
+                }
+
+                let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+                apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
+                return;
+            }
+        }
+
+        let n_cols = self.cols.focus.n_cols;
+        let win = &mut self.cols.focus.wins.focus;
+        let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+        apply_scroll(b, win, n_cols, true, up);
     }
 
     pub(crate) fn update_visible_ts_state(&mut self) {
@@ -747,6 +884,33 @@ impl Column {
     #[inline]
     fn focused_view_mut(&mut self) -> &mut View {
         &mut self.wins.focus.view
+    }
+}
+
+/// State for the scratch buffer
+#[derive(Debug)]
+pub(super) struct Scratch {
+    pub(super) b: Buffer,
+    pub(super) w: Window,
+    pub(super) is_visible: bool,
+    pub(super) is_focused: bool,
+}
+
+impl Scratch {
+    // n_rows is read from config on startup but then not modified after that
+    fn new(n_rows: usize) -> Self {
+        Self {
+            b: Buffer::new_virtual(SCRATCH_ID, "*scratch*", ""),
+            w: Window::new(n_rows, SCRATCH_ID),
+            is_visible: false,
+            is_focused: false,
+        }
+    }
+
+    /// Toggle the visibility of the scratch buffer and focus it if opening.
+    fn toggle(&mut self) {
+        self.is_visible = !self.is_visible;
+        self.is_focused = self.is_visible;
     }
 }
 
@@ -950,6 +1114,7 @@ mod tests {
         let (tx, _) = channel();
         let mut ws = Layout {
             buffers: Buffers::new_stubbed(&all_ids, tx),
+            scratch: Scratch::new(n_rows),
             screen_rows: n_rows,
             screen_cols: n_cols,
             cols: ZipList::try_from_iter(cols).unwrap(),

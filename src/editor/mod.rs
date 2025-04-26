@@ -512,6 +512,7 @@ where
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
             ShowHelp => self.show_help(),
+            ToggleScratch => self.layout.toggle_scratch(),
             TsShowTree => self.show_active_ts_tree(),
             UpdateConfig { input } => self.update_config(&input),
             ViewLogs => self.view_logs(),
