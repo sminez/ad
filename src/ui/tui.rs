@@ -332,6 +332,12 @@ impl UserInterface for Tui {
             _ => None,
         };
 
+        let (load_exec_range, scratch_load_exec_range) = if layout.scratch.is_focused {
+            (None, load_exec_range)
+        } else {
+            (load_exec_range, None)
+        };
+
         // We need space for each visible line plus the two commands to hide/show the cursor
         let mut lines = Vec::with_capacity(self.screen_rows + 2);
         lines.push(format!("{}{}", Cursor::Hide, Cursor::ToStart));
@@ -350,7 +356,7 @@ impl UserInterface for Tui {
         } else if layout.scratch.is_visible {
             lines.extend(WinIter::new_scratch_iter(
                 &layout.scratch,
-                load_exec_range,
+                scratch_load_exec_range,
                 self.screen_cols,
                 tabstop,
                 cs,
