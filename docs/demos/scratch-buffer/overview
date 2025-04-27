@@ -1,0 +1,11 @@
+This is a quick demo of the new scratch buffer behaviour being added to ad
+
+  - Conceptually the scratch buffer is similar to acme's per-window "tag"
+
+  - Instead of having a tag per buffer you have a single shared scratch buffer
+
+  - You can show and hide the scrach buffer using 'Alt-;'
+
+  - You can interact with the content of the scratch buffer in the same way as any other buffer
+
+    -> You can even run the NextSlide command from there, try it out!

@@ -25,8 +25,8 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             Ok(id) => Ok(Single(FocusBuffer { id })),
             Err(_) => Err(format!("'{args}' is not a valid buffer id")),
         },
-        "bn" | "buffer-next" => Ok(Single(NextBuffer)),
-        "bp" | "buffer-prev" => Ok(Single(PreviousBuffer)),
+        "bn" | "next-buffer" => Ok(Single(NextBuffer)),
+        "bp" | "prev-buffer" => Ok(Single(PreviousBuffer)),
         "next-column" => Ok(Single(NextColumn)),
         "next-window" => Ok(Single(NextWindowInColumn)),
         "prev-column" => Ok(Single(PreviousColumn)),
@@ -147,6 +147,9 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             input: input.to_string(),
         })),
 
+        "clear-scratch" => Ok(Single(ClearScratch)),
+        "toggle-scratch" => Ok(Single(ToggleScratch)),
+
         "ts-show-tree" => Ok(Single(TsShowTree)),
 
         "view-logs" => Ok(Single(ViewLogs)),
@@ -187,7 +190,8 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
         "viewport-center" => Ok(Single(SetViewPort(ViewPort::Center))),
 
         "" => Err(String::new()),
-        _ => Err(format!("Not an editor command: {command}")),
+        _ => Err(String::new()),
+        // _ => Err(format!("Not an editor command: {command}")),
     }
 }
 

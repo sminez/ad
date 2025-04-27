@@ -5,16 +5,20 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "switch to the buffer with the given ID ('buffer 5')",
         ),
         (
-            vec!["bn", "buffer-next"],
+            vec!["bn", "next-buffer"],
             "switch to the next available open buffer in the buffer list",
         ),
         (
-            vec!["bp", "buffer-prev"],
+            vec!["bp", "prev-buffer"],
             "switch to the previous available open buffer in the buffer list",
         ),
         (
             vec!["cd", "change-directory"],
             "change ad's working directory ('cd ../src')",
+        ),
+        (
+            vec!["clear-scratch"],
+            "clear the contents of the scratch buffer",
         ),
         (
             vec!["db", "delete-buffer"],
@@ -108,6 +112,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         (
             vec!["set"],
             "set a config property ('set bg-color=#ebdbb2')",
+        ),
+        (
+            vec!["toggle-scratch"],
+            "toggle the visibility of the scratch buffer",
         ),
         (vec!["view-logs"], "open ad's internal logs in a new buffer"),
         (

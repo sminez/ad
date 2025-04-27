@@ -1,0 +1,20 @@
+The scratch buffer can be interacted with from the filesystem interface.
+
+  - try running "ad -9p ls ad"
+
+    -> you should see a "scratch" file listed
+
+
+  - you can read the current content of the scratch buffer like so:
+
+    -> ad -9p read ad/scratch
+
+
+  - you can append to the scratch buffer in the same way as appending to any other buffer body:
+
+    -> echo "hello from the shell" | ad -9p write ad/scratch
+
+
+  - you can clear the scratch buffer using the "clear-scratch" command
+
+    -> try running it from this buffer, the scratch or writing it to the "ad/ctl" file

@@ -15,7 +15,7 @@ use crate::{
     },
     ts::{LineIter, RangeToken},
     ui::{
-        layout::{Column, Window},
+        layout::{Column, Scratch, Window},
         Layout, StateChange, UserInterface,
     },
     ziplist, ORIGINAL_TERMIOS,
@@ -297,25 +297,45 @@ impl UserInterface for Tui {
     ) {
         self.screen_rows = layout.screen_rows;
         self.screen_cols = layout.screen_cols;
+
+        let conf = config_handle!();
+        let (cs, status_timeout, tabstop, max_mb_lines) = (
+            &conf.colorscheme,
+            conf.status_timeout,
+            conf.tabstop,
+            conf.minibuffer_lines,
+        );
+
+        // If we have a minibuffer open then that takes priority over an open scratch buffer
         let w_minibuffer = mb.is_some();
         let mb = mb.unwrap_or_default();
         let active_buffer = layout.active_buffer();
-        let mb_lines = mb.b.map(|b| b.len_lines()).unwrap_or_default();
-        let mb_offset = if mb_lines > 0 { 1 } else { 0 };
+
+        let mb_has_lines = mb.b.map(|b| !b.is_empty()).unwrap_or_default();
+        let offset = if mb_has_lines {
+            mb.bottom - mb.top + 1
+        } else if !w_minibuffer && layout.scratch.is_visible {
+            max_mb_lines
+        } else {
+            0
+        };
 
         // This is the screen size that we have to work with for the buffer content we currently want to
         // display. If the minibuffer is active then it take priority over anything else and we always
         // show the status bar as the final two lines of the UI.
-        let effective_screen_rows = self.screen_rows - (mb.bottom - mb.top) - mb_offset;
-
-        let conf = config_handle!();
-        let (cs, status_timeout, tabstop) = (&conf.colorscheme, conf.status_timeout, conf.tabstop);
+        let effective_screen_rows = self.screen_rows - offset;
 
         let load_exec_range = match held_click {
             Some(click) if click.btn == MouseButton::Right || click.btn == MouseButton::Middle => {
                 Some((click.btn == MouseButton::Right, click.selection))
             }
             _ => None,
+        };
+
+        let (load_exec_range, scratch_load_exec_range) = if layout.scratch.is_focused {
+            (None, load_exec_range)
+        } else {
+            (load_exec_range, None)
         };
 
         // We need space for each visible line plus the two commands to hide/show the cursor
@@ -333,7 +353,17 @@ impl UserInterface for Tui {
 
         if w_minibuffer {
             lines.append(&mut self.render_minibuffer_state(&mb, tabstop, cs));
-        } else {
+        } else if layout.scratch.is_visible {
+            lines.extend(WinIter::new_scratch_iter(
+                &layout.scratch,
+                scratch_load_exec_range,
+                self.screen_cols,
+                tabstop,
+                cs,
+                self.style_cache.clone(),
+            ));
+        }
+        if !w_minibuffer {
             lines.push(self.render_message_bar(cs, pending_keys, status_timeout));
         }
 
@@ -341,7 +371,7 @@ impl UserInterface for Tui {
         let (x, y) = if w_minibuffer {
             (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
         } else {
-            layout.ui_xy(active_buffer)
+            layout.ui_xy()
         };
         lines.push(format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
@@ -528,6 +558,38 @@ struct WinIter<'a> {
     w: &'a Window,
     cs: &'a ColorScheme,
     style_cache: Rc<RefCell<HashMap<String, String>>>,
+}
+
+impl<'a> WinIter<'a> {
+    fn new_scratch_iter(
+        scratch: &'a Scratch,
+        load_exec_range: Option<(bool, Range)>,
+        n_cols: usize,
+        tabstop: usize,
+        cs: &'a ColorScheme,
+        style_cache: Rc<RefCell<HashMap<String, String>>>,
+    ) -> Self {
+        let b = &scratch.b;
+        let (w_lnum, _) = b.sign_col_dims();
+        let rng = if scratch.is_focused {
+            load_exec_range
+        } else {
+            None
+        };
+        let it = b.iter_tokenized_lines_from(scratch.w.view.row_off, rng);
+
+        WinIter {
+            y: 0,
+            w_lnum,
+            n_cols,
+            tabstop,
+            it,
+            gb: &b.txt,
+            w: &scratch.w,
+            cs,
+            style_cache,
+        }
+    }
 }
 
 impl Iterator for WinIter<'_> {

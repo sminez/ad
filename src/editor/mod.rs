@@ -5,7 +5,7 @@ use crate::{
     config_handle, die,
     dot::TextObject,
     exec::{Addr, Address},
-    fsys::{AdFs, InputFilter, LogEvent, Message, Req},
+    fsys::{AdFs, LogEvent, Message, Req},
     input::Event,
     key::{Arrow, Input},
     lsp::{LspManager, LspManagerHandle},
@@ -14,7 +14,7 @@ use crate::{
     set_config,
     system::{DefaultSystem, System},
     term::CurShape,
-    ui::{Layout, StateChange, Ui, UserInterface},
+    ui::{Layout, StateChange, Ui, UserInterface, SCRATCH_ID},
     LogBuffer,
 };
 use ad_event::Source;
@@ -27,7 +27,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, trace};
 
 mod actions;
 mod built_in_commands;
@@ -117,7 +117,10 @@ where
         let lsp_manager = Arc::new(LspManager::spawn(tx_events.clone()));
         let mut layout = Layout::new(0, 0, lsp_manager.clone());
         if show_splash && layout.is_empty_scratch() {
-            layout.active_buffer_mut().txt.insert_str(0, SPLASH);
+            layout
+                .active_buffer_mut_ignoring_scratch()
+                .txt
+                .insert_str(0, SPLASH);
         }
 
         Self {
@@ -144,7 +147,7 @@ where
     /// The id of the currently active buffer
     #[inline]
     pub fn active_buffer_id(&self) -> usize {
-        self.layout.active_buffer().id
+        self.layout.active_buffer_ignoring_scratch().id
     }
 
     /// Update the stored window size, accounting for the status and message bars
@@ -243,6 +246,11 @@ where
         tx: Sender<Result<String, String>>,
         f: fn(&Buffer) -> String,
     ) {
+        if id == SCRATCH_ID {
+            _ = tx.send(Ok((f)(&self.layout.scratch.b)));
+            return;
+        }
+
         match self.layout.buffer_with_id(id) {
             Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
@@ -259,6 +267,12 @@ where
         s: String,
         f: F,
     ) {
+        if id == SCRATCH_ID {
+            (f)(&mut self.layout.scratch.b, s);
+            _ = tx.send(Ok("handled".to_string()));
+            return;
+        }
+
         match self.layout.buffer_with_id_mut(id) {
             Some(b) => {
                 (f)(b, s);
@@ -331,7 +345,7 @@ where
             }
 
             AddInputEventFilter { id, filter } => {
-                let resp = if self.try_set_input_filter(id, filter) {
+                let resp = if self.layout.try_set_input_filter(id, filter) {
                     Ok("handled".to_string())
                 } else {
                     Err("filter already in place".to_string())
@@ -340,7 +354,7 @@ where
             }
 
             RemoveInputEventFilter { id } => {
-                self.clear_input_filter(id);
+                self.layout.clear_input_filter(id);
                 default_handled();
             }
 
@@ -393,6 +407,7 @@ where
                 .write_output_for_buffer(bufid, content, &self.cwd),
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
+            ClearScratch => self.layout.scratch.b.clear(),
             CommandMode => self.command_mode(),
             DeleteBuffer { force } => self.delete_buffer(self.active_buffer_id(), force),
             DeleteColumn { force } => self.delete_active_column(force),
@@ -427,7 +442,7 @@ where
             LspShowCapabilities => {
                 if let Some((name, txt)) = self
                     .lsp_manager
-                    .show_server_capabilities(self.layout.active_buffer())
+                    .show_server_capabilities(self.layout.active_buffer_ignoring_scratch())
                 {
                     self.layout.open_virtual(name, txt, true)
                 }
@@ -435,7 +450,7 @@ where
             LspShowDiagnostics => {
                 let action = self
                     .lsp_manager
-                    .show_diagnostics(self.layout.active_buffer());
+                    .show_diagnostics(self.layout.active_buffer_ignoring_scratch());
                 self.handle_action(action, Source::Fsys);
             }
             LspStart => {
@@ -443,20 +458,24 @@ where
                     self.set_status_message(msg);
                 }
             }
-            LspStop => self.lsp_manager.stop_client(self.layout.active_buffer()),
+            LspStop => self
+                .lsp_manager
+                .stop_client(self.layout.active_buffer_ignoring_scratch()),
             LspGotoDeclaration => self
                 .lsp_manager
-                .goto_declaration(self.layout.active_buffer()),
+                .goto_declaration(self.layout.active_buffer_ignoring_scratch()),
             LspGotoDefinition => self
                 .lsp_manager
-                .goto_definition(self.layout.active_buffer()),
+                .goto_definition(self.layout.active_buffer_ignoring_scratch()),
             LspGotoTypeDefinition => self
                 .lsp_manager
-                .goto_type_definition(self.layout.active_buffer()),
-            LspHover => self.lsp_manager.hover(self.layout.active_buffer()),
+                .goto_type_definition(self.layout.active_buffer_ignoring_scratch()),
+            LspHover => self
+                .lsp_manager
+                .hover(self.layout.active_buffer_ignoring_scratch()),
             LspReferences => self
                 .lsp_manager
-                .find_references(self.layout.active_buffer()),
+                .find_references(self.layout.active_buffer_ignoring_scratch()),
             MarkClean { bufid } => self.mark_clean(bufid),
             MbSelect(selector) => selector.run(self),
             NewEditLogTransaction => self.layout.active_buffer_mut().new_edit_log_transaction(),
@@ -512,6 +531,7 @@ where
             ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
             ShellRun { cmd } => self.run_shell_cmd(&cmd),
             ShowHelp => self.show_help(),
+            ToggleScratch => self.layout.toggle_scratch(),
             TsShowTree => self.show_active_ts_tree(),
             UpdateConfig { input } => self.update_config(&input),
             ViewLogs => self.view_logs(),
@@ -558,30 +578,6 @@ where
                 ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
             }
-        }
-    }
-
-    /// Returns `true` if the filter was successfully set, false if there was already one in place.
-    pub(crate) fn try_set_input_filter(&mut self, bufid: usize, filter: InputFilter) -> bool {
-        let b = match self.layout.buffer_with_id_mut(bufid) {
-            Some(b) => b,
-            None => return false,
-        };
-
-        if b.input_filter.is_some() {
-            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
-            return false;
-        }
-
-        b.input_filter = Some(filter);
-
-        true
-    }
-
-    /// Remove the input filter for the given scope if one exists.
-    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
-        if let Some(b) = self.layout.buffer_with_id_mut(bufid) {
-            b.input_filter = None;
         }
     }
 }

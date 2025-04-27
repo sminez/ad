@@ -18,8 +18,11 @@
 //! $HOME/.ad/mnt/
 //!   ctl
 //!   minibuffer
+//!   scratch
 //!   log
 //!   buffers/
+//!     current
+//!     index
 //!     [n]/
 //!       filename
 //!       dot
@@ -27,7 +30,7 @@
 //!       body
 //!       event
 //! ```
-use crate::{config_handle, editor::Action, input::Event};
+use crate::{config_handle, editor::Action, input::Event, ui::SCRATCH_ID};
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     sync::server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
@@ -77,14 +80,17 @@ const LOG_FILE: &str = "log";
 ///   3    /minibuffer  -> control file for selecting text using the minibuffer
 const MINIBUFFER_QID: u64 = 3;
 const MINIBUFFER: &str = "minibuffer";
+///   4    /scratch     -> control file for reading and appending to the scratch buffer
+const SCRATCH_QID: u64 = 4;
+const SCRATCH: &str = "scratch";
 ///   4    /buffers/    -> parent directory for buffers
-const BUFFERS_QID: u64 = 4;
+const BUFFERS_QID: u64 = 5;
 const BUFFERS_DIR: &str = "buffers";
 //    5      /index     -> a listing of all of the currently open buffers
-const INDEX_BUFFER_QID: u64 = 5;
+const INDEX_BUFFER_QID: u64 = 6;
 const INDEX_BUFFER: &str = "index";
 //    6      /current   -> the fsys filename of the current buffer
-const CURRENT_BUFFER_QID: u64 = 6;
+const CURRENT_BUFFER_QID: u64 = 7;
 const CURRENT_BUFFER: &str = "current";
 
 /// The number of qids required to serve both the directory and contents
@@ -101,10 +107,11 @@ const CURRENT_BUFFER: &str = "current";
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
 const QID_OFFSET: u64 = 9;
 
-const TOP_LEVEL_QIDS: [u64; 7] = [
+const TOP_LEVEL_QIDS: [u64; 8] = [
     MOUNT_ROOT_QID,
     CONTROL_FILE_QID,
     MINIBUFFER_QID,
+    SCRATCH_QID,
     LOG_FILE_QID,
     BUFFERS_QID,
     INDEX_BUFFER_QID,
@@ -160,6 +167,7 @@ struct State {
     mount_dir_stat: Stat,
     control_file_stat: Stat,
     minibuffer_stat: Stat,
+    scratch_stat: Stat,
     log_file_stat: Stat,
     mount_path: String,
     auto_mount: bool,
@@ -207,19 +215,6 @@ impl State {
         self.open_cids.get(&qid).and_then(|cids| cids.read_locked)
     }
 
-    /// Writing data to the minibuffer causes fsys to buffer the writes internally until the client
-    /// is done. When a client then attempts to read back the selection the full buffer is sent to
-    /// the editor for rendering and the reads block until the user makes a selection.
-    fn minibuffer_write(&mut self, lines: String) -> Result<usize> {
-        let n_bytes = lines.len();
-        match &mut self.minibuffer_content {
-            MiniBufferContent::Buffering(buffer) => buffer.extend_from_slice(lines.as_bytes()),
-            _ => self.minibuffer_content = MiniBufferContent::Buffering(lines.into_bytes()),
-        }
-
-        Ok(n_bytes)
-    }
-
     fn set_active_buffer(&mut self, s: String) -> Result<usize> {
         let id: usize = match s.trim().parse() {
             Ok(n) => n,
@@ -235,6 +230,29 @@ impl State {
         }
 
         Ok(s.len())
+    }
+
+    fn scratch_read(&self, offset: usize, count: usize) -> ReadOutcome {
+        let req = Req::ReadBufferBody { id: SCRATCH_ID };
+        match Message::send(req, &self.tx) {
+            Ok(s) => ReadOutcome::Immediate(apply_offset(s.as_bytes(), offset, count)),
+            Err(e) => {
+                error!("fsys failed to read file content: {e}");
+                ReadOutcome::Immediate(Vec::new())
+            }
+        }
+    }
+
+    fn scratch_write(&mut self, s: String) -> Result<usize> {
+        let n_bytes = s.len();
+        let req = Req::AppendBufferBody { id: SCRATCH_ID, s };
+
+        match Message::send(req, &self.tx) {
+            Ok(_) => Ok(n_bytes),
+            Err(e) => Err(format!(
+                "unable to write to scratch buffer (n_bytes={n_bytes}): {e}",
+            )),
+        }
     }
 
     fn minibuffer_read(&mut self, offset: usize, count: usize) -> ReadOutcome {
@@ -297,6 +315,19 @@ impl State {
             },
         }
     }
+
+    /// Writing data to the minibuffer causes fsys to buffer the writes internally until the client
+    /// is done. When a client then attempts to read back the selection the full buffer is sent to
+    /// the editor for rendering and the reads block until the user makes a selection.
+    fn minibuffer_write(&mut self, lines: String) -> Result<usize> {
+        let n_bytes = lines.len();
+        match &mut self.minibuffer_content {
+            MiniBufferContent::Buffering(buffer) => buffer.extend_from_slice(lines.as_bytes()),
+            _ => self.minibuffer_content = MiniBufferContent::Buffering(lines.into_bytes()),
+        }
+
+        Ok(n_bytes)
+    }
 }
 
 /// The filesystem interface for ad
@@ -332,6 +363,7 @@ impl AdFs {
                 mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
                 control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
                 minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
+                scratch_stat: empty_file_stat(SCRATCH_QID, SCRATCH),
                 log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
                 mount_path,
                 auto_mount,
@@ -399,6 +431,7 @@ impl Serve9p for AdFs {
             MOUNT_ROOT_QID => Ok(s.mount_dir_stat.clone()),
             CONTROL_FILE_QID => Ok(s.control_file_stat.clone()),
             MINIBUFFER_QID => Ok(s.minibuffer_stat.clone()),
+            SCRATCH_QID => Ok(s.scratch_stat.clone()),
             LOG_FILE_QID => Ok(s.log_file_stat.clone()),
             BUFFERS_QID => Ok(s.buffer_nodes.stat().clone()),
             qid => match s.buffer_nodes.get_stat_for_qid(qid) {
@@ -433,6 +466,7 @@ impl Serve9p for AdFs {
             MOUNT_ROOT_QID => match child {
                 CONTROL_FILE => Ok(s.control_file_stat.fm.clone()),
                 MINIBUFFER => Ok(s.minibuffer_stat.fm.clone()),
+                SCRATCH => Ok(s.scratch_stat.fm.clone()),
                 LOG_FILE => Ok(s.log_file_stat.fm.clone()),
                 BUFFERS_DIR => Ok(s.buffer_nodes.stat().fm.clone()),
                 _ => match s.buffer_nodes.lookup_file_stat(parent_qid, child) {
@@ -500,6 +534,8 @@ impl Serve9p for AdFs {
             return Ok(ReadOutcome::Immediate(Vec::new()));
         } else if qid == MINIBUFFER_QID {
             return Ok(s.minibuffer_read(offset, count));
+        } else if qid == SCRATCH_QID {
+            return Ok(s.scratch_read(offset, count));
         } else if qid == LOG_FILE_QID {
             return Ok(s.buffer_nodes.log.events_since_last_read(cid));
         }
@@ -532,6 +568,7 @@ impl Serve9p for AdFs {
             MOUNT_ROOT_QID => Ok(vec![
                 s.log_file_stat.clone(),
                 s.minibuffer_stat.clone(),
+                s.scratch_stat.clone(),
                 s.control_file_stat.clone(),
                 s.buffer_nodes.stat().clone(),
             ]),
@@ -577,6 +614,7 @@ impl Serve9p for AdFs {
             },
 
             MINIBUFFER_QID => s.minibuffer_write(str),
+            SCRATCH_QID => s.scratch_write(str),
             CURRENT_BUFFER_QID => s.set_active_buffer(str),
 
             LOG_FILE_QID | INDEX_BUFFER_QID => Err(E_NOT_ALLOWED.to_string()),

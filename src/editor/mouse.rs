@@ -6,6 +6,7 @@ use crate::{
     fsys::LogEvent,
     key::{MouseButton, MouseEvent, MouseEventKind, MouseMod},
     system::System,
+    ui::SCRATCH_ID,
 };
 use ad_event::Source;
 use std::time::Instant;
@@ -80,7 +81,7 @@ where
 
                 let click_in_active_buffer = self.layout.set_dot_from_screen_coords(x, y);
                 let b = self.layout.active_buffer_mut();
-                if !click_in_active_buffer {
+                if !click_in_active_buffer && b.id != SCRATCH_ID {
                     _ = self.tx_fsys.send(LogEvent::Focus(b.id));
                 }
 
@@ -676,7 +677,8 @@ mod tests {
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();
         let filter = InputFilter::new(tx);
-        ed.try_set_input_filter(ed.active_buffer_id(), filter);
+        ed.layout
+            .try_set_input_filter(ed.active_buffer_id(), filter);
 
         for evt in evts.iter() {
             ed.handle_mouse_event(*evt);

@@ -476,8 +476,8 @@ mod tests {
     use simple_test_case::test_case;
 
     #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
-    #[test_case(9, 7, DOT; "dot second buffer")]
-    #[test_case(22, 16, BODY; "body second buffer")]
+    #[test_case(10, 8, DOT; "dot second buffer")]
+    #[test_case(23, 17, BODY; "body second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);

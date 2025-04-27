@@ -49,6 +49,7 @@ pub enum Action {
     AppendToOutputBuffer { bufid: usize, content: String },
     ChangeDirectory { path: Option<String> },
     CleanupChild { id: u32 },
+    ClearScratch,
     CommandMode,
     Delete,
     DeleteBuffer { force: bool },
@@ -123,6 +124,7 @@ pub enum Action {
     ShellRun { cmd: String },
     ShellSend { cmd: String },
     ShowHelp,
+    ToggleScratch,
     TsShowTree,
     Undo,
     UpdateConfig { input: String },
@@ -196,11 +198,15 @@ where
             }
 
             Ok(None) => {
-                match self.layout.active_buffer().state_changed_on_disk() {
+                match self
+                    .layout
+                    .active_buffer_ignoring_scratch()
+                    .state_changed_on_disk()
+                {
                     Ok(true) => {
                         let res = self.minibuffer_prompt("File changed on disk, reload? [y/n]: ");
                         if let Some("y" | "Y" | "yes") = res.as_deref() {
-                            let b = self.layout.active_buffer_mut();
+                            let b = self.layout.active_buffer_mut_ignoring_scratch();
                             let msg = b.reload_from_disk();
                             self.lsp_manager.document_changed(b);
                             self.set_status_message(&msg);
@@ -230,7 +236,7 @@ where
     pub(crate) fn find_file(&mut self, new_window: bool) {
         let d = self
             .layout
-            .active_buffer()
+            .active_buffer_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
             .to_owned();
@@ -241,7 +247,7 @@ where
     pub(crate) fn find_repo_file(&mut self, new_window: bool) {
         let d = self
             .layout
-            .active_buffer()
+            .active_buffer_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
             .to_owned();
@@ -267,7 +273,7 @@ where
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 _ = self.tx_fsys.send(LogEvent::Close(id));
-                self.clear_input_filter(id);
+                self.layout.clear_input_filter(id);
                 let was_last_buffer = self.layout.close_buffer(id);
                 self.running = !was_last_buffer;
             }
@@ -301,7 +307,7 @@ where
             None => return,
         };
 
-        let b = self.layout.active_buffer_mut();
+        let b = self.layout.active_buffer_mut_ignoring_scratch();
         let msg = b.save_to_disk_at(p, force);
         self.lsp_manager.document_changed(b);
         self.set_status_message(msg);
@@ -312,7 +318,7 @@ where
     fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
         use BufferKind as Bk;
 
-        let desired_path = match (fname, &self.layout.active_buffer().kind) {
+        let desired_path = match (fname, &self.layout.active_buffer_ignoring_scratch().kind) {
             // File has a known name which is either where we loaded it from or a
             // path that has been set and verified from the Some(s) case that follows
             (None, Bk::File(ref p)) => return Some(p.clone()),
@@ -341,7 +347,8 @@ where
             }
         }
 
-        self.layout.active_buffer_mut().kind = BufferKind::File(desired_path.clone());
+        self.layout.active_buffer_mut_ignoring_scratch().kind =
+            BufferKind::File(desired_path.clone());
 
         Some(desired_path)
     }
@@ -372,7 +379,11 @@ where
     }
 
     pub(super) fn reload_active_buffer(&mut self) {
-        let msg = self.layout.active_buffer_mut().reload_from_disk();
+        let msg = self
+            .layout
+            .active_buffer_mut_ignoring_scratch()
+            .reload_from_disk();
+
         self.set_status_message(msg);
     }
 
@@ -421,7 +432,7 @@ where
     pub(super) fn search_in_current_buffer(&mut self) {
         let numbered_lines = self
             .layout
-            .active_buffer()
+            .active_buffer_ignoring_scratch()
             .string_lines()
             .into_iter()
             .enumerate()
@@ -430,8 +441,8 @@ where
 
         let selection = self.minibuffer_select_from("> ", numbered_lines);
         if let MiniBufferSelection::Line { cy, .. } = selection {
-            self.layout.active_buffer_mut().dot = Dot::Cur {
-                c: Cur::from_yx(cy, 0, self.layout.active_buffer()),
+            self.layout.active_buffer_mut_ignoring_scratch().dot = Dot::Cur {
+                c: Cur::from_yx(cy, 0, self.layout.active_buffer_ignoring_scratch()),
             };
             self.handle_action(Action::DotSet(TextObject::Line, 1), Source::Fsys);
             self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
@@ -484,7 +495,7 @@ where
         self.minibuffer_select_from(
             "<RAW BUFFER> ",
             self.layout
-                .active_buffer()
+                .active_buffer_ignoring_scratch()
                 .string_lines()
                 .into_iter()
                 .map(|l| format!("{:?}", l))
@@ -498,7 +509,11 @@ where
     }
 
     pub(super) fn show_active_ts_tree(&mut self) {
-        match self.layout.active_buffer().pretty_print_ts_tree() {
+        match self
+            .layout
+            .active_buffer_ignoring_scratch()
+            .pretty_print_ts_tree()
+        {
             Some(s) => self.layout.open_virtual("+ts-tree", s, false),
             None => self.set_status_message("no tree-sitter tree for current buffer"),
         }
@@ -529,6 +544,9 @@ where
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
     pub(super) fn default_load_dot(&mut self, source: Source, load_in_new_window: bool) {
+        // Grabbing the ID in this way allows us to treat loads in the scratch buffer as being from
+        // the active buffer.
+        let id = self.layout.active_buffer_ignoring_scratch().id;
         let b = self.layout.active_buffer_mut();
         b.expand_cur_dot();
         if b.notify_load(source) {
@@ -540,12 +558,11 @@ where
             return;
         }
 
-        let id = b.id;
         self.load_string_in_buffer(id, s, load_in_new_window);
     }
 
     pub(super) fn plumb(&mut self, txt: String, load_in_new_window: bool) {
-        let id = self.layout.active_buffer().id;
+        let id = self.layout.active_buffer_ignoring_scratch().id;
         self.load_string_in_buffer(id, txt, load_in_new_window);
     }
 
@@ -733,11 +750,13 @@ where
         };
 
         let mut buf = Vec::new();
-        let fname = self.layout.active_buffer().full_name().to_string();
-        match prog.execute(self.layout.active_buffer_mut(), &fname, &mut buf) {
+        let b = self.layout.active_buffer_mut_ignoring_scratch();
+        let fname = b.full_name().to_string();
+
+        match prog.execute(b, &fname, &mut buf) {
             Ok(new_dot) => {
                 self.layout.record_jump_position();
-                self.layout.active_buffer_mut().dot = new_dot;
+                self.layout.active_buffer_mut_ignoring_scratch().dot = new_dot;
             }
 
             Err(e) => self.set_status_message(format!("Error running edit command: {e:?}")),
@@ -803,8 +822,9 @@ where
     }
 
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let d = self.layout.active_buffer().dir().unwrap_or(&self.cwd);
-        let id = self.active_buffer_id();
+        let b = self.layout.active_buffer_ignoring_scratch();
+        let d = b.dir().unwrap_or(&self.cwd);
+        let id = b.id;
         let res = self.system.run_command_blocking(raw_cmd_str, d, id);
 
         match res {
@@ -814,8 +834,9 @@ where
     }
 
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let d = self.layout.active_buffer().dir().unwrap_or(&self.cwd);
-        let id = self.active_buffer_id();
+        let b = self.layout.active_buffer_ignoring_scratch();
+        let d = b.dir().unwrap_or(&self.cwd);
+        let id = b.id;
         let res = self
             .system
             .run_command(raw_cmd_str, d, id, self.tx_events.clone());

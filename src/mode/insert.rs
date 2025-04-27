@@ -14,6 +14,9 @@ pub(crate) fn insert_mode() -> (Mode, Vec<(String, &'static str)>) {
     let (keymap, docs) = keymap! {
         "return to NORMAL mode";
         [ Esc ] => [ SetMode { m: "NORMAL" }, NewEditLogTransaction ],
+        "toggle the visibility of the scratch buffer";
+        [ Alt(';') ] => [ ToggleScratch ],
+
         "backspace";
         [ Backspace ] => [ DotSet(Arr(Left), 1), Delete ],
         "delete";
