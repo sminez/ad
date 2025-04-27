@@ -8,6 +8,8 @@ use crate::{buffer::Buffer, dot::Cur};
 /// half-open ranges) so care needs to be taken when using a [Range] to select sub-regions of a
 /// [Buffer].
 ///
+/// A Range where `start == end` is considered a "null range" and may be collapsed to a single
+/// cursor via the [collapse_null_range][crate::dot::Dot::collapse_null_range] method on `Dot`.
 ///
 /// # Why do this?
 ///
@@ -15,14 +17,11 @@ use crate::{buffer::Buffer, dot::Cur};
 /// [Buffer] and we need to be able to manipulate both ends of that selection as isolated [Cur]
 /// instances within the text. As such, we _really_ need both the start and end cursor to have the
 /// same semantics and behaviour and we also need to be able to pop them off, manipulate them and
-/// recombine them to produce new Ranges. While it does make using Ranges for slicing simpler, it
-/// makes a lot of the more complicated operations we need to perform (expanding selections,
-/// mapping mouse selections etc) significantly harder to reason about as you end up needing to map
-/// back and forth between the end of a Range and the Cur that represents the final character in
-/// that Range.
-///
-/// A Range where `start == end` is considered a "null range" and may be collapsed to a single
-/// cursor via the [collapse_null_range][crate::dot::Dot::collapse_null_range] method on `Dot`.
+/// recombine them to produce new Ranges. While using a half-open interval would make using Ranges
+/// for slicing simpler, the trade off is that it makes a lot of the more complicated operations we
+/// need to perform (expanding selections, mapping mouse selections etc) significantly harder to
+/// reason about as you end up needing to map back and forth between the end of a Range and the Cur
+/// that represents the final character in that Range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Range {
     pub start: Cur,
