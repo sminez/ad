@@ -15,7 +15,7 @@ use super::{
     Error,
 };
 use crate::buffer::{Buffer, GapBuffer};
-use std::{mem::swap, rc::Rc};
+use std::{fmt, mem::swap, rc::Rc};
 
 pub(super) const N_SLOTS: usize = 30;
 
@@ -27,6 +27,8 @@ pub(super) const N_SLOTS: usize = 30;
 /// full PCRE syntax or functionality.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Regex {
+    /// The original text of the regex
+    re: String,
     /// The compiled instructions for running the VM
     prog: Prog,
     /// Names to be used for extracting named submatches
@@ -51,9 +53,15 @@ pub struct Regex {
     next: Option<char>,
 }
 
-impl std::fmt::Debug for Regex {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        fmt.debug_tuple("Regex").field(&self.prog).finish()
+impl fmt::Debug for Regex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("Regex").field(&self.re).finish()
+    }
+}
+
+impl fmt::Display for Regex {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.re)
     }
 }
 
@@ -70,7 +78,7 @@ impl Regex {
             submatch_names,
         } = compile_ast(ast, false);
 
-        Ok(Self::new(ops, submatch_names))
+        Ok(Self::new(re, ops, submatch_names))
     }
 
     /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
@@ -86,10 +94,10 @@ impl Regex {
             submatch_names,
         } = compile_ast(ast, true);
 
-        Ok(Self::new(ops, submatch_names))
+        Ok(Self::new(re, ops, submatch_names))
     }
 
-    fn new(ops: Vec<Op>, submatch_names: Vec<String>) -> Self {
+    fn new(re: &str, ops: Vec<Op>, submatch_names: Vec<String>) -> Self {
         let prog: Prog = optimise(ops)
             .into_iter()
             .map(|op| Inst { op, gen: 0 })
@@ -101,6 +109,7 @@ impl Regex {
         let free_sms = (1..prog.len()).collect();
 
         Self {
+            re: re.to_string(),
             prog,
             submatch_names: Rc::from(submatch_names.into_boxed_slice()),
             clist,
