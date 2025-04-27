@@ -117,7 +117,10 @@ where
         let lsp_manager = Arc::new(LspManager::spawn(tx_events.clone()));
         let mut layout = Layout::new(0, 0, lsp_manager.clone());
         if show_splash && layout.is_empty_scratch() {
-            layout.active_buffer_mut().txt.insert_str(0, SPLASH);
+            layout
+                .active_buffer_mut_ignoring_scratch()
+                .txt
+                .insert_str(0, SPLASH);
         }
 
         Self {
@@ -439,7 +442,7 @@ where
             LspShowCapabilities => {
                 if let Some((name, txt)) = self
                     .lsp_manager
-                    .show_server_capabilities(self.layout.active_buffer())
+                    .show_server_capabilities(self.layout.active_buffer_ignoring_scratch())
                 {
                     self.layout.open_virtual(name, txt, true)
                 }
@@ -447,7 +450,7 @@ where
             LspShowDiagnostics => {
                 let action = self
                     .lsp_manager
-                    .show_diagnostics(self.layout.active_buffer());
+                    .show_diagnostics(self.layout.active_buffer_ignoring_scratch());
                 self.handle_action(action, Source::Fsys);
             }
             LspStart => {
@@ -455,20 +458,24 @@ where
                     self.set_status_message(msg);
                 }
             }
-            LspStop => self.lsp_manager.stop_client(self.layout.active_buffer()),
+            LspStop => self
+                .lsp_manager
+                .stop_client(self.layout.active_buffer_ignoring_scratch()),
             LspGotoDeclaration => self
                 .lsp_manager
-                .goto_declaration(self.layout.active_buffer()),
+                .goto_declaration(self.layout.active_buffer_ignoring_scratch()),
             LspGotoDefinition => self
                 .lsp_manager
-                .goto_definition(self.layout.active_buffer()),
+                .goto_definition(self.layout.active_buffer_ignoring_scratch()),
             LspGotoTypeDefinition => self
                 .lsp_manager
-                .goto_type_definition(self.layout.active_buffer()),
-            LspHover => self.lsp_manager.hover(self.layout.active_buffer()),
+                .goto_type_definition(self.layout.active_buffer_ignoring_scratch()),
+            LspHover => self
+                .lsp_manager
+                .hover(self.layout.active_buffer_ignoring_scratch()),
             LspReferences => self
                 .lsp_manager
-                .find_references(self.layout.active_buffer()),
+                .find_references(self.layout.active_buffer_ignoring_scratch()),
             MarkClean { bufid } => self.mark_clean(bufid),
             MbSelect(selector) => selector.run(self),
             NewEditLogTransaction => self.layout.active_buffer_mut().new_edit_log_transaction(),

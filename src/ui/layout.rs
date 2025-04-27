@@ -1,7 +1,7 @@
 //! Layout of UI windows
 use crate::{
     buffer::{Buffer, BufferId, Buffers},
-    config_handle,
+    config_handle, die,
     dot::{Cur, Dot},
     editor::ViewPort,
     fsys::InputFilter,
@@ -131,7 +131,7 @@ impl Layout {
         }
 
         let opt = self.buffers.open_or_focus(path)?;
-        let id = self.active_buffer().id;
+        let id = self.active_buffer_ignoring_scratch().id;
 
         if self.buffer_is_visible(id) {
             self.focus_first_window_with_buffer(id);
@@ -159,9 +159,9 @@ impl Layout {
         if self.buffer_is_visible(id) {
             self.focus_first_window_with_buffer(id);
         } else if new_window {
-            self.show_buffer_in_new_window(self.active_buffer().id);
+            self.show_buffer_in_new_window(id);
         } else {
-            self.show_buffer_in_active_window(self.active_buffer().id);
+            self.show_buffer_in_active_window(id);
         }
     }
 
@@ -184,13 +184,13 @@ impl Layout {
         if self.buffers.len() == 1 {
             // We could have been asked to close a non-existant buffer.
             // If this was the last buffer then Editor::delete_buffer will exit
-            return self.active_buffer().id == id;
+            return self.active_buffer_ignoring_scratch().id == id;
         }
 
         debug_assert!(self.buffers.len() > 1, "we have at least two buffers");
         self.views.retain(|v| v.bufid != id);
         self.buffers.close_buffer(id);
-        let focused_id = self.active_buffer().id;
+        let focused_id = self.active_buffer_ignoring_scratch().id;
         let ix = self.views.iter().position(|v| v.bufid == id);
         let existing_view = ix.map(|ix| self.views.remove(ix));
 
@@ -329,7 +329,7 @@ impl Layout {
     pub(crate) fn jump_forward(&mut self) -> Option<BufferId> {
         let maybe_ids = self.buffers.jump_list_forward();
         if let Some((prev_id, new_id)) = maybe_ids {
-            self.show_buffer_in_active_window(self.active_buffer().id);
+            self.show_buffer_in_active_window(self.active_buffer_ignoring_scratch().id);
             self.set_viewport(ViewPort::Center);
             if new_id != prev_id {
                 return Some(new_id);
@@ -342,7 +342,7 @@ impl Layout {
     pub(crate) fn jump_backward(&mut self) -> Option<BufferId> {
         let maybe_ids = self.buffers.jump_list_backward();
         if let Some((prev_id, new_id)) = maybe_ids {
-            self.show_buffer_in_active_window(self.active_buffer().id);
+            self.show_buffer_in_active_window(self.active_buffer_ignoring_scratch().id);
             self.set_viewport(ViewPort::Center);
             if new_id != prev_id {
                 return Some(new_id);
@@ -814,7 +814,10 @@ impl Layout {
                     continue;
                 }
 
-                let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+                let b = self
+                    .buffers
+                    .with_id_mut(win.view.bufid)
+                    .unwrap_or_else(|| die!("layout state contains an unknown buffer ID"));
                 apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
                 return;
             }
@@ -834,7 +837,11 @@ impl Layout {
         });
 
         for (bufid, from, n_rows) in it {
-            let b = self.buffers.with_id_mut(bufid).unwrap();
+            let b = self
+                .buffers
+                .with_id_mut(bufid)
+                .unwrap_or_else(|| die!("layout state contains an unknown buffer ID"));
+
             b.update_ts_state(from, n_rows);
         }
     }
@@ -878,12 +885,9 @@ pub(crate) struct Column {
 
 impl Column {
     pub(crate) fn new(n_rows: usize, n_cols: usize, buf_ids: &[BufferId]) -> Self {
-        if buf_ids.is_empty() {
-            panic!("cant have an empty column");
-        }
         let win_rows = n_rows / buf_ids.len();
-        let mut wins =
-            ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id))).unwrap();
+        let mut wins = ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id)))
+            .expect("can't have an empty column");
 
         let slop = n_rows - (win_rows * buf_ids.len()) + buf_ids.len() - 1;
         wins.focus.n_rows += slop;

@@ -190,7 +190,8 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
         "viewport-center" => Ok(Single(SetViewPort(ViewPort::Center))),
 
         "" => Err(String::new()),
-        _ => Err(format!("Not an editor command: {command}")),
+        _ => Err(String::new()),
+        // _ => Err(format!("Not an editor command: {command}")),
     }
 }
 

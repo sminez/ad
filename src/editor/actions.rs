@@ -198,11 +198,15 @@ where
             }
 
             Ok(None) => {
-                match self.layout.active_buffer().state_changed_on_disk() {
+                match self
+                    .layout
+                    .active_buffer_ignoring_scratch()
+                    .state_changed_on_disk()
+                {
                     Ok(true) => {
                         let res = self.minibuffer_prompt("File changed on disk, reload? [y/n]: ");
                         if let Some("y" | "Y" | "yes") = res.as_deref() {
-                            let b = self.layout.active_buffer_mut();
+                            let b = self.layout.active_buffer_mut_ignoring_scratch();
                             let msg = b.reload_from_disk();
                             self.lsp_manager.document_changed(b);
                             self.set_status_message(&msg);
@@ -232,7 +236,7 @@ where
     pub(crate) fn find_file(&mut self, new_window: bool) {
         let d = self
             .layout
-            .active_buffer()
+            .active_buffer_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
             .to_owned();
@@ -243,7 +247,7 @@ where
     pub(crate) fn find_repo_file(&mut self, new_window: bool) {
         let d = self
             .layout
-            .active_buffer()
+            .active_buffer_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
             .to_owned();
@@ -303,7 +307,7 @@ where
             None => return,
         };
 
-        let b = self.layout.active_buffer_mut();
+        let b = self.layout.active_buffer_mut_ignoring_scratch();
         let msg = b.save_to_disk_at(p, force);
         self.lsp_manager.document_changed(b);
         self.set_status_message(msg);
@@ -314,7 +318,7 @@ where
     fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
         use BufferKind as Bk;
 
-        let desired_path = match (fname, &self.layout.active_buffer().kind) {
+        let desired_path = match (fname, &self.layout.active_buffer_ignoring_scratch().kind) {
             // File has a known name which is either where we loaded it from or a
             // path that has been set and verified from the Some(s) case that follows
             (None, Bk::File(ref p)) => return Some(p.clone()),
@@ -343,7 +347,8 @@ where
             }
         }
 
-        self.layout.active_buffer_mut().kind = BufferKind::File(desired_path.clone());
+        self.layout.active_buffer_mut_ignoring_scratch().kind =
+            BufferKind::File(desired_path.clone());
 
         Some(desired_path)
     }
@@ -374,7 +379,11 @@ where
     }
 
     pub(super) fn reload_active_buffer(&mut self) {
-        let msg = self.layout.active_buffer_mut().reload_from_disk();
+        let msg = self
+            .layout
+            .active_buffer_mut_ignoring_scratch()
+            .reload_from_disk();
+
         self.set_status_message(msg);
     }
 
@@ -423,7 +432,7 @@ where
     pub(super) fn search_in_current_buffer(&mut self) {
         let numbered_lines = self
             .layout
-            .active_buffer()
+            .active_buffer_ignoring_scratch()
             .string_lines()
             .into_iter()
             .enumerate()
@@ -432,8 +441,8 @@ where
 
         let selection = self.minibuffer_select_from("> ", numbered_lines);
         if let MiniBufferSelection::Line { cy, .. } = selection {
-            self.layout.active_buffer_mut().dot = Dot::Cur {
-                c: Cur::from_yx(cy, 0, self.layout.active_buffer()),
+            self.layout.active_buffer_mut_ignoring_scratch().dot = Dot::Cur {
+                c: Cur::from_yx(cy, 0, self.layout.active_buffer_ignoring_scratch()),
             };
             self.handle_action(Action::DotSet(TextObject::Line, 1), Source::Fsys);
             self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
@@ -486,7 +495,7 @@ where
         self.minibuffer_select_from(
             "<RAW BUFFER> ",
             self.layout
-                .active_buffer()
+                .active_buffer_ignoring_scratch()
                 .string_lines()
                 .into_iter()
                 .map(|l| format!("{:?}", l))
@@ -500,7 +509,11 @@ where
     }
 
     pub(super) fn show_active_ts_tree(&mut self) {
-        match self.layout.active_buffer().pretty_print_ts_tree() {
+        match self
+            .layout
+            .active_buffer_ignoring_scratch()
+            .pretty_print_ts_tree()
+        {
             Some(s) => self.layout.open_virtual("+ts-tree", s, false),
             None => self.set_status_message("no tree-sitter tree for current buffer"),
         }
@@ -737,17 +750,10 @@ where
         };
 
         let mut buf = Vec::new();
-        let fname = self
-            .layout
-            .active_buffer_ignoring_scratch()
-            .full_name()
-            .to_string();
+        let b = self.layout.active_buffer_mut_ignoring_scratch();
+        let fname = b.full_name().to_string();
 
-        match prog.execute(
-            self.layout.active_buffer_mut_ignoring_scratch(),
-            &fname,
-            &mut buf,
-        ) {
+        match prog.execute(b, &fname, &mut buf) {
             Ok(new_dot) => {
                 self.layout.record_jump_position();
                 self.layout.active_buffer_mut_ignoring_scratch().dot = new_dot;
@@ -816,8 +822,9 @@ where
     }
 
     pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let d = self.layout.active_buffer().dir().unwrap_or(&self.cwd);
-        let id = self.active_buffer_id();
+        let b = self.layout.active_buffer_ignoring_scratch();
+        let d = b.dir().unwrap_or(&self.cwd);
+        let id = b.id;
         let res = self.system.run_command_blocking(raw_cmd_str, d, id);
 
         match res {
@@ -827,8 +834,9 @@ where
     }
 
     pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let d = self.layout.active_buffer().dir().unwrap_or(&self.cwd);
-        let id = self.active_buffer_id();
+        let b = self.layout.active_buffer_ignoring_scratch();
+        let d = b.dir().unwrap_or(&self.cwd);
+        let id = b.id;
         let res = self
             .system
             .run_command(raw_cmd_str, d, id, self.tx_events.clone());
