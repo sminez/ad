@@ -210,8 +210,8 @@ impl Tui {
                     &mut rline,
                 );
 
-                if i == mb.selected_line_idx && cols < self.screen_cols {
-                    rline.push_str(&Style::Bg(cs.minibuffer_hl).to_string());
+                if cols < self.screen_cols {
+                    rline.push_str(&Style::Bg(bg).to_string());
                 }
 
                 let len = min(self.screen_cols, rline.len());
