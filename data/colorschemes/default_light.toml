@@ -2,7 +2,7 @@ bg = "#EBDBB2"
 fg = "#644855"
 bar_bg = "#83A598"
 signcol_fg = "#458488"
-minibuffer_hl = "#458488"
+minibuffer_hl = "#8fafa2"
 
 [syntax]
 default = { }
