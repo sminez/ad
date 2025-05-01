@@ -494,7 +494,7 @@ impl ByteRange {
 
         Self {
             from: gb.char_to_byte(start.idx),
-            to: gb.char_to_byte(end.idx),
+            to: gb.char_to_byte(end.idx + 1),
         }
     }
 
