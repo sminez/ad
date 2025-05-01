@@ -20,7 +20,7 @@ use crate::{
 use ad_event::Source;
 use std::{
     env, panic,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         mpsc::{channel, Receiver, Sender},
         Arc,
@@ -148,6 +148,17 @@ where
     #[inline]
     pub fn active_buffer_id(&self) -> usize {
         self.layout.active_buffer_ignoring_scratch().id
+    }
+
+    /// The effective directory of the editor at any point is the directory containing the
+    /// file backing the active buffer, or if the active buffer can not define a containing
+    /// directory, self.cwd.
+    #[inline]
+    pub fn effective_directory(&self) -> &Path {
+        self.layout
+            .active_buffer_ignoring_scratch()
+            .dir()
+            .unwrap_or(&self.cwd)
     }
 
     /// Update the stored window size, accounting for the status and message bars
@@ -495,8 +506,10 @@ where
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
-            OpenFile { path } => self.open_file_relative_to_cwd(&path, false),
-            OpenFileInNewWindow { path } => self.open_file_relative_to_cwd(&path, true),
+            OpenFile { path } => self.open_file_relative_to_effective_directory(&path, false),
+            OpenFileInNewWindow { path } => {
+                self.open_file_relative_to_effective_directory(&path, true)
+            }
             OpenVirtualFile { name, txt } => self.layout.open_virtual(name, txt, true),
             Paste => self.paste_from_clipboard(source),
             Plumb { txt, new_window } => self.plumb(txt, new_window),

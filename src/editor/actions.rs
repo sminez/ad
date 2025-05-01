@@ -173,6 +173,12 @@ where
         self.set_status_message(self.cwd.display().to_string());
     }
 
+    /// Open a file within the editor using a path that is relative to the effective
+    /// directory
+    pub fn open_file_relative_to_effective_directory(&mut self, path: &str, new_window: bool) {
+        self.open_file(self.effective_directory().join(path), new_window);
+    }
+
     /// Open a file within the editor using a path that is relative to the current working
     /// directory
     pub fn open_file_relative_to_cwd(&mut self, path: &str, new_window: bool) {
@@ -228,18 +234,13 @@ where
         let selection = self.minibuffer_select_from_command_output("> ", &cmd, d);
 
         if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file_relative_to_cwd(&format!("{}/{}", d.display(), line.trim()), new_window);
+            self.open_file(d.join(line.trim()), new_window);
         }
     }
 
     /// This shells out to the fd command line program
     pub(crate) fn find_file(&mut self, new_window: bool) {
-        let d = self
-            .layout
-            .active_buffer_ignoring_scratch()
-            .dir()
-            .unwrap_or(&self.cwd)
-            .to_owned();
+        let d = self.effective_directory().to_owned();
         self.find_file_under_dir(&d, new_window);
     }
 
