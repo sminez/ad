@@ -490,11 +490,17 @@ pub(crate) struct ByteRange {
 
 impl ByteRange {
     fn from_range(r: Range, gb: &GapBuffer) -> Self {
-        let Range { start, end, .. } = r;
+        let Range { start, mut end, .. } = r;
+
+        // For cursor ranges we don't highlight and for "real" ranges we need to
+        // insert the end of the range _after_ the end index.
+        if end.idx != start.idx {
+            end.idx += 1;
+        }
 
         Self {
             from: gb.char_to_byte(start.idx),
-            to: gb.char_to_byte(end.idx + 1),
+            to: gb.char_to_byte(end.idx),
         }
     }
 
