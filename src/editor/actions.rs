@@ -109,6 +109,8 @@ pub enum Action {
     ReloadBuffer { id: usize },
     ReloadConfig,
     RenameActiveBuffer { name: String },
+    ResizeActiveColumn { delta: i16 },
+    ResizeActiveWindow { delta: i16 },
     RunMode,
     SamMode,
     SaveBuffer { force: bool },

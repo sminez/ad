@@ -143,6 +143,15 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             name: args.to_string(),
         })),
 
+        "resize-col" => match args.parse::<i16>() {
+            Ok(delta) => Ok(Single(ResizeActiveColumn { delta })),
+            Err(_) => Err(format!("'{args}' is not a valid delta")),
+        },
+        "resize-win" => match args.parse::<i16>() {
+            Ok(delta) => Ok(Single(ResizeActiveWindow { delta })),
+            Err(_) => Err(format!("'{args}' is not a valid delta")),
+        },
+
         "set" => Ok(Single(UpdateConfig {
             input: input.to_string(),
         })),

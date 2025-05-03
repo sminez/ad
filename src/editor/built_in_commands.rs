@@ -110,6 +110,14 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "rename the active buffer so that subsequent file operations will apply to the new path"
         ),
         (
+            vec!["resize-col"],
+            "resize the active layout column by a given delta of characters",
+        ),
+        (
+            vec!["resize-win"],
+            "resize the active window by a given delta of rows",
+        ),
+        (
             vec!["set"],
             "set a config property ('set bg-color=#ebdbb2')",
         ),

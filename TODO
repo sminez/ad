@@ -1,5 +1,9 @@
 :: TODO
 
+-- BUGS --
+
+- [ ] src/ts.rs:638 is getting passed completely invalid indices that result in a crash
+
 -- Misc / Editor features --
 
 - [ ] Add line commenting for known languages

@@ -530,6 +530,8 @@ where
             ReloadActiveBuffer => self.reload_active_buffer(),
             ReloadBuffer { id } => self.reload_buffer(id),
             ReloadConfig => self.reload_config(),
+            ResizeActiveColumn { delta } => self.layout.resize_active_column(delta),
+            ResizeActiveWindow { delta } => self.layout.resize_active_window(delta),
             RunMode => self.run_mode(),
             SamMode => self.sam_mode(),
             SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),

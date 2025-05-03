@@ -13,6 +13,9 @@ use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
 use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
 
+/// The reserved ID for the scratch buffer.
+/// If we ever collide with this when creating a normal buffer then the user is
+/// doing something _very_ strange...
 pub(crate) const SCRATCH_ID: usize = usize::MAX;
 
 /// Layout is a screen layout of the windows available for displaying buffer
@@ -465,24 +468,30 @@ impl Layout {
         self.update_screen_size(self.screen_rows, self.screen_cols);
     }
 
-    #[inline]
-    pub(crate) fn focused_view(&self) -> &View {
-        &self.cols.focus.wins.focus.view
+    /// Adjust the size of the active [Column] by increasing or decreasing the number of
+    /// character columns it takes up.
+    ///
+    /// The adjustment is always applied from the left of the Column unless the active column
+    /// is the first in the [Layout], in which case the adjustment is made from the right.
+    pub(crate) fn resize_active_column(&mut self, delta_cols: i16) {
+        self.cols.grow_focus(delta_cols);
     }
 
-    #[inline]
-    pub(crate) fn focused_view_mut(&mut self) -> &mut View {
-        &mut self.cols.focus.wins.focus.view
+    /// Adjust the size of the active [Window] by increasing or decreasing the number of rows
+    /// it takes up.
+    ///
+    /// The adjustment is always applied from the top of the window unless the active window
+    /// is the first window in its [Column], in which case the adjustment is made from the
+    /// bottom of the window instead.
+    pub(crate) fn resize_active_window(&mut self, delta_rows: i16) {
+        self.cols.focus.wins.grow_focus(delta_rows);
     }
 
-    pub(crate) fn active_window_rows(&self) -> usize {
-        if self.scratch.is_focused {
-            self.scratch.w.n_rows
-        } else {
-            self.cols.focus.wins.focus.n_rows
-        }
-    }
-
+    /// Update the current layout state to reflect a new physical screen size given in terms
+    /// of the number of character rows and columns.
+    ///
+    /// Any existing layout customisation will be preserved as far as possible by converting
+    /// dimensions to be relative to the size of the full screen.
     pub(crate) fn update_screen_size(&mut self, rows: usize, cols: usize) {
         self.screen_rows = rows;
         self.screen_cols = cols;
@@ -502,6 +511,24 @@ impl Layout {
         }
 
         self.clamp_scroll();
+    }
+
+    #[inline]
+    pub(crate) fn focused_view(&self) -> &View {
+        &self.cols.focus.wins.focus.view
+    }
+
+    #[inline]
+    pub(crate) fn focused_view_mut(&mut self) -> &mut View {
+        &mut self.cols.focus.wins.focus.view
+    }
+
+    pub(crate) fn active_window_rows(&self) -> usize {
+        if self.scratch.is_focused {
+            self.scratch.w.n_rows
+        } else {
+            self.cols.focus.wins.focus.n_rows
+        }
     }
 
     /// Set the currently focused window to contain the given buffer
@@ -1063,6 +1090,62 @@ impl View {
     }
 }
 
+/// Min window size is 5x5
+const MIN_DIM: usize = 5;
+
+pub trait Growable {
+    fn size(&mut self) -> &mut usize;
+
+    fn clamped_sub(&mut self, delta: usize, min_val: usize) -> usize {
+        let clamped = (*self.size()).saturating_sub(delta);
+        if clamped >= min_val {
+            *self.size() = clamped;
+            delta
+        } else {
+            let actual = *self.size() - min_val;
+            *self.size() = min_val;
+            actual
+        }
+    }
+}
+
+impl Growable for Column {
+    fn size(&mut self) -> &mut usize {
+        &mut self.n_cols
+    }
+}
+
+impl Growable for Window {
+    fn size(&mut self) -> &mut usize {
+        &mut self.n_rows
+    }
+}
+
+impl<T> ZipList<T>
+where
+    T: Growable,
+{
+    fn grow_focus(&mut self, delta: i16) {
+        if self.len() == 1 || delta == 0 {
+            return; // nothing to grow
+        }
+
+        let other = if self.up.is_empty() {
+            &mut self.down[0]
+        } else {
+            &mut self.up[0]
+        };
+
+        if delta < 0 {
+            let actual = self.focus.clamped_sub((-delta) as usize, MIN_DIM);
+            *other.size() += actual;
+        } else {
+            let actual = other.clamped_sub(delta as usize, MIN_DIM);
+            *self.focus.size() += actual;
+        }
+    }
+}
+
 /// Calculate the size (rows/cols) for n blocks within an available space of t
 /// while accounting for "slop" that will be added to some elements to make up
 /// the correct total.
@@ -1132,7 +1215,7 @@ mod tests {
     use simple_test_case::test_case;
     use std::sync::mpsc::channel;
 
-    fn test_windows(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Layout {
+    fn test_layout(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Layout {
         let mut cols = Vec::with_capacity(col_wins.len());
         let mut n = 0;
         let mut all_ids = Vec::new();
@@ -1145,7 +1228,7 @@ mod tests {
         }
 
         let (tx, _) = channel();
-        let mut ws = Layout {
+        let mut l = Layout {
             buffers: Buffers::new_stubbed(&all_ids, tx),
             scratch: Scratch::new(n_rows),
             screen_rows: n_rows,
@@ -1153,13 +1236,13 @@ mod tests {
             cols: ZipList::try_from_iter(cols).unwrap(),
             views: vec![],
         };
-        ws.update_screen_size(n_rows, n_cols);
+        l.update_screen_size(n_rows, n_cols);
 
-        ws
+        l
     }
 
-    fn ordered_window_ids(ws: &Layout) -> Vec<usize> {
-        ws.cols
+    fn ordered_window_ids(l: &Layout) -> Vec<usize> {
+        l.cols
             .iter()
             .flat_map(|(_, c)| c.wins.iter().map(|(_, w)| w.view.bufid))
             .collect::<Vec<_>>()
@@ -1167,20 +1250,20 @@ mod tests {
 
     #[test]
     fn drag_left_works() {
-        let mut ws = test_windows(&[1, 1, 2], 80, 100);
-        ws.next_column();
-        assert_eq!(ws.active_buffer().id, 1);
-        ws.drag_left();
+        let mut l = test_layout(&[1, 1, 2], 80, 100);
+        l.next_column();
+        assert_eq!(l.active_buffer().id, 1);
+        l.drag_left();
 
-        assert_eq!(ws.cols.len(), 2);
-        let first_col: Vec<usize> = ws
+        assert_eq!(l.cols.len(), 2);
+        let first_col: Vec<usize> = l
             .cols
             .head()
             .wins
             .iter()
             .map(|(_, w)| w.view.bufid)
             .collect();
-        let second_col: Vec<usize> = ws
+        let second_col: Vec<usize> = l
             .cols
             .last()
             .wins
@@ -1194,19 +1277,19 @@ mod tests {
 
     #[test]
     fn drag_right_works() {
-        let mut ws = test_windows(&[1, 1, 2], 80, 100);
-        assert_eq!(ws.active_buffer().id, 0);
-        ws.drag_right();
+        let mut l = test_layout(&[1, 1, 2], 80, 100);
+        assert_eq!(l.active_buffer().id, 0);
+        l.drag_right();
 
-        assert_eq!(ws.cols.len(), 2);
-        let first_col: Vec<usize> = ws
+        assert_eq!(l.cols.len(), 2);
+        let first_col: Vec<usize> = l
             .cols
             .head()
             .wins
             .iter()
             .map(|(_, w)| w.view.bufid)
             .collect();
-        let second_col: Vec<usize> = ws
+        let second_col: Vec<usize> = l
             .cols
             .last()
             .wins
@@ -1220,46 +1303,46 @@ mod tests {
 
     #[test]
     fn next_prev_column_methods_work() {
-        let mut ws = test_windows(&[1, 1, 2], 80, 100);
-        assert_eq!(ws.focused_view().bufid, 0);
+        let mut l = test_layout(&[1, 1, 2], 80, 100);
+        assert_eq!(l.focused_view().bufid, 0);
 
         // next wrapping
-        ws.next_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.next_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.next_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.next_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.next_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.next_column();
+        assert_eq!(l.focused_view().bufid, 0);
 
         // prev wrapping
-        ws.prev_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.prev_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.prev_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.prev_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.prev_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.prev_column();
+        assert_eq!(l.focused_view().bufid, 0);
     }
 
     #[test]
     fn next_prev_window_methods_work() {
-        let mut ws = test_windows(&[3, 1], 80, 100);
-        assert_eq!(ws.focused_view().bufid, 0);
+        let mut l = test_layout(&[3, 1], 80, 100);
+        assert_eq!(l.focused_view().bufid, 0);
 
         // next wrapping
-        ws.next_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.next_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.next_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.next_window_in_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.next_window_in_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.next_window_in_column();
+        assert_eq!(l.focused_view().bufid, 0);
 
         // prev wrapping
-        ws.prev_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 2);
-        ws.prev_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 1);
-        ws.prev_window_in_column();
-        assert_eq!(ws.focused_view().bufid, 0);
+        l.prev_window_in_column();
+        assert_eq!(l.focused_view().bufid, 2);
+        l.prev_window_in_column();
+        assert_eq!(l.focused_view().bufid, 1);
+        l.prev_window_in_column();
+        assert_eq!(l.focused_view().bufid, 0);
     }
 
     #[test_case(&[1], 30, 40, 0; "one col one win")]
@@ -1273,25 +1356,24 @@ mod tests {
     #[test_case(&[1, 4], 60, 70, 4; "two cols second with four click in fourth window")]
     #[test]
     fn buffer_for_screen_coords_works(col_wins: &[usize], x: usize, y: usize, expected: BufferId) {
-        let mut ws = test_windows(col_wins, 80, 100);
-        println!("{ws:#?}");
+        let mut l = test_layout(col_wins, 80, 100);
 
         assert_eq!(
-            ws.buffer_for_screen_coords(x, y),
+            l.buffer_for_screen_coords(x, y),
             expected,
             "bufid without mutation"
         );
         assert_eq!(
-            ws.cols.focus.wins.focus.view.bufid, 0,
+            l.cols.focus.wins.focus.view.bufid, 0,
             "focused id before mutation"
         );
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            l.focus_buffer_for_screen_coords(x, y),
             expected,
             "bufid with mutation"
         );
         assert_eq!(
-            ws.cols.focus.wins.focus.view.bufid, expected,
+            l.cols.focus.wins.focus.view.bufid, expected,
             "focused id after mutation"
         );
     }
@@ -1303,24 +1385,21 @@ mod tests {
     #[test_case(4, &[0, 1, 2, 3]; "4")]
     #[test]
     fn close_buffer_works(id: usize, expected: &[usize]) {
-        let mut ws = test_windows(&[1, 4], 80, 100);
-        assert_eq!(&ordered_window_ids(&ws), &[0, 1, 2, 3, 4], "initial ids");
+        let mut l = test_layout(&[1, 4], 80, 100);
+        assert_eq!(&ordered_window_ids(&l), &[0, 1, 2, 3, 4], "initial ids");
 
-        ws.close_buffer(id);
-        assert!(
-            !ws.buffers.contains_bufid(id),
-            "buffer id should be removed"
-        );
+        l.close_buffer(id);
+        assert!(!l.buffers.contains_bufid(id), "buffer id should be removed");
 
         for bufid in expected.iter() {
             assert!(
-                ws.buffers.contains_bufid(*bufid),
+                l.buffers.contains_bufid(*bufid),
                 "other buffers should still be there"
             );
         }
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             expected,
             "ids for each window should be correct"
         );
@@ -1330,34 +1409,34 @@ mod tests {
     fn focus_buffer_for_screen_coords_doesnt_reorder_windows() {
         let (x, y) = (60, 70);
         let expected = 4;
-        let mut ws = test_windows(&[1, 4], 80, 100);
+        let mut l = test_layout(&[1, 4], 80, 100);
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             &[0, 1, 2, 3, 4],
             "before first click"
         );
 
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            l.focus_buffer_for_screen_coords(x, y),
             expected,
             "bufid with mutation"
         );
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             &[0, 1, 2, 3, 4],
             "after first click"
         );
 
         assert_eq!(
-            ws.focus_buffer_for_screen_coords(x, y),
+            l.focus_buffer_for_screen_coords(x, y),
             expected,
             "bufid with mutation"
         );
 
         assert_eq!(
-            &ordered_window_ids(&ws),
+            &ordered_window_ids(&l),
             &[0, 1, 2, 3, 4],
             "after second click"
         );
@@ -1390,6 +1469,60 @@ mod tests {
             b.set_dot(TextObject::Arr(Arrow::Right), 1);
             view.clamp_scroll(&mut b, 80, 80);
             offset += widths[idx];
+        }
+    }
+
+    #[test_case(1, 0, 10, &[100]; "one col inc")]
+    #[test_case(1, 0, -10, &[100]; "one col dec")]
+    #[test_case(2, 0, 10, &[60, 39]; "two cols inc one")]
+    #[test_case(2, 0, -10, &[40, 59]; "two cols dec one")]
+    #[test_case(2, 1, 10, &[40, 59]; "two cols inc two")]
+    #[test_case(2, 1, -10, &[60, 39]; "two cols dec two")]
+    #[test_case(3, 1, 10, &[23, 43, 32]; "three cols inc two")]
+    #[test_case(3, 1, -10, &[43, 23, 32]; "three cols dec two")]
+    #[test_case(2, 0, -200, &[MIN_DIM, 100 - MIN_DIM - 1]; "two cols dec one clamping")]
+    #[test_case(2, 0, 200, &[100 - MIN_DIM - 1, MIN_DIM]; "two cols inc one clamping")]
+    #[test]
+    fn resize_active_column_works(n_cols: usize, ix: usize, delta: i16, expected_cols: &[usize]) {
+        assert_eq!(expected_cols.len(), n_cols, "malformed test case");
+        let mut l = test_layout(&vec![1; n_cols], 80, 100);
+        // set focus to the target column
+        l.cols.focus_head();
+        for _ in 0..ix {
+            l.cols.focus_down();
+        }
+
+        l.resize_active_column(delta);
+
+        for (i, (_, c)) in l.cols.iter().enumerate() {
+            assert_eq!(c.n_cols, expected_cols[i], "column {i}");
+        }
+    }
+
+    #[test_case(1, 0, 10, &[80]; "one win inc")]
+    #[test_case(1, 0, -10, &[80]; "one win dec")]
+    #[test_case(2, 0, 10, &[50, 29]; "two wins inc one")]
+    #[test_case(2, 0, -10, &[30, 49]; "two wins dec one")]
+    #[test_case(2, 1, 10, &[30, 49]; "two wins inc two")]
+    #[test_case(2, 1, -10, &[50, 29]; "two wins dec two")]
+    #[test_case(3, 1, 10, &[16, 36, 26]; "three wins inc two")]
+    #[test_case(3, 1, -10, &[36, 16, 26]; "three wins dec two")]
+    #[test_case(2, 0, -200, &[MIN_DIM, 80 - MIN_DIM - 1]; "two wins dec one clamping")]
+    #[test_case(2, 0, 200, &[80 - MIN_DIM - 1, MIN_DIM]; "two wins inc one clamping")]
+    #[test]
+    fn resize_active_window_works(n_wins: usize, ix: usize, delta: i16, expected_rows: &[usize]) {
+        assert_eq!(expected_rows.len(), n_wins, "malformed test case");
+        let mut l = test_layout(&[n_wins], 80, 100);
+        // set focus to the target window
+        l.cols.focus.wins.focus_head();
+        for _ in 0..ix {
+            l.cols.focus.wins.focus_down();
+        }
+
+        l.resize_active_window(delta);
+
+        for (i, (_, w)) in l.cols.focus.wins.iter().enumerate() {
+            assert_eq!(w.n_rows, expected_rows[i], "window {i}");
         }
     }
 }
