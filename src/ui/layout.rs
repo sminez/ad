@@ -1445,7 +1445,7 @@ mod tests {
         key::Arrow,
     };
     use simple_test_case::test_case;
-    use std::sync::mpsc::channel;
+    use std::{path::PathBuf, sync::mpsc::channel};
 
     fn test_layout(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Layout {
         let mut cols = Vec::with_capacity(col_wins.len());
@@ -1816,5 +1816,13 @@ mod tests {
 
         assert_eq!(cols(&l), expected_cols, "updated column widths");
         assert_eq!(wins(&l), expected_wins, "updated window heights");
+    }
+
+    #[test]
+    fn writing_to_a_non_visible_output_buffer_creates_a_window() {
+        let mut l = test_layout(&[1], 80, 100);
+        assert_eq!(l.n_open_windows(), 1);
+        l.write_output_for_buffer(0, "some output".into(), &PathBuf::from("/tmp"));
+        assert_eq!(l.n_open_windows(), 2);
     }
 }

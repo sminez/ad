@@ -409,7 +409,8 @@ where
         }
     }
 
-    fn handle_action(&mut self, action: Action, source: Source) {
+    /// Process a single action and update editor state accordingly
+    pub fn handle_action(&mut self, action: Action, source: Source) {
         use Action::*;
 
         match action {
