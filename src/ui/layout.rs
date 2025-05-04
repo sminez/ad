@@ -25,7 +25,7 @@ pub(crate) const SCRATCH_ID: usize = usize::MAX;
 /// views change their IDs. It should always be wrapped with #[cfg(test)] so that it doesn't
 /// affect the performance of the editor when it is actually in use.
 #[cfg(test)]
-macro_rules! assert_buffer_ids {
+macro_rules! assert_invariants {
     ($self:expr) => {{
         for (i, (_, col)) in $self.cols.iter().enumerate() {
             for (j, (_, win)) in col.wins.iter().enumerate() {
@@ -33,7 +33,14 @@ macro_rules! assert_buffer_ids {
                     $self.buffers.contains_bufid(win.view.bufid),
                     "col {i} window {j} held unknown bufid ({})",
                     win.view.bufid
-                )
+                );
+                let b = $self.buffers.with_id(win.view.bufid).unwrap();
+                assert!(
+                    win.view.row_off < b.len_lines(),
+                    "col {i} window {j} has an OOB row_off ({} vs {})",
+                    win.view.row_off,
+                    b.len_lines()
+                );
             }
         }
         for view in $self.views.iter() {
@@ -41,7 +48,15 @@ macro_rules! assert_buffer_ids {
                 $self.buffers.contains_bufid(view.bufid),
                 "stored view held unknown bufid ({})",
                 view.bufid
-            )
+            );
+            let b = $self.buffers.with_id(view.bufid).unwrap();
+            assert!(
+                view.row_off < b.len_lines(),
+                "stored view for bufid {} has an OOB row_off ({} vs {})",
+                view.bufid,
+                view.row_off,
+                b.len_lines()
+            );
         }
     }};
 }
@@ -85,7 +100,7 @@ impl Layout {
         };
 
         #[cfg(test)]
-        assert_buffer_ids!(l);
+        assert_invariants!(l);
 
         l
     }
@@ -103,7 +118,7 @@ impl Layout {
         self.buffers.ensure_file_is_open(path);
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     pub(crate) fn is_empty_scratch(&self) -> bool {
@@ -187,7 +202,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
 
         Ok(opt)
     }
@@ -213,7 +228,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Returns true if this was the last buffer otherwise false.
@@ -262,7 +277,7 @@ impl Layout {
             }
 
             #[cfg(test)]
-            assert_buffer_ids!(self);
+            assert_invariants!(self);
 
             return false;
         }
@@ -286,7 +301,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
 
         false
     }
@@ -356,7 +371,7 @@ impl Layout {
         self.buffers.focus_id(id);
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
 
         false
     }
@@ -380,7 +395,7 @@ impl Layout {
         self.buffers.focus_id(id);
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
 
         false
     }
@@ -430,7 +445,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Move focus to the column to the right of current focus (wrapping)
@@ -439,6 +454,9 @@ impl Layout {
         self.cols.focus_down();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Move focus to the column to the left of current focus (wrapping)
@@ -447,6 +465,9 @@ impl Layout {
         self.cols.focus_up();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Move focus to the window below in the current column (wrapping)
@@ -455,6 +476,9 @@ impl Layout {
         self.cols.focus.wins.focus_down();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Move focus to the window above in the current column (wrapping)
@@ -463,18 +487,27 @@ impl Layout {
         self.cols.focus.wins.focus_up();
         self.buffers.focus_id(self.focused_view().bufid);
         self.force_cursor_to_be_in_view();
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Drag the focused window up through the column containing it (wrapping)
     pub(crate) fn drag_up(&mut self) {
         self.scratch.is_focused = false;
         self.cols.focus.wins.swap_up();
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Drag the focused window down through the column containing it (wrapping)
     pub(crate) fn drag_down(&mut self) {
         self.scratch.is_focused = false;
         self.cols.focus.wins.swap_down();
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Drag the focused window to the column on the left.
@@ -534,7 +567,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Drag the focused window to the column on the right.
@@ -580,7 +613,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Adjust the size of the active [Column] by increasing or decreasing the number of
@@ -688,7 +721,7 @@ impl Layout {
         }
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Create a new column containing a single window showing the same view found in the
@@ -703,7 +736,7 @@ impl Layout {
         self.balance_columns();
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Create a new window at the end of the current column showing the same view
@@ -717,7 +750,7 @@ impl Layout {
         self.balance_active_column();
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     /// Set the currently focused window to contain the given buffer
@@ -747,7 +780,7 @@ impl Layout {
         self.cols.focus_tail();
 
         #[cfg(test)]
-        assert_buffer_ids!(self);
+        assert_invariants!(self);
     }
 
     pub(crate) fn force_cursor_to_be_in_view(&mut self) {
@@ -767,6 +800,9 @@ impl Layout {
                 .focused_view_mut()
                 .force_cursor_to_be_in_view(b, rows, cols);
         }
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     pub(crate) fn clamp_scroll(&mut self) {
@@ -786,6 +822,9 @@ impl Layout {
                 .focused_view_mut()
                 .clamp_scroll(b, rows, cols);
         }
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     pub(crate) fn set_viewport(&mut self, vp: ViewPort) {
@@ -806,6 +845,9 @@ impl Layout {
                 .focused_view_mut()
                 .set_viewport(b, vp, rows, cols);
         }
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Coordinate offsets from the top left of the window layout to the top left of the active window.
@@ -966,6 +1008,9 @@ impl Layout {
         let c = self.cur_from_screen_coords(x, y);
         self.active_buffer_mut().dot = Dot::Cur { c };
 
+        #[cfg(test)]
+        assert_invariants!(self);
+
         bufid == current_bufid
     }
 
@@ -975,13 +1020,18 @@ impl Layout {
         let mut y_offset = 0;
 
         if self.row_is_scratch(y) {
-            return apply_scroll(
+            apply_scroll(
                 &mut self.scratch.b,
                 &mut self.scratch.w,
                 self.screen_cols,
                 self.scratch.is_focused,
                 up,
             );
+
+            #[cfg(test)]
+            assert_invariants!(self);
+
+            return;
         }
 
         for (focused_col, col) in self.cols.iter_mut() {
@@ -999,6 +1049,10 @@ impl Layout {
                     die!("invalid buffer ID {}", win.view.bufid);
                 });
                 apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
+
+                #[cfg(test)]
+                assert_invariants!(self);
+
                 return;
             }
         }
@@ -1007,6 +1061,9 @@ impl Layout {
         let win = &mut self.cols.focus.wins.focus;
         let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
         apply_scroll(b, win, n_cols, true, up);
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     pub(crate) fn update_visible_ts_state(&mut self) {
@@ -1023,6 +1080,9 @@ impl Layout {
 
             b.update_ts_state(from, n_rows);
         }
+
+        #[cfg(test)]
+        assert_invariants!(self);
     }
 
     /// Returns `true` if the filter was successfully set, false if there was already one in place.
@@ -1440,7 +1500,7 @@ mod tests {
 
         // This will panic if we've ended removing the original unnamed buffer from
         // self.buffers as part of opening the virtual buffer as the Layout state
-        // will now contain references to an unknown buffer ID (via assert_buffer_ids)
+        // will now contain references to an unknown buffer ID (via assert_invariants)
         let _ = l.open_or_focus("test-buffer.txt", false);
     }
 
