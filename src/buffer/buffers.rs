@@ -45,6 +45,16 @@ impl Buffers {
     }
 
     #[cfg(test)]
+    pub(crate) fn new_with_raw_sender(tx_req: Sender<Req>) -> Self {
+        Self {
+            next_id: 1,
+            inner: ziplist![Buffer::new_unnamed(0, "")],
+            jump_list: JumpList::default(),
+            lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
+        }
+    }
+
+    #[cfg(test)]
     pub(crate) fn new_stubbed(ids: &[usize], tx_req: Sender<Req>) -> Self {
         Self {
             next_id: ids.last().unwrap() + 1,
@@ -59,7 +69,11 @@ impl Buffers {
     }
 
     /// Returns the id of a newly created buffer, None if the buffer already existed
-    pub fn open_or_focus<P: AsRef<Path>>(&mut self, path: P) -> io::Result<Option<BufferId>> {
+    pub fn open_or_focus<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        retain_empty_unnamed: bool,
+    ) -> io::Result<Option<BufferId>> {
         let path = match path.as_ref().canonicalize() {
             Ok(p) => p,
             Err(e) if e.kind() == ErrorKind::NotFound => path.as_ref().to_path_buf(),
@@ -87,8 +101,9 @@ impl Buffers {
         let mut b = Buffer::new_from_canonical_file_path(id, path)?;
         self.lsp_handle.document_opened(&b);
 
-        // Remove an empty scratch buffer if the user has now opened a file
-        if self.is_empty_scratch() {
+        // Remove an empty unnamed buffer if the user has now opened a file and we have not
+        // been told to retain it (typically because we have an open window showing it)
+        if !retain_empty_unnamed && self.is_empty_scratch() {
             mem::swap(&mut self.inner.focus, &mut b);
         } else {
             self.record_jump_position();

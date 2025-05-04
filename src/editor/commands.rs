@@ -32,6 +32,11 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
         "prev-column" => Ok(Single(PreviousColumn)),
         "prev-window" => Ok(Single(PreviousWindowInColumn)),
 
+        "balance-all" => Ok(Single(BalanceAll)),
+        "balance-column" => Ok(Single(BalanceActiveColumn)),
+        "balance-columns" => Ok(Single(BalanceColumns)),
+        "balance-windows" => Ok(Single(BalanceWindows)),
+
         "cd" | "change-directory" => {
             if args.is_empty() {
                 Ok(Single(ChangeDirectory { path: None }))
@@ -142,6 +147,15 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
         "rename-buffer" => Ok(Single(RenameActiveBuffer {
             name: args.to_string(),
         })),
+
+        "resize-column" => match args.parse::<i16>() {
+            Ok(delta) => Ok(Single(ResizeActiveColumn { delta })),
+            Err(_) => Err(format!("'{args}' is not a valid delta")),
+        },
+        "resize-window" => match args.parse::<i16>() {
+            Ok(delta) => Ok(Single(ResizeActiveWindow { delta })),
+            Err(_) => Err(format!("'{args}' is not a valid delta")),
+        },
 
         "set" => Ok(Single(UpdateConfig {
             input: input.to_string(),

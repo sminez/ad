@@ -47,6 +47,10 @@ pub enum ViewPort {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     AppendToOutputBuffer { bufid: usize, content: String },
+    BalanceActiveColumn,
+    BalanceAll,
+    BalanceColumns,
+    BalanceWindows,
     ChangeDirectory { path: Option<String> },
     CleanupChild { id: u32 },
     ClearScratch,
@@ -109,6 +113,8 @@ pub enum Action {
     ReloadBuffer { id: usize },
     ReloadConfig,
     RenameActiveBuffer { name: String },
+    ResizeActiveColumn { delta: i16 },
+    ResizeActiveWindow { delta: i16 },
     RunMode,
     SamMode,
     SaveBuffer { force: bool },

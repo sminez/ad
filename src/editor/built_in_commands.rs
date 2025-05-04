@@ -13,6 +13,22 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "switch to the previous available open buffer in the buffer list",
         ),
         (
+            vec!["balance-all"],
+            "force columns to be the same width and all windows to be the same size withing their respective columns"
+        ),
+        (
+            vec!["balance-column"],
+            "force all windows in the current column to be the same size"
+        ),
+        (
+            vec!["balance-columns"],
+            "force all columns to be the same width"
+        ),
+        (
+            vec!["balance-windows"],
+            "force all windows to be the same size within their respective columns"
+        ),
+        (
             vec!["cd", "change-directory"],
             "change ad's working directory ('cd ../src')",
         ),
@@ -108,6 +124,14 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         (
             vec!["rename-buffer"],
             "rename the active buffer so that subsequent file operations will apply to the new path"
+        ),
+        (
+            vec!["resize-column"],
+            "resize the active layout column by a given delta of characters",
+        ),
+        (
+            vec!["resize-window"],
+            "resize the active window by a given delta of rows",
         ),
         (
             vec!["set"],
