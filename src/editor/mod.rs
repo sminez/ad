@@ -115,7 +115,7 @@ where
         set_config(cfg);
 
         let lsp_manager = Arc::new(LspManager::spawn(tx_events.clone()));
-        let mut layout = Layout::new(0, 0, lsp_manager.clone());
+        let mut layout = Layout::new(100, 100, lsp_manager.clone());
         if show_splash && layout.is_empty_scratch() {
             layout
                 .active_buffer_mut_ignoring_scratch()
@@ -416,6 +416,10 @@ where
             AppendToOutputBuffer { bufid, content } => self
                 .layout
                 .write_output_for_buffer(bufid, content, &self.cwd),
+            BalanceActiveColumn => self.layout.balance_active_column(),
+            BalanceAll => self.layout.balance_all(),
+            BalanceColumns => self.layout.balance_columns(),
+            BalanceWindows => self.layout.balance_windows(),
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
             ClearScratch => self.layout.scratch.b.clear(),

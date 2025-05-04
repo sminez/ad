@@ -18,6 +18,34 @@ use unicode_width::UnicodeWidthChar;
 /// doing something _very_ strange...
 pub(crate) const SCRATCH_ID: usize = usize::MAX;
 
+/// Similar to in ../buffer/internal.rs:/assert_line_endings/ this is used to hunt for exactly
+/// _where_ state becomes invalid between the actual buffer state in Buffers and the layout
+/// state referencing what should always be known IDs in Layout. This macro should be called
+/// at all points where the buffers & views are created / destroyed, as well as any time that
+/// views change their IDs. It should always be wrapped with #[cfg(test)] so that it doesn't
+/// affect the performance of the editor when it is actually in use.
+#[cfg(test)]
+macro_rules! assert_buffer_ids {
+    ($self:expr) => {{
+        for (i, (_, col)) in $self.cols.iter().enumerate() {
+            for (j, (_, win)) in col.wins.iter().enumerate() {
+                assert!(
+                    $self.buffers.contains_bufid(win.view.bufid),
+                    "col {i} window {j} held unknown bufid ({})",
+                    win.view.bufid
+                )
+            }
+        }
+        for view in $self.views.iter() {
+            assert!(
+                $self.buffers.contains_bufid(view.bufid),
+                "stored view held unknown bufid ({})",
+                view.bufid
+            )
+        }
+    }};
+}
+
 /// Layout is a screen layout of the windows available for displaying buffer
 /// content to the user. The available screen space is split into a number of
 /// columns each containing a vertical stack of windows.
@@ -47,22 +75,35 @@ impl Layout {
         let buffers = Buffers::new(lsp_handle);
         let id = buffers.active().id;
 
-        Self {
+        let l = Self {
             buffers,
             scratch: Scratch::new(config_handle!().minibuffer_lines),
             screen_rows,
             screen_cols,
             cols: ziplist![Column::new(screen_rows, screen_cols, &[id])],
             views: vec![],
-        }
+        };
+
+        #[cfg(test)]
+        assert_buffer_ids!(l);
+
+        l
     }
 
     pub(crate) fn buffers(&self) -> &Buffers {
         &self.buffers
     }
 
+    /// The number of currently visible windows
+    pub(crate) fn n_open_windows(&self) -> usize {
+        self.cols.iter().map(|(_, c)| c.wins.len()).sum()
+    }
+
     pub(crate) fn ensure_file_is_open(&mut self, path: &str) {
-        self.buffers.ensure_file_is_open(path)
+        self.buffers.ensure_file_is_open(path);
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     pub(crate) fn is_empty_scratch(&self) -> bool {
@@ -133,7 +174,8 @@ impl Layout {
             new_window = false;
         }
 
-        let opt = self.buffers.open_or_focus(path)?;
+        let retain_empty_unnamed = new_window || self.n_open_windows() > 1;
+        let opt = self.buffers.open_or_focus(path, retain_empty_unnamed)?;
         let id = self.active_buffer_ignoring_scratch().id;
 
         if self.buffer_is_visible(id) {
@@ -143,6 +185,9 @@ impl Layout {
         } else {
             self.show_buffer_in_active_window(id);
         }
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
 
         Ok(opt)
     }
@@ -166,6 +211,9 @@ impl Layout {
         } else {
             self.show_buffer_in_active_window(id);
         }
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Returns true if this was the last buffer otherwise false.
@@ -212,20 +260,33 @@ impl Layout {
             if let Some(view) = existing_view {
                 self.cols.focus.wins.focus.view = view;
             }
-            self.update_screen_size(self.screen_rows, self.screen_cols);
+
+            #[cfg(test)]
+            assert_buffer_ids!(self);
+
             return false;
         }
 
         // Remove columns where there are only views of the closing buffer
+        let cols_before = self.cols.len();
         self.cols
             .filter_unchecked(|c| c.wins.iter().any(|(_, w)| w.view.bufid != id));
 
-        // Remove remaining windows which were showing the closing buffer
-        for (_, c) in self.cols.iter_mut() {
-            c.wins.filter_unchecked(|w| w.view.bufid != id)
+        if self.cols.len() < cols_before {
+            self.balance_columns();
         }
 
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+        // Remove remaining windows which were showing the closing buffer
+        for (_, c) in self.cols.iter_mut() {
+            let wins_before = c.wins.len();
+            c.wins.filter_unchecked(|w| w.view.bufid != id);
+            if c.wins.len() < wins_before {
+                c.balance_windows(self.screen_rows);
+            }
+        }
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
 
         false
     }
@@ -285,13 +346,17 @@ impl Layout {
 
         if self.cols.focus.wins.len() == 1 {
             self.cols.remove_focused_unchecked();
+            self.balance_columns();
         } else {
             self.cols.focus.wins.remove_focused_unchecked();
+            self.balance_active_column();
         }
 
         let id = self.cols.focus.wins.focus.view.bufid;
         self.buffers.focus_id(id);
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
 
         false
     }
@@ -309,10 +374,13 @@ impl Layout {
         }
 
         self.cols.remove_focused_unchecked();
+        self.balance_columns();
 
         let id = self.cols.focus.wins.focus.view.bufid;
         self.buffers.focus_id(id);
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
 
         false
     }
@@ -360,6 +428,9 @@ impl Layout {
         if !self.buffer_is_visible(id) {
             self.show_buffer_in_new_window(id);
         }
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Move focus to the column to the right of current focus (wrapping)
@@ -419,28 +490,51 @@ impl Layout {
     ///   and the previous column is removed.
     pub(crate) fn drag_left(&mut self) {
         self.scratch.is_focused = false;
-        if self.cols.len() == 1 || self.cols.up.is_empty() {
+
+        // Strictly speaking, self.cols.up.is_empty() == true implies self.cols.len() == 1 but
+        // we keep the explicit check for clarity.
+        if self.cols.up.is_empty() || self.cols.len() == 1 {
+            // Single column or far left column
+
+            // If we only have a single window in this column then we're done...
             if self.cols.focus.wins.len() == 1 {
                 return;
             }
+
+            // Otherwise we need to create a new column containing only this window
             let win = self.cols.focus.wins.remove_focused_unchecked();
+            self.balance_active_column(); // tidy up the column we've just popped from
             let mut col = Column::new(self.screen_rows, self.screen_cols, &[win.view.bufid]);
             col.wins.focus = win;
             self.cols.insert_at(Position::Head, col);
             self.cols.focus_up();
+            self.balance_columns();
         } else if self.cols.focus.wins.len() == 1 {
+            // Column that is not on the far left containing only a single window
+
+            // If this column only has a single window then remove it an place the window in
+            // the column to the left
             let on_left = self.cols.up.is_empty();
             let win = self.cols.remove_focused_unchecked().wins.focus;
+            self.balance_columns();
+            self.balance_active_column();
             if !on_left {
                 self.cols.focus_up();
             }
             self.cols.focus.wins.insert(win);
+            self.balance_active_column();
         } else {
+            // Column that is not on the far left containing more than one window
+
             let win = self.cols.focus.wins.remove_focused_unchecked();
+            self.balance_active_column();
             self.cols.focus_up();
             self.cols.focus.wins.insert(win);
+            self.balance_active_column();
         }
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Drag the focused window to the column on the right.
@@ -448,24 +542,45 @@ impl Layout {
     /// See [Layout::drag_left] for semantics.
     pub(crate) fn drag_right(&mut self) {
         self.scratch.is_focused = false;
+
+        // Strictly speaking, self.cols.up.is_empty() == true implies self.cols.len() == 1 but
+        // we keep the explicit check for clarity.
         if self.cols.len() == 1 || self.cols.down.is_empty() {
+            // Single column or far right column
+
+            // If we only have a single window in this column then we're done...
             if self.cols.focus.wins.len() == 1 {
                 return;
             }
+
+            // Otherwise we need to create a new column containing only this window
             let win = self.cols.focus.wins.remove_focused_unchecked();
+            self.balance_active_column(); // tidy up the column we've just popped from
+
             let mut col = Column::new(self.screen_rows, self.screen_cols, &[0]);
             col.wins.focus = win;
             self.cols.insert_at(Position::Tail, col);
             self.cols.focus_down();
+            self.balance_columns();
         } else if self.cols.focus.wins.len() == 1 {
+            // Column that is not on the far right containing only a single window
+
             let win = self.cols.remove_focused_unchecked().wins.focus;
             self.cols.focus.wins.insert(win);
+            self.balance_active_column();
+            self.balance_columns();
         } else {
+            // Column that is not on the far right containing more than one window
+
             let win = self.cols.focus.wins.remove_focused_unchecked();
+            self.balance_active_column();
             self.cols.focus_down();
             self.cols.focus.wins.insert(win);
+            self.balance_active_column();
         }
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Adjust the size of the active [Column] by increasing or decreasing the number of
@@ -493,24 +608,48 @@ impl Layout {
     /// Any existing layout customisation will be preserved as far as possible by converting
     /// dimensions to be relative to the size of the full screen.
     pub(crate) fn update_screen_size(&mut self, rows: usize, cols: usize) {
+        let col_ratio = (cols as f32) / (self.screen_cols as f32);
+        let row_ratio = (rows as f32) / (self.screen_rows as f32);
+
         self.screen_rows = rows;
         self.screen_cols = cols;
 
-        if self.cols.len() == 1 {
-            self.cols.focus.update_size(rows, cols);
-            return;
-        }
-
-        let (w_col, slop) = calculate_dims(cols, self.cols.len());
-        for (i, (_, col)) in self.cols.iter_mut().enumerate() {
-            let mut w = w_col;
-            if i < slop {
-                w += 1;
-            }
-            col.update_size(rows, w);
+        self.cols.scale_sizes(col_ratio, cols);
+        for (_, c) in self.cols.iter_mut() {
+            c.wins.scale_sizes(row_ratio, rows);
         }
 
         self.clamp_scroll();
+    }
+
+    /// Force the columns within the layout to be equally sized.
+    pub(crate) fn balance_columns(&mut self) {
+        let (n_cols, slop) = calculate_dims(self.screen_cols, self.cols.len());
+        for (i, (_, col)) in self.cols.iter_mut().enumerate() {
+            col.n_cols = n_cols;
+            if i < slop {
+                col.n_cols += 1;
+            }
+        }
+    }
+
+    /// Force the windows within the active column to be balanced.
+    pub(crate) fn balance_active_column(&mut self) {
+        self.cols.focus.balance_windows(self.screen_rows);
+    }
+
+    /// Force the all windows within the layout to be equally sized within their respective
+    /// columns.
+    pub(crate) fn balance_windows(&mut self) {
+        for (_, col) in self.cols.iter_mut() {
+            col.balance_windows(self.screen_rows);
+        }
+    }
+
+    /// Force all columns and windows to be equally sized.
+    pub(crate) fn balance_all(&mut self) {
+        self.balance_columns();
+        self.balance_windows();
     }
 
     #[inline]
@@ -544,7 +683,12 @@ impl Layout {
         };
 
         swap(self.focused_view_mut(), &mut view);
-        self.views.push(view);
+        if self.buffers.contains_bufid(view.bufid) {
+            self.views.push(view);
+        }
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Create a new column containing a single window showing the same view found in the
@@ -556,7 +700,10 @@ impl Layout {
         col.wins.last_mut().view = view;
         self.cols.insert_at(Position::Tail, col);
         self.cols.focus_tail();
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+        self.balance_columns();
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Create a new window at the end of the current column showing the same view
@@ -567,7 +714,10 @@ impl Layout {
         let wins = &mut self.cols.focus.wins;
         wins.insert_at(Position::Tail, Window { n_rows: 0, view });
         wins.focus_tail();
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+        self.balance_active_column();
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     /// Set the currently focused window to contain the given buffer
@@ -586,14 +736,18 @@ impl Layout {
             let mut col = Column::new(self.screen_rows, self.screen_cols, &[id]);
             col.wins.last_mut().view = view;
             self.cols.insert_at(Position::Tail, col);
+            self.balance_columns();
         } else {
             let wins = &mut self.cols.last_mut().wins;
             wins.insert_at(Position::Tail, Window { n_rows: 0, view });
             wins.focus_tail();
+            self.balance_active_column();
         }
 
         self.cols.focus_tail();
-        self.update_screen_size(self.screen_rows, self.screen_cols);
+
+        #[cfg(test)]
+        assert_buffer_ids!(self);
     }
 
     pub(crate) fn force_cursor_to_be_in_view(&mut self) {
@@ -841,10 +995,9 @@ impl Layout {
                     continue;
                 }
 
-                let b = self
-                    .buffers
-                    .with_id_mut(win.view.bufid)
-                    .unwrap_or_else(|| die!("layout state contains an unknown buffer ID"));
+                let b = self.buffers.with_id_mut(win.view.bufid).unwrap_or_else(|| {
+                    die!("invalid buffer ID {}", win.view.bufid);
+                });
                 apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
                 return;
             }
@@ -864,10 +1017,9 @@ impl Layout {
         });
 
         for (bufid, from, n_rows) in it {
-            let b = self
-                .buffers
-                .with_id_mut(bufid)
-                .unwrap_or_else(|| die!("layout state contains an unknown buffer ID"));
+            let b = self.buffers.with_id_mut(bufid).unwrap_or_else(|| {
+                die!("invalid buffer ID {bufid}");
+            });
 
             b.update_ts_state(from, n_rows);
         }
@@ -912,38 +1064,34 @@ pub(crate) struct Column {
 
 impl Column {
     pub(crate) fn new(n_rows: usize, n_cols: usize, buf_ids: &[BufferId]) -> Self {
-        let win_rows = n_rows / buf_ids.len();
+        let (win_rows, slop) = calculate_dims(n_rows, buf_ids.len());
         let mut wins = ZipList::try_from_iter(buf_ids.iter().map(|id| Window::new(win_rows, *id)))
             .expect("can't have an empty column");
 
-        let slop = n_rows - (win_rows * buf_ids.len()) + buf_ids.len() - 1;
-        wins.focus.n_rows += slop;
+        for (i, (_, w)) in wins.iter_mut().enumerate() {
+            if i < slop {
+                w.n_rows += 1;
+            }
+        }
 
         Self { n_cols, wins }
-    }
-
-    fn update_size(&mut self, n_rows: usize, n_cols: usize) {
-        self.n_cols = n_cols;
-
-        if self.wins.len() == 1 {
-            self.wins.focus.n_rows = n_rows;
-            return;
-        }
-
-        let (h_win, slop) = calculate_dims(n_rows, self.wins.len());
-        for (i, (_, win)) in self.wins.iter_mut().enumerate() {
-            let mut h = h_win;
-            if i < slop {
-                h += 1;
-            }
-            win.n_rows = h;
-        }
     }
 
     /// Needed to avoid borrowing all of Layout when calling [Layout::focused_view_mut].
     #[inline]
     fn focused_view_mut(&mut self) -> &mut View {
         &mut self.wins.focus.view
+    }
+
+    /// Force the windows within this column to be balanced regardless of their current sizes
+    fn balance_windows(&mut self, screen_rows: usize) {
+        let (n_rows, slop) = calculate_dims(screen_rows, self.wins.len());
+        for (i, (_, win)) in self.wins.iter_mut().enumerate() {
+            win.n_rows = n_rows;
+            if i < slop {
+                win.n_rows += 1;
+            }
+        }
     }
 }
 
@@ -1125,6 +1273,10 @@ impl<T> ZipList<T>
 where
     T: Growable,
 {
+    /// Attempt to adjust the size of the focused element by a given delta.
+    ///
+    /// Clamp to [MIN_DIM] for both the focused element and the adjacent element
+    /// that is being modified along with it.
     fn grow_focus(&mut self, delta: i16) {
         if self.len() == 1 || delta == 0 {
             return; // nothing to grow
@@ -1142,6 +1294,26 @@ where
         } else {
             let actual = other.clamped_sub(delta as usize, MIN_DIM);
             *self.focus.size() += actual;
+        }
+    }
+
+    /// Attempt to preserve the current relative size of each element when the
+    /// overall available space changes.
+    fn scale_sizes(&mut self, ratio: f32, new_total: usize) {
+        let mut total = 0;
+        for (_, elem) in self.iter_mut() {
+            let new_size = (*elem.size() as f32 * ratio) as usize;
+            *elem.size() = new_size;
+            total += new_size;
+        }
+
+        total += self.len() - 1;
+        let slop = new_total - total;
+
+        for (i, (_, elem)) in self.iter_mut().enumerate() {
+            if i < slop {
+                *elem.size() += 1;
+            }
         }
     }
 }
@@ -1219,11 +1391,13 @@ mod tests {
         let mut cols = Vec::with_capacity(col_wins.len());
         let mut n = 0;
         let mut all_ids = Vec::new();
+        let (col_size, slop) = calculate_dims(n_cols, col_wins.len());
 
-        for m in col_wins.iter() {
+        for (i, m) in col_wins.iter().enumerate() {
             let ids: Vec<usize> = (n..(n + m)).collect();
             n += m;
-            cols.push(Column::new(n_rows, n_cols, &ids));
+            let col_n_cols = if i < slop { col_size + 1 } else { col_size };
+            cols.push(Column::new(n_rows, col_n_cols, &ids));
             all_ids.extend(ids);
         }
 
@@ -1246,6 +1420,28 @@ mod tests {
             .iter()
             .flat_map(|(_, c)| c.wins.iter().map(|(_, w)| w.view.bufid))
             .collect::<Vec<_>>()
+    }
+
+    #[test]
+    fn opening_file_with_unnamed_split_works() {
+        let (tx, _) = channel();
+        let buffers = Buffers::new_with_raw_sender(tx);
+        let id = buffers.active().id;
+        let mut l = Layout {
+            buffers,
+            scratch: Scratch::new(config_handle!().minibuffer_lines),
+            screen_rows: 80,
+            screen_cols: 100,
+            cols: ziplist![Column::new(80, 100, &[id])],
+            views: vec![],
+        };
+
+        l.new_column();
+
+        // This will panic if we've ended removing the original unnamed buffer from
+        // self.buffers as part of opening the virtual buffer as the Layout state
+        // will now contain references to an unknown buffer ID (via assert_buffer_ids)
+        let _ = l.open_or_focus("test-buffer.txt", false);
     }
 
     #[test]
@@ -1524,5 +1720,41 @@ mod tests {
         for (i, (_, w)) in l.cols.focus.wins.iter().enumerate() {
             assert_eq!(w.n_rows, expected_rows[i], "window {i}");
         }
+    }
+
+    #[test_case(100, 120, (73, 46), (100, 63, 36); "increase width and height")]
+    #[test_case(60, 80, (48, 31), (60, 38, 21); "decrease width and height")]
+    #[test]
+    fn update_screen_size_preserves_relative_sizes(
+        w: usize,
+        h: usize,
+        expected_cols: (usize, usize),
+        expected_wins: (usize, usize, usize),
+    ) {
+        let mut l = test_layout(&[1, 2], 80, 100);
+
+        l.cols.focus_head();
+        l.resize_active_column(10);
+        l.cols.focus_down();
+        l.cols.focus.wins.focus_head();
+        l.resize_active_window(10); // now focused on 1st window of 2nd column
+
+        let cols = |l: &Layout| (l.cols.up[0].n_cols, l.cols.focus.n_cols);
+        let wins = |l: &Layout| {
+            (
+                l.cols.up[0].wins.focus.n_rows,
+                l.cols.focus.wins.focus.n_rows,
+                l.cols.focus.wins.down[0].n_rows,
+            )
+        };
+
+        // check that the initial column and window sizes are correct
+        assert_eq!(cols(&l), (60, 39), "initial column widths");
+        assert_eq!(wins(&l), (80, 50, 29), "initial window heights");
+
+        l.update_screen_size(w, h);
+
+        assert_eq!(cols(&l), expected_cols, "updated column widths");
+        assert_eq!(wins(&l), expected_wins, "updated window heights");
     }
 }
