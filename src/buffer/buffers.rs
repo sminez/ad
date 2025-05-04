@@ -69,7 +69,11 @@ impl Buffers {
     }
 
     /// Returns the id of a newly created buffer, None if the buffer already existed
-    pub fn open_or_focus<P: AsRef<Path>>(&mut self, path: P, retain_empty_unnamed: bool) -> io::Result<Option<BufferId>> {
+    pub fn open_or_focus<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        retain_empty_unnamed: bool,
+    ) -> io::Result<Option<BufferId>> {
         let path = match path.as_ref().canonicalize() {
             Ok(p) => p,
             Err(e) if e.kind() == ErrorKind::NotFound => path.as_ref().to_path_buf(),
