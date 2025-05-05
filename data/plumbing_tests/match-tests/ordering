@@ -1,0 +1,29 @@
+Ordering of rules within the rules file matters: rules are matched from top to bottom and
+the first matching rule is used, regardless of whether or not there is a more specific match
+later in the file.
+
+-- rules --
+dst is ad
+attr delete a
+attr delete b
+attr add for-ad=true
+plumb to edit
+
+data is hello, world!
+attr add c=NEW
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+attrs: a=foo b=bar
+ndata: 13
+data: hello, world!
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+attrs: for-ad=true
+ndata: 13
+data: hello, world!

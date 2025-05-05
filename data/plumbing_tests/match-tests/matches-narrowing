@@ -1,0 +1,21 @@
+An example of using matches to narrow a messy selection by using an unanchored pattern
+to replace data with a substring.
+
+-- rules --
+data matches [a-zA-Z0-9_\-./@]+\.pdf
+data set $0
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 48
+data: $ zathura my-awesome-pdf.pdf some-other-pdf.pdf
+
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 18
+data: my-awesome-pdf.pdf

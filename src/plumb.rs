@@ -35,28 +35,33 @@ impl FromStr for PlumbingRules {
                 .filter(|l| !l.starts_with('#'))
                 .collect();
 
-            let block = lines.join("\n");
+            let mut block = lines.join("\n");
             if block.is_empty() {
                 continue;
             }
 
-            // Parse variable declaration blocks
             match block.split_once(' ') {
+                // Parse variable declaration blocks
                 Some((_, s)) if s.starts_with("=") => {
                     for line in block.lines() {
                         match line.split_once("=") {
                             Some((var, val)) => {
-                                prs.vars.insert(
-                                    non_empty_string(var.trim(), line)?,
-                                    non_empty_string(val.trim(), line)?,
-                                );
+                                let mut k = non_empty_string(var.trim(), line)?;
+                                k.insert(0, '$');
+                                prs.vars.insert(k, non_empty_string(val.trim(), line)?);
                             }
                             _ => return Err(format!("malformed line: {line:?}")),
                         }
                     }
                 }
 
-                _ => prs.rules.push(Rule::from_str(&block)?),
+                // Apply variables and parse rule blocks
+                _ => {
+                    for (k, v) in prs.vars.iter() {
+                        block = block.replace(k, v);
+                    }
+                    prs.rules.push(Rule::from_str(&block)?);
+                }
             }
         }
 
@@ -112,6 +117,10 @@ pub struct PlumbingMessage {
     pub dst: Option<String>,
     /// The working directory (used when data is a filename)
     pub wdir: Option<String>,
+    /// The offset within 'data' where the user's cursor currently lies (default=0).
+    /// If a rule specifies a 'narrows-to' rule it will be used to narrow initial data
+    /// to only include the specified cursor, otherwise the match will be rejected.
+    pub cur: usize,
     /// Name=value pairs. Must not contain newlines
     pub attrs: BTreeMap<String, String>,
     /// The string content of the message itself
@@ -173,11 +182,25 @@ impl FromStr for PlumbingMessage {
         let mut msg = Self::default();
         let mut it = s.lines();
         let mut ndata = 0;
+        let mut cur_set = false;
 
         for line in &mut it {
             parse_field!(line, "src", "src: ", msg.src);
             parse_field!(line, "dst", "dst: ", msg.dst);
             parse_field!(line, "wdir", "wdir: ", msg.wdir);
+
+            match (line.strip_prefix("cur: "), &mut msg.cur) {
+                (Some(_), _) if cur_set => return Err("duplicate cur field".to_string()),
+                (Some(val), _) => {
+                    msg.cur = match val.parse() {
+                        Ok(cur) => cur,
+                        Err(e) => return Err(format!("malformed cur field: {e}")),
+                    };
+                    cur_set = true;
+                    continue;
+                }
+                (None, _) => (),
+            }
 
             match (line.strip_prefix("attrs: "), msg.attrs.is_empty()) {
                 (Some(s), true) => {
@@ -229,6 +252,7 @@ enum Pattern {
     IsDir(String),
     Is(Field, String),
     Matches(Field, Regex),
+    NarrowsTo(Regex),
     Set(Field, String),
 }
 
@@ -242,6 +266,7 @@ impl Pattern {
             Self::IsDir(_) => "is-dir",
             Self::Is(_, _) => "is",
             Self::Matches(_, _) => "matches",
+            Self::NarrowsTo(_) => "narrows-to",
             Self::Set(_, _) => "set",
         }
     }
@@ -399,6 +424,22 @@ impl Pattern {
             }
 
             Self::Matches(f, re) => return re_match_and_update(*f, re, vars),
+
+            Self::NarrowsTo(re) => {
+                debug!(%msg.cur, "narrowing for provided cur");
+                for m in re.match_str_all(&msg.data) {
+                    let (from, to) = m.loc();
+                    if from <= msg.cur && msg.cur <= to {
+                        debug!(%from, %to, "successfully narrowed");
+                        msg.data = m.str_match_text(&msg.data);
+                        msg.cur = 0; // consume the cursor as it is now invalid
+                        return true;
+                    }
+                }
+
+                return false; // unable to narrow to cur
+            }
+
             Self::DataFrom(cmd) => {
                 debug!("running {cmd:?} to set message data");
                 let mut command = Command::new("sh");
@@ -504,6 +545,10 @@ impl FromStr for Rule {
                 rule.actions.push(Action::To(non_empty_string(s, line)?));
             } else if let Some(s) = line.strip_prefix("plumb start ") {
                 rule.actions.push(Action::Start(non_empty_string(s, line)?));
+            } else if let Some(s) = line.strip_prefix("data narrows ") {
+                rule.patterns.push(Pattern::NarrowsTo(
+                    Regex::compile(s).map_err(|e| format!("malformed regex ({e:?}): {s}"))?,
+                ));
             } else {
                 // patterns of the form $field $op $value
                 let (field, rest) = line
@@ -583,6 +628,7 @@ fn non_empty_string(s: &str, line: &str) -> Result<String, String> {
 mod tests {
     use super::*;
     use simple_test_case::dir_cases;
+    use simple_txtar::Archive;
 
     #[test]
     fn parse_default_rules_works() {
@@ -626,6 +672,7 @@ mod tests {
             src: Some("bash".to_string()),
             dst: Some("ad".to_string()),
             wdir: Some("/home/foo/bar".to_string()),
+            cur: 5,
             attrs: [
                 ("a".to_string(), "b".to_string()),
                 ("c".to_string(), "d".to_string()),
@@ -692,5 +739,33 @@ mod tests {
     fn parse_invalid_rule(_: &str, content: &str) {
         let res = Rule::from_str(content);
         assert!(res.is_err(), "{res:?}");
+    }
+
+    #[dir_cases("data/plumbing_tests/match-tests")]
+    #[test]
+    fn match_tests(_fname: &str, content: &str) {
+        let arr = Archive::from(content);
+        let comment = arr.comment();
+        if !comment.is_empty() {
+            println!("{comment}"); // help with debugging
+        }
+
+        let mut rules =
+            PlumbingRules::from_str(&arr.get("rules").expect("missing rules").content).unwrap();
+        let initial =
+            PlumbingMessage::from_str(&arr.get("initial").expect("missing initial").content)
+                .unwrap();
+
+        let raw_processed = &arr.get("processed").expect("missing processed").content;
+        let processed = if raw_processed.is_empty() {
+            None
+        } else {
+            Some(MatchOutcome::Message(
+                PlumbingMessage::from_str(raw_processed).unwrap(),
+            ))
+        };
+
+        let outcome = rules.plumb(initial);
+        assert_eq!(outcome, processed);
     }
 }

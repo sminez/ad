@@ -588,6 +588,7 @@ where
             src: Some("ad".to_string()),
             dst: None,
             wdir,
+            cur: 0,
             attrs: Default::default(),
             data: s.clone(),
         };

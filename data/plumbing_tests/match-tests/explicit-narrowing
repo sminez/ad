@@ -1,0 +1,21 @@
+An example of using explicit match narrowing with a cursor to allow for messy input data.
+
+-- rules --
+data narrows [a-zA-Z0-9_\-./@]+
+data matches ^[a-zA-Z0-9_\-./@]+\.pdf$
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+cur: 15
+ndata: 48
+data: $ zathura my-awesome-pdf.pdf some-other-pdf.pdf
+
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 18
+data: my-awesome-pdf.pdf

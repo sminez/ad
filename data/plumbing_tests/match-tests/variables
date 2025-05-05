@@ -1,0 +1,26 @@
+Variables should be templated out ahead of parsing rules
+
+-- rules --
+myattr = NEW
+myeditor = ad
+
+data is hello, world!
+dst is $myeditor
+attr add b=$myattr
+attr add c=baz
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+attrs: a=foo b=bar
+ndata: 13
+data: hello, world!
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+attrs: a=foo b=NEW c=baz
+ndata: 13
+data: hello, world!

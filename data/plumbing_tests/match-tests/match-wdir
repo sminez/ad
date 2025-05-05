@@ -1,0 +1,19 @@
+An example of using matches to narrow a messy selection by using an unanchored pattern
+to replace data with a substring.
+
+-- rules --
+wdir matches /home/foo/work-projects/.*
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/work-projects/bar/src
+ndata: 16
+data: impl Foo for Bar
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/work-projects/bar/src
+ndata: 16
+data: impl Foo for Bar
