@@ -306,7 +306,7 @@ impl Pattern {
                     for n in 1..10 {
                         match m.str_submatch_text(n, s) {
                             Some(txt) => {
-                                vars.insert(format!("${}", n), txt);
+                                vars.insert(format!("${n}"), txt);
                             }
                             None => return true,
                         }

@@ -218,7 +218,87 @@ being viewable here:
 
   https://github.com/sminez/ad/blob/develop/data/plumbing.rules
 
-  TODO: write up the syntax for plumbing rules
+
+The structure of the 'plumbing.rules' file is as follows:
+
+  Comments
+    Any line begining with a '#' is a comment and is ignored when parsing the file.
+
+  Variable declarations
+    At the top of the file you may have any number of 'var = value' lines that declare a
+    variable that may be used as '$var' in the rest of your rules file. Variables declared
+    in this way are replaced when the rules file is parsed. When a message is being processed
+    by your rules, there are several built in variables that are always available:
+
+      $0     The result of the most recent 'matches' pattern ($1, $2, ... for submatches)
+      $src   The 'src' field of the message being processed
+      $dst   The 'dst' field of the message being processed
+      $wdir  The 'wdir' field of the message being processed
+      $data  The 'data' field of the message being processed
+      $file  The matched file name from a successful 'isfile' pattern
+      $dir   The matched directory name from a successful 'isdir' pattern
+
+  Rule sets
+    After any variable declarations your rules file consists of one or more rule blocks that
+    define a set of patterns that must hold for an incoming message in order for the paired
+    action to be run. Every rule set must contain at least one pattern and one action. Rule
+    sets are terminated by a blank line or end of file.
+
+  Patterns
+    The following pattern lines are supported as part of a Rule set:
+
+      $field is $value    If the specified field exactly matches the given value, then
+                          the rule matches.
+
+      arg isfile $value   If the given value is a valid file path for an existing file
+                          then the rule matches.
+
+      arg isdir $value    If the given value is a valid directory path for an existing
+                          file then the rule matches.
+
+      $field matches $re  If the specified field matches the provided regex then the
+                          rule matches. (You must specify ^$ anchors to match against
+                          the full contents of the field if that is what you want)
+
+      data narrows $re    If the provided regex matches the message's data field at the
+                          offset specified by its cur field (defaulting to 0) then data
+                          is replaced with that match.
+
+      data from $cmd      Replaces the current contents of 'data' with the stdout of
+                          the provided shell command.
+
+      $field set $value   Replace the specified field with a new value.
+
+      attr add $attr=$val Set or replace the $attr attribute on the message. Multiple
+                          attributes may be set at once in a single 'attr add' line if
+                          desired. Message attributes are ignored by the plumber but
+                          can be used to pass additional information to the program that
+                          receives the resulting plumbing message from a 'plumb to' action.
+                          For ad, the following attributes are currently supported:
+
+                            action=showdata  causes ad to open a new window showing a
+                                             virtual buffer containing the contents of
+                                             the 'data' field.
+                            filename=$fname  sets the file name of a virtual buffer
+                                             opened using 'showdata' (defaults to
+                                             '+plumbing-message' if not set).
+                            addr=$addr       parses $addr as an Edit Command address
+                                             and sets the current dot to that range
+                                             after opening 'data' as a new file.
+
+      attr delete $attr   Delete the $attr attribute from the message.
+
+  Actions
+    The following actions are supported as part of a Rule set:
+
+      plumb to $port      Send the message to the specified port for handling by the
+                          program listening on it. Currently only the 'edit' port is
+                          supported where plumbed messages will be handled internally
+                          by ad itself.
+      plumb start $cmd    Discard the message and run the provided shell command instead.
+                          Typically this is used with variables to control how a command
+                          is executed (such as opening a picture in an image viewer, or
+                          a URL in a browser). 
 
 ---
 
