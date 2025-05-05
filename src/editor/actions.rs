@@ -195,7 +195,7 @@ where
     pub fn open_file<P: AsRef<Path>>(&mut self, path: P, new_window: bool) {
         let path = path.as_ref();
         debug!(?path, "opening file");
-        let was_empty_scratch = self.layout.is_empty_scratch();
+        let was_empty_scratch = self.layout.is_empty_squirrel();
         let current_id = self.active_buffer_id();
 
         match self.layout.open_or_focus(path, new_window) {

@@ -1,6 +1,6 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
-    buffer::{ActionOutcome, Buffer, SPLASH},
+    buffer::{ActionOutcome, Buffer, WELCOME_SQUIRREL},
     config::Config,
     config_handle, die,
     dot::TextObject,
@@ -116,11 +116,11 @@ where
 
         let lsp_manager = Arc::new(LspManager::spawn(tx_events.clone()));
         let mut layout = Layout::new(100, 100, lsp_manager.clone());
-        if show_splash && layout.is_empty_scratch() {
+        if show_splash && layout.is_empty_squirrel() {
             layout
                 .active_buffer_mut_ignoring_scratch()
                 .txt
-                .insert_str(0, SPLASH);
+                .insert_str(0, WELCOME_SQUIRREL);
         }
 
         Self {
@@ -170,7 +170,7 @@ where
 
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
-        if self.layout.is_empty_scratch() {
+        if self.layout.is_empty_squirrel() {
             _ = self.tx_fsys.send(LogEvent::Open(0));
             _ = self.tx_fsys.send(LogEvent::Focus(0));
         }

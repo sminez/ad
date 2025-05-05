@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur, SPLASH},
+    buffer::{Buffer, BufferKind, Cur, WELCOME_SQUIRREL},
     dot::TextObject,
     lsp::LspManagerHandle,
     ziplist,
@@ -103,7 +103,7 @@ impl Buffers {
 
         // Remove an empty unnamed buffer if the user has now opened a file and we have not
         // been told to retain it (typically because we have an open window showing it)
-        if !retain_empty_unnamed && self.is_empty_scratch() {
+        if !retain_empty_unnamed && self.is_empty_squirrel() {
             mem::swap(&mut self.inner.focus, &mut b);
         } else {
             self.record_jump_position();
@@ -320,11 +320,13 @@ impl Buffers {
         self.inner.len()
     }
 
+    /// Whether or not the only buffer we currently have open is the default squirrel buffer rather
+    /// than a "real" buffer that has been opened by the user.
     #[inline]
-    pub fn is_empty_scratch(&self) -> bool {
+    pub fn is_empty_squirrel(&self) -> bool {
         self.inner.len() == 1
             && self.inner.focus.is_unnamed()
-            && (self.inner.focus.txt.is_empty() || self.inner.focus.txt == SPLASH)
+            && (self.inner.focus.txt.is_empty() || self.inner.focus.txt == WELCOME_SQUIRREL)
     }
 
     /// Append to the +output buffer assigned to the buffer with provided id.

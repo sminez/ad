@@ -121,8 +121,8 @@ impl Layout {
         assert_invariants!(self);
     }
 
-    pub(crate) fn is_empty_scratch(&self) -> bool {
-        self.buffers.is_empty_scratch()
+    pub(crate) fn is_empty_squirrel(&self) -> bool {
+        self.buffers.is_empty_squirrel()
     }
 
     fn buffer_is_visible(&self, id: BufferId) -> bool {
@@ -183,9 +183,9 @@ impl Layout {
         mut new_window: bool,
     ) -> io::Result<Option<BufferId>> {
         self.scratch.is_focused = false;
-        if self.buffers.is_empty_scratch() {
-            // in the case where we only have an empty scratch buffer present, we always
-            // replace the current buffer with the one that is newly opened.
+        if self.buffers.is_empty_squirrel() {
+            // in the case where we only have an empty squirrel buffer present, we always replace
+            // the current buffer with the one that is newly opened.
             new_window = false;
         }
 

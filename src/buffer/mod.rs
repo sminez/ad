@@ -33,15 +33,15 @@ pub(crate) use buffers::{BufferId, Buffers};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.
-pub(crate) const SPLASH: &str = r#"+-------------------------------------------------------------------------+
-| > Welcome to the ad text editor!                                        |
-| This is a scratch buffer where you can make notes and execute commands. |
-| You can press the '-' key to open a file from the current directory, or |
-| type :help to view the in-editor help documentation.                    |
-|                                                                         |
-| To prevent this message being shown at startup, set the 'show_splash'   |
-| property to false in your config file.                                  |
-+-------------------------------------------------------------------------+
+pub(crate) const WELCOME_SQUIRREL: &str = r#"+---------------------------------------------------------------------------+
+| > Welcome to the ad text editor!                                          |
+| This is a temporary buffer where you can make notes and execute commands. |
+| You can press the '-' key to open a file from the current directory, or   |
+| type :help to view the in-editor help documentation.                      |
+|                                                                           |
+| To prevent this message being shown at startup, set the 'show_splash'     |
+| property to false in your config file.                                    |
++---------------------------------------------------------------------------+
               \  ,,  __
                 ("\ ( (
                 -)>\ )/
