@@ -672,7 +672,7 @@ mod tests {
             src: Some("bash".to_string()),
             dst: Some("ad".to_string()),
             wdir: Some("/home/foo/bar".to_string()),
-            cur: 5,
+            cur: 0,
             attrs: [
                 ("a".to_string(), "b".to_string()),
                 ("c".to_string(), "d".to_string()),

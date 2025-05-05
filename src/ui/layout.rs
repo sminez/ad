@@ -769,15 +769,15 @@ impl Layout {
             let mut col = Column::new(self.screen_rows, self.screen_cols, &[id]);
             col.wins.last_mut().view = view;
             self.cols.insert_at(Position::Tail, col);
+            self.cols.focus_tail();
             self.balance_columns();
         } else {
-            let wins = &mut self.cols.last_mut().wins;
+            self.cols.focus_tail();
+            let wins = &mut self.cols.focus.wins;
             wins.insert_at(Position::Tail, Window { n_rows: 0, view });
             wins.focus_tail();
             self.balance_active_column();
         }
-
-        self.cols.focus_tail();
 
         #[cfg(test)]
         assert_invariants!(self);
@@ -1820,9 +1820,15 @@ mod tests {
 
     #[test]
     fn writing_to_a_non_visible_output_buffer_creates_a_window() {
-        let mut l = test_layout(&[1], 80, 100);
-        assert_eq!(l.n_open_windows(), 1);
-        l.write_output_for_buffer(0, "some output".into(), &PathBuf::from("/tmp"));
+        let mut l = test_layout(&[1, 1], 80, 100);
         assert_eq!(l.n_open_windows(), 2);
+        assert_eq!(l.cols[0].wins[0].n_rows, 80);
+        assert_eq!(l.cols[1].wins[0].n_rows, 80);
+
+        l.write_output_for_buffer(0, "some output".into(), &PathBuf::from("/tmp"));
+        assert_eq!(l.n_open_windows(), 3);
+        assert_eq!(l.cols[0].wins[0].n_rows, 80);
+        assert_eq!(l.cols[1].wins[0].n_rows, 40);
+        assert_eq!(l.cols[1].wins[1].n_rows, 39);
     }
 }
