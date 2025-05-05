@@ -34,6 +34,7 @@ Running Built In Commands
 Running External Commands
 Running Edit Commands
 The Filesystem Interface
+Plumbing
 LSP support
 Syntax Highlighting
 
@@ -251,6 +252,7 @@ be executed directly from any buffer (including this one) or written as a comman
 string to the "ctl" file in the filesystem interface.
 
 {{BUILT_IN_COMMANDS}}
+
 ---
 
 >> Running External Commands
@@ -290,11 +292,11 @@ using any language you wish.
 
   http://man.cat-v.org/plan_9/5/
 
-If you have the 9p(1) command line utility installed you can use it to explore the filesystem:
+ad itself can be used as a simple 9p client to explore the filesystem:
 
-  9p ls ad
-  9p ls ad/buffers/1
-  9p read ad/buffers/1/dot
+  ad -9p ls ad
+  ad -9p ls ad/buffers/1
+  ad -9p read ad/buffers/1/dot
 
 If you have the fusermount(1) and 9pfuse(4) programs installed then you can set the "auto_mount"
 property in ~/.ad/config.toml to true and mount the filesystem directly at ~/.ad/mnt when ad starts.

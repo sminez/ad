@@ -105,7 +105,6 @@ pub(crate) fn parent_dir_containing<'a>(initial: &'a Path, target: &str) -> Opti
         .find(|&p| p.is_dir() && p.join(target).exists())
 }
 
-
 /// Check whether or not a given command can be found as an executable within the provided set of path directories
 #[allow(dead_code)]
 pub(crate) fn exists_on_path_as_executable(cmd: &str, cwd: &Path, path_str: &str) -> bool {
