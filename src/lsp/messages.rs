@@ -456,7 +456,7 @@ struct Reference {
 impl Reference {
     fn from_loc(loc: Location, enc: PositionEncoding) -> Self {
         let (path, coords) = Coords::new(loc, enc);
-        let prefix = format!("{}:{}", path, coords.line());
+        let prefix = format!("{}:{}", path, coords.line() + 1); // LSP ranges are 0-based
 
         Self {
             path,
