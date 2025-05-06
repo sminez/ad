@@ -16,12 +16,12 @@ constant = { fg = "#ce752c" }
 function = { fg = "#4685c0" }
 "function.macro" = { fg = "#ce752c" }
 keyword = { fg = "#a44860" }
-module = { fg = "#3c6fa3" }
+module = { fg = "#726a98" }
 number = { fg = "#D27E99" }
 operator = { fg = "#ad6693" }
 punctuation = { fg = "#754e85" }
 string = { fg = "#347e73" }
-type = { fg = "#458488" }
+type = { fg = "#0f8a97" }
 variable = { }
 "markup.italic" = { italic = true } 
 "markup.bold" = { bold = true } 
