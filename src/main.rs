@@ -1,5 +1,5 @@
 use ad_editor::{
-    Args, CachedStdin, Config, Editor, EditorMode, GapBuffer, LogBuffer, PlumbingRules, Program,
+    Args, CachedStdin, Config, Editor, EditorMode, LogBuffer, PlumbingRules, Program,
     LOG_LEVEL_ENV_VAR,
 };
 use ninep::sync::client::UnixClient;
@@ -109,7 +109,7 @@ fn run_script(script: &str, files: Vec<String>) {
             }
         };
 
-        if let Err(e) = prog.execute(&mut GapBuffer::from(s), path, &mut buf) {
+        if let Err(e) = prog.execute_on_string(s, path, &mut buf) {
             eprintln!("error running script: {e:?}");
             exit(1);
         }

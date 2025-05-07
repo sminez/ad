@@ -610,7 +610,7 @@ impl GapBuffer {
     /// Remove the requested range (from..to) from the visible region of the buffer.
     ///
     /// # Panics
-    /// This method will panic if `char_from < char_to`
+    /// This method will panic if `char_from > char_to` or if the requested range is out of bounds.
     pub fn remove_range(&mut self, char_from: usize, char_to: usize) {
         if char_from == char_to {
             return;

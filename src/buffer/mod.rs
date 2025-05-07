@@ -27,9 +27,9 @@ mod edit;
 mod internal;
 
 use edit::{Edit, EditLog, Kind, Txt};
-pub use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
 
 pub(crate) use buffers::{BufferId, Buffers};
+pub(crate) use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.
