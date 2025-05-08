@@ -709,9 +709,9 @@ checksum = "92802be477870645da846efac4217346cb92b80e1bad2b71ad73da2c156a6f7c"
 
 [[package]]
 name = "simple_test_case"
-version = "1.2.0"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d0649fa40b80dcacda1cabd018fd47b6b0c7fbbda6e1c3f658a6c4d5926500a"
+checksum = "6909e2382b73068b0172c9c28726b6fb9efeef51742ecfd05b9260c62c42bb8e"
 dependencies = [
  "proc-macro2",
  "quote",

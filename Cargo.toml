@@ -59,8 +59,8 @@ streaming-iterator = "0.1.9"
 toml = "0.8.20"
 
 [dev-dependencies]
-simple_test_case = "1.2.0"
 criterion = "0.5"
+simple_test_case = "1"
+simple_txtar = "1"
 tree-sitter-python = "0.23.6"
 tree-sitter-rust = "0.23.2"
-simple_txtar = "1.1.0"
