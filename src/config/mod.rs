@@ -14,7 +14,7 @@ use tracing::{error, warn};
 
 mod raw;
 
-use raw::{RawConfig, RawColorScheme};
+use raw::{RawColorScheme, RawConfig};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../../data/config.toml");
 
