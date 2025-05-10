@@ -53,9 +53,6 @@ impl Args {
                 };
 
                 let files: Vec<_> = args.collect();
-                if files.is_empty() {
-                    return Err(("no files provided".to_string(), 1));
-                }
 
                 Ok(Args {
                     script,
@@ -83,9 +80,6 @@ impl Args {
                 };
 
                 let files: Vec<_> = args.collect();
-                if files.is_empty() {
-                    return Err(("no files provided".to_string(), 1));
-                }
 
                 Ok(Args {
                     script,
@@ -122,9 +116,13 @@ mod tests {
     #[test_case("foo.txt"; "single file")]
     #[test_case("foo.txt bar.json"; "multiple files")]
     #[test_case("-e 'script' foo.txt"; "edit script")]
+    #[test_case("-e 'script'"; "edit script with no files")]
     #[test_case("--expression 'script' foo.txt"; "edit script long")]
+    #[test_case("--expression 'script'"; "edit script with no files long")]
     #[test_case("-f README.md foo.txt"; "script file")] // needs to be a real file
+    #[test_case("-f README.md"; "script file with no files")]
     #[test_case("--script-file README.md foo.txt"; "script file long")] // needs to be a real file
+    #[test_case("--script-file README.md"; "script file with no files long")]
     #[test_case("-9p read ad/buffers/index"; "9p read")]
     #[test_case("-9p write ad/buffers/1/dot"; "9p write")]
     #[test_case("-9p ls ad/buffers"; "9p ls")]
@@ -146,14 +144,10 @@ mod tests {
     // actually invalid argument cases
     #[test_case("-e"; "edit script with no script")]
     #[test_case("--expression"; "edit script with no script long")]
-    #[test_case("-e 'script'"; "edit script with no files")]
-    #[test_case("--expression 'script'"; "edit script with no files long")]
     #[test_case("-f"; "script file with no script file")]
     #[test_case("--script-file"; "script file with no script file long")]
     #[test_case("-f foo.txt"; "script file with unknown script file")]
     #[test_case("--script-file foo.txt"; "script file with unknown script file long")]
-    #[test_case("-f README.md"; "script file with no files")]
-    #[test_case("--script-file README.md"; "script file with no files long")]
     #[test]
     fn invalid_args(cmd_line: &str) {
         let it = cmd_line.split_whitespace().map(|s| s.to_string());
