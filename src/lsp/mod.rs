@@ -59,7 +59,7 @@ pub struct LspManagerHandle {
     tx_req: Sender<Req>,
     capabilities: ReadOnlyLock<HashMap<String, (usize, Capabilities)>>,
     diagnostics: ReadOnlyLock<HashMap<Uri, Vec<Diagnostic>>>,
-    configs: Vec<LangConfig>,
+    configs: HashMap<String, LangConfig>,
 }
 
 impl LspManagerHandle {
@@ -98,8 +98,8 @@ impl LspManagerHandle {
         let ext = os_ext.to_str()?;
         self.configs
             .iter()
-            .find(|c| c.extensions.iter().any(|e| e == ext))
-            .and_then(|c| c.lsp.as_ref().map(|lsp| (&c.name, lsp)))
+            .find(|(_, c)| c.extensions.iter().any(|e| e == ext))
+            .and_then(|(name, c)| c.lsp.as_ref().map(|lsp| (name, lsp)))
     }
 
     fn start_req_for_buf(&self, bs: &Buffers) -> Option<Req> {

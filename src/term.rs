@@ -5,7 +5,7 @@ use libc::{
     termios as Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, ISIG, ISTRIP, IXON, OPOST,
     SA_SIGINFO, SIGWINCH, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
 };
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::{
     fmt,
     io::{self, Stdout, Write},
@@ -58,7 +58,7 @@ pub unsafe fn register_signal_handler() {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Color {
     r: u8,
@@ -100,17 +100,12 @@ impl TryFrom<String> for Color {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct Styles {
-    #[serde(default)]
     pub fg: Option<Color>,
-    #[serde(default)]
     pub bg: Option<Color>,
-    #[serde(default)]
     pub bold: bool,
-    #[serde(default)]
     pub italic: bool,
-    #[serde(default)]
     pub underline: bool,
 }
 

@@ -5,19 +5,18 @@ use crate::{
     key::Input,
     term::{Color, Styles},
     trie::Trie,
-    ts::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
+    ts::TK_DEFAULT,
     util::parent_dir_containing,
 };
-use serde::{
-    de::{self, DeserializeOwned, MapAccess, Visitor},
-    Deserialize, Deserializer,
-};
-use std::{
-    collections::HashMap, env, fmt, fs, io, iter::successors, marker::PhantomData, path::Path,
-};
+use serde::{de, Deserialize, Deserializer};
+use std::{collections::HashMap, env, fs, io, iter::successors, ops::Deref, path::Path};
 use tracing::{error, warn};
 
-pub const DEFAULT_CONFIG: &str = include_str!("../data/config.toml");
+mod raw;
+
+use raw::{RawConfig, RawColorScheme};
+
+pub const DEFAULT_CONFIG: &str = include_str!("../../data/config.toml");
 
 pub(crate) fn config_path() -> String {
     let home = env::var("HOME").unwrap();
@@ -25,33 +24,30 @@ pub(crate) fn config_path() -> String {
 }
 
 /// Editor level configuration
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    #[serde(default)]
-    pub show_splash: bool,
-    pub tabstop: usize,
-    pub expand_tab: bool,
-    pub match_indent: bool,
-    pub status_timeout: u64,
-    pub double_click_ms: u64,
-    pub minibuffer_lines: usize,
-    pub find_command: String,
-
-    #[serde(default)]
+    pub editor: EditorConfig,
     pub filesystem: FsysConfig,
-    #[serde(default, deserialize_with = "path_or_struct")]
-    pub colorscheme: ColorScheme,
-    #[serde(default)]
     pub tree_sitter: TsConfig,
-    #[serde(default)]
-    pub languages: Vec<LangConfig>,
-    #[serde(default)]
+    pub colorscheme: ColorScheme,
+    pub languages: HashMap<String, LangConfig>,
     pub keys: KeyBindings,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        toml::from_str(DEFAULT_CONFIG).unwrap()
+        let (cfg, errs) = RawConfig::default().resolve("");
+        assert!(errs.is_none(), "default config is broken");
+
+        cfg
+    }
+}
+
+impl Deref for Config {
+    type Target = EditorConfig;
+
+    fn deref(&self) -> &Self::Target {
+        &self.editor
     }
 }
 
@@ -61,14 +57,22 @@ impl Config {
         let home = env::var("HOME").unwrap();
         let path = config_path();
 
-        let mut cfg = match fs::read_to_string(&path) {
-            Ok(s) => match toml::from_str(&s) {
-                Ok(cfg) => cfg,
-                Err(e) => {
-                    error!("invalid config file: {e}");
-                    return Err(format!("Invalid config file: {e}"));
+        match fs::read_to_string(&path) {
+            Ok(s) => {
+                let raw: RawConfig = match toml::from_str(&s) {
+                    Ok(cfg) => cfg,
+                    Err(e) => {
+                        error!("malformed config file: {e}");
+                        return Err(format!("Malformed config file: {e}"));
+                    }
+                };
+                let (cfg, err) = raw.resolve(&home);
+                if let Some(err) = err {
+                    error!("malformed config: {err}");
                 }
-            },
+
+                Ok(cfg)
+            }
 
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
                 if fs::create_dir_all(format!("{home}/.ad")).is_ok() {
@@ -77,29 +81,11 @@ impl Config {
                     }
                 }
 
-                Config::default()
+                Ok(Config::default())
             }
 
             Err(e) => return Err(format!("Unable to load config file: {e}")),
-        };
-
-        // Use default colorscheme's background color if none is specified
-        for style in cfg.colorscheme.syntax.values_mut() {
-            style.fg = style.fg.or(Some(cfg.colorscheme.fg));
-            style.bg = style.bg.or(Some(cfg.colorscheme.bg));
         }
-
-        // Replace "~/" shorthand notation in paths with the user's $HOME
-        for s in [
-            &mut cfg.tree_sitter.parser_dir,
-            &mut cfg.tree_sitter.syntax_query_dir,
-        ] {
-            if s.starts_with("~/") {
-                *s = s.replacen("~", &home, 1);
-            }
-        }
-
-        Ok(cfg)
     }
 
     /// Check to see if there is a known tree-sitter configuration for this buffer
@@ -112,18 +98,46 @@ impl Config {
 
         self.languages
             .iter()
-            .find(|c| {
+            .find(|(_, c)| {
                 c.filenames.iter().any(|f| *f == fname)
                     || c.extensions.iter().any(|e| e == ext)
                     || c.first_lines.iter().any(|l| first_line.starts_with(l))
             })
-            .map(|c| c.name.as_str())
+            .map(|(name, _)| name.as_str())
     }
 
     pub(crate) fn update_from(&mut self, input: &str) -> Result<(), String> {
         warn!("ignoring runtime config update: {input}");
 
         Err("runtime config updates are not currently supported".to_owned())
+    }
+}
+
+/// Top level configuration for the editor
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorConfig {
+    pub show_splash: bool,
+    pub tabstop: usize,
+    pub expand_tab: bool,
+    pub match_indent: bool,
+    pub status_timeout: u64,
+    pub double_click_ms: u64,
+    pub minibuffer_lines: usize,
+    pub find_command: String,
+}
+
+impl Default for EditorConfig {
+    fn default() -> Self {
+        Self {
+            show_splash: true,
+            tabstop: 4,
+            expand_tab: true,
+            match_indent: true,
+            status_timeout: 3,
+            double_click_ms: 200,
+            minibuffer_lines: 8,
+            find_command: "fd -t f".to_string(),
+        }
     }
 }
 
@@ -147,7 +161,7 @@ impl Default for FsysConfig {
 ///
 /// UI elements are available as properties and syntax stylings are available as a map of string
 /// tag to [Style]s that should be applied.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColorScheme {
     pub bg: Color,
     pub fg: Color,
@@ -159,50 +173,7 @@ pub struct ColorScheme {
 
 impl Default for ColorScheme {
     fn default() -> Self {
-        let bg: Color = "#1B1720".try_into().unwrap();
-        let fg: Color = "#E6D29E".try_into().unwrap();
-        let dot_bg: Color = "#336677".try_into().unwrap();
-        let load_bg: Color = "#957FB8".try_into().unwrap();
-        let exec_bg: Color = "#Bf616A".try_into().unwrap();
-        let comment: Color = "#624354".try_into().unwrap();
-        let constant: Color = "#FF9E3B".try_into().unwrap();
-        let function: Color = "#957FB8".try_into().unwrap();
-        let keyword: Color = "#Bf616A".try_into().unwrap();
-        let module: Color = "#2D4F67".try_into().unwrap();
-        let punctuation: Color = "#9CABCA".try_into().unwrap();
-        let string: Color = "#61DCA5".try_into().unwrap();
-        let type_: Color = "#7E9CD8".try_into().unwrap();
-        let variable: Color = "#DCA561".try_into().unwrap();
-
-        #[rustfmt::skip]
-        let syntax = [
-            (TK_DEFAULT,    Styles { fg: Some(fg), bg: Some(bg), ..Default::default() }),
-            (TK_DOT,        Styles { fg: Some(fg), bg: Some(dot_bg), ..Default::default() }),
-            (TK_LOAD,       Styles { fg: Some(fg), bg: Some(load_bg), ..Default::default() }),
-            (TK_EXEC,       Styles { fg: Some(fg), bg: Some(exec_bg), ..Default::default() }),
-            ("character",   Styles { fg: Some(string), bold: true, ..Default::default() }),
-            ("comment",     Styles { fg: Some(comment), italic: true, ..Default::default() }),
-            ("constant",    Styles { fg: Some(constant), ..Default::default() }),
-            ("function",    Styles { fg: Some(function), ..Default::default() }),
-            ("keyword",     Styles { fg: Some(keyword), ..Default::default() }),
-            ("module",      Styles { fg: Some(module), ..Default::default() }),
-            ("punctuation", Styles { fg: Some(punctuation), ..Default::default() }),
-            ("string",      Styles { fg: Some(string), ..Default::default() }),
-            ("type",        Styles { fg: Some(type_), ..Default::default() }),
-            ("variable",    Styles { fg: Some(variable), ..Default::default() }),
-        ]
-        .map(|(s, v)| (s.to_string(), v))
-        .into_iter()
-        .collect();
-
-        Self {
-            bg,
-            fg,
-            bar_bg: "#4E415C".try_into().unwrap(),
-            signcol_fg: "#544863".try_into().unwrap(),
-            minibuffer_hl: "#3E3549".try_into().unwrap(),
-            syntax,
-        }
+        RawColorScheme::default().resolve(&mut Vec::new())
     }
 }
 
@@ -242,9 +213,8 @@ impl Default for TsConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
 pub struct LangConfig {
-    pub name: String,
     #[serde(default)]
     pub extensions: Vec<String>,
     #[serde(default)]
@@ -256,7 +226,7 @@ pub struct LangConfig {
 }
 
 /// Configuration for running a given language server
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
 pub struct LspConfig {
     /// The command to run to start the language server
     pub command: String,
@@ -368,45 +338,6 @@ where
     }
 
     Trie::from_pairs(raw).map_err(de::Error::custom)
-}
-
-/// Helper for supporting specifying a path to an aditional file containing part of the config as
-/// well as the contents of the config inline.
-fn path_or_struct<'de, T, D>(deserializer: D) -> Result<T, D::Error>
-where
-    T: DeserializeOwned,
-    D: Deserializer<'de>,
-{
-    struct StringOrStruct<T>(PhantomData<fn() -> T>);
-
-    impl<'de, T> Visitor<'de> for StringOrStruct<T>
-    where
-        T: DeserializeOwned,
-    {
-        type Value = T;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-            formatter.write_str("string or map")
-        }
-
-        fn visit_str<E: de::Error>(self, value: &str) -> Result<T, E> {
-            let res = if value.starts_with("~/") {
-                let home = env::var("HOME").map_err(|e| E::custom(e.to_string()))?;
-                fs::read_to_string(value.replacen("~", &home, 1))
-            } else {
-                fs::read_to_string(value)
-            };
-
-            let raw = res.map_err(|e| E::custom(e.to_string()))?;
-            toml::from_str(&raw).map_err(|e| E::custom(e.to_string()))
-        }
-
-        fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<T, M::Error> {
-            Deserialize::deserialize(de::value::MapAccessDeserializer::new(map))
-        }
-    }
-
-    deserializer.deserialize_any(StringOrStruct(PhantomData))
 }
 
 #[cfg(test)]

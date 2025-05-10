@@ -1,6 +1,8 @@
 # Config file for the ad text editor
 # For details of the TOML file format see https://toml.io/en/v1.0.0
 
+# Top level config options
+[editor]
 # Display a welcome message when opening the editor without any files
 show_splash = true
 # Whether or not tab characters should be automatically replaced with `tabstop` spaces
@@ -17,6 +19,7 @@ double_click_ms = 200
 minibuffer_lines = 8
 # Shell command to be used for listing files when running the `find file` and `find repo file` commands
 find_command = "fd -t f"
+
 
 [filesystem]
 # Whether or not the 9p filesystem interface should be enabled or not
@@ -39,8 +42,6 @@ syntax_query_dir = "~/.ad/tree-sitter/queries"
 # It is also possible to specify an absolute path to a colorscheme TOML file containing this section of the config
 # like so:
 #   colorscheme = "~/.ad/colorschemes/default_dark.toml"
-#
-# NOTE: You will need to place this key at the top of the file before any other [sections]
 [colorscheme]
 # The default background color for all UI elements
 bg = "#1B1720"
@@ -120,73 +121,58 @@ label = { fg = "#E6C384" }
 
 # Language configuration
 
-[[languages]]
-name = "bash"
+[languages.bash]
 extensions = ["sh", "bash"]
 first_lines = ["#!/usr/bin/bash", "#!/usr/bin/sh", "#!/usr/bin/env bash", "#!/usr/bin/env sh"]
 
-[[languages]]
-name = "dart"
+[languages.dart]
 extensions = ["dart"]
 lsp.command = "dart"
 lsp.args = ["language-server", "--protocol=lsp"]
 lsp.roots = ["melos.yaml", "pubspec.yaml"]
 
-[[languages]]
-name = "graphql"
+[languages.graphql]
 extensions = ["graphql"]
 
-[[languages]]
-name = "json"
+[languages.json]
 extensions = ["json"]
 
-[[language]]
-name = "make"
+[languages.make]
 filenames = ["Makefile"]
 
-[[languages]]
-name = "markdown"
+[languages.markdown]
 extensions = ["md"]
 
-[[languages]]
-name = "proto"
+[languages.proto]
 extensions = ["proto"]
 
-[[languages]]
-name = "python"
+[languages.python]
 extensions = ["py"]
 lsp.command = "pylsp"
 lsp.roots = ["dummy.py"]
 
-[[languages]]
-name = "r"
+[languages.r]
 extensions = ["R"]
 lsp.command = "R"
 lsp.args = ["--slave", "-e", "languageserver::run()"]
 lsp.roots = ["dummy.R"]
 
-[[languages]]
-name = "rust"
+[languages.rust]
 extensions = ["rs"]
 lsp.command = "rust-analyzer"
 lsp.roots = ["Cargo.toml"]
 
-[[languages]]
-name = "scheme"
+[languages.scheme]
 extensions = ["scm"]
 
-[[languages]]
-name = "sql"
+[languages.sql]
 extensions = ["sql"]
 
-[[languages]]
-name = "swift"
+[languages.swift]
 extensions = ["swift"]
 
-[[languages]]
-name = "toml"
+[languages.toml]
 extensions = ["toml"]
 
-[[languages]]
-name = "yaml"
+[languages.yaml]
 extensions = ["yaml", "yml"]

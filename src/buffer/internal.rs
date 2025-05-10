@@ -881,7 +881,7 @@ impl<'a> Slice<'a> {
     }
 
     /// The byte offset that this slice starts at within the parent [GapBuffer].
-    pub fn from_byte(&self) -> usize {
+    pub fn byte_from(&self) -> usize {
         self.from
     }
 
