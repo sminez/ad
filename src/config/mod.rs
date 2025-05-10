@@ -52,8 +52,10 @@ impl Deref for Config {
 }
 
 impl Config {
-    /// Attempt to load a config file from the default location
-    pub fn try_load() -> Result<Self, String> {
+    /// Attempt to load a config file from the default location.
+    /// If there are any errors while loading and parsing the file then they
+    /// are reported as a formatted string for displaying to the user.
+    pub fn try_load() -> (Self, Option<String>) {
         let home = env::var("HOME").unwrap();
         let path = config_path();
 
@@ -63,15 +65,18 @@ impl Config {
                     Ok(cfg) => cfg,
                     Err(e) => {
                         error!("malformed config file: {e}");
-                        return Err(format!("Malformed config file: {e}"));
+                        return (
+                            Config::default(),
+                            Some(format!("malformed config file: {e}")),
+                        );
                     }
                 };
                 let (cfg, err) = raw.resolve(&path, &home);
-                if let Some(err) = err {
+                if let Some(err) = err.as_ref() {
                     error!("malformed config: {err}");
                 }
 
-                Ok(cfg)
+                (cfg, err)
             }
 
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
@@ -81,10 +86,13 @@ impl Config {
                     }
                 }
 
-                Ok(Config::default())
+                (Config::default(), None)
             }
 
-            Err(e) => return Err(format!("Unable to load config file: {e}")),
+            Err(e) => (
+                Config::default(),
+                Some(format!("unable to load config file: {e}")),
+            ),
         }
     }
 

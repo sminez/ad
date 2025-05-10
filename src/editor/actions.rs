@@ -191,6 +191,16 @@ where
         self.open_file(self.cwd.join(path), new_window);
     }
 
+    /// Open a new virtual buffer within the editor.
+    pub fn open_virtual(
+        &mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+        new_window: bool,
+    ) {
+        self.layout.open_virtual(name, content, new_window)
+    }
+
     /// Open a file within the editor
     pub fn open_file<P: AsRef<Path>>(&mut self, path: P, new_window: bool) {
         let path = path.as_ref();
@@ -373,11 +383,11 @@ where
     pub(super) fn reload_config(&mut self) {
         info!("reloading config");
         let msg = match Config::try_load() {
-            Ok(config) => {
+            (config, None) => {
                 replace_config(config);
                 "config reloaded".to_string()
             }
-            Err(s) => s,
+            (_, Some(s)) => s,
         };
         info!("{msg}");
 

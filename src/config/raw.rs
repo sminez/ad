@@ -46,15 +46,15 @@ impl RawConfig {
         let colorscheme = self
             .colorscheme
             .unwrap_or_default()
-            .into_inner(&config_dir, &phome, &mut errs)
+            .into_inner(config_dir, &phome, &mut errs)
             .resolve(&mut errs);
         let languages = self
             .languages
-            .map(|pos| pos.into_inner(&config_dir, &phome, &mut errs))
+            .map(|pos| pos.into_inner(config_dir, &phome, &mut errs))
             .unwrap_or_default();
         let keys = self
             .keys
-            .map(|pos| pos.into_inner(&config_dir, &phome, &mut errs))
+            .map(|pos| pos.into_inner(config_dir, &phome, &mut errs))
             .unwrap_or_default();
 
         let mut cfg = Config {
@@ -78,7 +78,7 @@ impl RawConfig {
             &mut cfg.tree_sitter.syntax_query_dir,
         ] {
             if s.starts_with("~/") {
-                *s = s.replacen("~", &home, 1);
+                *s = s.replacen("~", home, 1);
             }
         }
 
@@ -182,9 +182,9 @@ impl Default for RawColorScheme {
             palette: Default::default(),
             bg,
             fg,
-            bar_bg: "#4E415C".try_into().unwrap(),
-            signcol_fg: "#544863".try_into().unwrap(),
-            minibuffer_hl: "#3E3549".try_into().unwrap(),
+            bar_bg: "#4E415C".to_string(),
+            signcol_fg: "#544863".to_string(),
+            minibuffer_hl: "#3E3549".to_string(),
             syntax,
         }
     }
