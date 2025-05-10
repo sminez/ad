@@ -34,9 +34,11 @@ impl Default for RawConfig {
 impl RawConfig {
     /// Resolve the config that we need for running the editor and report any errors that
     /// resulted in defaults being used.
-    pub(super) fn resolve(self, home: &str) -> (Config, Option<String>) {
+    pub(super) fn resolve(self, config_path: &str, home: &str) -> (Config, Option<String>) {
         let mut errs = Vec::new();
         let phome = PathBuf::from(home);
+        let config_path = PathBuf::from(config_path);
+        let config_dir = config_path.parent().unwrap();
 
         let editor = self.editor.map(|raw| raw.resolve()).unwrap_or_default();
         let filesystem = self.filesystem.unwrap_or_default();
@@ -44,15 +46,15 @@ impl RawConfig {
         let colorscheme = self
             .colorscheme
             .unwrap_or_default()
-            .into_inner(&phome, &mut errs)
+            .into_inner(&config_dir, &phome, &mut errs)
             .resolve(&mut errs);
         let languages = self
             .languages
-            .map(|pos| pos.into_inner(&phome, &mut errs))
+            .map(|pos| pos.into_inner(&config_dir, &phome, &mut errs))
             .unwrap_or_default();
         let keys = self
             .keys
-            .map(|pos| pos.into_inner(&phome, &mut errs))
+            .map(|pos| pos.into_inner(&config_dir, &phome, &mut errs))
             .unwrap_or_default();
 
         let mut cfg = Config {
@@ -269,41 +271,57 @@ impl<T> PathOrStruct<T>
 where
     T: Default + DeserializeOwned,
 {
-    fn into_inner(self, home: &Path, errs: &mut Vec<String>) -> T {
-        match self.unwrap_or_try_read(home) {
+    fn into_inner(self, config_path: &Path, home: &Path, errs: &mut Vec<String>) -> T {
+        let path = match self {
+            Self::Struct(t) => return t,
+            Self::Path(p) => p,
+        };
+
+        match try_read(&path, config_path, home) {
             Ok(t) => t,
             Err(e) => {
-                errs.push(e.to_string());
+                errs.push(format!("  {path}: {e}"));
                 T::default()
             }
         }
     }
-
-    /// If we already have the data then return it, otherwise attempt to read and
-    /// parse the provided path from disk.
-    fn unwrap_or_try_read(self, home: &Path) -> io::Result<T> {
-        let path = match self {
-            Self::Path(p) => resolve_path(&p, home)?,
-            Self::Struct(t) => return Ok(t),
-        };
-        let content = fs::read_to_string(path)?;
-
-        toml::from_str(&content)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
-    }
 }
 
-fn resolve_path(raw: &str, home: &Path) -> io::Result<PathBuf> {
+fn try_read<T>(raw: &str, config_path: &Path, home: &Path) -> io::Result<T>
+where
+    T: Default + DeserializeOwned,
+{
     let mut path = match raw.strip_prefix("~/") {
         Some(tail) => home.join(tail),
         None => PathBuf::from(raw),
     };
-
-    path = path.canonicalize()?;
-
     if path.is_relative() {
-        Ok(home.join(".ad").join(path))
-    } else {
-        Ok(path)
+        path = config_path.join(path);
+    }
+    let content = fs::read_to_string(path)?;
+
+    toml::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::dir_cases;
+
+    #[dir_cases("data/config_tests/valid")]
+    #[test]
+    fn valid_config_parses(path: &str, content: &str) {
+        let raw: RawConfig = toml::from_str(content).unwrap();
+        let (_cfg, errs) = raw.resolve(path, "");
+        assert!(errs.is_none(), "{path} {errs:?}");
+    }
+
+    #[dir_cases("data/colorschemes")]
+    #[test]
+    fn colorschemes_parse(path: &str, content: &str) {
+        let raw: RawColorScheme = toml::from_str(content).unwrap();
+        let mut errs = Vec::new();
+        let _cs = raw.resolve(&mut errs);
+        assert!(errs.is_empty(), "{path} {errs:?}");
     }
 }

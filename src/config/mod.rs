@@ -36,7 +36,7 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let (cfg, errs) = RawConfig::default().resolve("");
+        let (cfg, errs) = RawConfig::default().resolve(&config_path(), "");
         assert!(errs.is_none(), "default config is broken");
 
         cfg
@@ -66,7 +66,7 @@ impl Config {
                         return Err(format!("Malformed config file: {e}"));
                     }
                 };
-                let (cfg, err) = raw.resolve(&home);
+                let (cfg, err) = raw.resolve(&path, &home);
                 if let Some(err) = err {
                     error!("malformed config: {err}");
                 }
@@ -345,7 +345,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_loads() {
+    fn default_config_is_valid() {
         Config::default(); // will panic if default config is invalid
     }
 }

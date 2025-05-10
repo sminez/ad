@@ -1,0 +1,23 @@
+# Everything in an external file where possible
+
+colorscheme = "../../colorschemes/default_dark.toml"
+languages = "../valid-langs.toml"
+keys = "../valid-keys.toml"
+
+[editor]
+show_splash = true
+expand_tab = true
+tabstop = 4
+match_indent = true
+status_timeout = 3
+double_click_ms = 200
+minibuffer_lines = 8
+find_command = "fd -t f"
+
+[filesystem]
+enabled = true
+auto_mount = false
+
+[tree_sitter]
+parser_dir = "~/.ad/tree-sitter/parsers"
+syntax_query_dir = "~/.ad/tree-sitter/queries"

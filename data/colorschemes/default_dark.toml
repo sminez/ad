@@ -1,36 +1,56 @@
-bg = "#1B1720"
-fg = "#E6D29E"
+fg = "fg"
+bg = "bg"
 bar_bg = "#4E415C"
 signcol_fg = "#544863"
 minibuffer_hl = "#3E3549"
 
+[palette]
+fg = "#E6D29E"
+bg = "#1B1720"
+blue = "#8793B5"
+brown = "#624354"
+dark-blue = "#2D4F67"
+dark-yellow = "#DCA561"
+light-blue = "#9CABCA"
+light-red = "#D27E99"
+mint = "#61DCA5"
+orange = "#FFA066"
+purple = "#957FB8"
+sage = "#9AB292"
+salmon = "#Bf616A"
+sea-blue = "#336677"
+yellow = "#E6C384"
+
 [syntax]
-default = { fg = "#E6D29E", bg = "#1B1720" }
-dot = { bg = "#336677" }
-load = { bg = "#957FB8" }
-exec = { bg = "#Bf616A" }
-boolean = { fg = "#DCA561", bold = true }
-character = { fg = "#61DCA5", italic = true }
-comment = { fg = "#624354", italic = true }
-constant = { fg = "#FFA066" }
-function = { fg = "#8793B5" }
-"function.macro" = { fg = "#FFA066" }
-keyword = { fg = "#Bf616A" }
-module = { fg = "#2D4F67" }
-number = { fg = "#D27E99" }
-operator = { fg = "#DCA561" }
-punctuation = { fg = "#9CABCA" }
-string = { fg = "#61DCA5" }
-type = { fg = "#9AB292" }
+default = { fg = "fg", bg = "bg" }
+dot = { bg = "sea-blue" }
+load = { bg = "purple" }
+exec = { bg = "salmon" }
+
+boolean = { fg = "dark-yellow", bold = true }
+character = { fg = "mint", italic = true }
+comment = { fg = "brown", italic = true }
+constant = { fg = "orange" }
+function = { fg = "blue" }
+"function.macro" = { fg = "orange" }
+keyword = { fg = "salmon" }
+module = { fg = "dark-blue" }
+number = { fg = "light-red" }
+operator = { fg = "dark-yellow" }
+punctuation = { fg = "light-blue" }
+string = { fg = "mint" }
+type = { fg = "sage" }
 variable = { }
+
 "markup.italic" = { italic = true } 
 "markup.bold" = { bold = true } 
-"markup.heading" = { fg = "#8793B5", bold = true }
-"markup.raw" = { fg = "#624354", italic = true }
-"markup.quote" = { fg = "#957FB8", italic = true }
-"markup.link.url" = { fg = "#9CABCA", underline = true }
-"markup.link.label" = { fg = "#2D4F67", bold = true }
-"markup.list.unchecked" = { fg = "#DCA561", bold = true }
-"markup.list.checked" = { fg = "#9AB292", bold = true }
-"markup.list" = { fg = "#9CABCA", bold = true } 
-label = { fg = "#E6C384" }
+"markup.heading" = { fg = "blue", bold = true }
+"markup.raw" = { fg = "brown", italic = true }
+"markup.quote" = { fg = "purple", italic = true }
+"markup.link.url" = { fg = "light-blue", underline = true }
+"markup.link.label" = { fg = "dark-blue", bold = true }
+"markup.list.unchecked" = { fg = "dark-yellow", bold = true }
+"markup.list.checked" = { fg = "sage", bold = true }
+"markup.list" = { fg = "light-blue", bold = true } 
+
+label = { fg = "yellow" }

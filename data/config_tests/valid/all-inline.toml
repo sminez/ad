@@ -1,0 +1,123 @@
+# Everything in a single file
+[editor]
+show_splash = true
+expand_tab = true
+tabstop = 4
+match_indent = true
+status_timeout = 3
+double_click_ms = 200
+minibuffer_lines = 8
+find_command = "fd -t f"
+
+[filesystem]
+enabled = true
+auto_mount = false
+
+[tree_sitter]
+parser_dir = "~/.ad/tree-sitter/parsers"
+syntax_query_dir = "~/.ad/tree-sitter/queries"
+
+[colorscheme]
+bg = "#1B1720"
+fg = "#E6D29E"
+bar_bg = "#4E415C"
+signcol_fg = "#544863"
+minibuffer_hl = "#3E3549"
+
+[colorscheme.syntax]
+default = { fg = "#E6D29E", bg = "#1B1720" }
+dot = { fg = "#E6D29E", bg = "#336677" }
+load = { fg = "#E6D29E", bg = "#957FB8" }
+exec = { fg = "#E6D29E", bg = "#Bf616A" }
+boolean = { fg = "#DCA561", bold = true }
+character = { fg = "#61DCA5", italic = true }
+comment = { fg = "#624354", italic = true }
+constant = { fg = "#FFA066" }
+function = { fg = "#8793B5" }
+"function.macro" = { fg = "#FFA066" }
+keyword = { fg = "#Bf616A" }
+module = { fg = "#2D4F67" }
+number = { fg = "#D27E99" }
+operator = { fg = "#DCA561" }
+punctuation = { fg = "#9CABCA" }
+string = { fg = "#61DCA5" }
+type = { fg = "#9AB292" }
+variable = { fg = "#E6D29E" }
+"markup.italic" = { fg = "#E6D29E", bg = "#1B1720", italic = true } 
+"markup.bold" = { fg = "#E6D29E", bg = "#1B1720", bold = true } 
+"markup.heading" = { fg = "#8793B5", bold = true }
+"markup.raw" = { fg = "#624354", italic = true }
+"markup.quote" = { fg = "#957FB8", italic = true }
+"markup.link.url" = { fg = "#9CABCA", underline = true }
+"markup.link.label" = { fg = "#2D4F67", bold = true }
+"markup.list.unchecked" = { fg = "#DCA561", bold = true }
+"markup.list.checked" = { fg = "#9AB292", bold = true }
+"markup.list" = { fg = "#9CABCA", bg = "#1B1720", bold = true } 
+label = { fg = "#E6C384" }
+
+[keys.normal]
+"<space> F" = { run = "fmt" }
+">" = { run = "indent" }
+"<" = { run = "unindent" }
+"<space> w /" = { run = "new-column" }
+"<space> w -" = { run = "new-window" }
+"<space> w h" = { run = "prev-column" }
+"<space> w j" = { run = "next-window" }
+"<space> w k" = { run = "prev-window" }
+"<space> w l" = { run = "next-column" }
+
+[languages.bash]
+extensions = ["sh", "bash"]
+first_lines = ["#!/usr/bin/bash", "#!/usr/bin/sh", "#!/usr/bin/env bash", "#!/usr/bin/env sh"]
+
+[languages.dart]
+extensions = ["dart"]
+lsp.command = "dart"
+lsp.args = ["language-server", "--protocol=lsp"]
+lsp.roots = ["melos.yaml", "pubspec.yaml"]
+
+[languages.graphql]
+extensions = ["graphql"]
+
+[languages.json]
+extensions = ["json"]
+
+[languages.make]
+filenames = ["Makefile"]
+
+[languages.markdown]
+extensions = ["md"]
+
+[languages.proto]
+extensions = ["proto"]
+
+[languages.python]
+extensions = ["py"]
+lsp.command = "pylsp"
+lsp.roots = ["dummy.py"]
+
+[languages.r]
+extensions = ["R"]
+lsp.command = "R"
+lsp.args = ["--slave", "-e", "languageserver::run()"]
+lsp.roots = ["dummy.R"]
+
+[languages.rust]
+extensions = ["rs"]
+lsp.command = "rust-analyzer"
+lsp.roots = ["Cargo.toml"]
+
+[languages.scheme]
+extensions = ["scm"]
+
+[languages.sql]
+extensions = ["sql"]
+
+[languages.swift]
+extensions = ["swift"]
+
+[languages.toml]
+extensions = ["toml"]
+
+[languages.yaml]
+extensions = ["yaml", "yml"]

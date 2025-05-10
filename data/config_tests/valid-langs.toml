@@ -1,0 +1,56 @@
+# An external languages file
+[bash]
+extensions = ["sh", "bash"]
+first_lines = ["#!/usr/bin/bash", "#!/usr/bin/sh", "#!/usr/bin/env bash", "#!/usr/bin/env sh"]
+
+[dart]
+extensions = ["dart"]
+lsp.command = "dart"
+lsp.args = ["language-server", "--protocol=lsp"]
+lsp.roots = ["melos.yaml", "pubspec.yaml"]
+
+[graphql]
+extensions = ["graphql"]
+
+[json]
+extensions = ["json"]
+
+[make]
+filenames = ["Makefile"]
+
+[markdown]
+extensions = ["md"]
+
+[proto]
+extensions = ["proto"]
+
+[python]
+extensions = ["py"]
+lsp.command = "pylsp"
+lsp.roots = ["dummy.py"]
+
+[r]
+extensions = ["R"]
+lsp.command = "R"
+lsp.args = ["--slave", "-e", "languageserver::run()"]
+lsp.roots = ["dummy.R"]
+
+[rust]
+extensions = ["rs"]
+lsp.command = "rust-analyzer"
+lsp.roots = ["Cargo.toml"]
+
+[scheme]
+extensions = ["scm"]
+
+[sql]
+extensions = ["sql"]
+
+[swift]
+extensions = ["swift"]
+
+[toml]
+extensions = ["toml"]
+
+[yaml]
+extensions = ["yaml", "yml"]

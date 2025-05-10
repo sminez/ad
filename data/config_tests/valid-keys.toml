@@ -1,0 +1,11 @@
+# An external keymap file
+[normal]
+"<space> F" = { run = "fmt" }
+">" = { run = "indent" }
+"<" = { run = "unindent" }
+"<space> w /" = { run = "new-column" }
+"<space> w -" = { run = "new-window" }
+"<space> w h" = { run = "prev-column" }
+"<space> w j" = { run = "next-window" }
+"<space> w k" = { run = "prev-window" }
+"<space> w l" = { run = "next-column" }
