@@ -7,8 +7,8 @@ use ad_editor::regex::Regex;
 use std::{fs, time::Instant};
 
 fn main() {
-    let s = fs::read_to_string("test-data/burnt-sushi-torture-test/torture-test.haystack").unwrap();
-    let re = fs::read_to_string("test-data/burnt-sushi-torture-test/torture-test.pattern").unwrap();
+    let s = fs::read_to_string("data/burnt-sushi-torture-test/torture-test.haystack").unwrap();
+    let re = fs::read_to_string("data/burnt-sushi-torture-test/torture-test.pattern").unwrap();
 
     println!("Haystack length: {}", s.len());
     println!("Pattern length: {}", re.len());
