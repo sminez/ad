@@ -1,0 +1,21 @@
+If the editor is opened with a malformed config file we shouldn't
+crash but we _should_ display an error to the user in a new window
+explaining why we had to fall back to the default config file.
+
+-- config --
+tests/data/config/malformed.toml
+-- file-hello.txt --
+-- buffer-list --
+1      hello.txt
+2    * +config-error
+-- expected-windows --
+1
+2
+-- expected-buffer-2 --
+Unable to load config file:
+malformed config file: TOML parse error at line 2, column 15
+  |
+2 | show_splash = "should be a bool"
+  |               ^^^^^^^^^^^^^^^^^^
+invalid type: string "should be a bool", expected a boolean
+

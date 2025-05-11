@@ -5,7 +5,7 @@ use crate::{
     key::Input,
     term::CurShape,
 };
-use std::{sync::mpsc::Sender, fmt};
+use std::{fmt, sync::mpsc::Sender};
 
 mod layout;
 mod tui;

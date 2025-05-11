@@ -88,7 +88,7 @@ fn editor_scenarios(path: &str, content: &str) {
             format!("Unable to load config file:\n{err}"),
             true,
         );
-        println!("{err}");
+        println!(">> CONFIG LOAD ERROR:\n{err}\n");
     }
 
     e.run();
