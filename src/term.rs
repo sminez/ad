@@ -192,7 +192,7 @@ impl fmt::Display for Cursor {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CurShape {
+pub enum CurShape {
     Block,
     Bar,
     Underline,

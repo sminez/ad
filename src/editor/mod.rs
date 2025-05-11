@@ -1,6 +1,6 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
-    buffer::{ActionOutcome, Buffer, WELCOME_SQUIRREL},
+    buffer::{ActionOutcome, Buffer, BufferId, WELCOME_SQUIRREL},
     config::Config,
     config_handle, die,
     dot::TextObject,
@@ -19,7 +19,7 @@ use crate::{
 };
 use ad_event::Source;
 use std::{
-    env, panic,
+    env, fmt, panic,
     path::{Path, PathBuf},
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -35,18 +35,32 @@ mod commands;
 mod minibuffer;
 mod mouse;
 
-pub(crate) use actions::{Action, Actions, ViewPort};
+pub use actions::Action;
+pub use minibuffer::MiniBufferState;
+pub use mouse::Click;
+
+pub(crate) use actions::{Actions, ViewPort};
 pub(crate) use built_in_commands::built_in_commands;
-pub(crate) use minibuffer::{MbSelect, MbSelector, MiniBufferSelection, MiniBufferState};
-pub(crate) use mouse::Click;
+pub(crate) use minibuffer::{MbSelect, MbSelector, MiniBufferSelection};
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorMode {
     /// Run as a TUI
     Terminal,
     /// Run without a user interface
     Headless,
+    /// Used in scenario tests
+    Boxed(Box<dyn UserInterface>),
+}
+
+impl fmt::Debug for EditorMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Terminal => f.debug_struct("EditorMode::Terminal").finish(),
+            Self::Headless => f.debug_struct("EditorMode::Headless").finish(),
+            Self::Boxed(_) => f.debug_struct("EditorMode::Boxed").finish(),
+        }
+    }
 }
 
 /// The main editor state.
@@ -150,6 +164,22 @@ where
         self.layout.active_buffer_ignoring_scratch().id
     }
 
+    pub fn buffer_list(&self) -> Vec<String> {
+        self.layout.as_buffer_list()
+    }
+
+    pub fn buffer_content(&self, id: BufferId) -> Option<String> {
+        self.layout.buffer_with_id(id).map(|b| b.str_contents())
+    }
+
+    pub fn buffer_dot(&self, id: BufferId) -> Option<String> {
+        self.layout.buffer_with_id(id).map(|b| b.dot_contents())
+    }
+
+    pub fn layout_ids(&self) -> Vec<Vec<BufferId>> {
+        self.layout.ids()
+    }
+
     /// The effective directory of the editor at any point is the directory containing the
     /// file backing the active buffer, or if the active buffer can not define a containing
     /// directory, self.cwd.
@@ -177,7 +207,7 @@ where
     }
 
     /// Initialise any UI state required for our [EditorMode] and run the main event loop.
-    pub fn run(mut self) {
+    pub fn run(&mut self) {
         if config_handle!().filesystem.enabled {
             let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
             AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
@@ -211,7 +241,7 @@ where
         );
     }
 
-    fn run_event_loop(mut self) {
+    fn run_event_loop(&mut self) {
         let tx = self.tx_events.clone();
         let (screen_rows, screen_cols) = self.ui.init(tx);
         self.update_window_size(screen_rows, screen_cols);

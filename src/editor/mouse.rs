@@ -14,7 +14,7 @@ use std::time::Instant;
 /// Transient state that we hold to track the last mouse click we saw while
 /// we wait for it to be released or if the buffer changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Click {
+pub struct Click {
     /// The button being held down
     pub(crate) btn: MouseButton,
     /// The current state of the dot associated with this click. This is updated

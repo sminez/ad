@@ -203,21 +203,24 @@ impl Buffers {
 
     /// Used to seed the buffer selection mini-buffer
     pub(crate) fn as_buffer_list(&self) -> Vec<String> {
-        let mut entries: Vec<String> = self
+        let mut entries: Vec<(usize, String)> = self
             .inner
             .iter()
             .map(|(focused, b)| {
-                format!(
-                    "{:<4} {} {}",
+                (
                     b.id,
-                    if focused { '*' } else { ' ' },
-                    b.full_name()
+                    format!(
+                        "{:<4} {} {}",
+                        b.id,
+                        if focused { '*' } else { ' ' },
+                        b.full_name()
+                    ),
                 )
             })
             .collect();
-        entries.sort();
+        entries.sort_by_key(|e| e.0);
 
-        entries
+        entries.into_iter().map(|(_, s)| s).collect()
     }
 
     pub(crate) fn contains_bufid(&self, id: BufferId) -> bool {

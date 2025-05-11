@@ -20,7 +20,7 @@ use std::{
 use tracing::trace;
 
 #[derive(Debug, Default)]
-pub(crate) struct MiniBufferState<'a> {
+pub struct MiniBufferState<'a> {
     pub(crate) cx: usize,
     pub(crate) n_visible_lines: usize,
     pub(crate) selected_line_idx: usize,

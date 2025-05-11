@@ -9,7 +9,7 @@ use crate::{
     util::parent_dir_containing,
 };
 use serde::{de, Deserialize, Deserializer};
-use std::{collections::HashMap, env, fs, io, iter::successors, ops::Deref, path::Path};
+use std::{collections::HashMap, env, fs, iter::successors, ops::Deref, path::Path};
 use tracing::{error, warn};
 
 mod raw;
@@ -52,14 +52,11 @@ impl Deref for Config {
 }
 
 impl Config {
-    /// Attempt to load a config file from the default location.
+    /// Attempt to load a config file from a specified location.
     /// If there are any errors while loading and parsing the file then they
     /// are reported as a formatted string for displaying to the user.
-    pub fn try_load() -> (Self, Option<String>) {
-        let home = env::var("HOME").unwrap();
-        let path = config_path();
-
-        match fs::read_to_string(&path) {
+    pub fn try_load_from_path(path: &str, home: &str) -> (Self, Option<String>) {
+        match fs::read_to_string(path) {
             Ok(s) => {
                 let raw: RawConfig = match toml::from_str(&s) {
                     Ok(cfg) => cfg,
@@ -71,7 +68,7 @@ impl Config {
                         );
                     }
                 };
-                let (cfg, err) = raw.resolve(&path, &home);
+                let (cfg, err) = raw.resolve(path, home);
                 if let Some(err) = err.as_ref() {
                     error!("malformed config: {err}");
                 }
@@ -79,21 +76,32 @@ impl Config {
                 (cfg, err)
             }
 
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                if fs::create_dir_all(format!("{home}/.ad")).is_ok() {
-                    if let Err(e) = fs::write(path, DEFAULT_CONFIG) {
-                        error!("unable to write default config file: {e}");
-                    }
-                }
-
-                (Config::default(), None)
-            }
-
             Err(e) => (
                 Config::default(),
                 Some(format!("unable to load config file: {e}")),
             ),
         }
+    }
+
+    /// Attempt to load a config file from the default location.
+    ///
+    /// If the config file doesn't currently exist then the default config
+    /// will be written to disk.
+    /// If there are any errors while loading and parsing the file then they
+    /// are reported as a formatted string for displaying to the user.
+    pub fn try_load() -> (Self, Option<String>) {
+        let home = env::var("HOME").unwrap();
+        let path = config_path();
+
+        if matches!(fs::exists(&path), Ok(false))
+            && fs::create_dir_all(format!("{home}/.ad")).is_ok()
+        {
+            if let Err(e) = fs::write(&path, DEFAULT_CONFIG) {
+                error!("unable to write default config file: {e}");
+            }
+        }
+
+        Self::try_load_from_path(&path, &home)
     }
 
     /// Check to see if there is a known tree-sitter configuration for this buffer

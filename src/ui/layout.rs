@@ -16,7 +16,7 @@ use unicode_width::UnicodeWidthChar;
 /// The reserved ID for the scratch buffer.
 /// If we ever collide with this when creating a normal buffer then the user is
 /// doing something _very_ strange...
-pub(crate) const SCRATCH_ID: usize = usize::MAX;
+pub const SCRATCH_ID: usize = usize::MAX;
 
 /// Similar to in ../buffer/internal.rs:/assert_line_endings/ this is used to hunt for exactly
 /// _where_ state becomes invalid between the actual buffer state in Buffers and the layout
@@ -65,7 +65,7 @@ macro_rules! assert_invariants {
 /// content to the user. The available screen space is split into a number of
 /// columns each containing a vertical stack of windows.
 #[derive(Debug)]
-pub(crate) struct Layout {
+pub struct Layout {
     /// The managed buffer state
     buffers: Buffers,
     /// An anonymous buffer that sits outside of the main buffer state and acts as though it is the
@@ -107,6 +107,13 @@ impl Layout {
 
     pub(crate) fn buffers(&self) -> &Buffers {
         &self.buffers
+    }
+
+    pub(crate) fn ids(&self) -> Vec<Vec<BufferId>> {
+        self.cols
+            .iter()
+            .map(|(_, col)| col.wins.iter().map(|(_, win)| win.view.bufid).collect())
+            .collect()
     }
 
     /// The number of currently visible windows

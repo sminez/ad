@@ -5,15 +5,16 @@ use crate::{
     key::Input,
     term::CurShape,
 };
-use std::sync::mpsc::Sender;
+use std::{sync::mpsc::Sender, fmt};
 
 mod layout;
 mod tui;
 
-pub(crate) use layout::{Layout, SCRATCH_ID};
+pub use layout::{Layout, SCRATCH_ID};
 pub use tui::Tui;
 
-pub(crate) trait UserInterface {
+/// Something that can be used as a user interface
+pub trait UserInterface {
     /// Initialise the UI and start processing events.
     ///
     /// Called before entering the main editor event loop
@@ -46,7 +47,7 @@ pub(crate) trait UserInterface {
 /// In cases where the data is cheap to pass directly it is included, otherwise updates
 /// to the editor state can be requested through the `provide_buf_reqs` method.
 #[derive(Debug, Clone)]
-pub(crate) enum StateChange {
+pub enum StateChange {
     // /// The active buffer has been updated
     // ActiveBuffer { id: usize },
     // /// The given buffer has been closed
@@ -69,10 +70,20 @@ pub(crate) enum StateChange {
 }
 
 #[allow(clippy::large_enum_variant)]
-#[derive(Debug)]
 pub(crate) enum Ui {
     Headless,
     Tui(Tui),
+    Boxed(Box<dyn UserInterface>),
+}
+
+impl fmt::Debug for Ui {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Headless => f.debug_struct("Ui::Headless").finish(),
+            Self::Tui(_) => f.debug_struct("Ui::Tui").finish(),
+            Self::Boxed(_) => f.debug_struct("Ui::Boxed").finish(),
+        }
+    }
 }
 
 impl From<EditorMode> for Ui {
@@ -80,6 +91,7 @@ impl From<EditorMode> for Ui {
         match mode {
             EditorMode::Headless => Self::Headless,
             EditorMode::Terminal => Self::Tui(Tui::new()),
+            EditorMode::Boxed(ui) => Self::Boxed(ui),
         }
     }
 }
@@ -89,6 +101,7 @@ impl UserInterface for Ui {
         match self {
             Self::Headless => (60, 80),
             Self::Tui(tui) => tui.init(tx),
+            Self::Boxed(ui) => ui.init(tx),
         }
     }
 
@@ -96,6 +109,7 @@ impl UserInterface for Ui {
         match self {
             Self::Headless => (),
             Self::Tui(tui) => tui.shutdown(),
+            Self::Boxed(ui) => ui.shutdown(),
         }
     }
 
@@ -103,6 +117,7 @@ impl UserInterface for Ui {
         match self {
             Self::Headless => (),
             Self::Tui(tui) => tui.state_change(change),
+            Self::Boxed(ui) => ui.state_change(change),
         }
     }
 
@@ -120,6 +135,9 @@ impl UserInterface for Ui {
             Self::Tui(tui) => {
                 tui.refresh(mode_name, layout, n_running, pending_keys, held_click, mb)
             }
+            Self::Boxed(ui) => {
+                ui.refresh(mode_name, layout, n_running, pending_keys, held_click, mb)
+            }
         }
     }
 
@@ -127,6 +145,7 @@ impl UserInterface for Ui {
         match self {
             Self::Headless => (),
             Self::Tui(tui) => tui.set_cursor_shape(cur_shape),
+            Self::Boxed(ui) => ui.set_cursor_shape(cur_shape),
         }
     }
 }

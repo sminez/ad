@@ -74,7 +74,12 @@ impl PlumbingRules {
     pub fn try_load() -> Result<Self, String> {
         let home = env::var("HOME").unwrap();
 
-        let s = match fs::read_to_string(format!("{home}/.ad/plumbing.rules")) {
+        Self::try_load_from_path(&format!("{home}/.ad/plumbing.rules"))
+    }
+
+    /// Attempt to load plumbing rules from a specified file
+    pub fn try_load_from_path(path: &str) -> Result<Self, String> {
+        let s = match fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Self::default()),
             Err(e) => return Err(format!("Unable to load plumbing rules: {e}")),

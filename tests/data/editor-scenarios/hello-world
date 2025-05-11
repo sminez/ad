@@ -1,0 +1,16 @@
+Open an empty file and type "hello, world!" into it.
+
+-- config --
+tests/data/config-without-fsys.toml
+-- file-hello.txt --
+-- actions --
+type: ihello, world!
+# return to normal mode
+type: <esc>
+-- buffer-list --
+1    * hello.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+hello, world!
+

@@ -132,7 +132,6 @@ impl DefaultSystem {
         }
     }
 
-    #[cfg(test)]
     pub fn without_clipboard_provider() -> Self {
         Self {
             selection: String::new(),

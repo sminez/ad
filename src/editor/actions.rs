@@ -187,7 +187,7 @@ where
 
     /// Open a file within the editor using a path that is relative to the current working
     /// directory
-    pub fn open_file_relative_to_cwd(&mut self, path: &str, new_window: bool) {
+    pub fn open_file_relative_to_cwd(&mut self, path: impl AsRef<Path>, new_window: bool) {
         self.open_file(self.cwd.join(path), new_window);
     }
 
