@@ -1,0 +1,14 @@
+Using the built-in "search in file" behaviour should select the chosen line
+
+-- config --
+tests/data/config/without-fsys.toml
+-- file-hello.txt --
+This is the first line
+and this is the second.
+
+Down here is the fourth
+-- actions --
+# Open the scratch buffer and type the command
+type: /Down\n
+-- expected-buffer-dot-1 --
+Down here is the fourth

@@ -22,6 +22,8 @@
 //!     "2"     <- second column should contain a single window with id 2
 //!   - expected-buffer-X
 //!     the expected final content for the buffer with ID X
+//!   - expected-buffer-dot-X
+//!     the expected content of the Dot for the buffer with ID X
 //!
 //! Any comment section present at the top of a test file will be printed before
 //! the test is run for additional debugging context in the event of a test
@@ -148,6 +150,7 @@ impl TestCase {
         };
 
         let mut files = Vec::new();
+        let mut buffer_dots = Vec::new();
         let mut buffer_contents = Vec::new();
 
         for mut file in arr.into_iter() {
@@ -157,6 +160,17 @@ impl TestCase {
                     file.content.pop();
                 }
                 files.push(file);
+            } else if file.name.starts_with("expected-buffer-dot-") {
+                let id: BufferId = file
+                    .name
+                    .strip_prefix("expected-buffer-dot-")
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                if file.content.ends_with('\n') {
+                    file.content.pop();
+                }
+                buffer_dots.push((id, file.content));
             } else if file.name.starts_with("expected-buffer-") {
                 let id: BufferId = file
                     .name
@@ -187,6 +201,7 @@ impl TestCase {
                 buffer_list,
                 windows,
                 buffer_contents,
+                buffer_dots,
             },
         }
     }
@@ -206,13 +221,16 @@ struct Assertions {
     buffer_list: Option<String>,
     windows: Vec<Vec<BufferId>>,
     buffer_contents: Vec<(BufferId, String)>,
-    // buffer_dot_contents: Vec<(BufferId, String)>
+    buffer_dots: Vec<(BufferId, String)>,
 }
 
 impl Assertions {
     /// Test case assertions are valid as long as there is at least one thing being asserted
     fn is_valid(&self) -> bool {
-        self.buffer_list.is_some() || !self.windows.is_empty() || !self.buffer_contents.is_empty()
+        self.buffer_list.is_some()
+            || !self.windows.is_empty()
+            || !self.buffer_contents.is_empty()
+            || !self.buffer_dots.is_empty()
     }
 
     fn verify(&self, e: &Editor<DefaultSystem>, test_dir: &Path) {
@@ -234,6 +252,14 @@ impl Assertions {
                 Some(expected),
                 e.buffer_content(*id).as_ref(),
                 "incorrect buffer content for id={id}"
+            );
+        }
+
+        for (id, expected) in self.buffer_dots.iter() {
+            assert_eq!(
+                Some(expected),
+                e.buffer_dot(*id).as_ref(),
+                "incorrect buffer dot content for id={id}"
             );
         }
     }
@@ -322,7 +348,12 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
                         .replace("\\t", "\t")
                         .replace("\\\\", "\\");
                     for ch in s.chars() {
-                        actions.push(TestAction::Input(Input::Char(ch)));
+                        let input = match ch {
+                            '\n' => Input::Return,
+                            '\t' => Input::Tab,
+                            _ => Input::Char(ch),
+                        };
+                        actions.push(TestAction::Input(input));
                     }
                 }
             }
