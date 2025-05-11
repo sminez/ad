@@ -1,0 +1,56 @@
+This is a regression test for an issue that was resulting in crashes in a
+number of places (gh#117).
+
+When opening a currently hidden output buffer we should correctly focus that
+buffer in the layout state and future inputs should be sent to the correct
+buffer.
+
+-- config --
+tests/data/config/without-fsys.toml
+-- file-foo.txt --
+foo
+-- file-bar.txt --
+bar
+-- file-baz.txt --
+baz
+-- actions --
+# ls should open the output buffer
+type: !ls\n
+sleep_ms: 100
+
+# we then close it and run ls again to trigger the bug. Annoyingly this is racey thanks
+# to the async command execution so we have a couple of additional keystrokes spaced out
+# with sleeps in order to ensure we have the output (and layout changes) from the second
+# call to ls
+type: :delete-window\n
+type: !ls\n
+sleep_ms: 100
+type: j
+sleep_ms: 100
+type: j
+sleep_ms: 100
+
+# this delete should run in the output buffer: we use Alt-j to select the second
+# instance of baz for deletion.
+type: /baz
+type: <alt>j
+type: \nxd
+-- buffer-list --
+1      foo.txt
+2      bar.txt
+3      baz.txt
+4    * +output
+-- expected-windows --
+3
+4
+-- expected-buffer-3 --
+baz
+
+-- expected-buffer-4 --
+bar.txt
+baz.txt
+foo.txt
+bar.txt
+foo.txt
+
+

@@ -786,6 +786,8 @@ impl Layout {
             self.balance_active_column();
         }
 
+        self.buffers.focus_id(id);
+
         #[cfg(test)]
         assert_invariants!(self);
     }
