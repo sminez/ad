@@ -1,0 +1,23 @@
+Running an exec script from the scratch buffer should result in the script
+being run against the currently focused buffer rather.
+
+-- config --
+tests/data/config/without-fsys.toml
+-- file-hello.txt --
+hello, world!
+-- actions --
+# Open the scratch buffer and type the command
+type: <alt>;
+type: iEdit , x/world/ c/sailor/
+# Return to normal mode and execute the command
+type: <esc>
+type: x@
+# Close the scratch buffer
+type: <alt>;
+-- buffer-list --
+1    * hello.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+hello, sailor!
+

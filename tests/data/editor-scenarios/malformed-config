@@ -1,6 +1,6 @@
-If the editor is opened with a malformed config file we shouldn't
-crash but we _should_ display an error to the user in a new window
-explaining why we had to fall back to the default config file.
+If the editor is opened with a malformed config file we shouldn't crash but
+we _should_ display an error to the user in a new window explaining why we
+had to fall back to the default config file.
 
 -- config --
 tests/data/config/malformed.toml

@@ -303,6 +303,19 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
         } else if let Some(s) = line.strip_prefix("type: ") {
             match s {
                 "<esc>" => actions.push(TestAction::Input(Input::Esc)),
+
+                s if s.starts_with("<alt>") => {
+                    let tail = s.strip_prefix("<alt>").unwrap().trim();
+                    let mut it = tail.chars();
+                    match (it.next(), it.next()) {
+                        (Some(ch), None) => actions.push(TestAction::Input(Input::Alt(ch))),
+                        (None, _) => panic!("invalid <alt> input: expected a character"),
+                        (_, Some(_)) => {
+                            panic!("invalid <alt> input: expected a single char, got {tail}");
+                        }
+                    }
+                }
+
                 _ => {
                     let s = s
                         .replace("\\n", "\n")
