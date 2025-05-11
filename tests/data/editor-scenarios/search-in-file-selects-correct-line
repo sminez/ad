@@ -8,7 +8,6 @@ and this is the second.
 
 Down here is the fourth
 -- actions --
-# Open the scratch buffer and type the command
 type: /Down\n
 -- expected-buffer-dot-1 --
 Down here is the fourth
