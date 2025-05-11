@@ -40,13 +40,23 @@ use ad_editor::{
 };
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
-use std::{env, fs, path::Path, sync::mpsc::Sender, time::SystemTime};
+use std::{
+    env, fs,
+    path::Path,
+    sync::{mpsc::Sender, Arc, Mutex},
+    thread::sleep,
+    time::{Duration, SystemTime},
+};
 
 #[dir_cases("tests/data/editor-scenarios")]
 #[test]
 fn editor_scenarios(path: &str, content: &str) {
     // Parse the given test case file and validate it before initialising the editor
-    let TestCase { setup, assertions } = TestCase::from_archive(content);
+    let TestCase {
+        setup,
+        assertions,
+        status_messages,
+    } = TestCase::from_archive(content);
     if !assertions.is_valid() {
         panic!("no assertions provided");
     }
@@ -97,6 +107,9 @@ fn editor_scenarios(path: &str, content: &str) {
 
     fs::remove_dir_all(&dir).expect("unable to remove temp directory");
 
+    let status_hist = status_messages.lock().unwrap().join("\n");
+    println!(">> STATUS HISTORY:\n{status_hist}");
+
     assertions.verify(&e, &dir);
 }
 
@@ -105,6 +118,7 @@ fn editor_scenarios(path: &str, content: &str) {
 struct TestCase {
     setup: Setup,
     assertions: Assertions,
+    status_messages: Arc<Mutex<Vec<String>>>,
 }
 
 impl TestCase {
@@ -138,6 +152,9 @@ impl TestCase {
             Some(f) => {
                 let mut windows = Vec::with_capacity(f.content.lines().count());
                 for line in f.content.lines() {
+                    if line.starts_with('#') || line.is_empty() {
+                        continue;
+                    }
                     let col: Vec<BufferId> = line
                         .split_whitespace()
                         .map(|s| s.parse().unwrap())
@@ -185,6 +202,8 @@ impl TestCase {
             }
         }
 
+        let status_messages = Arc::new(Mutex::new(Vec::new()));
+
         Self {
             setup: Setup {
                 config,
@@ -193,7 +212,7 @@ impl TestCase {
                 files,
                 ui: ScriptedUi {
                     actions,
-                    status_message: String::new(),
+                    status_messages: status_messages.clone(),
                     tx: None,
                 },
             },
@@ -203,6 +222,7 @@ impl TestCase {
                 buffer_contents,
                 buffer_dots,
             },
+            status_messages,
         }
     }
 }
@@ -268,7 +288,7 @@ impl Assertions {
 #[derive(Debug)]
 struct ScriptedUi {
     actions: Vec<TestAction>,
-    status_message: String,
+    status_messages: Arc<Mutex<Vec<String>>>,
     tx: Option<Sender<Event>>,
 }
 
@@ -284,7 +304,7 @@ impl UserInterface for ScriptedUi {
         match change {
             StateChange::ConfigUpdated => (),
             StateChange::StatusMessage { msg } => {
-                self.status_message = msg;
+                self.status_messages.lock().unwrap().push(msg);
             }
         }
     }
@@ -299,6 +319,11 @@ impl UserInterface for ScriptedUi {
         _mb: Option<MiniBufferState<'_>>,
     ) {
         let event = match self.actions.pop() {
+            Some(TestAction::SleepMs(n)) => {
+                sleep(Duration::from_millis(n));
+                return;
+            }
+
             Some(TestAction::Input(input)) => Event::Input(input),
             None => Event::Action(Action::Exit { force: true }),
         };
@@ -317,6 +342,7 @@ impl UserInterface for ScriptedUi {
 #[derive(Debug)]
 enum TestAction {
     Input(Input),
+    SleepMs(u64),
     // FsysMessage(???),   <- will require being able to specify the mount point for fsys
 }
 
@@ -326,34 +352,32 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
     for line in raw.lines() {
         if line.starts_with('#') || line.is_empty() {
             continue;
+        } else if let Some(s) = line.strip_prefix("sleep_ms: ") {
+            let n: u64 = match s.trim().parse() {
+                Ok(n) => n,
+                Err(e) => panic!("invalid sleep duration: {e}"),
+            };
+            actions.push(TestAction::SleepMs(n));
         } else if let Some(s) = line.strip_prefix("type: ") {
             match s {
                 "<esc>" => actions.push(TestAction::Input(Input::Esc)),
 
                 s if s.starts_with("<alt>") => {
-                    let tail = s.strip_prefix("<alt>").unwrap().trim();
+                    let tail = escape(s.strip_prefix("<alt>").unwrap().trim());
                     let mut it = tail.chars();
                     match (it.next(), it.next()) {
+                        (Some('\n'), None) => actions.push(TestAction::Input(Input::AltReturn)),
                         (Some(ch), None) => actions.push(TestAction::Input(Input::Alt(ch))),
                         (None, _) => panic!("invalid <alt> input: expected a character"),
                         (_, Some(_)) => {
-                            panic!("invalid <alt> input: expected a single char, got {tail}");
+                            panic!("invalid <alt> input: expected a single char, got {tail:?}");
                         }
                     }
                 }
 
                 _ => {
-                    let s = s
-                        .replace("\\n", "\n")
-                        .replace("\\t", "\t")
-                        .replace("\\\\", "\\");
-                    for ch in s.chars() {
-                        let input = match ch {
-                            '\n' => Input::Return,
-                            '\t' => Input::Tab,
-                            _ => Input::Char(ch),
-                        };
-                        actions.push(TestAction::Input(input));
+                    for ch in escape(s).chars() {
+                        actions.push(TestAction::Input(char_as_input(ch)));
                     }
                 }
             }
@@ -364,4 +388,18 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
 
     actions.reverse(); // so we can pop from the end while running
     actions
+}
+
+fn escape(s: &str) -> String {
+    s.replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\\\", "\\")
+}
+
+fn char_as_input(ch: char) -> Input {
+    match ch {
+        '\n' => Input::Return,
+        '\t' => Input::Tab,
+        _ => Input::Char(ch),
+    }
 }

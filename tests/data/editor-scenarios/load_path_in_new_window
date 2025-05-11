@@ -1,0 +1,17 @@
+Alt-Return should open a new window when loading a file.
+
+-- config --
+tests/data/config/without-fsys.toml
+-- file-hello.txt --
+hello, world!
+-- file-load-me.txt --
+hello.txt
+-- actions --
+type: <alt>\n
+-- buffer-list --
+1    * hello.txt
+2      load-me.txt
+-- expected-windows --
+# the first visible window will be the last file opened (so id=2)
+2
+1
