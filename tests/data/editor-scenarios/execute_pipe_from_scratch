@@ -1,0 +1,25 @@
+Executing a command using | should pipe the current buffer dot through the command.
+
+-- config --
+tests/data/config/without-fsys.toml
+-- file-foo.txt --
+foo
+bar
+baz
+-- actions --
+type: %
+type: <alt>;
+type: i|sort
+type: <esc>
+type: x@
+type: <alt>;
+-- buffer-list --
+1    * foo.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+bar
+baz
+foo
+
+

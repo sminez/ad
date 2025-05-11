@@ -826,7 +826,7 @@ where
 
     pub(super) fn pipe_dot_through_shell_cmd(&mut self, raw_cmd_str: &str) {
         let (s, d) = {
-            let b = self.layout.active_buffer();
+            let b = self.layout.active_buffer_ignoring_scratch();
             (b.dot_contents(), b.dir().unwrap_or(&self.cwd))
         };
 
@@ -834,7 +834,10 @@ where
         let res = self.system.pipe_through_command(raw_cmd_str, &s, d, id);
 
         match res {
-            Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
+            Ok(s) => self.forward_action_to_active_buffer_ignoring_scratch(
+                Action::InsertString { s },
+                Source::Fsys,
+            ),
             Err(e) => self.set_status_message(format!("Error running external command: {e}")),
         }
     }

@@ -622,8 +622,25 @@ where
         }
     }
 
-    fn forward_action_to_active_buffer(&mut self, a: Action, source: Source) {
+    pub(super) fn forward_action_to_active_buffer(&mut self, a: Action, source: Source) {
         if let Some(o) = self.layout.active_buffer_mut().handle_action(a, source) {
+            match o {
+                ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
+                ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
+            }
+        }
+    }
+
+    pub(super) fn forward_action_to_active_buffer_ignoring_scratch(
+        &mut self,
+        a: Action,
+        source: Source,
+    ) {
+        if let Some(o) = self
+            .layout
+            .active_buffer_mut_ignoring_scratch()
+            .handle_action(a, source)
+        {
             match o {
                 ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
                 ActionOutcome::SetClipboard(s) => self.set_clipboard(s),

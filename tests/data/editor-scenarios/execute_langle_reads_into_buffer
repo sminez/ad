@@ -1,0 +1,24 @@
+Executing a command using < should replace the command selection with the output.
+
+-- config --
+tests/data/config/without-fsys.toml
+-- file-foo.txt --
+foo
+-- file-bar.txt --
+bar
+-- file-baz.txt --
+<ls
+-- actions --
+type: x@
+-- buffer-list --
+1      foo.txt
+2      bar.txt
+3    * baz.txt
+-- expected-windows --
+3
+-- expected-buffer-3 --
+bar.txt
+baz.txt
+foo.txt
+
+
