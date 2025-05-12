@@ -52,6 +52,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "ad_watch"
+version = "0.1.0"
+dependencies = [
+ "ad_client",
+ "subprocess",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

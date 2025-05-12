@@ -11,7 +11,7 @@
     clippy::undocumented_unsafe_blocks
 )]
 use ninep::sync::client::{ReadLineIter, UnixClient};
-use std::{io, io::Write, os::unix::net::UnixStream};
+use std::{io, io::Write, os::unix::net::UnixStream, str::FromStr};
 
 mod event;
 
@@ -40,6 +40,14 @@ impl Client {
         self.inner
             .write_str(format!("buffers/{buffer}/event"), 0, event_line)?;
         Ok(())
+    }
+
+    /// Iterate over the log events emitted by ad
+    pub fn log_events(&mut self) -> io::Result<impl Iterator<Item = io::Result<LogEvent>>> {
+        Ok(self
+            .inner
+            .iter_lines("log")?
+            .map(|line| LogEvent::from_str(&line)))
     }
 
     /// Get the currently active buffer id.
@@ -184,5 +192,60 @@ impl Write for BodyWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+/// A message sent by the main editor thread to notify the fs thread that
+/// the current buffer list has changed.
+#[derive(Debug, Clone, Copy)]
+pub enum LogEvent {
+    /// A newly created buffer
+    Open(usize),
+    /// A buffer that has now been closed and needs removing from state
+    Close(usize),
+    /// A change to the currently active buffer
+    Focus(usize),
+    /// A buffer was saved
+    Save(usize),
+}
+
+impl FromStr for LogEvent {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.contains('\n') {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "expected single line",
+            ));
+        }
+
+        let (str_id, action) = s.split_once(' ').ok_or(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "malformed log line: {s:?}",
+        ))?;
+
+        let id: usize = str_id.parse().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "expected integer ID, got {str_id:?}",
+            )
+        })?;
+
+        let evt = match action {
+            "open" => Self::Open(id),
+            "close" => Self::Close(id),
+            "focus" => Self::Focus(id),
+            "save" => Self::Save(id),
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unknown log action {action:?}",
+                ))
+            }
+        };
+
+        Ok(evt)
     }
 }
