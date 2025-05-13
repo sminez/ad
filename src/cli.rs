@@ -12,15 +12,19 @@ options:
   -9p [-A aname] read [path]       Read the contents of a file on a 9p file server
   -9p [-A aname] write [path]      Write the contents of stdin to a file on a 9p file server
   -9p [-A aname] ls [path]         List the contents of a directory on a 9p file server
+  -l, --list-sessions              List the current open editor 9p sessions
+  --rm-sockets                     Remove all ad 9p sockets from the default namespace directory
   -h, --help                       Print this help message
   -v, --version                    Print version information
 ";
 
 #[derive(Debug)]
-pub struct Args {
-    pub script: Option<String>,
-    pub files: Vec<String>,
-    pub ninep_args: Vec<String>,
+pub enum Args {
+    OpenEditor { files: Vec<String> },
+    RunScript { script: String, files: Vec<String> },
+    NineP { args: Vec<String> },
+    ListSessions,
+    RmSockets,
 }
 
 impl Args {
@@ -31,78 +35,42 @@ impl Args {
 
     fn try_parse_iter(mut args: impl Iterator<Item = String>) -> Result<Self, (String, i32)> {
         match args.next().as_deref() {
-            // no files to open
-            None => Ok(Args {
-                script: None,
-                files: Vec::new(),
-                ninep_args: Vec::new(),
+            Some("-e" | "--expression") => match args.next() {
+                Some(script) => Ok(Args::RunScript {
+                    script,
+                    files: args.collect(),
+                }),
+                None => Err(("no script provided".to_string(), 1)),
+            },
+
+            Some("-f" | "--script-file") => match args.next() {
+                Some(fname) => match fs::read_to_string(&fname) {
+                    Ok(script) => Ok(Args::RunScript {
+                        script,
+                        files: args.collect(),
+                    }),
+                    Err(e) => Err((format!("unable to load script file from {fname}: {e}"), 1)),
+                },
+                None => Err(("no script file provided".to_string(), 1)),
+            },
+
+            Some("-9p") => Ok(Args::NineP {
+                args: args.collect(),
             }),
 
-            // Running as a simple 9p client
-            Some("-9p") => Ok(Args {
-                script: None,
-                files: Vec::new(),
-                ninep_args: args.collect(),
-            }),
+            Some("-l" | "--list-sessions") => Ok(Args::ListSessions),
+            Some("--rm-sockets") => Ok(Args::RmSockets),
 
-            // script expression to run
-            Some("-e" | "--expression") => {
-                let script = match args.next() {
-                    Some(script) => Some(script),
-                    None => return Err(("no script provided".to_string(), 1)),
-                };
-
-                let files: Vec<_> = args.collect();
-
-                Ok(Args {
-                    script,
-                    files,
-                    ninep_args: Vec::new(),
-                })
-            }
-
-            // script file to run
-            Some("-f" | "--script-file") => {
-                let script = match args.next() {
-                    Some(fname) => {
-                        let script = match fs::read_to_string(&fname) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                return Err((
-                                    format!("unable to load script file from {fname}: {e}"),
-                                    1,
-                                ));
-                            }
-                        };
-                        Some(script)
-                    }
-                    None => return Err(("no script file provided".to_string(), 1)),
-                };
-
-                let files: Vec<_> = args.collect();
-
-                Ok(Args {
-                    script,
-                    files,
-                    ninep_args: Vec::new(),
-                })
-            }
-
-            // help and version info
             Some("-h" | "--help") => Err((USAGE.to_string(), 0)),
             Some("-v" | "--version") => Err((format!("ad v{VERSION}"), 0)),
 
-            // files to open
             Some(fname) => {
                 let mut files = vec![fname.to_string()];
                 files.extend(args);
 
-                Ok(Args {
-                    script: None,
-                    files,
-                    ninep_args: Vec::new(),
-                })
+                Ok(Args::OpenEditor { files })
             }
+            None => Ok(Args::OpenEditor { files: Vec::new() }),
         }
     }
 }

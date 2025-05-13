@@ -10,7 +10,7 @@ use subprocess::{Popen, PopenConfig, Redirection};
 fn main() -> io::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
-        eprintln!("no command provided to watch");
+        eprintln!("no command provided to watch-ad");
         exit(1);
     }
 
@@ -67,17 +67,17 @@ fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> io::Result
 
     spawn(move || {
         for res in stdout.lines() {
-            match res {
-                Ok(mut line) => {
-                    line.push('\n');
-                    if line.contains('\r') {
-                        line = line.replace("\r\n", "\n").replace("\r", "\n");
-                    }
-
-                    _ = w.write_all(line.as_bytes());
-                }
+            let mut line = match res {
+                Ok(line) => line,
                 Err(_) => break,
+            };
+
+            line.push('\n');
+            if line.contains('\r') {
+                line = line.replace("\r\n", "\n").replace("\r", "\n");
             }
+
+            _ = w.write_all(line.as_bytes());
         }
     });
 

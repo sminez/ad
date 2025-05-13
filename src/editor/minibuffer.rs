@@ -289,17 +289,18 @@ where
         cmd: &str,
         dir: &Path,
     ) -> MiniBufferSelection {
-        let initial_lines =
-            match self
-                .system
-                .run_command_blocking(cmd, dir, self.active_buffer_id())
-            {
-                Ok(s) => s.lines().map(String::from).collect(),
-                Err(e) => {
-                    self.set_status_message(format!("unable to get minibuffer input: {e}"));
-                    return MiniBufferSelection::Cancelled;
-                }
-            };
+        let initial_lines = match self.system.run_command_blocking(
+            cmd,
+            dir,
+            self.active_buffer_id(),
+            self.active_buffer_name(),
+        ) {
+            Ok(s) => s.lines().map(String::from).collect(),
+            Err(e) => {
+                self.set_status_message(format!("unable to get minibuffer input: {e}"));
+                return MiniBufferSelection::Cancelled;
+            }
+        };
 
         self.prompt_w_callback(prompt, initial_lines, |_| None)
     }

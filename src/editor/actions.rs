@@ -272,6 +272,7 @@ where
             "git rev-parse --show-toplevel",
             &d,
             self.active_buffer_id(),
+            self.active_buffer_name(),
         ) {
             Ok(s) => s,
             Err(e) => {
@@ -831,7 +832,9 @@ where
         };
 
         let id = self.active_buffer_id();
-        let res = self.system.pipe_through_command(raw_cmd_str, &s, d, id);
+        let res =
+            self.system
+                .pipe_through_command(raw_cmd_str, &s, d, id, self.active_buffer_name());
 
         match res {
             Ok(s) => self.forward_action_to_active_buffer_ignoring_scratch(
@@ -846,7 +849,9 @@ where
         let b = self.layout.active_buffer_ignoring_scratch();
         let d = b.dir().unwrap_or(&self.cwd);
         let id = b.id;
-        let res = self.system.run_command_blocking(raw_cmd_str, d, id);
+        let res = self
+            .system
+            .run_command_blocking(raw_cmd_str, d, id, b.full_name());
 
         match res {
             Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
@@ -858,9 +863,9 @@ where
         let b = self.layout.active_buffer_ignoring_scratch();
         let d = b.dir().unwrap_or(&self.cwd);
         let id = b.id;
-        let res = self
-            .system
-            .run_command(raw_cmd_str, d, id, self.tx_events.clone());
+        let res =
+            self.system
+                .run_command(raw_cmd_str, d, id, b.full_name(), self.tx_events.clone());
 
         if let Err(e) = res {
             self.set_status_message(format!("Error running external command: {e}"));

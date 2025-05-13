@@ -164,6 +164,11 @@ where
         self.layout.active_buffer_ignoring_scratch().id
     }
 
+    #[inline]
+    pub fn active_buffer_name(&self) -> &str {
+        self.layout.active_buffer_ignoring_scratch().full_name()
+    }
+
     pub fn buffer_list(&self) -> Vec<String> {
         self.layout.as_buffer_list()
     }
@@ -208,13 +213,21 @@ where
 
     /// Initialise any UI state required for our [EditorMode] and run the main event loop.
     pub fn run(&mut self) {
-        if config_handle!().filesystem.enabled {
+        let handle = if config_handle!().filesystem.enabled {
             let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
-            AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
+            let handle = AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
             self.ensure_correct_fsys_state();
-        }
+            Some(handle)
+        } else {
+            None
+        };
 
         self.run_event_loop();
+
+        if let Some(handle) = handle {
+            handle.remove_socket();
+            // handle.join();
+        }
     }
 
     #[inline]

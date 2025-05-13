@@ -14,6 +14,7 @@
 use libc::termios as Termios;
 use std::{
     io::Stdout,
+    process,
     sync::{OnceLock, RwLock},
 };
 
@@ -56,6 +57,12 @@ pub(crate) const UNNAMED_BUFFER: &str = "[No Name]";
 pub(crate) const MAX_NAME_LEN: usize = 50;
 
 pub(crate) static ORIGINAL_TERMIOS: OnceLock<Termios> = OnceLock::new();
+
+pub(crate) static PID: OnceLock<u32> = OnceLock::new();
+
+pub(crate) fn pid() -> u32 {
+    *PID.get_or_init(process::id)
+}
 
 /// Global config values which are only ever updated from the main editor thread.
 /// This is handled as a static OnceLock rather than being a property on the

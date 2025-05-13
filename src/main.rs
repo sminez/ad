@@ -2,9 +2,9 @@ use ad_editor::{
     Args, CachedStdin, Config, Editor, EditorMode, LogBuffer, PlumbingRules, Program,
     LOG_LEVEL_ENV_VAR,
 };
-use ninep::sync::client::UnixClient;
+use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
-    env, fs,
+    env, fmt, fs,
     io::{self, Read, Write},
     process::exit,
 };
@@ -19,17 +19,13 @@ fn main() {
         }
     };
 
-    let Args {
-        script,
-        files,
-        ninep_args,
-    } = args;
-
-    if !ninep_args.is_empty() {
-        return run_9p_oneshot(ninep_args);
-    } else if let Some(script) = script {
-        return run_script(&script, files);
-    }
+    let files = match args {
+        Args::RunScript { script, files } => return run_script(&script, files),
+        Args::NineP { args } => return run_9p_oneshot(args),
+        Args::ListSessions => return list_open_sessions(),
+        Args::RmSockets => return remove_open_sockets(),
+        Args::OpenEditor { files } => files,
+    };
 
     let log_buffer = LogBuffer::default();
     let builder = tracing_subscriber::fmt()
@@ -67,7 +63,7 @@ fn main() {
     e.run()
 }
 
-fn fatal(msg: &str) -> ! {
+fn fatal(msg: impl fmt::Display) -> ! {
     eprintln!("{msg}");
     exit(1);
 }
@@ -151,14 +147,43 @@ fn run_9p_oneshot(args: Vec<String>) {
         None => fatal("no path provided"),
     };
 
-    let client = match UnixClient::new_unix(ns, aname) {
+    let client = match client_for_ns(ns, aname) {
         Ok(client) => client,
-        Err(e) => fatal(&e.to_string()),
+        Err(e) => fatal(e.to_string()),
     };
 
     if let Err(e) = run_9p_command(&cmd, path, client) {
-        fatal(&e.to_string());
+        fatal(e.to_string());
     }
+}
+
+/// Depending on the requested namespace and the presence or absence of an "ad-pid" env var we may
+/// need to adjust the ns to include an ad PID
+fn client_for_ns(ns: &str, aname: String) -> io::Result<UnixClient> {
+    if ns != "ad" {
+        return UnixClient::new_unix(ns, aname);
+    }
+
+    let mut ns = ns.to_string();
+    if let Ok(pid) = env::var("ad-pid") {
+        ns.push('-');
+        ns.push_str(&pid);
+    } else {
+        // If there is only a single running ad instance then we can attach to that, otherwise we
+        // need to error out and prompt the user to select the appropriate instance they want to
+        // connect to.
+        let mut ad_sockets = open_9p_sockets()?;
+        match ad_sockets.len() {
+            1 => ns = ad_sockets.remove(0),
+            0 => fatal("No such file or directory"),
+            _ => fatal(format!(
+                "please specify which ad instance to connect to:\n{}",
+                ad_sockets.join("\n")
+            )),
+        }
+    };
+
+    UnixClient::new_unix(ns, aname)
 }
 
 fn run_9p_command(cmd: &str, path: &str, mut client: UnixClient) -> io::Result<()> {
@@ -177,8 +202,57 @@ fn run_9p_command(cmd: &str, path: &str, mut client: UnixClient) -> io::Result<(
             }
         }
 
-        _ => fatal(&format!("unknown command: {cmd}")),
+        _ => fatal(format!("unknown command: {cmd}")),
     }
 
     Ok(())
+}
+
+fn open_9p_sockets() -> io::Result<Vec<String>> {
+    let mut ad_sockets = Vec::new();
+    for entry in fs::read_dir(socket_dir())? {
+        let entry = entry?;
+        let fname = entry.file_name();
+        if let Some(s) = fname.to_str() {
+            if s.starts_with("ad-") {
+                ad_sockets.push(s.to_string());
+            }
+        }
+    }
+
+    Ok(ad_sockets)
+}
+
+fn list_open_sessions() {
+    fn inner() -> io::Result<()> {
+        for ns in open_9p_sockets()?.into_iter() {
+            let mut client = UnixClient::new_unix(&ns, "")?;
+            let id = client.read_str("buffers/current")?;
+            let fname = client.read_str(format!("buffers/{id}/filename"))?;
+            println!("{ns}\t{fname}");
+        }
+
+        Ok(())
+    }
+
+    if let Err(e) = inner() {
+        fatal(format!("unable to list open editor sessions: {e}"));
+    }
+}
+
+fn remove_open_sockets() {
+    fn inner() -> io::Result<()> {
+        let d = socket_dir();
+        for ns in open_9p_sockets()?.into_iter() {
+            let path = format!("{d}/{ns}");
+            println!("removing {path}");
+            fs::remove_file(path)?;
+        }
+
+        Ok(())
+    }
+
+    if let Err(e) = inner() {
+        fatal(format!("unable to remove open 9p sockets: {e}"));
+    }
 }

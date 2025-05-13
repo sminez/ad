@@ -39,7 +39,7 @@ use ninep::{
 use std::{
     collections::HashMap,
     env,
-    fs::create_dir_all,
+    fs::{create_dir_all, remove_file},
     mem::take,
     path::Path,
     process::Command,
@@ -135,12 +135,20 @@ struct Cids {
 
 /// A join handle for the filesystem thread
 #[derive(Debug)]
-pub struct FsHandle(JoinHandle<()>);
+pub struct FsHandle {
+    path: String,
+    inner: JoinHandle<()>,
+}
 
 impl FsHandle {
+    /// Remove our socket (will cause the 9p server to exit)
+    pub fn remove_socket(&self) {
+        _ = remove_file(&self.path);
+    }
+
     /// Join on the filesystem thread
     pub fn join(self) {
-        _ = self.0.join();
+        _ = self.inner.join();
     }
 }
 
@@ -149,6 +157,10 @@ enum MiniBufferContent {
     Buffering(Vec<u8>),
     Data(Vec<u8>),
     Pending(Sender<Sender<Vec<u8>>>, Receiver<Vec<u8>>),
+}
+
+fn socket_name_for_pid() -> String {
+    format!("{DEFAULT_SOCKET_NAME}-{}", crate::pid())
 }
 
 /// Mutable state for the ad filesystem.
@@ -376,11 +388,15 @@ impl AdFs {
         let s = self.state.lock().unwrap();
         let auto_mount = s.auto_mount;
         let mount_path = s.mount_path.clone();
-        let socket_path = socket_path(DEFAULT_SOCKET_NAME);
+        let socket_name = socket_name_for_pid();
+        let socket_path = socket_path(&socket_name);
         drop(s);
 
         let s = Server::new(self);
-        let handle = FsHandle(s.serve_socket(DEFAULT_SOCKET_NAME.to_string()));
+        let handle = FsHandle {
+            path: socket_path.clone(),
+            inner: s.serve_socket(socket_name),
+        };
 
         if auto_mount {
             let res = Command::new("9pfuse")
