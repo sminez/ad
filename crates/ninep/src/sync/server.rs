@@ -21,6 +21,7 @@ use std::{
     mem::size_of,
     net::TcpListener,
     os::unix::net::UnixListener,
+    path::PathBuf,
     sync::mpsc::Receiver,
     thread::{spawn, JoinHandle},
 };
@@ -39,7 +40,7 @@ pub enum ReadOutcome {
 
 #[derive(Debug)]
 struct Socket {
-    path: String,
+    path: PathBuf,
     listener: UnixListener,
 }
 
@@ -49,10 +50,11 @@ impl Drop for Socket {
     }
 }
 
-fn unix_socket(name: &str) -> Socket {
-    let socket_dir = socket_dir();
-    let _ = fs::create_dir_all(&socket_dir);
-    let path = format!("{socket_dir}/{name}");
+fn unix_socket(path: impl Into<PathBuf>) -> Socket {
+    let path = path.into();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
 
     // FIXME: really we should be handling this on exit but we'll need to catch
     // ctrl-c to do that properly. For now this works but it means that if you
@@ -175,12 +177,23 @@ where
         })
     }
 
-    /// Bind this server to the specified path and serve over a unix socket.
-    pub fn serve_socket(mut self, socket_name: impl Into<String>) -> JoinHandle<()> {
+    /// Bind this server to the specified socket name and serve over a unix socket created under
+    /// the default [socket_dir].
+    pub fn serve_socket(self, socket_name: impl Into<String>) -> JoinHandle<()> {
         let socket_name = socket_name.into();
+        let path = socket_dir().join(socket_name);
 
+        self.serve_socket_with_custom_path(path)
+    }
+
+    /// Bind this server to the specified absolute path and serve over a unix socket created under
+    /// an arbitrary directory.
+    ///
+    /// It is recommended that you use [Server::serve_socket] for most purposes so that your server
+    /// creates its socket in the known default [socket_dir].
+    pub fn serve_socket_with_custom_path(mut self, socket_path: PathBuf) -> JoinHandle<()> {
         spawn(move || {
-            let sock = unix_socket(&socket_name);
+            let sock = unix_socket(socket_path);
 
             for stream in sock.listener.incoming() {
                 let stream = stream.unwrap();

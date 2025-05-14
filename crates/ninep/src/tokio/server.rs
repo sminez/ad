@@ -14,7 +14,7 @@ use crate::{
     Result,
 };
 use simple_coro::CoroState;
-use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of};
+use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
     net::{TcpListener, UnixListener},
     sync::mpsc::{unbounded_channel, Receiver, UnboundedSender},
@@ -35,7 +35,7 @@ pub enum ReadOutcome {
 
 #[derive(Debug)]
 struct Socket {
-    path: String,
+    path: PathBuf,
     listener: UnixListener,
 }
 
@@ -45,10 +45,11 @@ impl Drop for Socket {
     }
 }
 
-fn unix_socket(name: &str) -> Socket {
-    let socket_dir = socket_dir();
-    let _ = fs::create_dir_all(&socket_dir);
-    let path = format!("{socket_dir}/{name}");
+fn unix_socket(path: impl Into<PathBuf>) -> Socket {
+    let path = path.into();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
 
     // FIXME: really we should be handling this on exit but we'll need to catch
     // ctrl-c to do that properly. For now this works but it means that if you
@@ -206,12 +207,23 @@ where
         })
     }
 
-    /// Bind this server to the specified path and serve over a unix socket.
-    pub fn serve_socket_async(mut self, socket_name: impl Into<String>) -> JoinHandle<()> {
+    /// Bind this server to the specified socket name and serve over a unix socket created under
+    /// the default [socket_dir].
+    pub fn serve_socket_async(self, socket_name: impl Into<String>) -> JoinHandle<()> {
         let socket_name = socket_name.into();
+        let path = socket_dir().join(socket_name);
 
+        self.serve_socket_with_custom_path_async(path)
+    }
+
+    /// Bind this server to the specified absolute path and serve over a unix socket created under
+    /// an arbitrary directory.
+    ///
+    /// It is recommended that you use [Server::serve_socket_async] for most purposes so that your
+    /// server creates its socket in the known default [socket_dir].
+    pub fn serve_socket_with_custom_path_async(mut self, socket_path: PathBuf) -> JoinHandle<()> {
         spawn(async move {
-            let sock = unix_socket(&socket_name);
+            let sock = unix_socket(socket_path);
             loop {
                 if let Ok((stream, _addr)) = sock.listener.accept().await {
                     let session = self.new_session(stream);

@@ -13,6 +13,7 @@ use std::{
     env,
     future::Future,
     ops::{Deref, DerefMut},
+    path::{Path, PathBuf},
     sync::Arc,
 };
 
@@ -37,16 +38,16 @@ pub(crate) const SUPPORTED_VERSION: &str = "9P2000";
 const DEFAULT_DISPLAY_VALUE: &str = ":0";
 
 /// Determine the 9p socket directory based on the USER and DISPLAY environment variables
-pub fn socket_dir() -> String {
+pub fn socket_dir() -> PathBuf {
     let uname = env::var("USER").unwrap();
     let display = env::var("DISPLAY").unwrap_or(String::from(DEFAULT_DISPLAY_VALUE));
-    format!("/tmp/ns.{uname}.{display}")
+
+    PathBuf::from("/tmp").join(format!("ns.{uname}.{display}"))
 }
 
 /// The unix socket path that will be used for a given server name.
-pub fn socket_path(name: &str) -> String {
-    let socket_dir = socket_dir();
-    format!("{socket_dir}/{name}")
+pub fn socket_path(name: impl AsRef<Path>) -> PathBuf {
+    socket_dir().join(name)
 }
 
 /// An opaque client ID that can be used by server implementations to determine which client a
