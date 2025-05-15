@@ -41,7 +41,7 @@ use std::{
     env,
     fs::{create_dir_all, remove_file},
     mem::take,
-    path::Path,
+    path::{Path, PathBuf},
     process::Command,
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -136,7 +136,7 @@ struct Cids {
 /// A join handle for the filesystem thread
 #[derive(Debug)]
 pub struct FsHandle {
-    path: String,
+    path: PathBuf,
     inner: JoinHandle<()>,
 }
 
@@ -159,8 +159,8 @@ enum MiniBufferContent {
     Pending(Sender<Sender<Vec<u8>>>, Receiver<Vec<u8>>),
 }
 
-fn socket_name_for_pid() -> String {
-    format!("{DEFAULT_SOCKET_NAME}-{}", crate::pid())
+pub fn default_socket_path_for_pid() -> PathBuf {
+    socket_path(format!("{DEFAULT_SOCKET_NAME}-{}", crate::pid()))
 }
 
 /// Mutable state for the ad filesystem.
@@ -384,18 +384,17 @@ impl AdFs {
     }
 
     /// Spawn a thread for running this filesystem and return a handle to it
-    pub fn run_threaded(self) -> FsHandle {
+    pub fn run_threaded(self, custom_socket_path: Option<PathBuf>) -> FsHandle {
         let s = self.state.lock().unwrap();
         let auto_mount = s.auto_mount;
-        let mount_path = s.mount_path.clone();
-        let socket_name = socket_name_for_pid();
-        let socket_path = socket_path(&socket_name);
+        let mount_path = PathBuf::from(s.mount_path.clone());
+        let socket_path = custom_socket_path.unwrap_or_else(default_socket_path_for_pid);
         drop(s);
 
         let s = Server::new(self);
         let handle = FsHandle {
             path: socket_path.clone(),
-            inner: s.serve_socket(socket_name),
+            inner: s.serve_socket_with_custom_path(socket_path.clone()),
         };
 
         if auto_mount {

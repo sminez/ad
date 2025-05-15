@@ -1,0 +1,22 @@
+Set the dot for an inactive buffer by writing a regular expression to the 'addr'
+control file for that buffer in fsys. This should not affect the active buffer
+state of the editor.
+
+-- config --
+tests/data/config/with-fsys.toml
+-- file-hello-1.txt --
+hello, world!
+-- file-hello-2.txt --
+hello, sailor!
+-- actions --
+fsys: write buffers/1/addr /world.*$/
+-- buffer-list --
+1      hello-1.txt
+2    * hello-2.txt
+-- expected-windows --
+2
+-- expected-buffer-1 --
+hello, world!
+
+-- expected-buffer-dot-1 --
+world!

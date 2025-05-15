@@ -38,28 +38,62 @@ use ad_editor::{
     ui::{Layout, StateChange, UserInterface},
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
 };
+use ninep::sync::client::UnixClient;
+use serial_test::serial;
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
 use std::{
-    env, fs,
-    path::Path,
+    env, fs, io,
+    path::{Path, PathBuf},
     sync::{mpsc::Sender, Arc, Mutex},
-    thread::sleep,
+    thread::{sleep, spawn},
     time::{Duration, SystemTime},
 };
 
-#[dir_cases("tests/data/editor-scenarios")]
+/// The number of milliseconds to sleep before sending a noop when a render is triggered while we
+/// have an outstanding fsys opertaion pending.
+/// Also used as our poll interval while we wait for fsys to come up before starting a test run
+/// that requires it to be running.
+const FSYS_SLEEP_MS: u64 = 100;
+/// The maximum number of times we will check to see if the fsys socket has been created before
+/// bailing on a test case that requires it.
+const FSYS_MAX_TRIES: usize = 10;
+
+#[dir_cases(
+    "tests/data/editor-scenarios/edit_mode",
+    "tests/data/editor-scenarios/exec",
+    "tests/data/editor-scenarios/fsys",
+    "tests/data/editor-scenarios/general",
+    "tests/data/editor-scenarios/issues",
+    "tests/data/editor-scenarios/plumbing"
+)]
 #[test]
+#[serial]
 fn editor_scenarios(path: &str, content: &str) {
     // Parse the given test case file and validate it before initialising the editor
     let TestCase {
-        setup,
+        test_id,
+        mut setup,
         assertions,
         status_messages,
-    } = TestCase::from_archive(content);
+    } = TestCase::from_archive(path, content);
+
     if !assertions.is_valid() {
         panic!("no assertions provided");
     }
+
+    // Create a new temp directory to hold our test files while the test runs
+    let dir = env::temp_dir().join(&test_id);
+    let test_file_dir = dir.join("files");
+    let socket_path = dir.join("sock");
+
+    fs::create_dir_all(&test_file_dir).expect("unable to create temp directory");
+    println!("using {} for the fsys socket", socket_path.display());
+    println!("using {} for test files", test_file_dir.display());
+    println!("config fsys.enabled={}", setup.config.filesystem.enabled);
+
+    setup.ui.socket_path = socket_path.clone();
+
     let mut e = Editor::new_with_system(
         setup.config,
         setup.plumbing_rules,
@@ -68,26 +102,13 @@ fn editor_scenarios(path: &str, content: &str) {
         DefaultSystem::without_clipboard_provider(),
     );
 
-    // Create a new temp directory to hold our test files while the test runs
-    let dir = env::temp_dir().join(format!(
-        "ad-tests-{}-{}",
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        path.replace("tests/data/editor-scenarios/", "")
-    ));
-
-    fs::create_dir_all(&dir).expect("unable to create temp directory");
-    println!("using {} for test files", dir.display());
-
     for f in setup.files.into_iter() {
-        let p = dir.join(&f.name);
+        let p = test_file_dir.join(&f.name);
         if let Some(parent) = p.parent() {
             _ = fs::create_dir_all(parent);
         }
         if let Err(e) = fs::write(&p, f.content) {
-            fs::remove_dir_all(dir).expect("unable to remove temp directory");
+            fs::remove_dir_all(test_file_dir).expect("unable to remove temp directory");
             panic!("failed to write test file {}: {e}", f.name);
         }
 
@@ -103,28 +124,31 @@ fn editor_scenarios(path: &str, content: &str) {
         println!(">> CONFIG LOAD ERROR:\n{err}\n");
     }
 
-    e.run();
+    e.run_with_explicit_fsys_path(socket_path.clone());
 
-    fs::remove_dir_all(&dir).expect("unable to remove temp directory");
+    _ = fs::remove_file(socket_path);
+    _ = fs::remove_dir_all(&dir);
 
     let status_hist = status_messages.lock().unwrap().join("\n");
     println!(">> STATUS HISTORY:\n{status_hist}");
 
-    assertions.verify(&e, &dir);
+    assertions.verify(&e, &test_file_dir);
 }
 
 /// A parsed test case from a scenario file
 #[derive(Debug)]
 struct TestCase {
+    test_id: String,
     setup: Setup,
     assertions: Assertions,
     status_messages: Arc<Mutex<Vec<String>>>,
 }
 
 impl TestCase {
-    fn from_archive(content: &str) -> Self {
+    fn from_archive(path: &str, content: &str) -> Self {
         let arr = Archive::from(content);
         let home = env::var("HOME").unwrap();
+        let uname = env::var("USER").unwrap();
 
         let comment = arr.comment();
         if !comment.is_empty() {
@@ -204,14 +228,28 @@ impl TestCase {
 
         let status_messages = Arc::new(Mutex::new(Vec::new()));
 
+        // Unique ID for our testing temp directory and any fsys socket that gets created
+        let test_id = format!(
+            "ad-tests-{}-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+            path.replace("tests/data/editor-scenarios/", "")
+        );
+
         Self {
+            test_id,
             setup: Setup {
                 config,
                 config_err,
                 plumbing_rules,
                 files,
                 ui: ScriptedUi {
+                    uname,
+                    socket_path: PathBuf::new(),
                     actions,
+                    pending_fsys: Arc::new(Mutex::new(false)),
                     status_messages: status_messages.clone(),
                     tx: None,
                 },
@@ -287,14 +325,82 @@ impl Assertions {
 
 #[derive(Debug)]
 struct ScriptedUi {
+    uname: String,
+    socket_path: PathBuf,
     actions: Vec<TestAction>,
+    pending_fsys: Arc<Mutex<bool>>,
     status_messages: Arc<Mutex<Vec<String>>>,
     tx: Option<Sender<Event>>,
+}
+
+impl ScriptedUi {
+    fn spawn_fsys(&self, f: Fsys) {
+        let mut client =
+            match UnixClient::new_unix_with_explicit_path(&self.uname, &self.socket_path, "") {
+                Ok(client) => client,
+                Err(e) => {
+                    println!(">>> UNABLE TO CREATE FSYS CLIENT: {e}");
+                    return;
+                }
+            };
+
+        *self.pending_fsys.lock().unwrap() = true;
+        let pending = self.pending_fsys.clone();
+
+        spawn(move || {
+            let inner = move || {
+                match f {
+                    Fsys::Read(path) => {
+                        let s = client.read_str(&path)?;
+                        println!("read {path}: {s:?}");
+                    }
+
+                    Fsys::ReadDir(path) => {
+                        for stat in client.read_dir(&path)?.into_iter() {
+                            println!("read dir ({path}): {}", stat.fm.name);
+                        }
+                    }
+
+                    Fsys::Write(path, content) => {
+                        client.write_str(&path, 0, &content)?;
+                        println!("wrote to {path}: {content:?}");
+                    }
+                }
+
+                io::Result::Ok(())
+            };
+
+            if let Err(e) = inner() {
+                println!(">>> FSYS ERROR: {e}");
+            }
+
+            *pending.lock().unwrap() = false;
+        });
+    }
 }
 
 impl UserInterface for ScriptedUi {
     fn init(&mut self, tx: Sender<Event>) -> (usize, usize) {
         self.tx = Some(tx);
+
+        let need_fsys_socket = self
+            .actions
+            .iter()
+            .any(|a| matches!(a, TestAction::Fsys(_)));
+
+        if need_fsys_socket {
+            let mut n = 0;
+            while !fs::exists(&self.socket_path).unwrap() {
+                n += 1;
+                if n == FSYS_MAX_TRIES {
+                    panic!("fsys failed to come up...");
+                }
+
+                println!("waiting for fsys to come up");
+                sleep(Duration::from_millis(FSYS_SLEEP_MS));
+            }
+        }
+
         (60, 80)
     }
 
@@ -318,14 +424,28 @@ impl UserInterface for ScriptedUi {
         _held_click: Option<&Click>,
         _mb: Option<MiniBufferState<'_>>,
     ) {
-        let event = match self.actions.pop() {
-            Some(TestAction::SleepMs(n)) => {
-                sleep(Duration::from_millis(n));
-                return;
-            }
+        let event = if *self.pending_fsys.lock().unwrap() {
+            // We need to allow for the fsys thread to communicate with the main editor event loop
+            // which triggers additional refreshes for when our message actually comes through to
+            // the event loop
+            sleep(Duration::from_millis(FSYS_SLEEP_MS));
+            Event::Action(Action::Noop)
+        } else {
+            match self.actions.pop() {
+                Some(TestAction::Fsys(f)) => {
+                    self.spawn_fsys(f);
+                    Event::Action(Action::Noop)
+                }
 
-            Some(TestAction::Input(input)) => Event::Input(input),
-            None => Event::Action(Action::Exit { force: true }),
+                Some(TestAction::SleepMs(n)) => {
+                    sleep(Duration::from_millis(n));
+                    Event::Action(Action::Noop)
+                }
+
+                Some(TestAction::Input(input)) => Event::Input(input),
+
+                None => Event::Action(Action::Exit { force: true }),
+            }
         };
 
         self.tx.as_ref().unwrap().send(event).unwrap();
@@ -334,16 +454,42 @@ impl UserInterface for ScriptedUi {
     fn set_cursor_shape(&mut self, _cur_shape: CurShape) {}
 }
 
+#[derive(Debug)]
+enum Fsys {
+    Read(String),
+    ReadDir(String),
+    Write(String, String),
+}
+
 /// User input actions to send to the editor.
-/// The whitespace after the colon following the action name is required.
-///
-///   - '# comments are ignored'
-///   - 'type: ihello, world!'
+/// Note that the whitespace after the colon following the action name is required for the simple
+/// parser being used here. Blank lines and lines beginning with a '#' will be treated as comments
+/// and are ignored, for valid action definitions see each of the variants of the enum.
 #[derive(Debug)]
 enum TestAction {
+    /// Send input to the editor as if it had been typed at the keyboard.
+    ///
+    /// # Examples
+    ///
+    /// type: ihello, world!
+    /// type: <esc>
+    /// type: <alt>$single_character
     Input(Input),
+    /// Sleep for a given number of miliseconds.
+    /// This may be required when running external programs through loading and executing.
+    ///
+    /// # Examples
+    ///
+    /// sleep_ms: 200
     SleepMs(u64),
-    // FsysMessage(???),   <- will require being able to specify the mount point for fsys
+    /// Read or write a control file from the 9p virtual filesystem.
+    ///
+    /// # Examples
+    ///
+    /// fsys: read buffers/1/body
+    /// fsys: write buffers/1/dot
+    /// fsys: ls buffers/1
+    Fsys(Fsys),
 }
 
 fn parse_actions(raw: &str) -> Vec<TestAction> {
@@ -381,6 +527,19 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
                     }
                 }
             }
+        } else if let Some(s) = line.strip_prefix("fsys: ") {
+            let f = match s.split_once(' ') {
+                Some(("read", path)) => Fsys::Read(path.to_string()),
+                Some(("ls", path)) => Fsys::ReadDir(path.to_string()),
+                Some(("write", tail)) => match tail.split_once(' ') {
+                    Some((path, content)) => Fsys::Write(path.to_string(), content.to_string()),
+                    None => panic!("invalid fsys line: {s:?}"),
+                },
+
+                _ => panic!("invalid fsys line: {s:?}"),
+            };
+
+            actions.push(TestAction::Fsys(f));
         } else {
             panic!("malformed action line: {line:?}");
         }

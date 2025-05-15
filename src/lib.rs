@@ -70,11 +70,9 @@ pub(crate) fn pid() -> u32 {
 /// through to everywhere that it is needed outside of the main Editor methods.
 pub(crate) static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
 
+/// We always use this get_or_init -> mutuate the inner RwLock behaviour so that in scenario tests
+/// we are guaranteed to be running with the correct config.
 pub(crate) fn set_config(cfg: Config) {
-    _ = CONFIG.set(RwLock::new(cfg));
-}
-
-pub(crate) fn replace_config(cfg: Config) {
     *CONFIG
         .get_or_init(|| RwLock::new(Config::default()))
         .write()

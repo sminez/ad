@@ -211,22 +211,45 @@ where
         }
     }
 
+    /// Initialise any UI state required for our [EditorMode] and run the main event loop using a
+    /// custom path for our fsys socket.
+    pub fn run_with_explicit_fsys_path(&mut self, socket_path: PathBuf) {
+        self.run_event_loop(Some(socket_path));
+    }
+
     /// Initialise any UI state required for our [EditorMode] and run the main event loop.
     pub fn run(&mut self) {
+        self.run_event_loop(None);
+    }
+
+    fn run_event_loop(&mut self, socket_path: Option<PathBuf>) {
         let handle = if config_handle!().filesystem.enabled {
             let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
-            let handle = AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded();
+            let handle = AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded(socket_path);
             self.ensure_correct_fsys_state();
             Some(handle)
         } else {
             None
         };
 
-        self.run_event_loop();
+        let tx = self.tx_events.clone();
+        let (screen_rows, screen_cols) = self.ui.init(tx);
+        self.update_window_size(screen_rows, screen_cols);
+        self.ui.set_cursor_shape(self.current_cursor_shape());
+
+        while self.running {
+            self.refresh_screen_w_minibuffer(None);
+
+            match self.rx_events.recv() {
+                Ok(next_event) => self.handle_event(next_event),
+                _ => break,
+            }
+        }
+
+        self.ui.shutdown();
 
         if let Some(handle) = handle {
             handle.remove_socket();
-            // handle.join();
         }
     }
 
@@ -252,24 +275,6 @@ where
             self.held_click.as_ref(),
             mb,
         );
-    }
-
-    fn run_event_loop(&mut self) {
-        let tx = self.tx_events.clone();
-        let (screen_rows, screen_cols) = self.ui.init(tx);
-        self.update_window_size(screen_rows, screen_cols);
-        self.ui.set_cursor_shape(self.current_cursor_shape());
-
-        while self.running {
-            self.refresh_screen_w_minibuffer(None);
-
-            match self.rx_events.recv() {
-                Ok(next_event) => self.handle_event(next_event),
-                _ => break,
-            }
-        }
-
-        self.ui.shutdown();
     }
 
     /// Update the status line to contain the given message.
@@ -457,6 +462,8 @@ where
         use Action::*;
 
         match action {
+            Noop => (),
+
             AppendToOutputBuffer { bufid, content } => self
                 .layout
                 .write_output_for_buffer(bufid, content, &self.cwd),

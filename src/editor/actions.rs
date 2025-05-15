@@ -11,7 +11,7 @@ use crate::{
     lsp::Coords,
     mode::Mode,
     plumb::{MatchOutcome, PlumbingMessage},
-    replace_config,
+    set_config,
     system::System,
     ui::{StateChange, UserInterface},
     update_config,
@@ -46,6 +46,8 @@ pub enum ViewPort {
 /// Supported actions for interacting with the editor state
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
+    Noop,
+
     AppendToOutputBuffer { bufid: usize, content: String },
     BalanceActiveColumn,
     BalanceAll,
@@ -385,7 +387,7 @@ where
         info!("reloading config");
         let msg = match Config::try_load() {
             (config, None) => {
-                replace_config(config);
+                set_config(config);
                 "config reloaded".to_string()
             }
             (_, Some(s)) => s,

@@ -244,8 +244,8 @@ fn remove_open_sockets() {
     fn inner() -> io::Result<()> {
         let d = socket_dir();
         for ns in open_9p_sockets()?.into_iter() {
-            let path = format!("{d}/{ns}");
-            println!("removing {path}");
+            let path = d.join(ns);
+            println!("removing {}", path.display());
             fs::remove_file(path)?;
         }
 

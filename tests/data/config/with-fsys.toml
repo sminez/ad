@@ -9,5 +9,5 @@ minibuffer_lines = 8
 find_command = "fd -t f"
 
 [filesystem]
-enabled = false
+enabled = true
 auto_mount = false
