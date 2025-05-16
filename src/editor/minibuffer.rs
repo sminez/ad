@@ -6,16 +6,17 @@ use crate::{
     buffer::{Buffer, Buffers, GapBuffer},
     config_handle,
     dot::TextObject,
-    editor::Actions,
-    editor::Editor,
+    editor::{Actions, Editor},
     key::{Arrow, Input},
     system::System,
+    Config,
 };
 use ad_event::Source;
 use std::{
     cmp::{self, min},
     fmt,
     path::Path,
+    sync::{Arc, Mutex},
 };
 use tracing::trace;
 
@@ -77,7 +78,13 @@ impl<F> MiniBuffer<F>
 where
     F: Fn(&str) -> Option<Vec<String>>,
 {
-    pub fn new(prompt: String, lines: Vec<String>, max_height: usize, on_change: F) -> Self {
+    pub fn new(
+        prompt: String,
+        lines: Vec<String>,
+        max_height: usize,
+        on_change: F,
+        config: Arc<Mutex<Config>>,
+    ) -> Self {
         let line_indices = Vec::with_capacity(lines.len());
 
         Self {
@@ -86,7 +93,7 @@ where
             input: String::new(),
             initial_lines: lines,
             line_indices,
-            b: Buffer::new_minibuffer(),
+            b: Buffer::new_minibuffer(config),
             max_height,
             x: 0,
             y: 0,
@@ -242,8 +249,9 @@ where
         let mut mb = MiniBuffer::new(
             prompt.to_string(),
             initial_lines,
-            config_handle!().minibuffer_lines,
+            config_handle!(self).minibuffer_lines,
             on_change,
+            self.config.clone(),
         );
 
         loop {

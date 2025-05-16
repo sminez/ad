@@ -11,7 +11,6 @@ use crate::{
     lsp::{LspManager, LspManagerHandle},
     mode::{modes, Mode},
     plumb::PlumbingRules,
-    set_config,
     system::{DefaultSystem, System},
     term::CurShape,
     ui::{Layout, StateChange, Ui, UserInterface, SCRATCH_ID},
@@ -23,7 +22,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         mpsc::{channel, Receiver, Sender},
-        Arc,
+        Arc, Mutex,
     },
     time::Instant,
 };
@@ -69,6 +68,7 @@ pub struct Editor<S>
 where
     S: System,
 {
+    config: Arc<Mutex<Config>>,
     system: S,
     ui: Ui,
     cwd: PathBuf,
@@ -112,7 +112,7 @@ where
 {
     /// Construct a new [Editor] with the provided config and System.
     pub fn new_with_system(
-        cfg: Config,
+        config: Config,
         plumbing_rules: PlumbingRules,
         mode: EditorMode,
         log_buffer: LogBuffer,
@@ -125,11 +125,16 @@ where
         let (tx_events, rx_events) = channel();
         let (tx_fsys, rx_fsys) = channel();
 
-        let show_splash = cfg.show_splash;
-        set_config(cfg);
+        let show_splash = config.show_splash;
+        let lsp_manager = Arc::new(LspManager::spawn(
+            config.languages.clone(),
+            tx_events.clone(),
+        ));
 
-        let lsp_manager = Arc::new(LspManager::spawn(tx_events.clone()));
-        let mut layout = Layout::new(100, 100, lsp_manager.clone());
+        let config = Arc::new(Mutex::new(config));
+
+        let ui = Ui::new(mode, config.clone());
+        let mut layout = Layout::new(100, 100, lsp_manager.clone(), config.clone());
         if show_splash && layout.is_empty_squirrel() {
             layout
                 .active_buffer_mut_ignoring_scratch()
@@ -138,8 +143,9 @@ where
         }
 
         Self {
+            config,
             system,
-            ui: mode.into(),
+            ui,
             cwd,
             running: true,
             modes: modes(),
@@ -223,10 +229,17 @@ where
     }
 
     fn run_event_loop(&mut self, socket_path: Option<PathBuf>) {
-        let handle = if config_handle!().filesystem.enabled {
+        let (fs_enabled, auto_mount) = {
+            let cfg = config_handle!(self);
+            (cfg.filesystem.enabled, cfg.filesystem.auto_mount)
+        };
+
+        let handle = if fs_enabled {
             let rx_fsys = self.rx_fsys.take().expect("to have fsys channels");
-            let handle = AdFs::new(self.tx_events.clone(), rx_fsys).run_threaded(socket_path);
+            let fs = AdFs::new(self.tx_events.clone(), rx_fsys, auto_mount);
+            let handle = fs.run_threaded(socket_path);
             self.ensure_correct_fsys_state();
+
             Some(handle)
         } else {
             None
@@ -431,14 +444,18 @@ where
 
     fn handle_input(&mut self, input: Input) {
         self.pending_keys.push(input);
+        let maybe_actions =
+            self.modes[0].handle_keys(&mut self.pending_keys, &*config_handle!(self));
 
-        if let Some(actions) = self.modes[0].handle_keys(&mut self.pending_keys) {
+        if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);
         }
     }
 
     fn handle_explicit_inputs(&mut self, inputs: &mut Vec<Input>) {
-        if let Some(actions) = self.modes[0].handle_keys(inputs) {
+        let maybe_actions = self.modes[0].handle_keys(inputs, &*config_handle!(self));
+
+        if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);
         }
     }
@@ -603,7 +620,6 @@ where
             ShowHelp => self.show_help(),
             ToggleScratch => self.layout.toggle_scratch(),
             TsShowTree => self.show_active_ts_tree(),
-            UpdateConfig { input } => self.update_config(&input),
             ViewLogs => self.view_logs(),
             Yank => self.set_clipboard(self.layout.active_buffer().dot_contents()),
 

@@ -5,7 +5,7 @@
 use crate::{
     buffer::{Buffer, Buffers},
     config::{LangConfig, LspConfig},
-    config_handle, die,
+    die,
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
     input::Event,
     lsp::{
@@ -294,7 +294,10 @@ pub struct LspManager {
 }
 
 impl LspManager {
-    pub fn spawn(tx_events: Sender<Event>) -> LspManagerHandle {
+    pub fn spawn(
+        configs: HashMap<String, LangConfig>,
+        tx_events: Sender<Event>,
+    ) -> LspManagerHandle {
         let (tx_req, rx_req) = channel();
         let manager = Self {
             clients: Default::default(),
@@ -315,7 +318,7 @@ impl LspManager {
             tx_req,
             capabilities,
             diagnostics,
-            configs: config_handle!().languages.clone(),
+            configs,
         }
     }
 

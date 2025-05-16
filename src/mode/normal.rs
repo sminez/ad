@@ -1,6 +1,5 @@
 //! vim style normal mode
 use crate::{
-    config_handle,
     dot::TextObject::*,
     editor::{Action::*, Actions, ViewPort},
     key::{Arrow::*, Input::*},
@@ -251,13 +250,7 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         name: "NORMAL".to_string(),
         cur_shape: CurShape::Block,
         keymap,
-        handle_expired_pending: |keys| {
-            config_handle!()
-                .keys
-                .normal
-                .get(keys)
-                .map(|ka| ka.as_actions())
-        },
+        handle_expired_pending: |keys, cfg| cfg.keys.normal.get(keys).map(|ka| ka.as_actions()),
     };
 
     (mode, docs)

@@ -12,11 +12,7 @@
 )]
 
 use libc::termios as Termios;
-use std::{
-    io::Stdout,
-    process,
-    sync::{OnceLock, RwLock},
-};
+use std::{io::Stdout, process, sync::OnceLock};
 
 pub mod buffer;
 pub mod cli;
@@ -64,38 +60,17 @@ pub(crate) fn pid() -> u32 {
     *PID.get_or_init(process::id)
 }
 
-/// Global config values which are only ever updated from the main editor thread.
-/// This is handled as a static OnceLock rather than being a property on the
-/// Editor itself as it avoids having to thread the Config struct as a parameter
-/// through to everywhere that it is needed outside of the main Editor methods.
-pub(crate) static CONFIG: OnceLock<RwLock<Config>> = OnceLock::new();
-
-/// We always use this get_or_init -> mutuate the inner RwLock behaviour so that in scenario tests
-/// we are guaranteed to be running with the correct config.
-pub(crate) fn set_config(cfg: Config) {
-    *CONFIG
-        .get_or_init(|| RwLock::new(Config::default()))
-        .write()
-        .unwrap() = cfg;
-}
-
-pub(crate) fn update_config(input: &str) -> Result<(), String> {
-    let mut guard = CONFIG
-        .get_or_init(|| RwLock::new(Config::default()))
-        .write()
-        .unwrap();
-
-    guard.update_from(input)
-}
-
-/// Get a read-only handle to the global Config data
+/// Helper for accessing config stored on self as an Arc<Mutex<Config>>
 #[macro_export]
 macro_rules! config_handle {
-    () => {{
-        $crate::CONFIG
-            .get_or_init(|| std::sync::RwLock::new($crate::Config::default()))
-            .read()
-            .unwrap()
+    ($self:expr) => {{
+        match $self.config.lock() {
+            Ok(config) => config,
+            Err(err) => {
+                $self.config.clear_poison();
+                err.into_inner()
+            }
+        }
     }};
 }
 

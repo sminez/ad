@@ -157,10 +157,6 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             Err(_) => Err(format!("'{args}' is not a valid delta")),
         },
 
-        "set" => Ok(Single(UpdateConfig {
-            input: input.to_string(),
-        })),
-
         "clear-scratch" => Ok(Single(ClearScratch)),
         "toggle-scratch" => Ok(Single(ToggleScratch)),
 

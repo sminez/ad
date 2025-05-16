@@ -10,7 +10,7 @@ use crate::{
 };
 use serde::{de, Deserialize, Deserializer};
 use std::{collections::HashMap, env, fs, iter::successors, ops::Deref, path::Path};
-use tracing::{error, warn};
+use tracing::error;
 
 mod raw;
 
@@ -120,12 +120,6 @@ impl Config {
                     || c.first_lines.iter().any(|l| first_line.starts_with(l))
             })
             .map(|(name, _)| name.as_str())
-    }
-
-    pub(crate) fn update_from(&mut self, input: &str) -> Result<(), String> {
-        warn!("ignoring runtime config update: {input}");
-
-        Err("runtime config updates are not currently supported".to_owned())
     }
 }
 

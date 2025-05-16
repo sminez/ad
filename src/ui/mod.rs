@@ -1,11 +1,15 @@
 //! The ad user interface
 use crate::{
+    config::Config,
     editor::{Click, EditorMode, MiniBufferState},
     input::Event,
     key::Input,
     term::CurShape,
 };
-use std::{fmt, sync::mpsc::Sender};
+use std::{
+    fmt,
+    sync::{mpsc::Sender, Arc, Mutex},
+};
 
 mod layout;
 mod tui;
@@ -86,11 +90,11 @@ impl fmt::Debug for Ui {
     }
 }
 
-impl From<EditorMode> for Ui {
-    fn from(mode: EditorMode) -> Self {
+impl Ui {
+    pub(crate) fn new(mode: EditorMode, config: Arc<Mutex<Config>>) -> Self {
         match mode {
             EditorMode::Headless => Self::Headless,
-            EditorMode::Terminal => Self::Tui(Tui::new()),
+            EditorMode::Terminal => Self::Tui(Tui::new(config)),
             EditorMode::Boxed(ui) => Self::Boxed(ui),
         }
     }

@@ -346,7 +346,7 @@ mod tests {
     #[test_case(FindWord::Fwd, 13, "test"; "forward end of buffer")]
     #[test]
     fn expand_word(fw: FindWord, idx: usize, expected: &str) {
-        let b = Buffer::new_virtual(0, "test", "this is a test");
+        let b = Buffer::new_virtual(0, "test", "this is a test", Default::default());
         let dot = Dot::Cur { c: Cur { idx } };
         let expanded = fw.expand(dot, &b);
         let content = expanded.content(&b);
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn expand_word_for_buffer_with_trailing_spaces() {
-        let b = Buffer::new_virtual(0, "test", "this is a test   ");
+        let b = Buffer::new_virtual(0, "test", "this is a test   ", Default::default());
         let dot = Dot::Cur { c: Cur { idx: 14 } };
         let expanded = FindWord::Fwd.expand(dot, &b);
         let content = expanded.content(&b);

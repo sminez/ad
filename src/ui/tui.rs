@@ -1,7 +1,7 @@
 //! A terminal UI for ad
 use crate::{
     buffer::{Buffer, Chars, GapBuffer},
-    config::ColorScheme,
+    config::{ColorScheme, Config},
     config_handle, die,
     dot::Range,
     editor::{Click, MiniBufferState},
@@ -29,7 +29,7 @@ use std::{
     iter::{repeat_n, Peekable},
     panic,
     rc::Rc,
-    sync::mpsc::Sender,
+    sync::{mpsc::Sender, Arc, Mutex},
     thread::{spawn, JoinHandle},
     time::Instant,
 };
@@ -48,6 +48,7 @@ fn box_draw_str(s: &str, cs: &ColorScheme) -> String {
 #[derive(Debug)]
 pub struct Tui {
     stdout: Stdout,
+    config: Arc<Mutex<Config>>,
     screen_rows: usize,
     screen_cols: usize,
     status_message: String,
@@ -65,7 +66,7 @@ pub struct Tui {
 
 impl Default for Tui {
     fn default() -> Self {
-        Self::new()
+        Self::new(Default::default())
     }
 }
 
@@ -76,9 +77,10 @@ impl Drop for Tui {
 }
 
 impl Tui {
-    pub fn new() -> Self {
+    pub fn new(config: Arc<Mutex<Config>>) -> Self {
         let mut tui = Self {
             stdout: stdout(),
+            config,
             screen_rows: 0,
             screen_cols: 0,
             status_message: String::new(),
@@ -96,7 +98,7 @@ impl Tui {
     }
 
     fn update_cached_elements(&mut self) {
-        let cs = &config_handle!().colorscheme;
+        let cs = &config_handle!(self).colorscheme;
         let vstr = box_draw_str(VLINE, cs);
         let hstr = box_draw_str(HLINE, cs);
         self.tstr = box_draw_str(TSTR, cs);
@@ -298,7 +300,7 @@ impl UserInterface for Tui {
         self.screen_rows = layout.screen_rows;
         self.screen_cols = layout.screen_cols;
 
-        let conf = config_handle!();
+        let conf = config_handle!(self);
         let (cs, status_timeout, tabstop, max_mb_lines) = (
             &conf.colorscheme,
             conf.status_timeout,

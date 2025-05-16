@@ -1,5 +1,6 @@
 use crate::{
     buffer::{Buffer, BufferKind, Cur, WELCOME_SQUIRREL},
+    config::Config,
     dot::TextObject,
     lsp::LspManagerHandle,
     ziplist,
@@ -11,7 +12,7 @@ use std::{
     io::{self, ErrorKind},
     mem,
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 #[cfg(test)]
@@ -32,39 +33,47 @@ pub struct Buffers {
     inner: ZipList<Buffer>,
     jump_list: JumpList,
     lsp_handle: Arc<LspManagerHandle>,
+    config: Arc<Mutex<Config>>,
 }
 
 impl Buffers {
-    pub fn new(lsp_handle: Arc<LspManagerHandle>) -> Self {
+    pub fn new(lsp_handle: Arc<LspManagerHandle>, config: Arc<Mutex<Config>>) -> Self {
         Self {
             next_id: 1,
-            inner: ziplist![Buffer::new_unnamed(0, "")],
+            inner: ziplist![Buffer::new_unnamed(0, "", config.clone())],
             jump_list: JumpList::default(),
             lsp_handle,
+            config,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_raw_sender(tx_req: Sender<Req>) -> Self {
+    pub(crate) fn new_with_raw_sender(tx_req: Sender<Req>, config: Arc<Mutex<Config>>) -> Self {
         Self {
             next_id: 1,
-            inner: ziplist![Buffer::new_unnamed(0, "")],
+            inner: ziplist![Buffer::new_unnamed(0, "", config.clone())],
             jump_list: JumpList::default(),
             lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
+            config,
         }
     }
 
     #[cfg(test)]
-    pub(crate) fn new_stubbed(ids: &[usize], tx_req: Sender<Req>) -> Self {
+    pub(crate) fn new_stubbed(
+        ids: &[usize],
+        tx_req: Sender<Req>,
+        config: Arc<Mutex<Config>>,
+    ) -> Self {
         Self {
             next_id: ids.last().unwrap() + 1,
             inner: ZipList::try_from_iter(
                 ids.iter()
-                    .map(|i| Buffer::new_virtual(*i, "".to_owned(), "".to_owned())),
+                    .map(|i| Buffer::new_virtual(*i, "", "", config.clone())),
             )
             .unwrap(),
             jump_list: JumpList::default(),
             lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
+            config,
         }
     }
 
@@ -98,7 +107,7 @@ impl Buffers {
 
         let id = self.next_id;
         self.next_id += 1;
-        let mut b = Buffer::new_from_canonical_file_path(id, path)?;
+        let mut b = Buffer::new_from_canonical_file_path(id, path, self.config.clone())?;
         self.lsp_handle.document_opened(&b);
 
         // Remove an empty unnamed buffer if the user has now opened a file and we have not
@@ -126,7 +135,7 @@ impl Buffers {
         let id = self.next_id;
         self.next_id += 1;
 
-        if let Ok(b) = Buffer::new_from_canonical_file_path(id, p) {
+        if let Ok(b) = Buffer::new_from_canonical_file_path(id, p, self.config.clone()) {
             self.lsp_handle.document_opened(&b);
             self.inner.insert_at(Position::Tail, b);
         }
@@ -158,9 +167,10 @@ impl Buffers {
     }
 
     pub fn close_buffer(&mut self, id: BufferId) {
-        let removed = self
-            .inner
-            .remove_where_with_default(|b| b.id == id, || Buffer::new_unnamed(self.next_id, ""));
+        let removed = self.inner.remove_where_with_default(
+            |b| b.id == id,
+            || Buffer::new_unnamed(self.next_id, "", self.config.clone()),
+        );
         self.jump_list.clear_for_buffer(id);
 
         if let Some(b) = removed {
@@ -193,7 +203,7 @@ impl Buffers {
         }
 
         let id = self.next_id;
-        let buf = Buffer::new_virtual(id, name, content);
+        let buf = Buffer::new_virtual(id, name, content, self.config.clone());
         self.record_jump_position();
         self.push_buffer(buf);
         self.next_id += 1;
@@ -350,7 +360,7 @@ impl Buffers {
             None => {
                 let id = self.next_id;
                 self.next_id += 1;
-                let b = Buffer::new_output(id, key, s);
+                let b = Buffer::new_output(id, key, s, self.config.clone());
                 self.record_jump_position();
                 self.inner.insert(b);
 

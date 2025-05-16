@@ -1311,7 +1311,7 @@ mod tests {
 [ "(" ")" "{" "}" ] @punctuation"#;
 
         let s = "fn main() {}";
-        let mut b = Buffer::new_unnamed(0, s);
+        let mut b = Buffer::new_unnamed(0, s, Default::default());
         let gb = &b.txt;
         let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
@@ -1369,7 +1369,7 @@ mod tests {
     (identifier) @module))"#;
 
         let s = "import builtins as _builtins";
-        let b = Buffer::new_unnamed(0, s);
+        let b = Buffer::new_unnamed(0, s, Default::default());
         let gb = &b.txt;
         let mut ts = TsState::try_new_from_language(
             "python",
@@ -1404,7 +1404,7 @@ mod tests {
 [ "(" ")" "{" "}" ] @punctuation"#;
 
         let s = "Ok(Some(42)) foo BAR";
-        let b = Buffer::new_unnamed(0, s);
+        let b = Buffer::new_unnamed(0, s, Default::default());
         let gb = &b.txt;
         let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)

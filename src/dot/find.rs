@@ -199,7 +199,7 @@ mod tests {
     #[test_case("test"; "last word")]
     #[test]
     fn find_forward_str(s: &str) {
-        let b = Buffer::new_virtual(0, "test", "this is a find test");
+        let b = Buffer::new_virtual(0, "test", "this is a find test", Default::default());
         let dot = find_forward_wrapping(&s, &b).expect("to find string");
         let matched_text = dot.content(&b);
 

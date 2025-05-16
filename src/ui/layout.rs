@@ -1,6 +1,7 @@
 //! Layout of UI windows
 use crate::{
     buffer::{Buffer, BufferId, Buffers},
+    config::Config,
     config_handle, die,
     dot::{Cur, Dot},
     editor::ViewPort,
@@ -9,7 +10,13 @@ use crate::{
     ziplist,
     ziplist::{Position, ZipList},
 };
-use std::{cmp::min, io, mem::swap, path::Path, sync::Arc};
+use std::{
+    cmp::min,
+    io,
+    mem::swap,
+    path::Path,
+    sync::{Arc, Mutex},
+};
 use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
 
@@ -68,6 +75,8 @@ macro_rules! assert_invariants {
 pub struct Layout {
     /// The managed buffer state
     buffers: Buffers,
+    /// Global editor config
+    config: Arc<Mutex<Config>>,
     /// An anonymous buffer that sits outside of the main buffer state and acts as though it is the
     /// active buffer for the purposes of Load/Execute.
     pub(crate) scratch: Scratch,
@@ -86,13 +95,16 @@ impl Layout {
         screen_rows: usize,
         screen_cols: usize,
         lsp_handle: Arc<LspManagerHandle>,
+        config: Arc<Mutex<Config>>,
     ) -> Self {
-        let buffers = Buffers::new(lsp_handle);
+        let scratch = Scratch::new(config.clone());
+        let buffers = Buffers::new(lsp_handle, config.clone());
         let id = buffers.active().id;
 
         let l = Self {
             buffers,
-            scratch: Scratch::new(config_handle!().minibuffer_lines),
+            config,
+            scratch,
             screen_rows,
             screen_cols,
             cols: ziplist![Column::new(screen_rows, screen_cols, &[id])],
@@ -793,11 +805,14 @@ impl Layout {
     }
 
     pub(crate) fn force_cursor_to_be_in_view(&mut self) {
+        let tabstop = config_handle!(self).tabstop;
+
         if self.scratch.is_focused {
             self.scratch.w.view.force_cursor_to_be_in_view(
                 &mut self.scratch.b,
                 self.scratch.w.n_rows,
                 self.screen_cols,
+                tabstop,
             );
         } else {
             let b = self.buffers.active_mut();
@@ -807,7 +822,7 @@ impl Layout {
             self.cols
                 .focus
                 .focused_view_mut()
-                .force_cursor_to_be_in_view(b, rows, cols);
+                .force_cursor_to_be_in_view(b, rows, cols, tabstop);
         }
 
         #[cfg(test)]
@@ -815,11 +830,14 @@ impl Layout {
     }
 
     pub(crate) fn clamp_scroll(&mut self) {
+        let tabstop = config_handle!(self).tabstop;
+
         if self.scratch.is_focused {
             self.scratch.w.view.clamp_scroll(
                 &mut self.scratch.b,
                 self.scratch.w.n_rows,
                 self.screen_cols,
+                tabstop,
             );
         } else {
             let b = self.buffers.active_mut();
@@ -829,7 +847,7 @@ impl Layout {
             self.cols
                 .focus
                 .focused_view_mut()
-                .clamp_scroll(b, rows, cols);
+                .clamp_scroll(b, rows, cols, tabstop);
         }
 
         #[cfg(test)]
@@ -837,12 +855,15 @@ impl Layout {
     }
 
     pub(crate) fn set_viewport(&mut self, vp: ViewPort) {
+        let tabstop = config_handle!(self).tabstop;
+
         if self.scratch.is_focused {
             self.scratch.w.view.set_viewport(
                 &mut self.scratch.b,
                 vp,
                 self.scratch.w.n_rows,
                 self.screen_cols,
+                tabstop,
             );
         } else {
             let b = self.buffers.active_mut();
@@ -852,7 +873,7 @@ impl Layout {
             self.cols
                 .focus
                 .focused_view_mut()
-                .set_viewport(b, vp, rows, cols);
+                .set_viewport(b, vp, rows, cols, tabstop);
         }
 
         #[cfg(test)]
@@ -1025,6 +1046,7 @@ impl Layout {
 
     /// Scroll the [View] under the given cursor coordinates up or down by a single line
     pub(crate) fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
+        let tabstop = config_handle!(self).tabstop;
         let mut x_offset = 0;
         let mut y_offset = 0;
 
@@ -1033,6 +1055,7 @@ impl Layout {
                 &mut self.scratch.b,
                 &mut self.scratch.w,
                 self.screen_cols,
+                tabstop,
                 self.scratch.is_focused,
                 up,
             );
@@ -1057,7 +1080,7 @@ impl Layout {
                 let b = self.buffers.with_id_mut(win.view.bufid).unwrap_or_else(|| {
                     die!("invalid buffer ID {}", win.view.bufid);
                 });
-                apply_scroll(b, win, col.n_cols, focused_col && focused_win, up);
+                apply_scroll(b, win, col.n_cols, tabstop, focused_col && focused_win, up);
 
                 #[cfg(test)]
                 assert_invariants!(self);
@@ -1069,7 +1092,7 @@ impl Layout {
         let n_cols = self.cols.focus.n_cols;
         let win = &mut self.cols.focus.wins.focus;
         let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-        apply_scroll(b, win, n_cols, true, up);
+        apply_scroll(b, win, n_cols, tabstop, true, up);
 
         #[cfg(test)]
         assert_invariants!(self);
@@ -1175,9 +1198,11 @@ pub(crate) struct Scratch {
 
 impl Scratch {
     // n_rows is read from config on startup but then not modified after that
-    fn new(n_rows: usize) -> Self {
+    fn new(config: Arc<Mutex<Config>>) -> Self {
+        let n_rows = config.lock().unwrap().minibuffer_lines;
+
         Self {
-            b: Buffer::new_virtual(SCRATCH_ID, "*scratch*", ""),
+            b: Buffer::new_virtual(SCRATCH_ID, "*scratch*", "", config),
             w: Window::new(n_rows, SCRATCH_ID),
             is_visible: false,
             is_focused: false,
@@ -1238,12 +1263,10 @@ impl View {
         (x, y)
     }
 
-    pub(crate) fn rx_from_x(&self, b: &Buffer, y: usize, x: usize) -> usize {
+    pub(crate) fn rx_from_x(&self, b: &Buffer, y: usize, x: usize, tabstop: usize) -> usize {
         if y >= b.len_lines() {
             return 0;
         }
-
-        let tabstop = config_handle!().tabstop;
 
         let mut rx = 0;
         for c in b.txt.line(y).chars().take(x) {
@@ -1257,17 +1280,29 @@ impl View {
     }
 
     /// Force the contained Buffer cursor to be visible if it currently isn't
-    fn force_cursor_to_be_in_view(&mut self, b: &mut Buffer, rows: usize, cols: usize) {
+    fn force_cursor_to_be_in_view(
+        &mut self,
+        b: &mut Buffer,
+        rows: usize,
+        cols: usize,
+        tabstop: usize,
+    ) {
         b.dot = self.cur.into();
-        self.clamp_scroll(b, rows, cols);
+        self.clamp_scroll(b, rows, cols, tabstop);
     }
 
     /// Clamp the current viewport to include the [Dot].
-    pub(crate) fn clamp_scroll(&mut self, b: &mut Buffer, rows: usize, cols: usize) {
+    pub(crate) fn clamp_scroll(
+        &mut self,
+        b: &mut Buffer,
+        rows: usize,
+        cols: usize,
+        tabstop: usize,
+    ) {
         self.cur = b.dot.active_cur();
         let (y, x) = self.cur.as_yx(b);
         let (_, w_sgncol) = b.sign_col_dims();
-        self.rx = self.rx_from_x(b, y, x);
+        self.rx = self.rx_from_x(b, y, x, tabstop);
         b.cached_rx = self.rx;
 
         if y < self.row_off {
@@ -1294,6 +1329,7 @@ impl View {
         vp: ViewPort,
         screen_rows: usize,
         screen_cols: usize,
+        tabstop: usize,
     ) {
         let (y, _) = b.dot.active_cur().as_yx(b);
 
@@ -1303,7 +1339,7 @@ impl View {
             ViewPort::Bottom => y.saturating_sub(screen_rows),
         };
 
-        self.clamp_scroll(b, screen_rows, screen_cols);
+        self.clamp_scroll(b, screen_rows, screen_cols, tabstop);
     }
 }
 
@@ -1407,7 +1443,14 @@ fn calculate_dims(t: usize, n: usize) -> (usize, usize) {
 /// When we apply scrolling to a [View] we need to keep track of a preferred cursor position so
 /// that when the user bounces between windows they don't get reset to a default position based on
 /// the viewport alone.
-fn apply_scroll(b: &mut Buffer, win: &mut Window, n_cols: usize, focused: bool, up: bool) {
+fn apply_scroll(
+    b: &mut Buffer,
+    win: &mut Window,
+    n_cols: usize,
+    tabstop: usize,
+    focused: bool,
+    up: bool,
+) {
     let n_rows = win.n_rows;
     let view = &mut win.view;
     let mut cur = if focused {
@@ -1442,7 +1485,7 @@ fn apply_scroll(b: &mut Buffer, win: &mut Window, n_cols: usize, focused: bool, 
     };
 
     if focused {
-        view.clamp_scroll(b, n_rows, n_cols);
+        view.clamp_scroll(b, n_rows, n_cols, tabstop);
     }
 }
 
@@ -1471,9 +1514,13 @@ mod tests {
         }
 
         let (tx, _) = channel();
+        let config = Arc::new(Mutex::new(Config::default()));
+        let scratch = Scratch::new(config.clone());
+
         let mut l = Layout {
-            buffers: Buffers::new_stubbed(&all_ids, tx),
-            scratch: Scratch::new(n_rows),
+            buffers: Buffers::new_stubbed(&all_ids, tx, config.clone()),
+            config,
+            scratch,
             screen_rows: n_rows,
             screen_cols: n_cols,
             cols: ZipList::try_from_iter(cols).unwrap(),
@@ -1494,11 +1541,16 @@ mod tests {
     #[test]
     fn opening_file_with_unnamed_split_works() {
         let (tx, _) = channel();
-        let buffers = Buffers::new_with_raw_sender(tx);
+        let config = Arc::new(Mutex::new(Config::default()));
+        let scratch = Scratch::new(config.clone());
+
+        let buffers = Buffers::new_with_raw_sender(tx, config.clone());
         let id = buffers.active().id;
+
         let mut l = Layout {
             buffers,
-            scratch: Scratch::new(config_handle!().minibuffer_lines),
+            config,
+            scratch,
             screen_rows: 80,
             screen_cols: 100,
             cols: ziplist![Column::new(80, 100, &[id])],
@@ -1716,7 +1768,7 @@ mod tests {
         let s = "abc 世界 🦊";
         // unicode display width for each character
         let widths = &[1, 1, 1, 1, 2, 2, 1, 2];
-        let mut b = Buffer::new_virtual(0, "test", s);
+        let mut b = Buffer::new_virtual(0, "test", s, Default::default());
         let mut view = View::new(0);
         let mut offset = 0;
 
@@ -1732,7 +1784,7 @@ mod tests {
             );
 
             b.set_dot(TextObject::Arr(Arrow::Right), 1);
-            view.clamp_scroll(&mut b, 80, 80);
+            view.clamp_scroll(&mut b, 80, 80, 4);
             offset += widths[idx];
         }
     }

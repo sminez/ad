@@ -9,7 +9,7 @@ use crate::{
     lsp::Coords,
     ts::{LineIter, TsState},
     util::normalize_line_endings,
-    MAX_NAME_LEN, UNNAMED_BUFFER,
+    Config, MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ad_event::Source;
 use std::{
@@ -17,7 +17,10 @@ use std::{
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
-    sync::atomic::{AtomicUsize, Ordering},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
     time::SystemTime,
 };
 use tracing::{debug, error};
@@ -178,13 +181,18 @@ pub struct Buffer {
     pub(crate) dirty: bool,
     pub(crate) input_filter: Option<InputFilter>,
     pub(crate) ts_state: Option<TsState>,
+    config: Arc<Mutex<Config>>,
     version: AtomicUsize,
     edit_log: EditLog,
 }
 
 impl Buffer {
     /// As the name implies, this method MUST be called with the full cannonical file path
-    pub fn new_from_canonical_file_path(id: usize, path: PathBuf) -> io::Result<Self> {
+    pub fn new_from_canonical_file_path(
+        id: usize,
+        path: PathBuf,
+        config: Arc<Mutex<Config>>,
+    ) -> io::Result<Self> {
         let (kind, raw) = BufferKind::try_kind_and_content_from_path(path.clone())?;
         let mut b = Self {
             id,
@@ -195,10 +203,11 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
-            edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            config,
             version: AtomicUsize::new(1),
+            edit_log: EditLog::default(),
         };
 
         b.try_set_ts_state();
@@ -207,7 +216,7 @@ impl Buffer {
     }
 
     /// Create a new unnamed buffer with the given content
-    pub fn new_unnamed(id: usize, content: impl Into<String>) -> Self {
+    pub fn new_unnamed(id: usize, content: impl Into<String>, config: Arc<Mutex<Config>>) -> Self {
         Self {
             id,
             kind: BufferKind::Unnamed,
@@ -217,10 +226,11 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
-            edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            config,
             version: AtomicUsize::new(1),
+            edit_log: EditLog::default(),
         }
     }
 
@@ -228,7 +238,12 @@ impl Buffer {
     ///
     /// The buffer will not be included in the virtual filesystem and it will be removed when it
     /// loses focus.
-    pub fn new_virtual(id: usize, name: impl Into<String>, content: impl Into<String>) -> Self {
+    pub fn new_virtual(
+        id: usize,
+        name: impl Into<String>,
+        content: impl Into<String>,
+        config: Arc<Mutex<Config>>,
+    ) -> Self {
         let mut content = normalize_line_endings(content.into());
         if content.ends_with('\n') {
             content.pop();
@@ -243,16 +258,22 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
-            edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            config,
             version: AtomicUsize::new(1),
+            edit_log: EditLog::default(),
         }
     }
 
     /// Construct a new +output buffer with the given name which must be a valid output buffer name
     /// of the form '$dir/+output'.
-    pub(super) fn new_output(id: usize, name: String, content: String) -> Self {
+    pub(super) fn new_output(
+        id: usize,
+        name: String,
+        content: String,
+        config: Arc<Mutex<Config>>,
+    ) -> Self {
         Self {
             id,
             kind: BufferKind::Output(name),
@@ -262,18 +283,19 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
-            edit_log: EditLog::default(),
             input_filter: None,
             ts_state: None,
+            config,
             version: AtomicUsize::new(1),
+            edit_log: EditLog::default(),
         }
     }
 
     /// Clear any existing tree-sitter state and then attempt to detect and set the state
     /// based on this buffer's BufferKind
     fn try_set_ts_state(&mut self) {
+        let cfg = config_handle!(self);
         self.ts_state = None;
-        let cfg = config_handle!();
         if let Some(lang) = cfg.ts_lang_for_buffer(self) {
             match TsState::try_new(
                 lang,
@@ -397,7 +419,7 @@ impl Buffer {
         format!("\"{display_path}\" {n_lines}L {n_bytes}B loaded")
     }
 
-    pub(super) fn new_minibuffer() -> Self {
+    pub(super) fn new_minibuffer(config: Arc<Mutex<Config>>) -> Self {
         Self {
             id: usize::MAX,
             kind: BufferKind::MiniBuffer,
@@ -407,10 +429,11 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
-            edit_log: Default::default(),
             input_filter: None,
             ts_state: None,
+            config,
             version: AtomicUsize::new(1),
+            edit_log: Default::default(),
         }
     }
 
@@ -579,13 +602,13 @@ impl Buffer {
     }
 
     pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
+        let tabstop = config_handle!(self).tabstop;
         if self.is_empty() {
             return 0;
         }
 
         let mut rx = 0;
         let mut cx = 0;
-        let tabstop = config_handle!().tabstop;
 
         for c in self.txt.line(y).chars() {
             if c == '\n' {
@@ -838,8 +861,8 @@ impl Buffer {
 
     fn handle_raw_input(&mut self, k: Input) -> Option<ActionOutcome> {
         let (match_indent, expand_tab, tabstop) = {
-            let conf = config_handle!();
-            (conf.match_indent, conf.expand_tab, conf.tabstop)
+            let cfg = config_handle!(self);
+            (cfg.match_indent, cfg.expand_tab, cfg.tabstop)
         };
 
         match k {
@@ -1199,7 +1222,7 @@ pub(crate) mod tests {
     }
 
     pub fn buffer_from_lines(lines: &[&str]) -> Buffer {
-        let mut b = Buffer::new_unnamed(0, "");
+        let mut b = Buffer::new_unnamed(0, "", Default::default());
         let s = lines.join("\n");
 
         for c in s.chars() {
@@ -1231,7 +1254,7 @@ pub(crate) mod tests {
 
     #[test]
     fn insert_with_moving_dot_works() {
-        let mut b = Buffer::new_unnamed(0, "");
+        let mut b = Buffer::new_unnamed(0, "", Default::default());
 
         // Insert from the start of the buffer
         for c in "hello w".chars() {
@@ -1293,7 +1316,7 @@ pub(crate) mod tests {
 
     #[test]
     fn move_forward_at_end_of_buffer_is_fine() {
-        let mut b = Buffer::new_unnamed(0, "");
+        let mut b = Buffer::new_unnamed(0, "", Default::default());
         b.handle_raw_input(Input::Arrow(Arrow::Right));
 
         let c = Cur { idx: 0 };
@@ -1302,7 +1325,7 @@ pub(crate) mod tests {
 
     #[test]
     fn delete_in_empty_buffer_is_fine() {
-        let mut b = Buffer::new_unnamed(0, "");
+        let mut b = Buffer::new_unnamed(0, "", Default::default());
         b.handle_action(Action::Delete, Source::Keyboard);
         let c = Cur { idx: 0 };
         let lines = b.string_lines();
@@ -1393,7 +1416,7 @@ pub(crate) mod tests {
     #[test]
     fn undo_string_insert_works() {
         let initial_content = "foo foo foo\n";
-        let mut b = Buffer::new_unnamed(0, initial_content);
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
         b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string(), None);
         b.handle_action(Action::Undo, Source::Keyboard);
@@ -1404,7 +1427,7 @@ pub(crate) mod tests {
     #[test]
     fn undo_string_delete_works() {
         let initial_content = "foo foo foo\n";
-        let mut b = Buffer::new_unnamed(0, initial_content);
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
         let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r }, None);
@@ -1416,7 +1439,7 @@ pub(crate) mod tests {
     #[test]
     fn undo_string_insert_and_delete_works() {
         let initial_content = "foo foo foo\n";
-        let mut b = Buffer::new_unnamed(0, initial_content);
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
         let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r }, None);
@@ -1453,6 +1476,7 @@ pub(crate) mod tests {
                 0,
                 format!("{cwd}/+output"),
                 format!("abc_123 {l}{s}{r}\tmore text"),
+                Default::default(),
             );
 
             // Check with the initial cursor position being at any offset within the target
@@ -1477,7 +1501,7 @@ pub(crate) mod tests {
     #[test_case("foo\rbar\nbaz\r\nquux", "foo\nbar\nbaz\nquux"; "mixed line endings")]
     #[test]
     fn normalizes_line_endings_insert_string(s: &str, expected: &str) {
-        let mut b = Buffer::new_virtual(0, "test", "");
+        let mut b = Buffer::new_virtual(0, "test", "", Default::default());
         b.insert_string(Dot::Cur { c: c(0) }, s.to_string(), None);
         // we force a trailing newline so account for that as well
         assert_eq!(b.str_contents(), format!("{expected}\n"));
@@ -1488,7 +1512,7 @@ pub(crate) mod tests {
     #[test_case('a', "a"; "ascii")]
     #[test]
     fn normalizes_line_endings_insert_char(ch: char, expected: &str) {
-        let mut b = Buffer::new_virtual(0, "test", "");
+        let mut b = Buffer::new_virtual(0, "test", "", Default::default());
         b.insert_char(Dot::Cur { c: c(0) }, ch, None);
         // we force a trailing newline so account for that as well
         assert_eq!(b.str_contents(), format!("{expected}\n"));
@@ -1498,7 +1522,7 @@ pub(crate) mod tests {
     // tree which can become invalidated when the buffer is being truncated.
     #[test]
     fn insert_string_reducing_buffer_len_works_with_ts_state() {
-        let mut b = Buffer::new_virtual(0, "test", "fn main() {}");
+        let mut b = Buffer::new_virtual(0, "test", "fn main() {}", Default::default());
         b.ts_state = Some(
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
                 .unwrap(),
@@ -1520,7 +1544,7 @@ pub(crate) mod tests {
 
     #[test]
     fn insert_char_reducing_buffer_len_works_with_ts_state() {
-        let mut b = Buffer::new_virtual(0, "test", "fn main() {}");
+        let mut b = Buffer::new_virtual(0, "test", "fn main() {}", Default::default());
         b.ts_state = Some(
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
                 .unwrap(),
@@ -1537,7 +1561,7 @@ pub(crate) mod tests {
 
     #[test]
     fn match_indent_works() {
-        let mut b = Buffer::new_virtual(0, "test", "  foo");
+        let mut b = Buffer::new_virtual(0, "test", "  foo", Default::default());
         b.set_dot(TextObject::BufferEnd, 1);
         b.handle_raw_input(Input::Return);
         assert_eq!(b.txt.to_string(), "  foo\n  ");
@@ -1549,6 +1573,7 @@ pub(crate) mod tests {
             0,
             "test",
             "// does it need to be a doc comment? that is a long enough line to",
+            Default::default(),
         );
         b.set_dot(TextObject::BufferEnd, 1);
         b.handle_raw_input(Input::Return);

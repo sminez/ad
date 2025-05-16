@@ -1,6 +1,5 @@
 //! vim style insert mode where most keys are directly modifying the buffer
 use crate::{
-    config_handle,
     dot::TextObject::*,
     editor::{Action::*, Actions},
     key::{Arrow::*, Input::*},
@@ -51,12 +50,8 @@ pub(crate) fn insert_mode() -> (Mode, Vec<(String, &'static str)>) {
         name: "INSERT".to_string(),
         cur_shape: CurShape::Bar,
         keymap,
-        handle_expired_pending: |keys| {
-            let res = config_handle!()
-                .keys
-                .insert
-                .get(keys)
-                .map(|ka| ka.as_actions());
+        handle_expired_pending: |keys, cfg| {
+            let res = cfg.keys.insert.get(keys).map(|ka| ka.as_actions());
 
             match res {
                 QueryResult::Val(_) => res,

@@ -134,10 +134,6 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "resize the active window by a given delta of rows",
         ),
         (
-            vec!["set"],
-            "set a config property ('set bg-color=#ebdbb2')",
-        ),
-        (
             vec!["toggle-scratch"],
             "toggle the visibility of the scratch buffer",
         ),

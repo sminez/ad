@@ -541,7 +541,11 @@ mod tests {
     #[test_case("-/\\s/+#1,/\\s/-#1", Dot::from_char_indices(15, 17), "and"; "regex range boundaries")]
     #[test]
     fn map_addr_works(s: &str, expected: Dot, expected_contents: &str) {
-        let mut b = Buffer::new_unnamed(0, "this is a line\nand another\n- [ ] something to do\n");
+        let mut b = Buffer::new_unnamed(
+            0,
+            "this is a line\nand another\n- [ ] something to do\n",
+            Default::default(),
+        );
         b.dot = Cur::new(16).into();
 
         let mut addr = Addr::parse(&mut s.chars().peekable()).expect("valid addr");

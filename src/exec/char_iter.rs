@@ -89,7 +89,7 @@ mod tests {
     #[test_case(0, 14; "full buffer")]
     #[test]
     fn buffer_rev_iter_between_covers_same_range_as_iter_between(from: usize, to: usize) {
-        let b = Buffer::new_virtual(0, "test", "this is a test");
+        let b = Buffer::new_virtual(0, "test", "this is a test", Default::default());
         let forward: Vec<char> = b.iter_between(from, to).map(|(_, c)| c).collect();
         let mut backward: Vec<char> = b.rev_iter_between(to, from).map(|(_, c)| c).collect();
         backward.reverse();

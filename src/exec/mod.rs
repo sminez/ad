@@ -531,7 +531,7 @@ mod tests {
             initial_dot: Addr::full(),
             exprs,
         };
-        let mut b = Buffer::new_unnamed(0, "foo foo foo");
+        let mut b = Buffer::new_unnamed(0, "foo foo foo", Default::default());
         let dot = prog
             .step(&mut b, &Match::synthetic(0, 11), 0, "test", &mut vec![])
             .unwrap();
@@ -547,7 +547,7 @@ mod tests {
     fn substitution_of_submatches_works(s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
 
-        let mut b = Buffer::new_unnamed(0, "this is a test string");
+        let mut b = Buffer::new_unnamed(0, "this is a test string", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         assert_eq!(&b.txt.to_string(), expected);
     }
@@ -555,7 +555,7 @@ mod tests {
     #[test]
     fn loop_between_generates_the_correct_blocks() {
         let mut prog = Program::try_parse(", y/ / p/>$0<\n/").unwrap();
-        let mut b = Buffer::new_unnamed(0, "this and that");
+        let mut b = Buffer::new_unnamed(0, "this and that", Default::default());
         let mut output = Vec::new();
         let dot = prog.execute(&mut b, "test", &mut output).unwrap();
 
@@ -591,7 +591,7 @@ mod tests {
     #[test]
     fn execute_produces_the_correct_string(idx: usize, s: &str, expected: &str) {
         let mut prog = Program::try_parse(s).unwrap();
-        let mut b = Buffer::new_unnamed(0, "foo│foo│foo");
+        let mut b = Buffer::new_unnamed(0, "foo│foo│foo", Default::default());
         b.dot = Cur::new(idx).into();
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
@@ -601,7 +601,7 @@ mod tests {
     #[test]
     fn multiline_file_dot_star_works() {
         let mut prog = Program::try_parse(", x/.*/ c/foo/").unwrap();
-        let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile");
+        let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
         // '.*' will match the null string at the end of lines containing a newline as well
@@ -611,7 +611,7 @@ mod tests {
     #[test]
     fn multiline_file_dot_plus_works() {
         let mut prog = Program::try_parse(", x/.+/ c/foo/").unwrap();
-        let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile");
+        let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
         assert_eq!(&b.txt.to_string(), "foo\nfoo\nfoo");
@@ -630,7 +630,7 @@ mod tests {
     fn buffer_execute_undo_all_is_a_noop(s: &str) {
         let mut prog = Program::try_parse(s).unwrap();
         let initial_content = "this is a line\nand another\n- [ ] something to do\n";
-        let mut b = Buffer::new_unnamed(0, initial_content);
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         while b.handle_action(Action::Undo, Source::Keyboard).is_none() {}
@@ -649,6 +649,7 @@ mod tests {
         let mut b = Buffer::new_unnamed(
             0,
             include_str!("../../data/regression/edit-landing-on-gap-end.txt"),
+            Default::default(),
         );
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 

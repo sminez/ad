@@ -11,10 +11,8 @@ use crate::{
     lsp::Coords,
     mode::Mode,
     plumb::{MatchOutcome, PlumbingMessage},
-    set_config,
     system::System,
     ui::{StateChange, UserInterface},
-    update_config,
     util::gen_help_docs,
 };
 use ad_event::Source;
@@ -135,7 +133,6 @@ pub enum Action {
     ToggleScratch,
     TsShowTree,
     Undo,
-    UpdateConfig { input: String },
     ViewLogs,
     Yank,
 
@@ -248,7 +245,7 @@ where
     }
 
     fn find_file_under_dir(&mut self, d: &Path, new_window: bool) {
-        let cmd = config_handle!().find_command.clone();
+        let cmd = config_handle!(self).find_command.clone();
         let selection = self.minibuffer_select_from_command_output("> ", &cmd, d);
 
         if let MiniBufferSelection::Line { line, .. } = selection {
@@ -387,7 +384,7 @@ where
         info!("reloading config");
         let msg = match Config::try_load() {
             (config, None) => {
-                set_config(config);
+                *self.config.lock().unwrap() = config;
                 "config reloaded".to_string()
             }
             (_, Some(s)) => s,
@@ -405,14 +402,6 @@ where
             .reload_from_disk();
 
         self.set_status_message(msg);
-    }
-
-    pub(super) fn update_config(&mut self, input: &str) {
-        info!(%input, "updating config");
-        if let Err(msg) = update_config(input) {
-            self.set_status_message(msg);
-        }
-        self.ui.state_change(StateChange::ConfigUpdated);
     }
 
     pub(super) fn set_mode(&mut self, name: &str) {

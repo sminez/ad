@@ -287,7 +287,7 @@ The third paragraph is even shorter.";
     #[test_case(LineStart, c(5, 0); "line start")]
     #[test]
     fn set_dot_works(to: TextObject, expected: Dot) {
-        let mut b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());
+        let mut b = Buffer::new_virtual(0, "test", EXAMPLE_TEXT, Default::default());
         b.dot = c(5, 1); // Start of paragraph 2
         to.set_dot(&mut b);
 
@@ -303,7 +303,7 @@ The third paragraph is even shorter.";
     )]
     #[test]
     fn dot_content_includes_expected_text(dot: Dot, expected: &str) {
-        let mut b = Buffer::new_virtual(0, "test".to_string(), EXAMPLE_TEXT.to_string());
+        let mut b = Buffer::new_virtual(0, "test", EXAMPLE_TEXT, Default::default());
         b.dot = dot;
         let content = b.dot_contents();
 

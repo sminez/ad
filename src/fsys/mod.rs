@@ -30,7 +30,7 @@
 //!       body
 //!       event
 //! ```
-use crate::{config_handle, editor::Action, input::Event, ui::SCRATCH_ID};
+use crate::{editor::Action, input::Event, ui::SCRATCH_ID};
 use ninep::{
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     sync::server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
@@ -350,7 +350,7 @@ pub(crate) struct AdFs {
 
 impl AdFs {
     /// Construct a new filesystem interface using channels held by the editor.
-    pub fn new(tx: Sender<Event>, brx: Receiver<LogEvent>) -> Self {
+    pub fn new(tx: Sender<Event>, brx: Receiver<LogEvent>, auto_mount: bool) -> Self {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
 
@@ -363,7 +363,6 @@ impl AdFs {
         spawn_log_listener(brx, listener_tx, log_rx);
 
         let buffer_nodes = BufferNodes::new(tx.clone(), listener_rx, log_tx);
-        let auto_mount = config_handle!().filesystem.auto_mount;
 
         Self {
             state: Arc::new(Mutex::new(State {

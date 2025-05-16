@@ -544,7 +544,7 @@ mod tests {
         use crate::exec::IterBoundedChars;
 
         let mut r = Regex::compile_reverse(re).unwrap();
-        let b = Buffer::new_unnamed(0, s);
+        let b = Buffer::new_unnamed(0, s, Default::default());
         let mut it = b.rev_iter_between(s.len(), 0);
         let m = r
             .match_iter(&mut it, s.len())

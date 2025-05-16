@@ -39,7 +39,6 @@ use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
 };
 use ninep::sync::client::UnixClient;
-use serial_test::serial;
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
 use std::{
@@ -68,7 +67,6 @@ const FSYS_MAX_TRIES: usize = 10;
     "tests/data/editor-scenarios/plumbing"
 )]
 #[test]
-#[serial]
 fn editor_scenarios(path: &str, content: &str) {
     // Parse the given test case file and validate it before initialising the editor
     let TestCase {
