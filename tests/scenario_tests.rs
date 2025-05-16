@@ -227,13 +227,13 @@ impl TestCase {
         let status_messages = Arc::new(Mutex::new(Vec::new()));
 
         // Unique ID for our testing temp directory and any fsys socket that gets created
+        let (_dir, fname) = path.rsplit_once('/').unwrap();
         let test_id = format!(
-            "ad-tests-{}-{}",
+            "ad-tests-{}-{fname}",
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            path.replace("tests/data/editor-scenarios/", "")
         );
 
         Self {
