@@ -3,7 +3,7 @@ we _should_ display an error to the user in a new window explaining why we
 had to fall back to the default config file.
 
 -- config --
-tests/data/config/malformed.toml
+path: tests/data/config/malformed.toml
 -- file-hello.txt --
 -- buffer-list --
 1      hello.txt

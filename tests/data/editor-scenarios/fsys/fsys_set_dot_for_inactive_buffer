@@ -3,7 +3,7 @@ control file for that buffer in fsys. This should not affect the active buffer
 state of the editor.
 
 -- config --
-tests/data/config/with-fsys.toml
+path: tests/data/config/with-fsys.toml
 -- file-hello-1.txt --
 hello, world!
 -- file-hello-2.txt --

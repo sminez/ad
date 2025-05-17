@@ -6,7 +6,7 @@ buffer in the layout state and future inputs should be sent to the correct
 buffer.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-foo.txt --
 foo
 -- file-bar.txt --

@@ -1,7 +1,7 @@
 Executing a command using | should pipe the current buffer dot through the command.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-foo.txt --
 foo
 bar

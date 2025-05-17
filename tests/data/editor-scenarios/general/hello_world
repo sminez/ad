@@ -1,7 +1,7 @@
 Open an empty file and type "hello, world!" into it.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-hello.txt --
 -- actions --
 type: ihello, world!

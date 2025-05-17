@@ -2,7 +2,7 @@ Open an empty file and enter "hello, world!" into it via the virtual filesystem
 interface by appending directly to the file body.
 
 -- config --
-tests/data/config/with-fsys.toml
+path: tests/data/config/with-fsys.toml
 -- file-hello.txt --
 -- actions --
 fsys: write buffers/1/body hello, world!

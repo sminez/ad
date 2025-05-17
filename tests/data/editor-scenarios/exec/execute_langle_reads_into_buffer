@@ -1,7 +1,7 @@
 Executing a command using < should replace the command selection with the output.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-foo.txt --
 foo
 -- file-bar.txt --

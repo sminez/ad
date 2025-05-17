@@ -1,7 +1,7 @@
 Executing a command should open the corresponding output buffer.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-foo.txt --
 foo
 -- file-bar.txt --

@@ -2,7 +2,7 @@ Set the dot for the active buffer by writing a regular expression to the 'addr'
 control file for that buffer in fsys.
 
 -- config --
-tests/data/config/with-fsys.toml
+path: tests/data/config/with-fsys.toml
 -- file-hello.txt --
 hello, world!
 -- actions --

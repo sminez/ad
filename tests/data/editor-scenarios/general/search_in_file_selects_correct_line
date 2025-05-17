@@ -1,7 +1,7 @@
 Using the built-in "search in file" behaviour should select the chosen line
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-hello.txt --
 This is the first line
 and this is the second.

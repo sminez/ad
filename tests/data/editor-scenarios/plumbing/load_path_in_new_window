@@ -1,7 +1,7 @@
 Alt-Return should open a new window when loading a file.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-hello.txt --
 hello, world!
 -- file-load-me.txt --

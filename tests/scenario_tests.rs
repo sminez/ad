@@ -1,33 +1,7 @@
 //! Data driven tests that run the editor in headless mode to provide full testing
 //! of the main editor behaviour (other than the UI).
 //!
-//! Test files are written in txtar format and have the following supported
-//! sections:
-//!   - config
-//!     path to a file to load as config (default: data/config.toml)
-//!   - plumbing-rules
-//!     path to a file to load as plumbing rules (default: empty ruleset)
-//!   - file-X
-//!     inline file content for a file that should be created and opened on startup
-//!     first line is the path to use for the file
-//!   - actions
-//!     one action per line (see the "TestAction" enum below)
-//!   - buffer-list
-//!     a list of buffer IDs and their expected file paths in the format used
-//!     by the minibuffer buffer list. '*' marks the buffer that is expected
-//!     to be focused
-//!   - expected-windows
-//!     the expected columns and their ordered buffer IDs (column per-line)
-//!     "1 3"   <- first column should contain two windows with ids 1 & 3
-//!     "2"     <- second column should contain a single window with id 2
-//!   - expected-buffer-X
-//!     the expected final content for the buffer with ID X
-//!   - expected-buffer-dot-X
-//!     the expected content of the Dot for the buffer with ID X
-//!
-//! Any comment section present at the top of a test file will be printed before
-//! the test is run for additional debugging context in the event of a test
-//! failure.
+//! See TestCase::from_archive for details of the supported file sections.
 use ad_editor::{
     buffer::BufferId,
     editor::{Action, Click, MiniBufferState},
@@ -44,6 +18,7 @@ use simple_txtar::{Archive, File};
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::{mpsc::Sender, Arc, Mutex},
     thread::{sleep, spawn},
     time::{Duration, SystemTime},
@@ -76,7 +51,7 @@ fn editor_scenarios(path: &str, content: &str) {
         status_messages,
     } = TestCase::from_archive(path, content);
 
-    if !assertions.is_valid() {
+    if assertions.is_empty() {
         panic!("no assertions provided");
     }
 
@@ -143,33 +118,75 @@ struct TestCase {
 }
 
 impl TestCase {
+    /// A bare bones parser for the txtar test file format used by the editor_scenarios test above.
+    ///
+    /// If the file being parsed is malformed in any way this method will panic in order to fail
+    /// the test. The parsing of each section of the archive is documented in inline comments
+    /// within parser itself.
     fn from_archive(path: &str, content: &str) -> Self {
         let arr = Archive::from(content);
-        let home = env::var("HOME").unwrap();
-        let uname = env::var("USER").unwrap();
+        let home = env::var("HOME").expect("HOME env var required for parsing config");
+        let uname = env::var("USER").expect("USER env var required for connecting to fsys");
 
+        // If there is a top level comment to the archive we print it for additional debugging
+        // context if the test case fails or the rest of the file fails to parse.
         let comment = arr.comment();
         if !comment.is_empty() {
             println!("{}", comment.trim());
         }
 
-        let config_path = match arr.get("config") {
-            Some(f) => f.content.trim(),
-            None => "data/config.toml",
+        // -- config --
+        // Default config can overwritten by providing a config file inline or as a file path by
+        // providing a single line of the form "path: path/to/config.toml".
+        let (config, config_err) = match arr.get("config") {
+            Some(f) => {
+                let s = f.content.trim();
+                match s.strip_prefix("path: ") {
+                    Some(p) => Config::try_load_from_path(p, &home),
+                    None => Config::try_load_from_str(s, path, &home),
+                }
+            }
+            None => (Config::default(), None),
         };
-        let (config, config_err) = Config::try_load_from_path(config_path, &home);
 
+        // -- plumbing-rules --
+        // Same idea for plumbing rules
         let plumbing_rules = match arr.get("plumbing-rules") {
-            Some(f) => PlumbingRules::try_load_from_path(f.content.trim()).unwrap_or_default(),
+            Some(f) => {
+                let s = f.content.trim();
+                match s.strip_prefix("path: ") {
+                    Some(p) => PlumbingRules::try_load_from_path(p).unwrap(),
+                    None => PlumbingRules::from_str(s).unwrap(),
+                }
+            }
             None => PlumbingRules::default(),
         };
 
+        // -- actions --
+        // Actions are not required as the setup of the test alone may be all we need
         let actions = match arr.get("actions") {
             Some(f) => parse_actions(f.content.trim()),
             None => Vec::new(),
         };
 
+        // -- buffer-list --
+        // The buffer list is just a raw string that we compare to the final listing that
+        // the user can open in the minibuffer using 2"<space> b". We trim the working
+        // directory from the start of each path in the real listing so the content in a
+        // test case should just be the paths as provided in -- file-X -- sections.
+        // (See the file-X section below for more details)
         let buffer_list = arr.get("buffer-list").map(|f| f.content.trim().to_string());
+
+        // -- expected-windows --
+        // Expected windows are specified as the ordered buffer IDs per column, one
+        // column per line. So,
+        // ```
+        // 1 2
+        // 3 4 5
+        // ```
+        // Would expect there to be two column in the UI layout, the first containing
+        // buffers 1 and 2 (top to bottom) and the second containing buffers 3, 4 and
+        // 5 (again, top to bottom).
         let windows = match arr.get("expected-windows") {
             Some(f) => {
                 let mut windows = Vec::with_capacity(f.content.lines().count());
@@ -188,45 +205,72 @@ impl TestCase {
             None => Vec::new(),
         };
 
+        // The remaining file sections are defined using prefixes rather than each
+        // having a pre-defined name. They may be repeated as often as desired but
+        // collisions in names are invalid and will result in a panic.
         let mut files = Vec::new();
         let mut buffer_dots = Vec::new();
         let mut buffer_contents = Vec::new();
 
+        let strip_trailing_newline = |f: &mut File| {
+            if f.content.ends_with('\n') {
+                f.content.pop();
+            }
+        };
+        let parse_bufid = |str_id: &str| {
+            str_id
+                .parse::<BufferId>()
+                .unwrap_or_else(|_| panic!("invalid buffer ID: {str_id:?}"))
+        };
+
         for mut file in arr.into_iter() {
-            if file.name.starts_with("file-") {
-                file.name = file.name.strip_prefix("file-").unwrap().to_string();
-                if file.content.ends_with('\n') {
-                    file.content.pop();
-                }
+            if let Some(fname) = file.name.strip_prefix("file-") {
+                // -- file-$filepath --
+                // File sections define a file that should be present and loaded in the editor
+                // as part of startup (as if the file path had been provided as an argument on
+                // the command line).
+                // Trailing newlines are stripped so that it is possible to have a completely
+                // empty input file by providing a file section without any content.
+                file.name = fname.to_string();
+                strip_trailing_newline(&mut file);
                 files.push(file);
-            } else if file.name.starts_with("expected-buffer-dot-") {
-                let id: BufferId = file
-                    .name
-                    .strip_prefix("expected-buffer-dot-")
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                if file.content.ends_with('\n') {
-                    file.content.pop();
-                }
+            } else if let Some(str_id) = file.name.strip_prefix("expected-buffer-dot-") {
+                // --expected-buffer-dot-$bufid --
+                // Specify the expected content of the dot for a given buffer after all test
+                // actions have been run.
+                let id = parse_bufid(str_id);
+                strip_trailing_newline(&mut file);
                 buffer_dots.push((id, file.content));
-            } else if file.name.starts_with("expected-buffer-") {
-                let id: BufferId = file
-                    .name
-                    .strip_prefix("expected-buffer-")
-                    .unwrap()
-                    .parse()
-                    .unwrap();
-                if file.content.ends_with('\n') {
-                    file.content.pop();
-                }
+            } else if let Some(str_id) = file.name.strip_prefix("expected-buffer-") {
+                // --expected-buffer-$bufid --
+                // Specify the expected content of a given buffer after all test actions have
+                // been run.
+                let id = parse_bufid(str_id);
+                strip_trailing_newline(&mut file);
                 buffer_contents.push((id, file.content));
             }
         }
 
-        let status_messages = Arc::new(Mutex::new(Vec::new()));
+        let (ui, status_messages) = ScriptedUi::new(uname, actions);
+        let setup = Setup {
+            config,
+            config_err,
+            plumbing_rules,
+            files,
+            ui,
+        };
+        let assertions = Assertions {
+            buffer_list,
+            windows,
+            buffer_contents,
+            buffer_dots,
+        };
 
-        // Unique ID for our testing temp directory and any fsys socket that gets created
+        // End of file parsing
+
+        // Create a unique ID for our testing temp directory and fsys socket (if created) so
+        // we can control the paths that appear in the editor and simplify cleanup of test
+        // data.
         let (_dir, fname) = path.rsplit_once('/').unwrap();
         let test_id = format!(
             "ad-tests-{}-{fname}",
@@ -238,26 +282,8 @@ impl TestCase {
 
         Self {
             test_id,
-            setup: Setup {
-                config,
-                config_err,
-                plumbing_rules,
-                files,
-                ui: ScriptedUi {
-                    uname,
-                    socket_path: PathBuf::new(),
-                    actions,
-                    pending_fsys: Arc::new(Mutex::new(false)),
-                    status_messages: status_messages.clone(),
-                    tx: None,
-                },
-            },
-            assertions: Assertions {
-                buffer_list,
-                windows,
-                buffer_contents,
-                buffer_dots,
-            },
+            setup,
+            assertions,
             status_messages,
         }
     }
@@ -281,12 +307,11 @@ struct Assertions {
 }
 
 impl Assertions {
-    /// Test case assertions are valid as long as there is at least one thing being asserted
-    fn is_valid(&self) -> bool {
-        self.buffer_list.is_some()
-            || !self.windows.is_empty()
-            || !self.buffer_contents.is_empty()
-            || !self.buffer_dots.is_empty()
+    fn is_empty(&self) -> bool {
+        self.buffer_list.is_none()
+            && self.windows.is_empty()
+            && self.buffer_contents.is_empty()
+            && self.buffer_dots.is_empty()
     }
 
     fn verify(&self, e: &Editor<DefaultSystem>, test_dir: &Path) {
@@ -332,6 +357,20 @@ struct ScriptedUi {
 }
 
 impl ScriptedUi {
+    fn new(uname: String, actions: Vec<TestAction>) -> (Self, Arc<Mutex<Vec<String>>>) {
+        let status_messages = Arc::new(Mutex::new(Vec::new()));
+        let ui = ScriptedUi {
+            uname,
+            socket_path: PathBuf::new(),
+            actions,
+            pending_fsys: Arc::new(Mutex::new(false)),
+            status_messages: status_messages.clone(),
+            tx: None,
+        };
+
+        (ui, status_messages)
+    }
+
     fn spawn_fsys(&self, f: Fsys) {
         let mut client =
             match UnixClient::new_unix_with_explicit_path(&self.uname, &self.socket_path, "") {

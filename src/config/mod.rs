@@ -57,30 +57,34 @@ impl Config {
     /// are reported as a formatted string for displaying to the user.
     pub fn try_load_from_path(path: &str, home: &str) -> (Self, Option<String>) {
         match fs::read_to_string(path) {
-            Ok(s) => {
-                let raw: RawConfig = match toml::from_str(&s) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        error!("malformed config file: {e}");
-                        return (
-                            Config::default(),
-                            Some(format!("malformed config file: {e}")),
-                        );
-                    }
-                };
-                let (cfg, err) = raw.resolve(path, home);
-                if let Some(err) = err.as_ref() {
-                    error!("malformed config: {err}");
-                }
-
-                (cfg, err)
-            }
-
+            Ok(s) => Self::try_load_from_str(&s, path, home),
             Err(e) => (
                 Config::default(),
                 Some(format!("unable to load config file: {e}")),
             ),
         }
+    }
+
+    /// Attempt to load a config file from its raw file contents as a string.
+    /// If there are any errors while loading and parsing the file then they
+    /// are reported as a formatted string for displaying to the user.
+    pub fn try_load_from_str(s: &str, path: &str, home: &str) -> (Self, Option<String>) {
+        let raw: RawConfig = match toml::from_str(s) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                error!("malformed config file: {e}");
+                return (
+                    Config::default(),
+                    Some(format!("malformed config file: {e}")),
+                );
+            }
+        };
+        let (cfg, err) = raw.resolve(path, home);
+        if let Some(err) = err.as_ref() {
+            error!("malformed config: {err}");
+        }
+
+        (cfg, err)
     }
 
     /// Attempt to load a config file from the default location.

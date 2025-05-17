@@ -2,7 +2,7 @@ Running an exec script from the scratch buffer should result in the script
 being run against the currently focused buffer rather than in scratch.
 
 -- config --
-tests/data/config/without-fsys.toml
+path: tests/data/config/without-fsys.toml
 -- file-hello.txt --
 hello, world!
 -- actions --
