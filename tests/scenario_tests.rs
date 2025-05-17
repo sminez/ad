@@ -206,9 +206,9 @@ impl TestCase {
         // The remaining file sections are defined using prefixes rather than each
         // having a pre-defined name. They may be repeated as often as desired but
         // collisions in names are invalid and will result in a panic.
-        let mut files = Vec::new();
-        let mut buffer_dots = Vec::new();
-        let mut buffer_contents = Vec::new();
+        let mut files: Vec<File> = Vec::new();
+        let mut buffer_dots: Vec<(BufferId, String)> = Vec::new();
+        let mut buffer_contents: Vec<(BufferId, String)> = Vec::new();
 
         let strip_trailing_newline = |f: &mut File| {
             if f.content.ends_with('\n') {
@@ -230,6 +230,9 @@ impl TestCase {
                 // Trailing newlines are stripped so that it is possible to have a completely
                 // empty input file by providing a file section without any content.
                 file.name = fname.to_string();
+                if files.iter().any(|f| f.name == file.name) {
+                    panic!(">>> ERROR duplicate test file name: {:?}", file.name);
+                }
                 strip_trailing_newline(&mut file);
                 files.push(file);
             } else if let Some(str_id) = file.name.strip_prefix("expected-buffer-dot-") {
@@ -237,6 +240,9 @@ impl TestCase {
                 // Specify the expected content of the dot for a given buffer after all test
                 // actions have been run.
                 let id = parse_bufid(str_id);
+                if buffer_dots.iter().any(|(known_id, _)| *known_id == id) {
+                    panic!(">>> ERROR duplicate expected-buffer-dot section for ID={id}");
+                }
                 strip_trailing_newline(&mut file);
                 buffer_dots.push((id, file.content));
             } else if let Some(str_id) = file.name.strip_prefix("expected-buffer-") {
@@ -244,6 +250,9 @@ impl TestCase {
                 // Specify the expected content of a given buffer after all test actions have
                 // been run.
                 let id = parse_bufid(str_id);
+                if buffer_contents.iter().any(|(known_id, _)| *known_id == id) {
+                    panic!(">>> ERROR duplicate expected-buffer section for ID={id}");
+                }
                 strip_trailing_newline(&mut file);
                 buffer_contents.push((id, file.content));
             }
@@ -368,47 +377,22 @@ impl ScriptedUi {
     }
 
     fn spawn_fsys(&self, f: Fsys) {
-        let mut client =
-            match UnixClient::new_unix_with_explicit_path(&self.uname, &self.socket_path, "") {
-                Ok(client) => client,
-                Err(e) => {
-                    println!(">>> UNABLE TO CREATE FSYS CLIENT: {e}");
-                    return;
-                }
-            };
-
-        *self.pending_fsys.lock().unwrap() = true;
-        let pending = self.pending_fsys.clone();
-
-        spawn(move || {
-            let inner = move || {
-                match f {
-                    Fsys::Read(path) => {
-                        let s = client.read_str(&path)?;
-                        println!("read {path}: {s:?}");
-                    }
-
-                    Fsys::ReadDir(path) => {
-                        for stat in client.read_dir(&path)?.into_iter() {
-                            println!("read dir ({path}): {}", stat.fm.name);
-                        }
-                    }
-
-                    Fsys::Write(path, content) => {
-                        client.write_str(&path, 0, &content)?;
-                        println!("wrote to {path}: {content:?}");
-                    }
-                }
-
-                io::Result::Ok(())
-            };
-
-            if let Err(e) = inner() {
-                println!(">>> FSYS ERROR: {e}");
+        match UnixClient::new_unix_with_explicit_path(&self.uname, &self.socket_path, "") {
+            Ok(client) => {
+                // We need to mark that we are pending before spawning the background thread
+                // for running the fsys operation otherwise we race with the main editor
+                // event loop and can fail to wait for the client to connect.
+                let pending = self.pending_fsys.clone();
+                *pending.lock().unwrap() = true;
+                spawn(move || f.run(client, pending));
             }
-
-            *pending.lock().unwrap() = false;
-        });
+            Err(e) => {
+                // Not panicking here so we can let the rest of the test run to completion
+                // and allow the cleanup logic to run.
+                println!(">>> UNABLE TO CREATE FSYS CLIENT: {e}");
+                return;
+            }
+        }
     }
 }
 
@@ -494,6 +478,38 @@ enum Fsys {
     Write(String, String),
 }
 
+impl Fsys {
+    fn run(self, mut client: UnixClient, pending: Arc<Mutex<bool>>) {
+        let inner = move || {
+            match self {
+                Fsys::Read(path) => {
+                    let s = client.read_str(&path)?;
+                    println!("read {path}: {s:?}");
+                }
+
+                Fsys::ReadDir(path) => {
+                    for stat in client.read_dir(&path)?.into_iter() {
+                        println!("read dir ({path}): {}", stat.fm.name);
+                    }
+                }
+
+                Fsys::Write(path, content) => {
+                    client.write_str(&path, 0, &content)?;
+                    println!("wrote to {path}: {content:?}");
+                }
+            }
+
+            io::Result::Ok(())
+        };
+
+        if let Err(e) = inner() {
+            println!(">>> FSYS ERROR: {e}");
+        }
+
+        *pending.lock().unwrap() = false;
+    }
+}
+
 /// User input actions to send to the editor.
 /// Note that the whitespace after the colon following the action name is required for the simple
 /// parser being used here. Blank lines and lines beginning with a '#' will be treated as comments
@@ -525,6 +541,7 @@ enum TestAction {
     Fsys(Fsys),
 }
 
+/// See [TestAction] for example valid input lines.
 fn parse_actions(raw: &str) -> Vec<TestAction> {
     let mut actions = Vec::with_capacity(raw.lines().count());
 
@@ -538,6 +555,10 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
             };
             actions.push(TestAction::SleepMs(n));
         } else if let Some(s) = line.strip_prefix("type: ") {
+            // We need to provide a special syntax for control characters etc.
+            // Rather than make things complicated and try to support marking sequences of characters
+            // as being typed while control characters are held, we required that they are given one
+            // per line. ("normal" typing can be given as a concatenation).
             match s {
                 "<esc>" => actions.push(TestAction::Input(Input::Esc)),
 
