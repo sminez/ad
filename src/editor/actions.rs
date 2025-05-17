@@ -383,11 +383,11 @@ where
     pub(super) fn reload_config(&mut self) {
         info!("reloading config");
         let msg = match Config::try_load() {
-            (config, None) => {
+            Ok(config) => {
                 *self.config.lock().unwrap() = config;
                 "config reloaded".to_string()
             }
-            (_, Some(s)) => s,
+            Err(s) => s,
         };
         info!("{msg}");
 

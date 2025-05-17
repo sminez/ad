@@ -36,10 +36,9 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let (cfg, errs) = RawConfig::default().resolve(&config_path(), "");
-        assert!(errs.is_none(), "default config is broken");
-
-        cfg
+        RawConfig::default()
+            .resolve(&config_path(), "")
+            .expect("default config is broken")
     }
 }
 
@@ -55,36 +54,30 @@ impl Config {
     /// Attempt to load a config file from a specified location.
     /// If there are any errors while loading and parsing the file then they
     /// are reported as a formatted string for displaying to the user.
-    pub fn try_load_from_path(path: &str, home: &str) -> (Self, Option<String>) {
+    pub fn try_load_from_path(path: &str, home: &str) -> Result<Self, String> {
         match fs::read_to_string(path) {
             Ok(s) => Self::try_load_from_str(&s, path, home),
-            Err(e) => (
-                Config::default(),
-                Some(format!("unable to load config file: {e}")),
-            ),
+            Err(e) => Err(format!("unable to load config file: {e}")),
         }
     }
 
     /// Attempt to load a config file from its raw file contents as a string.
     /// If there are any errors while loading and parsing the file then they
     /// are reported as a formatted string for displaying to the user.
-    pub fn try_load_from_str(s: &str, path: &str, home: &str) -> (Self, Option<String>) {
+    pub fn try_load_from_str(s: &str, path: &str, home: &str) -> Result<Self, String> {
         let raw: RawConfig = match toml::from_str(s) {
             Ok(cfg) => cfg,
             Err(e) => {
                 error!("malformed config file: {e}");
-                return (
-                    Config::default(),
-                    Some(format!("malformed config file: {e}")),
-                );
+                return Err(format!("malformed config file: {e}"));
             }
         };
-        let (cfg, err) = raw.resolve(path, home);
-        if let Some(err) = err.as_ref() {
-            error!("malformed config: {err}");
+        let res = raw.resolve(path, home);
+        if let Err(err) = res.as_ref() {
+            error!("malformed config file: {err}");
         }
 
-        (cfg, err)
+        res
     }
 
     /// Attempt to load a config file from the default location.
@@ -93,7 +86,7 @@ impl Config {
     /// will be written to disk.
     /// If there are any errors while loading and parsing the file then they
     /// are reported as a formatted string for displaying to the user.
-    pub fn try_load() -> (Self, Option<String>) {
+    pub fn try_load() -> Result<Self, String> {
         let home = env::var("HOME").unwrap();
         let path = config_path();
 

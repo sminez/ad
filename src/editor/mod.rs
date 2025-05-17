@@ -104,6 +104,23 @@ impl Editor<DefaultSystem> {
             DefaultSystem::from_env(),
         )
     }
+
+    pub fn new_with_initial_files(
+        config_res: Result<Config, String>,
+        plumbing_rules_res: Result<PlumbingRules, String>,
+        mode: EditorMode,
+        log_buffer: LogBuffer,
+        file_paths: &[impl AsRef<Path>],
+    ) -> Self {
+        Self::new_with_system_and_initial_files(
+            config_res,
+            plumbing_rules_res,
+            mode,
+            log_buffer,
+            DefaultSystem::from_env(),
+            file_paths,
+        )
+    }
 }
 
 impl<S> Editor<S>
@@ -162,6 +179,53 @@ where
             last_click_was_left: false,
             last_click_time: Instant::now(),
         }
+    }
+
+    /// Construct a new [Editor] using the provided config and then open a list of initial
+    /// files based on their file paths relative to the working directory of the editor.
+    ///
+    /// The config and plumbing rules results are used to display parse errors to the user
+    /// in virtual buffers. In the case that Err is passed for either argument, the default
+    /// for that type will be used to start the editor so the parser errors can be shown.
+    pub fn new_with_system_and_initial_files(
+        config_res: Result<Config, String>,
+        plumbing_rules_res: Result<PlumbingRules, String>,
+        mode: EditorMode,
+        log_buffer: LogBuffer,
+        system: S,
+        file_paths: &[impl AsRef<Path>],
+    ) -> Self {
+        let (config, config_err) = match config_res {
+            Ok(config) => (config, None),
+            Err(e) => (Config::default(), Some(e)),
+        };
+        let (plumbing_rules, plumb_err) = match plumbing_rules_res {
+            Ok(rules) => (rules, None),
+            Err(e) => (PlumbingRules::default(), Some(e)),
+        };
+
+        let mut e = Self::new_with_system(config, plumbing_rules, mode, log_buffer, system);
+
+        for path in file_paths.iter() {
+            e.open_file_relative_to_cwd(path, false);
+        }
+
+        if let Some(err) = config_err {
+            e.open_virtual(
+                "+config-error",
+                format!("Unable to load config file:\n{err}"),
+                true,
+            );
+        }
+        if let Some(err) = plumb_err {
+            e.open_virtual(
+                "+plumbing-error",
+                format!("Unable to load plumbing rules:\n{err}"),
+                true,
+            );
+        }
+
+        e
     }
 
     /// The id of the currently active buffer

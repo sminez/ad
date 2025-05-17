@@ -34,7 +34,7 @@ impl Default for RawConfig {
 impl RawConfig {
     /// Resolve the config that we need for running the editor and report any errors that
     /// resulted in defaults being used.
-    pub(super) fn resolve(self, config_path: &str, home: &str) -> (Config, Option<String>) {
+    pub(super) fn resolve(self, config_path: &str, home: &str) -> Result<Config, String> {
         let mut errs = Vec::new();
         let phome = PathBuf::from(home);
         let config_path = PathBuf::from(config_path);
@@ -56,6 +56,10 @@ impl RawConfig {
             .keys
             .map(|pos| pos.into_inner(config_dir, &phome, &mut errs))
             .unwrap_or_default();
+
+        if !errs.is_empty() {
+            return Err(errs.join("\n"));
+        }
 
         let mut cfg = Config {
             editor,
@@ -82,13 +86,7 @@ impl RawConfig {
             }
         }
 
-        let err_msg = if !errs.is_empty() {
-            Some(errs.join("\n"))
-        } else {
-            None
-        };
-
-        (cfg, err_msg)
+        Ok(cfg)
     }
 }
 
@@ -312,8 +310,8 @@ mod tests {
     #[test]
     fn valid_config_parses(path: &str, content: &str) {
         let raw: RawConfig = toml::from_str(content).unwrap();
-        let (_cfg, errs) = raw.resolve(path, "");
-        assert!(errs.is_none(), "{path} {errs:?}");
+        let res = raw.resolve(path, "");
+        assert!(res.is_ok(), "{path} {res:?}");
     }
 
     #[dir_cases("data/colorschemes")]

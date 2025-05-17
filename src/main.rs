@@ -8,7 +8,7 @@ use std::{
     io::{self, Read, Write},
     process::exit,
 };
-use tracing::{error, level_filters::LevelFilter, subscriber::set_global_default};
+use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 
 fn main() {
     let args = match Args::try_parse() {
@@ -38,27 +38,13 @@ fn main() {
     let subscriber = builder.finish();
     set_global_default(subscriber).expect("unable to set a global tracing subscriber");
 
-    let (config, config_err) = Config::try_load();
-    let plumbing_rules = match PlumbingRules::try_load() {
-        Ok(rules) => rules,
-        Err(s) => {
-            error!("unable to load plumbing rules: {s}");
-            PlumbingRules::default() // Empty plumbing rules
-        }
-    };
-
-    let mut e = Editor::new(config, plumbing_rules, EditorMode::Terminal, log_buffer);
-    for fname in files.iter() {
-        e.open_file_relative_to_cwd(fname, false);
-    }
-
-    if let Some(err) = config_err {
-        e.open_virtual(
-            "+config-error",
-            format!("Unable to load config file:\n{err}"),
-            true,
-        );
-    }
+    let mut e = Editor::new_with_initial_files(
+        Config::try_load(),
+        PlumbingRules::try_load(),
+        EditorMode::Terminal,
+        log_buffer,
+        &files,
+    );
 
     e.run()
 }

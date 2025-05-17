@@ -59,43 +59,39 @@ fn editor_scenarios(path: &str, content: &str) {
     let dir = env::temp_dir().join(&test_id);
     let test_file_dir = dir.join("files");
     let socket_path = dir.join("sock");
+    setup.ui.socket_path = socket_path.clone();
 
     fs::create_dir_all(&test_file_dir).expect("unable to create temp directory");
     println!("using {} for the fsys socket", socket_path.display());
     println!("using {} for test files", test_file_dir.display());
-    println!("config fsys.enabled={}", setup.config.filesystem.enabled);
 
-    setup.ui.socket_path = socket_path.clone();
+    // Write out all of our test files into the new temp directory and store the paths
+    // so they can be passed to the editor.
+    let file_paths: Vec<PathBuf> = setup
+        .files
+        .into_iter()
+        .map(|f| {
+            let p = test_file_dir.join(&f.name);
+            if let Some(parent) = p.parent() {
+                _ = fs::create_dir_all(parent);
+            }
+            if let Err(e) = fs::write(&p, f.content) {
+                fs::remove_dir_all(&test_file_dir).expect("unable to remove temp directory");
+                panic!("failed to write test file {}: {e}", f.name);
+            }
 
-    let mut e = Editor::new_with_system(
-        setup.config,
-        setup.plumbing_rules,
+            p
+        })
+        .collect();
+
+    let mut e = Editor::new_with_system_and_initial_files(
+        setup.config_res,
+        setup.plumbing_rules_res,
         EditorMode::Boxed(Box::new(setup.ui)),
         LogBuffer::default(),
         DefaultSystem::without_clipboard_provider(),
+        &file_paths,
     );
-
-    for f in setup.files.into_iter() {
-        let p = test_file_dir.join(&f.name);
-        if let Some(parent) = p.parent() {
-            _ = fs::create_dir_all(parent);
-        }
-        if let Err(e) = fs::write(&p, f.content) {
-            fs::remove_dir_all(test_file_dir).expect("unable to remove temp directory");
-            panic!("failed to write test file {}: {e}", f.name);
-        }
-
-        e.open_file_relative_to_cwd(p, false);
-    }
-
-    if let Some(err) = setup.config_err {
-        e.open_virtual(
-            "+config-error",
-            format!("Unable to load config file:\n{err}"),
-            true,
-        );
-        println!(">> CONFIG LOAD ERROR:\n{err}\n");
-    }
 
     e.run_with_explicit_fsys_path(socket_path.clone());
 
@@ -138,7 +134,7 @@ impl TestCase {
         // -- config --
         // Default config can overwritten by providing a config file inline or as a file path by
         // providing a single line of the form "path: path/to/config.toml".
-        let (config, config_err) = match arr.get("config") {
+        let config_res = match arr.get("config") {
             Some(f) => {
                 let s = f.content.trim();
                 match s.strip_prefix("path: ") {
@@ -146,27 +142,29 @@ impl TestCase {
                     None => Config::try_load_from_str(s, path, &home),
                 }
             }
-            None => (Config::default(), None),
+            None => Ok(Config::default()),
         };
 
         // -- plumbing-rules --
         // Same idea for plumbing rules
-        let plumbing_rules = match arr.get("plumbing-rules") {
+        let plumbing_rules_res = match arr.get("plumbing-rules") {
             Some(f) => {
                 let s = f.content.trim();
                 match s.strip_prefix("path: ") {
-                    Some(p) => PlumbingRules::try_load_from_path(p).unwrap(),
-                    None => PlumbingRules::from_str(s).unwrap(),
+                    Some(p) => PlumbingRules::try_load_from_path(p),
+                    None => PlumbingRules::from_str(s),
                 }
             }
-            None => PlumbingRules::default(),
+            None => Ok(PlumbingRules::default()),
         };
 
         // -- actions --
-        // Actions are not required as the setup of the test alone may be all we need
+        // Actions are not required as the setup of the test alone may be all we need but
+        // we provide a default sleep no-op action to handle the first render call that
+        // comes through when the edior starts up.
         let actions = match arr.get("actions") {
             Some(f) => parse_actions(f.content.trim()),
-            None => Vec::new(),
+            None => vec![TestAction::SleepMs(100)],
         };
 
         // -- buffer-list --
@@ -253,9 +251,8 @@ impl TestCase {
 
         let (ui, status_messages) = ScriptedUi::new(uname, actions);
         let setup = Setup {
-            config,
-            config_err,
-            plumbing_rules,
+            config_res,
+            plumbing_rules_res,
             files,
             ui,
         };
@@ -291,9 +288,8 @@ impl TestCase {
 
 #[derive(Debug)]
 struct Setup {
-    config: Config,
-    config_err: Option<String>,
-    plumbing_rules: PlumbingRules,
+    config_res: Result<Config, String>,
+    plumbing_rules_res: Result<PlumbingRules, String>,
     files: Vec<File>,
     ui: ScriptedUi,
 }
