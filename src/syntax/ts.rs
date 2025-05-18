@@ -482,7 +482,7 @@ mod tests {
         buffer::Buffer,
         dot::{Cur, Dot},
         editor::Action,
-        syntax::RangeToken,
+        syntax::{RangeToken, SyntaxState},
     };
     use ad_event::Source;
     use simple_test_case::test_case;
@@ -509,11 +509,16 @@ mod tests {
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
                 .unwrap();
         ts.update(gb, 0, gb.len());
-        b.ts_state = Some(ts);
+        b.syntax_state = Some(SyntaxState::Ts(ts));
 
         assert_eq!(b.str_contents(), "fn main() {}\n");
+
+        let ranges = match b.syntax_state.as_ref() {
+            Some(SyntaxState::Ts(ts)) => ts.t.range_tokens(),
+            _ => panic!("no ts state"),
+        };
         assert_eq!(
-            b.ts_state.as_ref().unwrap().t.range_tokens(),
+            ranges,
             vec![
                 rt("keyword", 0, 2),       // fn
                 rt("punctuation", 7, 8),   // (
@@ -525,11 +530,14 @@ mod tests {
 
         b.dot = Dot::Cur { c: Cur { idx: 9 } };
         b.handle_action(Action::Delete, Source::Fsys);
-        b.ts_state
+        b.syntax_state
             .as_mut()
             .unwrap()
             .update(&b.txt, 0, usize::MAX - 1);
-        let ranges = b.ts_state.as_ref().unwrap().t.range_tokens();
+        let ranges = match b.syntax_state.as_ref() {
+            Some(SyntaxState::Ts(ts)) => ts.t.range_tokens(),
+            _ => panic!("no ts state"),
+        };
 
         assert_eq!(b.str_contents(), "fn main(){}\n");
         assert_eq!(ranges.len(), 5);

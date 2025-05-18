@@ -7,7 +7,7 @@
 use crate::{
     buffer::GapBuffer,
     dot::Range,
-    regex::{self, IndexedChars, Match, Regex},
+    regex::{IndexedChars, Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
 
@@ -19,13 +19,16 @@ pub struct ReState {
 }
 
 impl ReState {
-    pub fn new(tagged_re: &[(impl AsRef<str>, impl AsRef<str>)]) -> Result<Self, regex::Error> {
+    pub fn new(tagged_re: &[(impl AsRef<str>, impl AsRef<str>)]) -> Result<Self, String> {
         let mut names = Vec::with_capacity(tagged_re.len());
         let mut re = Vec::with_capacity(tagged_re.len());
 
         for (name, re_str) in tagged_re.iter() {
             names.push(name.as_ref().to_string());
-            re.push(Regex::compile(re_str.as_ref())?);
+            re.push(
+                Regex::compile(re_str.as_ref())
+                    .map_err(|err| format!("invalid regex ({:?}): {err:?}", re_str.as_ref()))?,
+            );
         }
 
         Ok(Self {

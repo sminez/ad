@@ -65,25 +65,28 @@ pub fn setup_dotfiles() -> DynResult {
     fs::create_dir_all(dot_dir.join("mnt"))?;
 
     let cp = |path: &str| fs::copy(data_dir.join(path), dot_dir.join(path));
+    let cp_dir = |path: &str| {
+        fs::create_dir_all(dot_dir.join(path))?;
+        for entry in fs::read_dir(data_dir.join(path))? {
+            let p = entry?.path();
+            let fname = p.file_name().unwrap().to_string_lossy();
+            cp(&format!("{path}/{fname}"))?;
+        }
+        DynResult::Ok(())
+    };
 
     eprintln!("  [ ] copying default config file");
     cp("config.toml")?;
     eprintln!("  [ ] copying default plumbing rules");
     cp("plumbing.rules")?;
     eprintln!("  [ ] copying data/bin...");
-    fs::create_dir_all(dot_dir.join("bin"))?;
-    for entry in fs::read_dir(data_dir.join("bin"))? {
-        let path = entry?.path();
-        let fname = path.file_name().unwrap().to_string_lossy();
-        cp(&format!("bin/{fname}"))?;
-    }
+    cp_dir("bin")?;
     eprintln!("  [ ] copying data/lib...");
-    fs::create_dir_all(dot_dir.join("lib"))?;
-    for entry in fs::read_dir(data_dir.join("lib"))? {
-        let path = entry?.path();
-        let fname = path.file_name().unwrap().to_string_lossy();
-        cp(&format!("lib/{fname}"))?;
-    }
+    cp_dir("lib")?;
+    eprintln!("  [ ] copying data/colorschemes...");
+    cp_dir("colorschemes")?;
+    eprintln!("  [ ] copying data/syntax...");
+    cp_dir("syntax")?;
 
     Ok(())
 }

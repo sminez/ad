@@ -7,7 +7,7 @@ use crate::{
     fsys::InputFilter,
     key::Input,
     lsp::Coords,
-    syntax::{ts::TsState, LineIter},
+    syntax::{LineIter, SyntaxState},
     util::normalize_line_endings,
     Config, MAX_NAME_LEN, UNNAMED_BUFFER,
 };
@@ -180,7 +180,7 @@ pub struct Buffer {
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
     pub(crate) input_filter: Option<InputFilter>,
-    pub(crate) ts_state: Option<TsState>,
+    pub(crate) syntax_state: Option<SyntaxState>,
     config: Arc<Mutex<Config>>,
     version: AtomicUsize,
     edit_log: EditLog,
@@ -204,7 +204,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             input_filter: None,
-            ts_state: None,
+            syntax_state: None,
             config,
             version: AtomicUsize::new(1),
             edit_log: EditLog::default(),
@@ -227,7 +227,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             input_filter: None,
-            ts_state: None,
+            syntax_state: None,
             config,
             version: AtomicUsize::new(1),
             edit_log: EditLog::default(),
@@ -259,7 +259,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             input_filter: None,
-            ts_state: None,
+            syntax_state: None,
             config,
             version: AtomicUsize::new(1),
             edit_log: EditLog::default(),
@@ -284,7 +284,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             input_filter: None,
-            ts_state: None,
+            syntax_state: None,
             config,
             version: AtomicUsize::new(1),
             edit_log: EditLog::default(),
@@ -295,16 +295,11 @@ impl Buffer {
     /// based on this buffer's BufferKind
     fn try_set_ts_state(&mut self) {
         let cfg = config_handle!(self);
-        self.ts_state = None;
-        if let Some(lang) = cfg.ts_lang_for_buffer(self) {
-            match TsState::try_new(
-                lang,
-                &cfg.tree_sitter.parser_dir,
-                &cfg.tree_sitter.syntax_query_dir,
-                &self.txt,
-            ) {
-                Ok(state) => self.ts_state = Some(state),
-                Err(msg) => error!("unable to initialise tree-sitter: {msg}"),
+        self.syntax_state = None;
+        if let Some(lang) = cfg.lang_for_buffer(self) {
+            match SyntaxState::try_new(lang, &self.txt, &cfg) {
+                Ok(state) => self.syntax_state = Some(state),
+                Err(msg) => error!("unable to initialise syntax state: {msg}"),
             }
         }
     }
@@ -430,7 +425,7 @@ impl Buffer {
             last_save: SystemTime::now(),
             dirty: false,
             input_filter: None,
-            ts_state: None,
+            syntax_state: None,
             config,
             version: AtomicUsize::new(1),
             edit_log: Default::default(),
@@ -494,7 +489,9 @@ impl Buffer {
     }
 
     pub(crate) fn pretty_print_ts_tree(&self) -> Option<String> {
-        self.ts_state.as_ref().map(|ts| ts.pretty_print_tree())
+        self.syntax_state
+            .as_ref()
+            .and_then(|st| st.pretty_print_tree())
     }
 
     pub(crate) fn string_lines(&self) -> Vec<String> {
@@ -511,7 +508,7 @@ impl Buffer {
     }
 
     pub fn update_ts_state(&mut self, from: usize, n_rows: usize) {
-        if let Some(ts) = self.ts_state.as_mut() {
+        if let Some(ts) = self.syntax_state.as_mut() {
             ts.update(&self.txt, from, n_rows);
         }
     }
@@ -521,7 +518,7 @@ impl Buffer {
         line: usize,
         load_exec_range: Option<(bool, Range)>,
     ) -> LineIter<'_> {
-        match self.ts_state.as_ref() {
+        match self.syntax_state.as_ref() {
             Some(ts) => {
                 ts.iter_tokenized_lines_from(line, &self.txt, self.dot.as_range(), load_exec_range)
             }
@@ -1046,7 +1043,7 @@ impl Buffer {
 
         let idx = cur.idx;
 
-        if let Some(ts) = self.ts_state.as_mut() {
+        if let Some(ts) = self.syntax_state.as_mut() {
             if let Some(s) = deleted.as_ref() {
                 let len = s.chars().count();
                 let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
@@ -1062,7 +1059,7 @@ impl Buffer {
 
         self.edit_log.insert_char(cur, ch);
 
-        if let Some(ts) = self.ts_state.as_mut() {
+        if let Some(ts) = self.syntax_state.as_mut() {
             ts.edit(idx, idx, idx + 1, &self.txt);
         }
 
@@ -1086,7 +1083,7 @@ impl Buffer {
 
         let idx = cur.idx;
 
-        if let Some(ts) = self.ts_state.as_mut() {
+        if let Some(ts) = self.syntax_state.as_mut() {
             if let Some(s) = deleted.as_ref() {
                 let len = s.chars().count();
                 let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
@@ -1108,7 +1105,7 @@ impl Buffer {
             cur.idx += len;
         }
 
-        if let Some(ts) = self.ts_state.as_mut() {
+        if let Some(ts) = self.syntax_state.as_mut() {
             ts.edit(idx, idx, idx + len, &self.txt);
         }
 
@@ -1123,7 +1120,7 @@ impl Buffer {
             Dot::Range { r } => self.delete_range(r, source),
         };
 
-        if let Some(ts) = self.ts_state.as_mut() {
+        if let Some(ts) = self.syntax_state.as_mut() {
             let len = deleted.as_ref().map(|s| s.chars().count()).unwrap_or(1);
             let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
             ts.edit(cur.idx, ch_old_end, cur.idx, &self.txt);
@@ -1202,7 +1199,7 @@ fn n_digits(mut n: usize) -> usize {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::key::Arrow;
+    use crate::{key::Arrow, syntax::ts::TsState};
     use edit::tests::{del_c, del_s, in_c, in_s};
     use simple_test_case::test_case;
     use std::env;
@@ -1523,10 +1520,10 @@ pub(crate) mod tests {
     #[test]
     fn insert_string_reducing_buffer_len_works_with_ts_state() {
         let mut b = Buffer::new_virtual(0, "test", "fn main() {}", Default::default());
-        b.ts_state = Some(
+        b.syntax_state = Some(SyntaxState::Ts(
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
                 .unwrap(),
-        );
+        ));
 
         b.set_dot(TextObject::BufferStart, 1);
         b.extend_dot_forward(TextObject::BufferEnd, 1);
@@ -1545,10 +1542,10 @@ pub(crate) mod tests {
     #[test]
     fn insert_char_reducing_buffer_len_works_with_ts_state() {
         let mut b = Buffer::new_virtual(0, "test", "fn main() {}", Default::default());
-        b.ts_state = Some(
+        b.syntax_state = Some(SyntaxState::Ts(
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
                 .unwrap(),
-        );
+        ));
 
         b.set_dot(TextObject::BufferStart, 1);
         b.extend_dot_forward(TextObject::BufferEnd, 1);

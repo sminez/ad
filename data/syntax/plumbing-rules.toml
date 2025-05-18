@@ -1,0 +1,3 @@
+comment = "\\b#.*"
+keyword = "\\b(data|attr|plumb|arg)\\b"
+function = "\\b(matches|narrows|from|add|to|set|start|isfile|isdir)\\b"

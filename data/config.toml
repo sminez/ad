@@ -143,6 +143,10 @@ filenames = ["Makefile"]
 [languages.markdown]
 extensions = ["md"]
 
+[languages.plumbingrules]
+filenames = ["plumbing.rules"]
+re_syntax = "syntax/plumbing-rules.toml"
+
 [languages.proto]
 extensions = ["proto"]
 
@@ -173,6 +177,10 @@ extensions = ["swift"]
 
 [languages.toml]
 extensions = ["toml"]
+
+[languages.txtar]
+extensions = ["txtar"]
+re_syntax = "syntax/txtar.toml"
 
 [languages.yaml]
 extensions = ["yaml", "yml"]

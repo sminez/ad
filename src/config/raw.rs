@@ -2,8 +2,8 @@
 //! it into our internal data types.
 use crate::{
     config::{
-        ColorScheme, Config, EditorConfig, FsysConfig, KeyBindings, LangConfig, TsConfig,
-        DEFAULT_CONFIG,
+        ColorScheme, Config, EditorConfig, FsysConfig, KeyBindings, LangConfig, LspConfig,
+        TsConfig, DEFAULT_CONFIG,
     },
     syntax::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
     term::{Color, Styles},
@@ -14,6 +14,7 @@ use std::{
     fs, io,
     path::{Path, PathBuf},
 };
+use toml::Table;
 
 #[derive(Debug, PartialEq, Deserialize)]
 pub(super) struct RawConfig {
@@ -21,7 +22,7 @@ pub(super) struct RawConfig {
     filesystem: Option<FsysConfig>,
     tree_sitter: Option<TsConfig>,
     colorscheme: Option<PathOrStruct<RawColorScheme>>,
-    languages: Option<PathOrStruct<HashMap<String, LangConfig>>>,
+    languages: Option<PathOrStruct<HashMap<String, RawLangConfig>>>,
     keys: Option<PathOrStruct<KeyBindings>>,
 }
 
@@ -48,10 +49,19 @@ impl RawConfig {
             .unwrap_or_default()
             .into_inner(config_dir, &phome, &mut errs)
             .resolve(&mut errs);
-        let languages = self
+        let raw_languages = self
             .languages
             .map(|pos| pos.into_inner(config_dir, &phome, &mut errs))
             .unwrap_or_default();
+
+        let languages = raw_languages
+            .into_iter()
+            .map(|(lang, raw)| {
+                let conf = raw.resolve(config_dir, &phome, &mut errs);
+                (lang, conf)
+            })
+            .collect();
+
         let keys = self
             .keys
             .map(|pos| pos.into_inner(config_dir, &phome, &mut errs))
@@ -245,6 +255,59 @@ struct RawStyles {
     italic: bool,
     #[serde(default)]
     underline: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
+pub struct RawLangConfig {
+    #[serde(default)]
+    pub extensions: Vec<String>,
+    #[serde(default)]
+    pub first_lines: Vec<String>,
+    #[serde(default)]
+    pub filenames: Vec<String>,
+    #[serde(default)]
+    pub re_syntax: Option<String>,
+    #[serde(default)]
+    pub lsp: Option<LspConfig>,
+}
+
+impl RawLangConfig {
+    fn resolve(self, config_path: &Path, home: &Path, errs: &mut Vec<String>) -> LangConfig {
+        let re_syntax = match self.re_syntax {
+            None => Vec::new(),
+            Some(path) => match try_read::<Table>(&path, config_path, home) {
+                Err(e) => {
+                    errs.push(format!("  {path}: {e}"));
+                    Vec::new()
+                }
+                Ok(table) => {
+                    let mut pairs = Vec::with_capacity(table.len());
+                    for (k, v) in table.into_iter() {
+                        match v.as_str() {
+                            Some(s) => pairs.push((k, s.to_string())),
+                            None => {
+                                errs.push(format!(
+                                    "  invalid re syntax for key {k}: value must be a string"
+                                ));
+                                pairs.clear();
+                                break;
+                            }
+                        }
+                    }
+
+                    pairs
+                }
+            },
+        };
+
+        LangConfig {
+            extensions: self.extensions,
+            first_lines: self.first_lines,
+            filenames: self.filenames,
+            re_syntax,
+            lsp: self.lsp,
+        }
+    }
 }
 
 /// Helper for allowing users to specify a path to an alternate config file for a given section

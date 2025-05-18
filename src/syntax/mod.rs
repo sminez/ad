@@ -19,6 +19,7 @@
 use crate::{
     buffer::{GapBuffer, Slice},
     dot::Range,
+    Config,
 };
 use std::{
     cmp::{max, min, Ord, Ordering, PartialOrd},
@@ -42,6 +43,24 @@ pub enum SyntaxState {
 }
 
 impl SyntaxState {
+    pub fn try_new(lang: &str, gb: &GapBuffer, cfg: &Config) -> Result<Self, String> {
+        let lang_cfg = cfg
+            .languages
+            .get(lang)
+            .ok_or_else(|| format!("unknown language {lang:?}"))?;
+
+        if lang_cfg.re_syntax.is_empty() {
+            Ok(Self::Ts(ts::TsState::try_new(
+                lang,
+                &cfg.tree_sitter.parser_dir,
+                &cfg.tree_sitter.syntax_query_dir,
+                gb,
+            )?))
+        } else {
+            Ok(Self::Re(re::ReState::new(&lang_cfg.re_syntax)?))
+        }
+    }
+
     /// Mirror an edit that has been made to the underlying [GapBuffer] to the syntax state in
     /// order to keep syntax ranges in sync.
     pub fn edit(&mut self, ch_start: usize, ch_old_end: usize, ch_new_end: usize, gb: &GapBuffer) {

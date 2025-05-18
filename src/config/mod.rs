@@ -101,8 +101,8 @@ impl Config {
         Self::try_load_from_path(&path, &home)
     }
 
-    /// Check to see if there is a known tree-sitter configuration for this buffer
-    pub fn ts_lang_for_buffer(&self, b: &Buffer) -> Option<&str> {
+    /// Check to see if there is a known language for this buffer
+    pub fn lang_for_buffer(&self, b: &Buffer) -> Option<&str> {
         let path = b.path()?;
         let fname = path.file_name()?.to_string_lossy();
         let os_ext = path.extension().unwrap_or_default();
@@ -228,6 +228,8 @@ pub struct LangConfig {
     pub first_lines: Vec<String>,
     #[serde(default)]
     pub filenames: Vec<String>,
+    #[serde(default)]
+    pub re_syntax: Vec<(String, String)>,
     #[serde(default)]
     pub lsp: Option<LspConfig>,
 }
