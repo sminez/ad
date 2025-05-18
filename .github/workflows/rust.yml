@@ -38,7 +38,7 @@ jobs:
     - uses: taiki-e/install-action@nextest
 
     - name: Run tests
-      run: cargo nextest run --workspace
+      run: cargo nextest run --workspace --no-fail-fast
 
   rustfmt:
     name: Ensure rustfmt is happy
