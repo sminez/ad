@@ -1,3 +1,11 @@
+Regression case for (gh#30).
+
+Running an Edit command with the edit position landing on the current GapBuffer gap-end
+position resulted in malformed buffer content.
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- file-help.txt --
 Edit 6,32 x/.*\n/ y/\s+-- / x/(.+)/ c/"$1"/
 Edit 6,32 x/"(.+)"\s+--/ c/vec!["$1"],/
 Edit 6,32 x/"(.+) \| (.+)"/ c/"$1", "$2"/
@@ -29,4 +37,14 @@ wq | write-quit       -- save the current buffer to disk and exit, blocking if o
 wq! | write-quit!     -- save the current buffer to disk and exit, discarding other changes
 w | write             -- save the current buffer to disk. (Blocked if the file has been modified on disk)
 w! | write!           -- save the current buffer to disk ignoring external changes
+
+
+-- actions --
+# run the edit command from line 1 of the buffer
+type: x@
+
+# select line 30 which should now have the correct double quote transform applied to it
+type: /30\n
+-- expected-buffer-dot-1 --
+"w | write"             -- "save the current buffer to disk. (Blocked if the file has been modified on disk)"
 
