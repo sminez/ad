@@ -5,8 +5,8 @@ use crate::{
         ColorScheme, Config, EditorConfig, FsysConfig, KeyBindings, LangConfig, TsConfig,
         DEFAULT_CONFIG,
     },
+    syntax::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
     term::{Color, Styles},
-    ts::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
 };
 use serde::{de::DeserializeOwned, Deserialize};
 use std::{

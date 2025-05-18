@@ -1,0 +1,22 @@
+A successful "data from" rule combined with a showdata action should result in
+a new buffer being opened in the editor with the new data.
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- plumbing-rules --
+data matches load-me
+data from echo "some synthesised data"
+attr add action=showdata filename=+testing
+plumb to edit
+-- file-load-me.txt --
+load-me
+-- actions --
+type: x\n
+-- buffer-list --
+1      load-me.txt
+2    * +testing
+-- expected-windows --
+2
+-- expected-buffer-2 --
+some synthesised data
+

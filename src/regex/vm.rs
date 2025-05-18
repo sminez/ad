@@ -70,15 +70,15 @@ impl Regex {
     ///
     /// This method handles pre-allocation of the memory required for running the VM so
     /// that the allocation cost is paid once up front rather than on each use of the Regex.
-    pub fn compile(re: &str) -> Result<Self, Error> {
-        let mut ast = parse(re)?;
+    pub fn compile(re: impl AsRef<str>) -> Result<Self, Error> {
+        let mut ast = parse(re.as_ref())?;
         ast.optimise();
         let CompiledOps {
             ops,
             submatch_names,
         } = compile_ast(ast, false);
 
-        Ok(Self::new(re, ops, submatch_names))
+        Ok(Self::new(re.as_ref(), ops, submatch_names))
     }
 
     /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
@@ -86,15 +86,15 @@ impl Regex {
     ///
     /// This method handles pre-allocation of the memory required for running the VM so
     /// that the allocation cost is paid once up front rather than on each use of the Regex.
-    pub fn compile_reverse(re: &str) -> Result<Self, Error> {
-        let mut ast = parse(re)?;
+    pub fn compile_reverse(re: impl AsRef<str>) -> Result<Self, Error> {
+        let mut ast = parse(re.as_ref())?;
         ast.optimise();
         let CompiledOps {
             ops,
             submatch_names,
         } = compile_ast(ast, true);
 
-        Ok(Self::new(re, ops, submatch_names))
+        Ok(Self::new(re.as_ref(), ops, submatch_names))
     }
 
     fn new(re: &str, ops: Vec<Op>, submatch_names: Vec<String>) -> Self {
@@ -142,11 +142,24 @@ impl Regex {
         }
     }
 
-    /// Iterate over all non-overlapping matches of this Regex for a given `Buffer` input.
+    /// Iterate over all non-overlapping matches of this Regex for a given [Buffer] input.
     pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b GapBuffer> {
         self.track_submatches = true;
         MatchIter {
             it: &b.txt,
+            r: self,
+            from: 0,
+        }
+    }
+
+    /// Iterate over all non-overlapping matches of this Regex for a given [GapBuffer] input.
+    pub fn match_gapbuffer_all<'a, 'b>(
+        &'a mut self,
+        gb: &'b GapBuffer,
+    ) -> MatchIter<'a, &'b GapBuffer> {
+        self.track_submatches = true;
+        MatchIter {
+            it: gb,
             r: self,
             from: 0,
         }
@@ -181,7 +194,7 @@ impl Regex {
 
     /// This is the main VM implementation that is used by all other matching methods on Regex.
     ///
-    /// The `return_on_first_match` flag is used to early return a dummy Match as soon as we
+    /// The `track_submatches` flag is used to early return a dummy Match as soon as we
     /// can tell that the given regular expression matches the input (rather than looking for
     /// the leftmost-longest match).
     ///  - The Match returned in this case will always point to the null string at the start

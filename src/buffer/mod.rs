@@ -7,7 +7,7 @@ use crate::{
     fsys::InputFilter,
     key::Input,
     lsp::Coords,
-    ts::{LineIter, TsState},
+    syntax::{ts::TsState, LineIter},
     util::normalize_line_endings,
     Config, MAX_NAME_LEN, UNNAMED_BUFFER,
 };

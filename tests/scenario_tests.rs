@@ -390,7 +390,6 @@ impl ScriptedUi {
                 // Not panicking here so we can let the rest of the test run to completion
                 // and allow the cleanup logic to run.
                 println!(">>> UNABLE TO CREATE FSYS CLIENT: {e}");
-                return;
             }
         }
     }

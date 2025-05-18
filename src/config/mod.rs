@@ -3,9 +3,9 @@ use crate::{
     buffer::Buffer,
     editor::{Action, Actions},
     key::Input,
+    syntax::TK_DEFAULT,
     term::{Color, Styles},
     trie::Trie,
-    ts::TK_DEFAULT,
     util::parent_dir_containing,
 };
 use serde::{de, Deserialize, Deserializer};

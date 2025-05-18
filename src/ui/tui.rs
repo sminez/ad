@@ -8,12 +8,12 @@ use crate::{
     input::Event,
     key::{Input, MouseButton, MouseEvent},
     restore_terminal_state,
+    syntax::{LineIter, RangeToken},
     term::{
         clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
         get_termsize, register_signal_handler, win_size_changed, CurShape, Cursor, Style, Styles,
         RESET_STYLE,
     },
-    ts::{LineIter, RangeToken},
     ui::{
         layout::{Column, Scratch, Window},
         Layout, StateChange, UserInterface,
@@ -915,7 +915,7 @@ fn try_read_input(stdin: &mut impl Read) -> Option<Input> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ts::{ByteRange, TK_DEFAULT};
+    use crate::syntax::{ByteRange, TK_DEFAULT};
     use simple_test_case::test_case;
     use std::{char::REPLACEMENT_CHARACTER, io};
 

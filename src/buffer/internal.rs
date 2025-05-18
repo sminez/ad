@@ -775,7 +775,7 @@ impl GapBuffer {
     }
 
     #[inline]
-    fn offset_char_to_byte(
+    pub(crate) fn offset_char_to_byte(
         &self,
         char_idx: usize,
         byte_offset: usize,

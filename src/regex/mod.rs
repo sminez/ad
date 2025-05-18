@@ -10,7 +10,7 @@ mod compile;
 mod matches;
 mod vm;
 
-pub use matches::{Match, MatchIter};
+pub use matches::{IndexedChars, Match, MatchIter};
 pub use vm::Regex;
 
 /// Errors that can be returned by the regex engine

@@ -30,6 +30,13 @@ pub struct Range {
 }
 
 impl Range {
+    /// Beginning of file
+    pub const BOF: Self = Range {
+        start: Cur { idx: 0 },
+        end: Cur { idx: 0 },
+        start_active: false,
+    };
+
     pub(crate) fn from_cursors(c1: Cur, c2: Cur, c1_was_active: bool) -> Self {
         let (start, end, start_active) = if c1 <= c2 {
             (c1, c2, c1_was_active)

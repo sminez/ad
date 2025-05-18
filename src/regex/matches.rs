@@ -9,7 +9,7 @@ use std::{
 /// The match location of a Regex against a given input.
 ///
 /// The sub-match indices are relative to the input used to run the original match.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Match {
     pub(super) sub_matches: [usize; N_SLOTS],
     pub(super) submatch_names: Rc<[String]>,
