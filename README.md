@@ -55,6 +55,10 @@ $ cargo install --path .
 $ cargo xtask setup-dotfiles
 ```
 
+Please see [here](https://github.com/sminez/ad/blob/develop/xtask/src/setup.rs#L59) for the
+actions that are carried out by the `setup-dotfiles` task. You should review these and make
+sure that you are happy to proceed before running the task.
+
 From there you should be able to open `ad` and run the `:help` command to view the built-in help.
 If you would like to watch a tour of how `ad` works there is one available [here](https://www.youtube.com/watch?v=jb2pAi5hLUg).
 
