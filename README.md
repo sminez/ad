@@ -19,7 +19,7 @@ issues to learn about what is and is not implemented.
 ![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
 
 
-## Project Status
+## :warning: Project Status
 
 `ad` is stable _enough_ and and supports sufficient features that you can try it out and see what
 you think. That said, there is currently very little documentation and there are likely to be
@@ -34,7 +34,7 @@ changed.
 You have been warned!
 
 
-### Contributing
+### :technologist: Contributing
 
 The project as a whole isn't particularly well suited for external contributors in its current
 state so please do [raise an issue](https://github.com/sminez/ad/issues/new/choose) to discuss
@@ -43,7 +43,7 @@ minor bug fixes and typo corrections I am unlikely to be able to do anything oth
 PRs that have been opened without prior discussion of the issue they are intending to address.
 
 
-## Getting started
+## :eyes: Getting started
 
 Packaging of the project to include the default config files and helper scripts isn't currently
 in place, so the recommended way to try out `ad` is to clone this repo and compile from source:
@@ -66,10 +66,10 @@ If you would like to watch a tour of how `ad` works there is one available [here
 > the exact content of the video tour may not accurately reflect the current state of `ad`.
 
 
-## The design of ad
+## :straight_ruler: The design of ad
 
 `ad` is aiming to be a hybrid of the pieces of various editors that I find most useful:
-  - vim style modal editing to allow for convenient key bindings
+  - vim style modal editing
   - convenient text navigation and selection from vim/kakoune
   - mini-buffer based user defined minor modes from emacs
   - sam/acme style editing commands for larger editing actions
@@ -87,7 +87,7 @@ direct interaction with external tools and programs from the outside rather than
 everything **in**.
 
 
-### Building on top of ad
+### :building_construction: Building on top of ad
 
 In addition to the `data/bin` directory of this repo you might want to check out the following links for examples of
 what you can achieve with `ad`'s filesystem interface:
@@ -95,13 +95,11 @@ what you can achieve with `ad`'s filesystem interface:
 - A [Zettelkasten note taking application](https://gist.github.com/davcam/a4570acb520dce3a25a98cf2ddbb9ef2) from [@davcam](https://github.com/davcam)
 
 
-## Repo structure
+## :package: Modules
+Given the (arguably questionable) goal of implementing as much as possible from scratch, there is a fair
+amount of functionality included in `ad` which in turn is split out into a number of modules within the
+crate. For now, I'm not structuring things as individual crates but that may change in future.
 
-Given the (arguably questionable) goal of implementing everything from scratch, there is a fair amount
-of functionality included in `ad` which in turn is split out into a number of modules within the crate.
-For now, I'm not structuring things as individual crates but that may change in future.
-
-### Modules
 _This is a non-exhaustive list of some of the more interesting parts of the internals of `ad`_
 
 - **buffer/internal**: a [gap buffer](https://en.wikipedia.org/wiki/Gap_buffer) implementation for the
@@ -109,15 +107,18 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
 - **dot**: manipulation of the current selection in a given buffer (including vim-like motions)
 - **exec**: minimal implementation of the core of the [sam editing language](http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf)
 - **fsys**: virtual filesystem interface to the editor state in the style of [acme](http://acme.cat-v.org/)
+- **lsp**: a minimal [LSP](https://microsoft.github.io/language-server-protocol/) client
 - **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
   - Now moved out to its own crate with source code available [here](https://github.com/sminez/ad/crates/ninep).
 - **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
   the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexability in tinkering
   with the exec command language.
+- **syntax**: [tree-sitter](https://tree-sitter.github.io/tree-sitter/) based syntax highlighting (with
+  optional per-line regex based highlighting if grammars are unavailable for a particular filetype)
 - **trie**: [trie](https://en.wikipedia.org/wiki/Trie) data structure for handling sequence based keybindings
 
 
-## Why?
+## :question: Why?
 
 I've used [vim][0] for years now (more recently [neovim][1] and [kakoune][2]) and I really love the
 core editor itself. A while back I discovered [acme][3] through a fantastic [screencast][4] from
@@ -134,26 +135,8 @@ that I can hack on.
 
 So...How hard could it be?
 
-## Simplicity
-For things that are going to be core parts of the experience (bindings, per-filetype configuration)
-I'm just going to hard code stuff. I'll try to do it in a way that makes it easy to update / change
-but the whole thing will be a lot easier to write if there isn't too much config parsing.
 
-That said, the more I work on this, the more I wonder if it might be interesting to structure `ad`
-in the same way as [penrose](https://github.com/sminez/penrose) and have it as a library for writing
-your own text editor? That would require some restructuring but might be interesting to explore...
-
-## Goals
-- Simple modal editing to the extent that I use VIM
-- Sed/Sam style edit commands
-- Acme style use of external commands rather than an embedded language:
-  - Exposing current buffer / window state to external programs
-  - Exposing events to external programs
-  - Accepting events from other programs
-- Virtual buffers for command output that can be hidden
-
-
-## Sam style structural regular expressions
+## A note on Sam style structural regular expressions
 
 One aim of this project is to provide an implementation of "Structural Regular Expressions" as first
 presented (to my knowledge) in the [Sam text editor][5] from plan9 by Rob Pike. [This tutorial][6]
