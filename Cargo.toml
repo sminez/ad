@@ -45,22 +45,22 @@ harness = false
 
 [dependencies]
 ad_event = { version = "0.3", path = "crates/ad_event" }
-libc = "0.2.171"
-libloading = "0.8.6"
+libc = "0.2.172"
+libloading = "0.8.7"
 lsp-types = "0.97.0"
 ninep = { version = "0.4", path = "crates/ninep", default-features = false }
 serde = "1.0.219"
 serde_json = "1.0.140"
 streaming-iterator = "0.1.9"
-toml = { version = "0.8.20", features = [ "preserve_order" ] }
+toml = { version = "0.8.22", features = [ "preserve_order" ] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = [ "fmt" ] }
-tree-sitter = "0.25.3"
+tree-sitter = "0.25.4"
 unicode-width = "0.2.0"
 
 [dev-dependencies]
-criterion = "0.5"
+criterion = "0.6"
 simple_test_case = "1"
 simple_txtar = "1"
 tree-sitter-python = "0.23.6"
-tree-sitter-rust = "0.23.2"
+tree-sitter-rust = "0.24.0"
