@@ -730,10 +730,14 @@ fn render_chars(
         if ch == '\n' {
             break;
         }
-        let w = if ch == '\t' {
-            tabstop
+
+        let (w, ch) = if ch == '\t' {
+            (tabstop, ch)
         } else {
-            UnicodeWidthChar::width(ch).unwrap_or(1)
+            match UnicodeWidthChar::width(ch) {
+                Some(0) | None => (1, char::REPLACEMENT_CHARACTER),
+                Some(n) => (n, ch),
+            }
         };
 
         if *cols + w <= max_cols {
@@ -940,6 +944,24 @@ mod tests {
             tag,
             r: ByteRange { from, to },
         }
+    }
+
+    // https://en.wikipedia.org/wiki/Bidirectional_text#Table_of_possible_BiDi_character_types
+    // https://i18n-puzzles.com/puzzle/18/
+    #[test]
+    fn render_chars_correctly_handles_bidi_markers() {
+        #[allow(text_direction_codepoint_in_literal)]
+        let line = GapBuffer::from("⁧foo⁦bar⁩baz⁩");
+        let expected = format!("�foo�bar�baz�{RESET_STYLE}");
+
+        let max_cols = line.chars().count();
+        let mut chars = line.chars().peekable();
+        let mut buf = String::with_capacity(line.len());
+        let mut cols = 0;
+
+        render_chars(&mut chars, None, max_cols, 4, &mut cols, &mut buf);
+
+        assert_eq!(buf, expected);
     }
 
     // The !| characters here are the dummy style strings in the style_cache
