@@ -56,7 +56,7 @@ fn editor_scenarios(path: &str, content: &str) {
     }
 
     // Create a new temp directory to hold our test files while the test runs
-    let dir = env::temp_dir().join(&test_id);
+    let dir = PathBuf::from("/tmp").join(&test_id);
     let test_file_dir = dir.join("files");
     let socket_path = dir.join("sock");
     setup.ui.socket_path = socket_path.clone();
@@ -321,10 +321,12 @@ impl Assertions {
 
     fn verify(&self, e: &Editor<DefaultSystem>, test_dir: &Path) {
         if let Some(s) = self.buffer_list.as_ref() {
+            println!(">> {:?}\n\n", e.buffer_list());
             let blist = e
                 .buffer_list()
                 .join("\n")
-                .replace(&format!("{}/", test_dir.display()), "");
+                .replace(&format!("{}/", test_dir.display()), "")
+                .replace("/private", ""); // OSX-ism
 
             assert_eq!(s, &blist, "incorrect buffer listing");
         }
