@@ -132,7 +132,7 @@ impl Tui {
             },
             b.dot.addr(b)
         );
-        let width = self.screen_cols - lstatus.len();
+        let width = self.screen_cols.saturating_sub(lstatus.len());
 
         format!(
             "{}{}{lstatus}{rstatus:>width$}{}\r\n",
@@ -166,7 +166,7 @@ impl Tui {
                 Style::Bg(cs.bg)
             ));
         } else {
-            let width = self.screen_cols - 10;
+            let width = self.screen_cols.saturating_sub(10);
             buf.push_str(&format!(
                 "{}{}{pending:>width$}          ",
                 Style::Fg(cs.fg),
