@@ -4,11 +4,7 @@ welcome to ad: an adaptable text editor.
 
     - you can get set up by cloning the repo and running the following commands:
       - cargo install --path .
-      - make setup-dotfiles
-
-    - currently you will required the `9p` tool in order to run the `Slide` command
-      for following this tour (and many of the helper scripts provided in the repo).
-      It can be obtained as part of plan9port here: https://github.com/9fans/plan9port/
+      - cargo xtask setup-dotfiles
 
     - from there you can run this presentation yourself by opening the docs/tour directory
       within ad and middle clicking the word "Slide" below or placing the cursor on
