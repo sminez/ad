@@ -10,6 +10,9 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
+// Required for testing rendering behaviour.
+// As of https://github.com/rust-lang/rust/issues/140281 this needs to be at the crate level
+#![allow(text_direction_codepoint_in_literal)]
 
 use libc::termios as Termios;
 use std::{io::Stdout, process, sync::OnceLock};
