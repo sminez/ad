@@ -3,10 +3,10 @@
 //!
 //! Conceptually this is operates as an embedded dmenu.
 use crate::{
-    buffer::{Buffer, Buffers, GapBuffer},
+    buffer::{Buffer, Buffers, GapBuffer, Slice},
     config_handle,
     dot::TextObject,
-    editor::{Actions, Editor},
+    editor::{Action, Actions, Editor},
     key::{Arrow, Input},
     system::System,
     Config,
@@ -20,13 +20,15 @@ use std::{
 };
 use tracing::trace;
 
+const MINIBUFFER_ID: usize = usize::MAX - 1;
+
 #[derive(Debug, Default)]
 pub struct MiniBufferState<'a> {
     pub(crate) cx: usize,
     pub(crate) n_visible_lines: usize,
     pub(crate) selected_line_idx: usize,
     pub(crate) prompt: &'a str,
-    pub(crate) input: &'a str,
+    pub(crate) input: Slice<'a>,
     pub(crate) b: Option<&'a Buffer>,
     pub(crate) top: usize,
     pub(crate) bottom: usize,
@@ -44,16 +46,16 @@ pub(crate) enum MiniBufferSelection {
 /// Conceptually this is operates as an embedded dmenu.
 pub(crate) struct MiniBuffer<F>
 where
-    F: Fn(&str) -> Option<Vec<String>>,
+    F: Fn(&GapBuffer) -> Option<Vec<String>>,
 {
     on_change: F,
     prompt: String,
-    input: String,
+    n_prompt_chars: usize,
+    input: Buffer,
     initial_lines: Vec<String>,
     line_indices: Vec<usize>,
     b: Buffer,
     max_height: usize,
-    x: usize,
     y: usize,
     selected_line_idx: usize,
     n_visible_lines: usize,
@@ -64,7 +66,7 @@ where
 
 impl<F> fmt::Debug for MiniBuffer<F>
 where
-    F: Fn(&str) -> Option<Vec<String>>,
+    F: Fn(&GapBuffer) -> Option<Vec<String>>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MiniBuffer")
@@ -76,7 +78,7 @@ where
 
 impl<F> MiniBuffer<F>
 where
-    F: Fn(&str) -> Option<Vec<String>>,
+    F: Fn(&GapBuffer) -> Option<Vec<String>>,
 {
     pub fn new(
         prompt: String,
@@ -86,16 +88,17 @@ where
         config: Arc<Mutex<Config>>,
     ) -> Self {
         let line_indices = Vec::with_capacity(lines.len());
+        let n_prompt_chars = prompt.chars().count();
 
         Self {
             on_change,
             prompt,
-            input: String::new(),
+            n_prompt_chars,
+            input: Buffer::new_unnamed(MINIBUFFER_ID, "", config.clone()),
             initial_lines: lines,
             line_indices,
             b: Buffer::new_minibuffer(config),
             max_height,
-            x: 0,
             y: 0,
             selected_line_idx: 0,
             n_visible_lines: 0,
@@ -107,7 +110,7 @@ where
 
     #[inline]
     fn handle_on_change(&mut self) {
-        if let Some(lines) = (self.on_change)(&self.input) {
+        if let Some(lines) = (self.on_change)(&self.input.txt) {
             self.b.txt = GapBuffer::from(lines.join("\n"));
             self.b.dot.clamp_idx(self.b.txt.len_chars());
         };
@@ -118,7 +121,7 @@ where
         self.b.txt.clear();
         self.line_indices.clear();
 
-        let input_fragments: Vec<&str> = self.input.split_whitespace().collect();
+        let input_fragments: Vec<&str> = self.input.txt.as_str().split_whitespace().collect();
         let mut visible_lines = vec![];
 
         for (i, line) in self.initial_lines.iter().enumerate() {
@@ -162,10 +165,10 @@ where
     #[inline]
     fn current_state(&self) -> MiniBufferState<'_> {
         MiniBufferState {
-            cx: self.x + self.prompt.len(),
+            cx: self.input.dot.active_cur().idx + self.n_prompt_chars,
             n_visible_lines: self.n_visible_lines,
             prompt: &self.prompt,
-            input: &self.input,
+            input: self.input.txt.as_slice(),
             selected_line_idx: self.selected_line_idx,
             b: if self.show_buffer_content {
                 Some(&self.b)
@@ -181,38 +184,47 @@ where
     fn handle_input(&mut self, input: Input) -> Option<MiniBufferSelection> {
         match input {
             Input::Char(c) => {
-                self.input.insert(self.x, c);
-                self.x += 1;
+                self.input
+                    .handle_action(Action::InsertChar { c }, Source::Keyboard);
                 self.handle_on_change();
             }
             Input::Ctrl('h') | Input::Backspace | Input::Del => {
-                if self.x > 0 && self.x <= self.input.len() {
-                    self.input.remove(self.x - 1);
-                    self.x = self.x.saturating_sub(1);
-                    self.handle_on_change();
-                }
+                self.input.handle_action(
+                    Action::DotSet(TextObject::Arr(Arrow::Left), 1),
+                    Source::Keyboard,
+                );
+                self.input.handle_action(Action::Delete, Source::Keyboard);
+                self.handle_on_change();
             }
 
             Input::Esc => return Some(MiniBufferSelection::Cancelled),
             Input::Return => {
                 let selection = match self.b.line(self.y) {
                     Some(_) if self.line_indices.is_empty() => MiniBufferSelection::UserInput {
-                        input: self.input.clone(),
+                        input: self.input.txt.to_string(),
                     },
                     Some(l) => MiniBufferSelection::Line {
                         cy: self.line_indices[self.y],
                         line: l.to_string(),
                     },
                     None => MiniBufferSelection::UserInput {
-                        input: self.input.clone(),
+                        input: self.input.txt.to_string(),
                     },
                 };
                 return Some(selection);
             }
 
-            Input::Alt('h') | Input::Arrow(Arrow::Left) => self.x = self.x.saturating_sub(1),
+            Input::Alt('h') | Input::Arrow(Arrow::Left) => {
+                self.input.handle_action(
+                    Action::DotSet(TextObject::Arr(Arrow::Left), 1),
+                    Source::Keyboard,
+                );
+            }
             Input::Alt('l') | Input::Arrow(Arrow::Right) => {
-                self.x = min(self.x + 1, self.input.len())
+                self.input.handle_action(
+                    Action::DotSet(TextObject::Arr(Arrow::Right), 1),
+                    Source::Keyboard,
+                );
             }
             Input::Alt('k') | Input::Arrow(Arrow::Up) => {
                 if self.selected_line_idx == 0 {
@@ -240,7 +252,7 @@ impl<S> Editor<S>
 where
     S: System,
 {
-    fn prompt_w_callback<F: Fn(&str) -> Option<Vec<String>>>(
+    fn prompt_w_callback<F: Fn(&GapBuffer) -> Option<Vec<String>>>(
         &mut self,
         prompt: &str,
         initial_lines: Vec<String>,

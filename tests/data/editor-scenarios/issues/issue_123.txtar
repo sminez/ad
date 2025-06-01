@@ -17,3 +17,4 @@ after
 type: /ča\n
 -- expected-buffer-dot-1 --
 dača
+
