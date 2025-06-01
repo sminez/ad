@@ -51,7 +51,7 @@ type CharOffset = usize;
 
 /// An implementation of a gap buffer that tracks internal meta-data to help with accessing
 /// sub-regions of the text such as character ranges and lines.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GapBuffer {
     /// the raw data being stored (both buffer content and the gap)
     data: Box<[u8]>,
@@ -68,6 +68,12 @@ pub struct GapBuffer {
     /// total number of characters in the buffer
     /// this is != line_endings.last() if there is no trailing newline
     n_chars: usize,
+}
+
+impl Default for GapBuffer {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn compute_line_endings(s: &str) -> (usize, BTreeMap<ByteOffset, CharOffset>) {
@@ -201,6 +207,11 @@ macro_rules! assert_line_endings {
 }
 
 impl GapBuffer {
+    /// Construct a new empty GapBuffer
+    pub fn new() -> Self {
+        Self::from("")
+    }
+
     /// Number of bytes in the gap
     #[inline]
     fn gap(&self) -> usize {
@@ -220,7 +231,47 @@ impl GapBuffer {
         self.cap == self.gap()
     }
 
-    /// The raw content of the buffer
+    /// Rearrange the internal storage of this buffer so that the active data is in a single
+    /// contiguous slice which is then returned.
+    pub fn make_contiguous(&mut self) -> &[u8] {
+        self.move_gap_to(0);
+        &self.data[self.gap_end..]
+    }
+
+    /// The contents of the buffer as a single `&str`.
+    ///
+    /// This method requires a mutable reference as we need to move the gap in order to ensure that
+    /// all of the active data within the buffer is contiguous.
+    pub fn as_str(&mut self) -> &str {
+        let raw = self.make_contiguous();
+
+        // SAFETY: we know we have valid utf-8 data internally and as_bytes moves the gap so that
+        // `raw` contains all of the live data within the buffer.
+        unsafe { std::str::from_utf8_unchecked(raw) }
+    }
+
+    /// The contents of the buffer either side of the current gap.
+    ///
+    /// If [make_contiguous][GapBuffer::make_contiguous] was previously called, the first `&str`
+    /// will be empty and the full content of the buffer will be in the second `&str`.
+    pub fn as_strs(&self) -> (&str, &str) {
+        let left = &self.data[0..self.gap_start];
+        let right = &self.data[self.gap_end..];
+
+        // SAFETY: we know that we have valid utf8 data internally and that the position of the gap
+        // does not split any utf-8 codepoints.
+        unsafe {
+            (
+                std::str::from_utf8_unchecked(left),
+                std::str::from_utf8_unchecked(right),
+            )
+        }
+    }
+
+    /// The raw content of the active data within the buffer.
+    ///
+    /// For a non allocating version of this when you are able to mutate the buffer (by moving the
+    /// gap) see [make_contiguous][GapBuffer::make_contiguous].
     pub fn bytes(&self) -> Vec<u8> {
         let mut v = Vec::with_capacity(self.len());
         v.extend(&self.data[..self.gap_start]);
@@ -231,7 +282,7 @@ impl GapBuffer {
 
     /// Iterate over the characters of the buffer
     pub fn chars(&self) -> Chars<'_> {
-        self.slice(0, self.n_chars).chars()
+        self.as_slice().chars()
     }
 
     /// Iterate over the lines of the buffer
@@ -1792,5 +1843,30 @@ mod tests {
             gb.to_string(),
             "// does it need to be a doc comment? that is a long enough line to\n"
         );
+    }
+
+    #[test_case(0, "", "foo bar"; "gap at start")]
+    #[test_case(3, "foo", " bar"; "gap in between")]
+    #[test]
+    fn as_strs_works(byte_idx: usize, left: &str, right: &str) {
+        let mut gb = GapBuffer::from("foo bar");
+        gb.move_gap_to(byte_idx);
+
+        let (l, r) = gb.as_strs();
+
+        assert_eq!((l, r), (left, right));
+    }
+
+    #[test_case(0; "gap at start")]
+    #[test_case(3; "gap in between")]
+    #[test]
+    fn as_str_works(byte_idx: usize) {
+        let mut gb = GapBuffer::from("foo bar");
+        gb.move_gap_to(byte_idx);
+
+        let s = gb.as_str();
+
+        assert_eq!(s, "foo bar");
+        assert_eq!(gb.gap_start, 0);
     }
 }

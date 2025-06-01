@@ -1,0 +1,20 @@
+Using the built-in "search in file" behaviour should work with multibyte UTF-8
+characters.
+
+Issue (gh#123) originally reported this and in order to trigger the panic that
+was being seen there we need to type both the multibyte character itself and
+then another after it which was being inserted one byte into the multibyte
+sequence due to incorrect tracking of byte offsets vs character offsets within
+the input buffer.
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- file-hello.txt --
+before
+dača
+after
+-- actions --
+type: /ča\n
+-- expected-buffer-dot-1 --
+dača
+

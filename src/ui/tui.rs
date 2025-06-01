@@ -950,7 +950,6 @@ mod tests {
     // https://i18n-puzzles.com/puzzle/18/
     #[test]
     fn render_chars_correctly_handles_bidi_markers() {
-        #[allow(text_direction_codepoint_in_literal)]
         let line = GapBuffer::from("⁧foo⁦bar⁩baz⁩");
         let expected = format!("�foo�bar�baz�{RESET_STYLE}");
 
