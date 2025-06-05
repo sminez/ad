@@ -35,6 +35,10 @@ use std::{
 };
 use unicode_width::UnicodeWidthChar;
 
+// If the screen dimensions drop below these values then we disable rendering
+const MIN_COLS: usize = 20;
+const MIN_ROWS: usize = 5;
+
 // const HLINE: &str = "—"; // em dash
 const HLINE: &str = "-";
 const VLINE: &str = "│";
@@ -132,7 +136,7 @@ impl Tui {
             },
             b.dot.addr(b)
         );
-        let width = self.screen_cols - lstatus.len();
+        let width = self.screen_cols.saturating_sub(lstatus.len());
 
         format!(
             "{}{}{lstatus}{rstatus:>width$}{}\r\n",
@@ -159,14 +163,17 @@ impl Tui {
         let delta = (Instant::now() - self.last_status).as_secs();
 
         if !msg.is_empty() && delta < status_timeout {
-            let width = self.screen_cols - msg.len() - 10;
+            let width = self
+                .screen_cols
+                .saturating_sub(msg.len())
+                .saturating_sub(10);
             buf.push_str(&format!(
                 "{}{}{msg}{pending:>width$}          ",
                 Style::Fg(cs.fg),
                 Style::Bg(cs.bg)
             ));
         } else {
-            let width = self.screen_cols - 10;
+            let width = self.screen_cols.saturating_sub(10);
             buf.push_str(&format!(
                 "{}{}{pending:>width$}          ",
                 Style::Fg(cs.fg),
@@ -300,6 +307,10 @@ impl UserInterface for Tui {
         self.screen_rows = layout.screen_rows;
         self.screen_cols = layout.screen_cols;
 
+        if self.screen_cols < MIN_COLS || self.screen_rows < MIN_ROWS {
+            return;
+        }
+
         let conf = config_handle!(self);
         let (cs, status_timeout, tabstop, max_mb_lines) = (
             &conf.colorscheme,
@@ -325,7 +336,7 @@ impl UserInterface for Tui {
         // This is the screen size that we have to work with for the buffer content we currently want to
         // display. If the minibuffer is active then it take priority over anything else and we always
         // show the status bar as the final two lines of the UI.
-        let effective_screen_rows = self.screen_rows - offset;
+        let effective_screen_rows = self.screen_rows.saturating_sub(offset);
 
         let load_exec_range = match held_click {
             Some(click) if click.btn == MouseButton::Right || click.btn == MouseButton::Middle => {
@@ -615,7 +626,7 @@ impl Iterator for WinIter<'_> {
                     Style::Fg(self.cs.fg),
                     width = self.w_lnum
                 );
-                let padding = self.n_cols - self.w_lnum - 2;
+                let padding = self.n_cols.saturating_sub(self.w_lnum).saturating_sub(2);
                 buf.push_str(&" ".repeat(padding));
 
                 buf
@@ -634,7 +645,7 @@ impl Iterator for WinIter<'_> {
                         self.gb,
                         it,
                         self.w.view.col_off,
-                        self.n_cols - padding,
+                        self.n_cols.saturating_sub(padding),
                         self.tabstop,
                         self.cs,
                         &mut self.style_cache
