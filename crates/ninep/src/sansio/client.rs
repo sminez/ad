@@ -36,7 +36,7 @@ pub(crate) fn err<T, E>(e: E) -> io::Result<T>
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    Err(io::Error::new(io::ErrorKind::Other, e))
+    Err(io::Error::other(e))
 }
 
 /// Internal sans-IO state for a 9p client implementation that can be used along with an I/O stream

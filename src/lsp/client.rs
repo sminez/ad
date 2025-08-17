@@ -66,7 +66,7 @@ impl LspClient {
         let read_thread = spawn(move || {
             while let Some(msg) = Message::read(&mut stdout)? {
                 if let Err(e) = tx.send(Req::Message(LspMessage { lsp_id, msg })) {
-                    return Err(io::Error::new(io::ErrorKind::Other, e));
+                    return Err(io::Error::other(e));
                 }
             }
             Ok(())

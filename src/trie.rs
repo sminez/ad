@@ -8,6 +8,7 @@ use std::{cmp, fmt};
 /// existing in the same Try.
 ///
 /// There are convenience methods provided for `Trie<char, V>` for when &str values are used as keys.
+#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Clone, PartialEq, Eq)]
 pub struct Trie<K, V>
 where

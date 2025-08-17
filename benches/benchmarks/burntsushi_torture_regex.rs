@@ -10,7 +10,8 @@
 //
 //  https://github.com/BurntSushi/rsc-regexp/blob/master/torture-test
 use ad_editor::regex::Regex;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 
 fn burntsushi_inputs(n_alts: usize, n_reps: usize) -> (String, Regex) {
     let mut re = "(abc)*d|".repeat(n_alts);

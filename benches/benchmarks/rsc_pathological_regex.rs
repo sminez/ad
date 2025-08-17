@@ -4,7 +4,8 @@
 // The graph from the article can be found here:
 //   https://swtch.com/~rsc/regexp/grep1p.png
 use ad_editor::regex::Regex;
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion};
+use std::hint::black_box;
 
 fn rsc_inputs(n: usize) -> (String, Regex) {
     let s = "a".repeat(n);

@@ -74,8 +74,7 @@ where
     F: EventFilter,
 {
     for line in client.event_lines(buffer)? {
-        let evt = FsysEvent::try_from_str(&line)
-            .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+        let evt = FsysEvent::try_from_str(&line).map_err(io::Error::other)?;
 
         let outcome = match evt.kind {
             Kind::LoadBody => {

@@ -19,7 +19,7 @@ pub trait SyncNineP: NineP {
     fn write_to<W: Write>(&self, w: &mut W) -> io::Result<()> {
         let mut buf = vec![0; self.n_bytes()];
         self.write_bytes(&mut buf)
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+            .map_err(|e| io::Error::other(e.to_string()))?;
 
         w.write_all(&buf)
     }

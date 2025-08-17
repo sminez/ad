@@ -45,7 +45,7 @@ where
 {
     let mut buf = vec![0; t.n_bytes()];
     t.write_bytes(&mut buf)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+        .map_err(|e| io::Error::other(e.to_string()))?;
 
     w.write_all(&buf).await
 }

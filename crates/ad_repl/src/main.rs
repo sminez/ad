@@ -45,7 +45,7 @@ fn main() -> io::Result<()> {
             ..Default::default()
         },
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    .map_err(io::Error::other)?;
 
     let stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();

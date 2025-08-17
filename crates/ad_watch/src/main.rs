@@ -61,7 +61,7 @@ fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> io::Result
             ..Default::default()
         },
     )
-    .map_err(|err| io::Error::new(io::ErrorKind::Other, err))?;
+    .map_err(io::Error::other)?;
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let mut w = client.body_writer(id)?;
 
