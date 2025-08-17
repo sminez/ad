@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct Inst {
     pub(super) op: Op,
-    pub(super) gen: usize,
+    pub(super) generation: usize,
 }
 
 pub(super) type Prog = Vec<Inst>;

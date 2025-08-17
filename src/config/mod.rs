@@ -8,7 +8,7 @@ use crate::{
     trie::Trie,
     util::parent_dir_containing,
 };
-use serde::{de, Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, de};
 use std::{collections::HashMap, env, fs, iter::successors, ops::Deref, path::Path};
 use tracing::error;
 
@@ -92,10 +92,9 @@ impl Config {
 
         if matches!(fs::exists(&path), Ok(false))
             && fs::create_dir_all(format!("{home}/.ad")).is_ok()
+            && let Err(e) = fs::write(&path, DEFAULT_CONFIG)
         {
-            if let Err(e) = fs::write(&path, DEFAULT_CONFIG) {
-                error!("unable to write default config file: {e}");
-            }
+            error!("unable to write default config file: {e}");
         }
 
         Self::try_load_from_path(&path, &home)

@@ -4,11 +4,11 @@ use crate::{
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
     input::Event,
     lsp::{
+        Diagnostic, LSP_FILE, LspManager, Pending, PendingParams, PendingRequest, Pos,
+        PositionEncoding,
         capabilities::{Capabilities, Coords},
         client::Status,
         rpc::{ErrorCode, Message, Notification, Request, RequestId, Response, ResponseError},
-        Diagnostic, LspManager, Pending, PendingParams, PendingRequest, Pos, PositionEncoding,
-        LSP_FILE,
     },
 };
 use lsp_types::{
@@ -577,10 +577,10 @@ impl RequestHandler<'_> {
             }
         }
 
-        if let Some(actions) = actions {
-            if self.man.tx_events.send(Event::Actions(actions)).is_err() {
-                error!("LSP - sender actions channel closed: exiting");
-            }
+        if let Some(actions) = actions
+            && self.man.tx_events.send(Event::Actions(actions)).is_err()
+        {
+            error!("LSP - sender actions channel closed: exiting");
         }
 
         self
@@ -745,10 +745,10 @@ impl NotificationHandler<'_> {
             }
         };
 
-        if let Some(actions) = actions {
-            if self.man.tx_events.send(Event::Actions(actions)).is_err() {
-                error!("LSP - sender actions channel closed: exiting");
-            }
+        if let Some(actions) = actions
+            && self.man.tx_events.send(Event::Actions(actions)).is_err()
+        {
+            error!("LSP - sender actions channel closed: exiting");
         }
 
         self
@@ -768,12 +768,12 @@ pub(crate) trait LspServerNotification: lsp_types::notification::Notification {
 
 impl LspServerNotification for lsp_types::notification::Progress {
     fn handle_params(lsp_id: usize, params: Self::Params, man: &mut LspManager) -> Option<Actions> {
+        use ProgressParamsValue::*;
+        use WorkDoneProgress::*;
         use lsp_types::{
             ProgressParamsValue, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
             WorkDoneProgressReport,
         };
-        use ProgressParamsValue::*;
-        use WorkDoneProgress::*;
 
         let actions = |title: &str, message: Option<String>, perc: Option<u32>| {
             let message = message.unwrap_or_default();

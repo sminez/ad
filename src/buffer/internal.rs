@@ -9,7 +9,7 @@
 //! - https://coredumped.dev/2023/08/09/text-showdown-gap-buffers-vs-ropes/
 //! - https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation
 use std::{
-    cmp::{max, min, Ordering},
+    cmp::{Ordering, max, min},
     collections::BTreeMap,
     fmt,
 };
@@ -312,11 +312,7 @@ impl GapBuffer {
                     raw_idx
                 };
 
-                if byte_idx < self.len() {
-                    n + 1
-                } else {
-                    n
-                }
+                if byte_idx < self.len() { n + 1 } else { n }
             }
 
             None => 1,
@@ -1149,7 +1145,8 @@ unsafe fn decode_char_at(start: usize, bytes: &[u8]) -> char {
     // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
     let x = bytes[start];
     if x < 128 {
-        return char::from_u32_unchecked(x as u32);
+        // SAFETY: x is in the correct range
+        return unsafe { char::from_u32_unchecked(x as u32) };
     }
 
     // Multibyte case follows
@@ -1176,7 +1173,8 @@ unsafe fn decode_char_at(start: usize, bytes: &[u8]) -> char {
         }
     }
 
-    char::from_u32_unchecked(ch)
+    // SAFETY: we know that ch is valid at this point
+    unsafe { char::from_u32_unchecked(ch) }
 }
 
 /// Decode a utf-8 code point from `bytes` ending at `end`.
@@ -1185,7 +1183,8 @@ unsafe fn decode_char_at(start: usize, bytes: &[u8]) -> char {
 unsafe fn decode_char_ending_at(end: usize, bytes: &[u8]) -> char {
     // Decode UTF-8
     let w = match bytes[end] {
-        b if b < 128 => return char::from_u32_unchecked(b as u32),
+        // SAFETY: b is in range
+        b if b < 128 => return unsafe { char::from_u32_unchecked(b as u32) },
         b => b,
     };
 
@@ -1209,7 +1208,8 @@ unsafe fn decode_char_ending_at(end: usize, bytes: &[u8]) -> char {
     }
     ch = utf8_acc_cont_byte(ch, w);
 
-    char::from_u32_unchecked(ch)
+    // SAFETY: we know that ch is valid at this point
+    unsafe { char::from_u32_unchecked(ch) }
 }
 
 #[cfg(test)]

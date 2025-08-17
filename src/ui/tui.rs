@@ -1,5 +1,6 @@
 //! A terminal UI for ad
 use crate::{
+    ORIGINAL_TERMIOS,
     buffer::{Buffer, Chars, GapBuffer},
     config::{ColorScheme, Config},
     config_handle, die,
@@ -10,27 +11,27 @@ use crate::{
     restore_terminal_state,
     syntax::{LineIter, RangeToken},
     term::{
-        clear_screen, enable_alternate_screen, enable_mouse_support, enable_raw_mode, get_termios,
-        get_termsize, register_signal_handler, win_size_changed, CurShape, Cursor, Style, Styles,
-        RESET_STYLE,
+        CurShape, Cursor, RESET_STYLE, Style, Styles, clear_screen, enable_alternate_screen,
+        enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
+        win_size_changed,
     },
     ui::{
-        layout::{Column, Scratch, Window},
         Layout, StateChange, UserInterface,
+        layout::{Column, Scratch, Window},
     },
-    ziplist, ORIGINAL_TERMIOS,
+    ziplist,
 };
 use std::{
     cell::RefCell,
     char,
-    cmp::{min, Ordering},
+    cmp::{Ordering, min},
     collections::HashMap,
-    io::{stdin, stdout, Read, Stdout, Write},
-    iter::{repeat_n, Peekable},
+    io::{Read, Stdout, Write, stdin, stdout},
+    iter::{Peekable, repeat_n},
     panic,
     rc::Rc,
-    sync::{mpsc::Sender, Arc, Mutex},
-    thread::{spawn, JoinHandle},
+    sync::{Arc, Mutex, mpsc::Sender},
+    thread::{JoinHandle, spawn},
     time::Instant,
 };
 use unicode_width::UnicodeWidthChar;
@@ -839,12 +840,14 @@ fn render_line<'a>(
 fn spawn_input_thread(tx: Sender<Event>) -> JoinHandle<()> {
     let mut stdin = stdin();
 
-    spawn(move || loop {
-        if let Some(key) = try_read_input(&mut stdin) {
-            _ = tx.send(Event::Input(key));
-        } else if win_size_changed() {
-            let (rows, cols) = get_termsize();
-            _ = tx.send(Event::WinsizeChanged { rows, cols });
+    spawn(move || {
+        loop {
+            if let Some(key) = try_read_input(&mut stdin) {
+                _ = tx.send(Event::Input(key));
+            } else if win_size_changed() {
+                let (rows, cols) = get_termsize();
+                _ = tx.send(Event::WinsizeChanged { rows, cols });
+            }
         }
     })
 }
@@ -894,12 +897,12 @@ fn try_read_input(stdin: &mut impl Read) -> Option<Input> {
         return Some(key);
     }
 
-    if c2 == '[' && c3.is_ascii_digit() {
-        if let Some('~') = try_read_char(stdin) {
-            if let Some(key) = Input::try_from_bracket_tilde(c3) {
-                return Some(key);
-            }
-        }
+    if c2 == '['
+        && c3.is_ascii_digit()
+        && let Some('~') = try_read_char(stdin)
+        && let Some(key) = Input::try_from_bracket_tilde(c3)
+    {
+        return Some(key);
     }
 
     // xterm mouse encoding: "^[< Cb;Cx;Cy(;) (M or m) "

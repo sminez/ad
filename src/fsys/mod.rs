@@ -32,9 +32,9 @@
 //! ```
 use crate::{editor::Action, input::Event, ui::SCRATCH_ID};
 use ninep::{
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat},
-    sync::server::{socket_path, ClientId, ReadOutcome, Serve9p, Server},
     Result,
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat},
+    sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
 use std::{
     collections::HashMap,
@@ -44,10 +44,10 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
+        mpsc::{Receiver, Sender, channel},
     },
-    thread::{spawn, JoinHandle},
+    thread::{JoinHandle, spawn},
     time::SystemTime,
 };
 use tracing::{error, trace};
@@ -507,10 +507,10 @@ impl Serve9p for AdFs {
 
         if qid == LOG_FILE_QID {
             s.buffer_nodes.log.add_client(cid);
-        } else if !TOP_LEVEL_QIDS.contains(&qid) {
-            if let QidCheck::Unknown = s.buffer_nodes.check_if_known_qid(qid) {
-                return Err(format!("{E_UNKNOWN_FILE}: {qid}"));
-            }
+        } else if !TOP_LEVEL_QIDS.contains(&qid)
+            && let QidCheck::Unknown = s.buffer_nodes.check_if_known_qid(qid)
+        {
+            return Err(format!("{E_UNKNOWN_FILE}: {qid}"));
         }
 
         s.add_open_cid(qid, cid);
@@ -524,10 +524,10 @@ impl Serve9p for AdFs {
 
         if qid == LOG_FILE_QID {
             s.buffer_nodes.log.remove_client(cid);
-        } else if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid) {
-            if s.readlocked_cid(qid) == Some(cid) {
-                s.buffer_nodes.clear_input_filter(buf_qid);
-            }
+        } else if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid)
+            && s.readlocked_cid(qid) == Some(cid)
+        {
+            s.buffer_nodes.clear_input_filter(buf_qid);
         }
         s.remove_open_cid(qid, cid); // also handles clearing the read lock
     }

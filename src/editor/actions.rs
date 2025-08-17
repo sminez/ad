@@ -338,7 +338,7 @@ where
         let desired_path = match (fname, &self.layout.active_buffer_ignoring_scratch().kind) {
             // File has a known name which is either where we loaded it from or a
             // path that has been set and verified from the Some(s) case that follows
-            (None, Bk::File(ref p)) => return Some(p.clone()),
+            (None, Bk::File(p)) => return Some(p.clone()),
             // Renaming an existing file or attempting to save a new file created in
             // the editor: both need verifying
             (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
@@ -874,7 +874,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{editor::EditorMode, LogBuffer, PlumbingRules};
+    use crate::{LogBuffer, PlumbingRules, editor::EditorMode};
     use simple_test_case::test_case;
 
     macro_rules! assert_recv {

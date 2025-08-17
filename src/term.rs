@@ -1,9 +1,9 @@
 //! Terminal TUI support.
 use crate::die;
 use libc::{
-    c_int, c_void, ioctl, sigaction, sighandler_t, siginfo_t, tcgetattr, tcsetattr,
-    termios as Termios, BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, ISIG, ISTRIP, IXON, OPOST,
-    SA_SIGINFO, SIGWINCH, STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME,
+    BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, ISIG, ISTRIP, IXON, OPOST, SA_SIGINFO, SIGWINCH,
+    STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME, c_int, c_void, ioctl, sigaction,
+    sighandler_t, siginfo_t, tcgetattr, tcsetattr, termios as Termios,
 };
 use serde::Deserialize;
 use std::{
@@ -39,22 +39,25 @@ pub(crate) fn win_size_changed() -> bool {
 /// must only be called once
 pub unsafe fn register_signal_handler() {
     let mut maybe_sa = mem::MaybeUninit::<sigaction>::uninit();
-    if libc::sigemptyset(&mut (*maybe_sa.as_mut_ptr()).sa_mask) == -1 {
-        die!(
-            "Unable to register signal handler: {}",
-            io::Error::last_os_error()
-        )
-    }
+    // SAFETY: we are meeting the C API requirements around usage of null pointers
+    unsafe {
+        if libc::sigemptyset(&mut (*maybe_sa.as_mut_ptr()).sa_mask) == -1 {
+            die!(
+                "Unable to register signal handler: {}",
+                io::Error::last_os_error()
+            )
+        }
 
-    let mut sa_ptr = *maybe_sa.as_mut_ptr();
-    sa_ptr.sa_sigaction = handle_win_size_change as sighandler_t;
-    sa_ptr.sa_flags = SA_SIGINFO;
+        let mut sa_ptr = *maybe_sa.as_mut_ptr();
+        sa_ptr.sa_sigaction = handle_win_size_change as sighandler_t;
+        sa_ptr.sa_flags = SA_SIGINFO;
 
-    if libc::sigaction(SIGWINCH, &sa_ptr as *const _, ptr::null_mut()) == -1 {
-        die!(
-            "Unable to register signal handler: {}",
-            io::Error::last_os_error()
-        )
+        if libc::sigaction(SIGWINCH, &sa_ptr as *const _, ptr::null_mut()) == -1 {
+            die!(
+                "Unable to register signal handler: {}",
+                io::Error::last_os_error()
+            )
+        }
     }
 }
 

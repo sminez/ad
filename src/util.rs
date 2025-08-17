@@ -112,10 +112,11 @@ pub(crate) fn exists_on_path_as_executable(cmd: &str, cwd: &Path, path_str: &str
     let candidates = path_str.split(':').map(|dir| Path::new(dir).join(cmd));
 
     for candidate in std::iter::once(cwd_candidate).chain(candidates) {
-        if let Ok(meta) = fs::metadata(candidate) {
-            if meta.is_file() && meta.permissions().mode() & 0o111 != 0 {
-                return true;
-            }
+        if let Ok(meta) = fs::metadata(candidate)
+            && meta.is_file()
+            && meta.permissions().mode() & 0o111 != 0
+        {
+            return true;
         }
     }
 

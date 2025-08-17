@@ -1,6 +1,6 @@
 use ad_editor::{
-    Args, CachedStdin, Config, Editor, EditorMode, LogBuffer, PlumbingRules, Program,
-    LOG_LEVEL_ENV_VAR,
+    Args, CachedStdin, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer, PlumbingRules,
+    Program,
 };
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
@@ -199,10 +199,10 @@ fn open_9p_sockets() -> io::Result<Vec<String>> {
     for entry in fs::read_dir(socket_dir())? {
         let entry = entry?;
         let fname = entry.file_name();
-        if let Some(s) = fname.to_str() {
-            if s.starts_with("ad-") {
-                ad_sockets.push(s.to_string());
-            }
+        if let Some(s) = fname.to_str()
+            && s.starts_with("ad-")
+        {
+            ad_sockets.push(s.to_string());
         }
     }
 

@@ -16,12 +16,12 @@ use crate::{
     },
     util::ReadOnlyLock,
 };
-use lsp_types::{request::Initialize, NumberOrString, Uri};
+use lsp_types::{NumberOrString, Uri, request::Initialize};
 use std::{
     collections::HashMap,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc, RwLock,
+        mpsc::{Receiver, Sender, channel},
     },
     thread::{sleep, spawn},
     time::Duration,
@@ -387,8 +387,8 @@ impl LspManager {
     }
 
     fn handle_response(&mut self, lsp_id: usize, res: Response) {
-        use lsp_types::request as req;
         use Pending::*;
+        use lsp_types::request as req;
 
         let p = match self.pending.remove(&(lsp_id, res.id())) {
             Some(p) => p,
@@ -407,10 +407,10 @@ impl LspManager {
             Initialize(l, ob) => req::Initialize::handle(lsp_id, res, (l, ob), self),
         };
 
-        if let Some(actions) = actions {
-            if self.tx_events.send(Event::Actions(actions)).is_err() {
-                error!("LSP - sender actions channel closed: exiting");
-            }
+        if let Some(actions) = actions
+            && self.tx_events.send(Event::Actions(actions)).is_err()
+        {
+            error!("LSP - sender actions channel closed: exiting");
         }
     }
 

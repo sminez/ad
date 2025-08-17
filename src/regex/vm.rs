@@ -44,7 +44,7 @@ pub struct Regex {
     track_submatches: bool,
     /// Monotonically increasing index used to dedup Threads
     /// Will overflow at some point if a given regex is used a VERY large number of times
-    gen: usize,
+    generation: usize,
     /// Index into the current Thread list
     p: usize,
     /// Previous character from the input
@@ -100,7 +100,7 @@ impl Regex {
     fn new(re: &str, ops: Vec<Op>, submatch_names: Vec<String>) -> Self {
         let prog: Prog = optimise(ops)
             .into_iter()
-            .map(|op| Inst { op, gen: 0 })
+            .map(|op| Inst { op, generation: 0 })
             .collect();
 
         let clist = vec![Thread::default(); prog.len()].into_boxed_slice();
@@ -114,7 +114,7 @@ impl Regex {
             submatch_names: Rc::from(submatch_names.into_boxed_slice()),
             clist,
             nlist,
-            gen: 0,
+            generation: 0,
             p: 0,
             prev: None,
             next: None,
@@ -213,13 +213,13 @@ impl Regex {
 
         // We bump the generation to ensure we don't collide with anything from
         // a previous run while initialising the VM.
-        self.gen += 1;
+        self.generation += 1;
         // When setting up the initial threads we have our prelude which uses "@" so we provide a
         // null byte for the initial character as it is not needed and it avoids us having to make
         // the "ch" param of add_thread optional.
         self.add_thread(Thread::default(), sp, '\0', true);
         swap(&mut self.clist, &mut self.nlist);
-        self.gen += 1;
+        self.generation += 1;
 
         // Same as at the end of the outer for-loop, we need to reset self.p to 0
         // so that we are correctly tracking the length of the new nlist.
@@ -256,7 +256,7 @@ impl Regex {
 
             swap(&mut self.clist, &mut self.nlist);
             self.prev = Some(ch);
-            self.gen += 1;
+            self.generation += 1;
             n = self.p;
 
             if self.p == 0 {
@@ -314,11 +314,11 @@ impl Regex {
 
     #[inline]
     fn add_thread(&mut self, t: Thread, sp: usize, ch: char, initial: bool) {
-        if self.prog[t.pc].gen == self.gen {
+        if self.prog[t.pc].generation == self.generation {
             self.sm_dec_ref(t.sm);
             return; // already on the list we are currently building
         }
-        self.prog[t.pc].gen = self.gen;
+        self.prog[t.pc].generation = self.generation;
 
         // We do this as chained if-let as we need to recursively call add_thread with data
         // from self.prog but add_thread required &mut self, so matching would mean we had

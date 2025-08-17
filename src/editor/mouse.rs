@@ -132,10 +132,11 @@ where
             }
 
             (Release, m, b) => {
-                if let Some(click) = self.held_click {
-                    if click.btn == Left && (b == Right || b == Middle) {
-                        return; // paste and cut are handled on click
-                    }
+                if let Some(click) = self.held_click
+                    && click.btn == Left
+                    && (b == Right || b == Middle)
+                {
+                    return; // paste and cut are handled on click
                 }
 
                 let mut click = match self.held_click.take() {

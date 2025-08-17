@@ -1,7 +1,7 @@
 //! A [Buffer] represents a single file or in memory text buffer open within the editor.
 use crate::{
-    config_handle,
-    dot::{find::find_forward_wrapping, Cur, Dot, Range, TextObject},
+    Config, MAX_NAME_LEN, UNNAMED_BUFFER, config_handle,
+    dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
     editor::Action,
     exec::{Addr, Address, IterBoundedChars},
     fsys::InputFilter,
@@ -9,7 +9,6 @@ use crate::{
     lsp::Coords,
     syntax::{LineIter, SyntaxState},
     util::normalize_line_endings,
-    Config, MAX_NAME_LEN, UNNAMED_BUFFER,
 };
 use ad_event::Source;
 use std::{
@@ -18,8 +17,8 @@ use std::{
     io::{self, ErrorKind},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     time::SystemTime,
 };
@@ -335,7 +334,7 @@ impl Buffer {
             Err(e) => {
                 return Some(ActionOutcome::SetStatusMessage(format!(
                     "invalid file path: {e}"
-                )))
+                )));
             }
         };
 
@@ -785,10 +784,10 @@ impl Buffer {
         let path = Path::new(fname);
         if path.is_absolute() && path.exists() {
             return Some(dot);
-        } else if let Some(dir) = self.dir() {
-            if dir.join(path).exists() {
-                return Some(dot);
-            }
+        } else if let Some(dir) = self.dir()
+            && dir.join(path).exists()
+        {
+            return Some(dot);
         }
 
         // Not a file or a URL
@@ -1043,12 +1042,12 @@ impl Buffer {
 
         let idx = cur.idx;
 
-        if let Some(ts) = self.syntax_state.as_mut() {
-            if let Some(s) = deleted.as_ref() {
-                let len = s.chars().count();
-                let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-                ts.edit(idx, ch_old_end, idx, &self.txt);
-            }
+        if let Some(ts) = self.syntax_state.as_mut()
+            && let Some(s) = deleted.as_ref()
+        {
+            let len = s.chars().count();
+            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
+            ts.edit(idx, ch_old_end, idx, &self.txt);
         }
 
         self.txt.insert_char(idx, ch);
@@ -1083,12 +1082,12 @@ impl Buffer {
 
         let idx = cur.idx;
 
-        if let Some(ts) = self.syntax_state.as_mut() {
-            if let Some(s) = deleted.as_ref() {
-                let len = s.chars().count();
-                let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-                ts.edit(idx, ch_old_end, idx, &self.txt);
-            }
+        if let Some(ts) = self.syntax_state.as_mut()
+            && let Some(s) = deleted.as_ref()
+        {
+            let len = s.chars().count();
+            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
+            ts.edit(idx, ch_old_end, idx, &self.txt);
         }
 
         // Inserting an empty string should not be recorded as an edit (and is
