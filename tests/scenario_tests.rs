@@ -576,6 +576,18 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
                     }
                 }
 
+                s if s.starts_with("<ctrl>") => {
+                    let tail = escape(s.strip_prefix("<ctrl>").unwrap().trim());
+                    let mut it = tail.chars();
+                    match (it.next(), it.next()) {
+                        (Some(ch), None) => actions.push(TestAction::Input(Input::Ctrl(ch))),
+                        (None, _) => panic!("invalid <ctrl> input: expected a character"),
+                        (_, Some(_)) => {
+                            panic!("invalid <ctrl> input: expected a single char, got {tail:?}");
+                        }
+                    }
+                }
+
                 _ => {
                     for ch in escape(s).chars() {
                         actions.push(TestAction::Input(char_as_input(ch)));
