@@ -2,7 +2,7 @@ use ninep::sync::server::{ClientId, ReadOutcome};
 use std::{
     collections::HashMap,
     mem::swap,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender, channel},
     thread::spawn,
 };
 use tracing::{debug, error};

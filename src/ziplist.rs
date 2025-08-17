@@ -5,7 +5,7 @@ use std::{
     cmp::Ordering,
     collections::vec_deque::{self, VecDeque},
     fmt,
-    iter::{once, IntoIterator},
+    iter::{IntoIterator, once},
     mem::{swap, take},
     ops::{Index, IndexMut},
 };

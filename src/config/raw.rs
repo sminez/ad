@@ -2,13 +2,13 @@
 //! it into our internal data types.
 use crate::{
     config::{
-        ColorScheme, Config, EditorConfig, FsysConfig, KeyBindings, LangConfig, LspConfig,
-        TsConfig, DEFAULT_CONFIG,
+        ColorScheme, Config, DEFAULT_CONFIG, EditorConfig, FsysConfig, KeyBindings, LangConfig,
+        LspConfig, TsConfig,
     },
     syntax::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
     term::{Color, Styles},
 };
-use serde::{de::DeserializeOwned, Deserialize};
+use serde::{Deserialize, de::DeserializeOwned};
 use std::{
     collections::HashMap,
     fs, io,

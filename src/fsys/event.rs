@@ -2,15 +2,15 @@
 use crate::{
     dot::Range,
     fsys::{
-        message::{Message, Req},
         Result,
+        message::{Message, Req},
     },
     input::Event,
 };
 use ad_event::{FsysEvent, Kind, Source};
 use ninep::sync::server::ReadOutcome;
 use std::{
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender, channel},
     thread::spawn,
 };
 
@@ -107,32 +107,34 @@ pub enum InputRequest {
 pub fn run_threaded_input_listener(event_rx: Receiver<FsysEvent>) -> Sender<InputRequest> {
     let (fsys_tx, fsys_rx) = channel();
 
-    spawn(move || loop {
-        let tx = match fsys_rx.recv() {
-            Ok(InputRequest::Shutdown) | Err(_) => return,
-            Ok(InputRequest::Read { tx }) => tx,
-        };
+    spawn(move || {
+        loop {
+            let tx = match fsys_rx.recv() {
+                Ok(InputRequest::Shutdown) | Err(_) => return,
+                Ok(InputRequest::Read { tx }) => tx,
+            };
 
-        // If events are available now then return them immediately
-        let content: String = event_rx
-            .try_iter()
-            .map(|e| e.as_event_file_line())
-            .collect();
+            // If events are available now then return them immediately
+            let content: String = event_rx
+                .try_iter()
+                .map(|e| e.as_event_file_line())
+                .collect();
 
-        if !content.is_empty() {
-            _ = tx.send(ReadOutcome::Immediate(content.into_bytes()));
-            continue;
+            if !content.is_empty() {
+                _ = tx.send(ReadOutcome::Immediate(content.into_bytes()));
+                continue;
+            }
+
+            // Otherwise return a blocked read and wait for the next event to come through
+            let (read_tx, read_rx) = channel();
+            _ = tx.send(ReadOutcome::Blocked(read_rx));
+            let data = match event_rx.recv() {
+                Ok(evt) => evt.as_event_file_line().into_bytes(),
+                Err(_) => return,
+            };
+
+            _ = read_tx.send(data);
         }
-
-        // Otherwise return a blocked read and wait for the next event to come through
-        let (read_tx, read_rx) = channel();
-        _ = tx.send(ReadOutcome::Blocked(read_rx));
-        let data = match event_rx.recv() {
-            Ok(evt) => evt.as_event_file_line().into_bytes(),
-            Err(_) => return,
-        };
-
-        _ = read_tx.send(data);
     });
 
     fsys_tx

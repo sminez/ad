@@ -17,12 +17,12 @@
 //!     need to make use of [unicode_width::UnicodeWidthChar] in order to determine whether
 //!     none, part or all of any given token should be rendered.
 use crate::{
+    Config,
     buffer::{GapBuffer, Slice},
     dot::Range,
-    Config,
 };
 use std::{
-    cmp::{max, min, Ord, Ordering, PartialOrd},
+    cmp::{Ord, Ordering, PartialOrd, max, min},
     iter::Peekable,
     slice,
 };

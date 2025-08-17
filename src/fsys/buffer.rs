@@ -1,18 +1,18 @@
 //! Buffer state for the fuse filesystem
 use crate::{
     fsys::{
-        apply_offset, empty_dir_stat, empty_file_stat,
-        event::{run_threaded_input_listener, send_event_to_editor, InputFilter, InputRequest},
+        BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER,
+        INDEX_BUFFER_QID, InternalRead, Message, QID_OFFSET, Req, Result, apply_offset,
+        empty_dir_stat, empty_file_stat,
+        event::{InputFilter, InputRequest, run_threaded_input_listener, send_event_to_editor},
         log::{Log, LogEvent},
-        InternalRead, Message, Req, Result, BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER,
-        CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER, INDEX_BUFFER_QID, QID_OFFSET,
     },
     input::Event,
 };
 use ninep::{fs::Stat, sync::server::ReadOutcome};
 use std::{
     collections::BTreeMap,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::mpsc::{Receiver, Sender, channel},
     time::SystemTime,
 };
 use tracing::{debug, error, trace};

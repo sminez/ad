@@ -2,16 +2,16 @@
 //!
 //! This is not a general purpose client and it is not aiming to support all LSP features.
 use crate::lsp::{
+    Req,
     capabilities::PositionEncoding,
     rpc::{Message, RequestId},
-    Req,
 };
 use std::{
     ffi::OsStr,
     io::{self, BufRead, BufReader},
     process::{ChildStdin, Command, Stdio},
     sync::mpsc::Sender,
-    thread::{spawn, JoinHandle},
+    thread::{JoinHandle, spawn},
 };
 use tracing::error;
 

@@ -154,7 +154,7 @@ impl Program {
 
             Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
             Err(ParseError::UnclosedDelimiter) => {
-                return Err(Error::UnclosedDelimiter("dot expr regex", '/'))
+                return Err(Error::UnclosedDelimiter("dot expr regex", '/'));
             }
             Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
             Err(ParseError::InvalidSuffix) => return Err(Error::InvalidSuffix),
@@ -486,8 +486,8 @@ where
 mod tests {
     use super::*;
     use crate::{buffer::Buffer, editor::Action, regex::Regex};
-    use simple_test_case::test_case;
     use Expr::*;
+    use simple_test_case::test_case;
 
     fn re(s: &str) -> Regex {
         Regex::compile(s).unwrap()

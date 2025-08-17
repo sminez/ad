@@ -1,5 +1,5 @@
 //! A simple AST for parsing and manipulating regex strings
-use super::{next_char, CharClass, Error};
+use super::{CharClass, Error, next_char};
 use crate::util::parse_num;
 use std::{iter::Peekable, mem::swap, str::Chars};
 
@@ -576,9 +576,9 @@ fn try_parse_counted_repetition(it: &mut Peekable<Chars<'_>>) -> Result<Counted,
 mod tests {
     use super::Rep::*;
     use super::*;
-    use simple_test_case::test_case;
     use Assertion::*;
     use Greed::*;
+    use simple_test_case::test_case;
 
     fn cat(nodes: Vec<Ast>) -> Ast {
         Ast::Concat(nodes)

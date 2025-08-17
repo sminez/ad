@@ -1,4 +1,4 @@
-use super::vm::{Regex, N_SLOTS};
+use super::vm::{N_SLOTS, Regex};
 use crate::buffer::{GapBuffer, IdxChars};
 use std::{
     iter::{Enumerate, Skip},

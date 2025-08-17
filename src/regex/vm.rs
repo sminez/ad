@@ -9,10 +9,10 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use super::{
-    ast::{parse, Assertion},
-    compile::{compile_ast, optimise, CompiledOps, Inst, Op, Prog},
-    matches::{Match, MatchIter},
     Error,
+    ast::{Assertion, parse},
+    compile::{CompiledOps, Inst, Op, Prog, compile_ast, optimise},
+    matches::{Match, MatchIter},
 };
 use crate::buffer::{Buffer, GapBuffer};
 use std::{fmt, mem::swap, rc::Rc};

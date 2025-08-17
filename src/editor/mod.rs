@@ -1,5 +1,6 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
+    LogBuffer,
     buffer::{ActionOutcome, Buffer, BufferId, WELCOME_SQUIRREL},
     config::Config,
     config_handle, die,
@@ -9,20 +10,19 @@ use crate::{
     input::Event,
     key::{Arrow, Input},
     lsp::{LspManager, LspManagerHandle},
-    mode::{modes, Mode},
+    mode::{Mode, modes},
     plumb::PlumbingRules,
     system::{DefaultSystem, System},
     term::CurShape,
-    ui::{Layout, StateChange, Ui, UserInterface, SCRATCH_ID},
-    LogBuffer,
+    ui::{Layout, SCRATCH_ID, StateChange, Ui, UserInterface},
 };
 use ad_event::Source;
 use std::{
     env, fmt, panic,
     path::{Path, PathBuf},
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
+        mpsc::{Receiver, Sender, channel},
     },
     time::Instant,
 };

@@ -1,4 +1,4 @@
-use super::{consume_whitespace, Error};
+use super::{Error, consume_whitespace};
 use crate::regex::Regex;
 use std::{iter::Peekable, str::Chars};
 
@@ -157,8 +157,8 @@ fn parse_group(it: &mut Peekable<Chars<'_>>) -> Result<Vec<Vec<Expr>>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use simple_test_case::test_case;
     use Expr::*;
+    use simple_test_case::test_case;
 
     fn re(s: &str) -> Regex {
         Regex::compile(s).unwrap()

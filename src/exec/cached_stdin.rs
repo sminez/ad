@@ -1,11 +1,11 @@
 use crate::{
     buffer::GapBuffer,
     dot::Dot,
-    exec::{addr::Address, Edit},
+    exec::{Edit, addr::Address},
 };
 use std::{
     cell::RefCell,
-    io::{stdin, Stdin},
+    io::{Stdin, stdin},
 };
 
 /// Initial length of the line buffer for when we read from stdin

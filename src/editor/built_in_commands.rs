@@ -14,19 +14,19 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         ),
         (
             vec!["balance-all"],
-            "force columns to be the same width and all windows to be the same size withing their respective columns"
+            "force columns to be the same width and all windows to be the same size withing their respective columns",
         ),
         (
             vec!["balance-column"],
-            "force all windows in the current column to be the same size"
+            "force all windows in the current column to be the same size",
         ),
         (
             vec!["balance-columns"],
-            "force all columns to be the same width"
+            "force all columns to be the same width",
         ),
         (
             vec!["balance-windows"],
-            "force all windows to be the same size within their respective columns"
+            "force all windows to be the same size within their respective columns",
         ),
         (
             vec!["cd", "change-directory"],
@@ -60,11 +60,23 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             vec!["dw!", "delete-window!"],
             "delete the active window discarding all pendings changes if this is the last window",
         ),
-        (vec!["new-window"], "clone the current window as a new window at the end of the focused column"),
-        (vec!["new-column"], "clone the current window as a new column"),
-        (vec!["next-window"], "move focus to the next window in the current column"),
+        (
+            vec!["new-window"],
+            "clone the current window as a new window at the end of the focused column",
+        ),
+        (
+            vec!["new-column"],
+            "clone the current window as a new column",
+        ),
+        (
+            vec!["next-window"],
+            "move focus to the next window in the current column",
+        ),
         (vec!["next-column"], "move focus to the next column"),
-        (vec!["prev-window"], "move focus to the previous window in the current column"),
+        (
+            vec!["prev-window"],
+            "move focus to the previous window in the current column",
+        ),
         (vec!["prev-column"], "move focus to the previous column"),
         (
             vec!["echo"],
@@ -123,7 +135,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         ),
         (
             vec!["rename-buffer"],
-            "rename the active buffer so that subsequent file operations will apply to the new path"
+            "rename the active buffer so that subsequent file operations will apply to the new path",
         ),
         (
             vec!["resize-column"],
@@ -166,14 +178,41 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             vec!["w!", "write!"],
             "save the current buffer to disk ignoring external changes",
         ),
-        (vec!["lsp-find-references"], "show references to the symbol under the current cursor in the mini-buffer (requires an attached LSP server)"),
-        (vec!["lsp-goto-declaration"], "jump to the declaration of the symbol under the current cursor (requires an attached LSP server)"),
-        (vec!["lsp-goto-definition"], "jump to the definition of the symbol under the current cursor (requires an attached LSP server)"),
-        (vec!["lsp-goto-type-definition"], "jump to the definition of the type of symbol under the current cursor (requires an attached LSP server)"),
-        (vec!["lsp-hover"], "display hover text for the symbol under the current cursor in a new window (requires an attached LSP server)"),
-        (vec!["lsp-show-capabilities"], "display the JSON capabilities of the LSP server for the current buffer (requires an attached LSP server)"),
-        (vec!["lsp-show-diagnostics"], "display all LSP diagnostics in the mini-buffer"),
-        (vec!["lsp-start"], "attempt to start an LSP server associated with the current filetype"),
-        (vec!["lsp-stop"], "stop the LSP server associated with the current filetype"),
+        (
+            vec!["lsp-find-references"],
+            "show references to the symbol under the current cursor in the mini-buffer (requires an attached LSP server)",
+        ),
+        (
+            vec!["lsp-goto-declaration"],
+            "jump to the declaration of the symbol under the current cursor (requires an attached LSP server)",
+        ),
+        (
+            vec!["lsp-goto-definition"],
+            "jump to the definition of the symbol under the current cursor (requires an attached LSP server)",
+        ),
+        (
+            vec!["lsp-goto-type-definition"],
+            "jump to the definition of the type of symbol under the current cursor (requires an attached LSP server)",
+        ),
+        (
+            vec!["lsp-hover"],
+            "display hover text for the symbol under the current cursor in a new window (requires an attached LSP server)",
+        ),
+        (
+            vec!["lsp-show-capabilities"],
+            "display the JSON capabilities of the LSP server for the current buffer (requires an attached LSP server)",
+        ),
+        (
+            vec!["lsp-show-diagnostics"],
+            "display all LSP diagnostics in the mini-buffer",
+        ),
+        (
+            vec!["lsp-start"],
+            "attempt to start an LSP server associated with the current filetype",
+        ),
+        (
+            vec!["lsp-stop"],
+            "stop the LSP server associated with the current filetype",
+        ),
     ]
 }

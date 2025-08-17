@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     fmt,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::Sender},
 };
 
 mod layout;

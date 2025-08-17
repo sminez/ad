@@ -2,8 +2,8 @@
 use crate::{
     buffer::Buffer,
     dot::{
-        find::{find_backward_start, find_forward_end, Find},
         Cur, Dot, Range,
+        find::{Find, find_backward_start, find_forward_end},
     },
     key::Arrow,
 };
@@ -202,7 +202,7 @@ impl Find for FindParagraph {
                     return match self {
                         Self::Fwd => Some((i, i)),
                         Self::Bck => Some((i + 1, i + 1)),
-                    }
+                    };
                 }
                 '\n' => prev_was_newline = true,
                 _ => prev_was_newline = false,
@@ -253,7 +253,7 @@ impl Find for FindWord {
                     return match self {
                         Self::Fwd => Some((i - 1, i - 1)),
                         Self::Bck => Some((i + 1, i + 1)),
-                    }
+                    };
                 }
                 _ => prev = kind,
             }

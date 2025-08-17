@@ -3,13 +3,13 @@
 //!
 //! Conceptually this is operates as an embedded dmenu.
 use crate::{
+    Config,
     buffer::{Buffer, Buffers, GapBuffer, Slice},
     config_handle,
     dot::TextObject,
     editor::{Action, Actions, Editor},
     key::{Arrow, Input},
     system::System,
-    Config,
 };
 use ad_event::Source;
 use std::{

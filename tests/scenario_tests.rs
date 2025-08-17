@@ -3,6 +3,7 @@
 //!
 //! See TestCase::from_archive for details of the supported file sections.
 use ad_editor::{
+    Config, Editor, EditorMode, LogBuffer, PlumbingRules,
     buffer::BufferId,
     editor::{Action, Click, MiniBufferState},
     input::Event,
@@ -10,7 +11,6 @@ use ad_editor::{
     system::DefaultSystem,
     term::CurShape,
     ui::{Layout, StateChange, UserInterface},
-    Config, Editor, EditorMode, LogBuffer, PlumbingRules,
 };
 use ninep::sync::client::UnixClient;
 use simple_test_case::dir_cases;
@@ -19,7 +19,7 @@ use std::{
     env, fs, io,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{mpsc::Sender, Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::Sender},
     thread::{sleep, spawn},
     time::{Duration, SystemTime},
 };
