@@ -44,6 +44,9 @@ pub(crate) fn insert_mode() -> (Mode, Vec<(String, &'static str)>) {
         "delete previous word";
         [ Ctrl('w') ] => [ DotSet(Arr(Left), 1), DotExtendBackward(Word, 1), Delete ],
 
+        // LSP
+        "LSP: request completions";
+        [ Alt(' ') ] => [ LspCompletion ],
     };
 
     let mode = Mode {
