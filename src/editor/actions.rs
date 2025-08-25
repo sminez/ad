@@ -82,6 +82,7 @@ pub enum Action {
     JumpListBack,
     KillRunningChild,
     LoadDot { new_window: bool },
+    LspCompletion,
     LspGotoDeclaration,
     LspGotoDefinition,
     LspGotoTypeDefinition,
