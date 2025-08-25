@@ -10,7 +10,7 @@ use crate::{
 };
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionParams, CompletionResponse, CompletionTextEdit,
-    CompletionTriggerKind, TextEdit, request as req,
+    CompletionTriggerKind, request as req,
 };
 use std::sync::mpsc::Sender;
 
@@ -31,6 +31,8 @@ impl LspRequest for req::Completion {
             work_done_progress_params: Default::default(),
             partial_result_params: Default::default(),
             context: Some(CompletionContext {
+                // We only support explicit explicitly invoked completions rather than always-on
+                // auto-complete firing for each character that the user types
                 trigger_kind: CompletionTriggerKind::INVOKED,
                 trigger_character: None,
             }),
@@ -71,39 +73,17 @@ impl LspRequest for req::Completion {
     }
 }
 
-// We assume that each TextEdit is a single edit to the current buffer.
-//
-// "Additional edits" need to be made via the xdot as the LSP protocol specifies that they are
-// edits that need to be made to the file without affecting the editor's cursor position.
-// Annoyingly the protocol doesn't provide any mechanism for specifying the final cursor position
-// following a multi-part edit like this so we're left to figure out the correct final cursor
-// position ourselves.
-fn actions_from_text_edit(edit: &TextEdit, enc: PositionEncoding, use_xdot: bool) -> [Action; 2] {
-    let coords = Coords::new_from_range(edit.range, enc);
-
-    if use_xdot {
-        [
-            Action::XDotSetFromCoords { coords },
-            Action::XInsertString {
-                s: edit.new_text.clone(),
-            },
-        ]
-    } else {
-        [
-            Action::DotSetFromCoords { coords },
-            Action::InsertString {
-                s: edit.new_text.clone(),
-            },
-        ]
-    }
-}
-
 #[derive(Debug, Clone)]
 struct Completion {
     comp_item: CompletionItem,
-    edit_actions: Option<Actions>,
-    resolve_args: Option<(usize, Sender<Req>)>,
+    actions: CompletionAction,
     kind: String,
+}
+
+#[derive(Debug, Clone)]
+enum CompletionAction {
+    Resolve(usize, Sender<Req>),
+    Actions(Actions),
 }
 
 impl Completion {
@@ -114,46 +94,24 @@ impl Completion {
         tx_req: &Sender<Req>,
     ) -> Self {
         let kind = comp_item.kind.map(|k| format!("{k:?}")).unwrap_or_default();
-        let (resolve_args, edit_actions) = match comp_item.text_edit.as_ref() {
-            Some(CompletionTextEdit::Edit(edit)) => {
-                // Some LSP servers will defer computing data for additional edits until explicitly
-                // requested by the client using completionItem/resolve. If the "data" field is
-                // non-null then this is an indicator that we need to make the resolve request (the
-                // data inside of the "data" field itself is only intended for use by the LSP
-                // server itself in order to resolve the request so we shouldn't be doing anything
-                // with it other than passing it back).
-                if comp_item.data.is_some() {
-                    (Some((lsp_id, tx_req.clone())), None)
-                } else {
-                    (
-                        None,
-                        Some(Actions::Multi(
-                            actions_from_text_edit(edit, enc, false).to_vec(),
-                        )),
-                    )
-                }
-            }
 
-            Some(CompletionTextEdit::InsertAndReplace(_)) | None => (None, None),
+        // Some LSP servers will defer computing data for additional edits until explicitly
+        // requested by the client using completionItem/resolve. If the "data" field is
+        // non-null then this is an indicator that we need to make the resolve request (the
+        // data inside of the "data" field itself is only intended for use by the LSP
+        // server itself in order to resolve the request so we shouldn't be doing anything
+        // with it other than passing it back).
+        let actions = if comp_item.data.is_some() {
+            CompletionAction::Resolve(lsp_id, tx_req.clone())
+        } else {
+            CompletionAction::Actions(actions_for_resolved_completion_item(comp_item.clone(), enc))
         };
 
         Self {
             comp_item,
-            edit_actions,
-            resolve_args,
+            actions,
             kind,
         }
-    }
-
-    // From the LSP spec docs on the insertText field:
-    // 	 A string that should be inserted into a document when selecting
-    //   this completion. When omitted the label is used as the insert text
-    //   for this item.
-    fn raw_insert_text(&self) -> String {
-        self.comp_item
-            .insert_text
-            .clone()
-            .unwrap_or_else(|| self.comp_item.label.clone())
     }
 
     fn mb_line(&self, label_width: usize, kind_width: usize) -> String {
@@ -195,18 +153,9 @@ impl MbSelect for Completions {
     }
 
     fn prompt_and_options(&self, _buffers: &Buffers) -> (String, Vec<String>) {
-        let label_width = self
-            .0
-            .iter()
-            .map(|c| c.comp_item.label.chars().count())
-            .max()
-            .unwrap_or_default();
-        let kind_width = self
-            .0
-            .iter()
-            .map(|c| c.kind.chars().count())
-            .max()
-            .unwrap_or_default();
+        let width = |f: fn(&Completion) -> usize| self.0.iter().map(f).max().unwrap_or_default();
+        let label_width = width(|c| c.comp_item.label.chars().count());
+        let kind_width = width(|c| c.kind.chars().count());
 
         (
             "Completions> ".to_owned(),
@@ -219,24 +168,22 @@ impl MbSelect for Completions {
 
     fn selected_actions(&self, sel: MiniBufferSelection) -> Option<Actions> {
         match sel {
-            MiniBufferSelection::Line { cy, .. } => self.0.get(cy).and_then(|c| {
-                if let Some((lsp_id, tx_req)) = c.resolve_args.clone() {
-                    let pending =
-                        PendingParams::ResolveCompletionItem(Box::new(c.comp_item.clone()));
-                    let req = Req::Pending(PendingRequest { lsp_id, pending });
-                    if let Err(e) = tx_req.send(req) {
-                        die!("LSP manager died: {e}")
-                    }
+            MiniBufferSelection::Line { cy, .. } => {
+                self.0.get(cy).and_then(|c| match c.actions.clone() {
+                    CompletionAction::Actions(actions) => Some(actions),
 
-                    None
-                } else {
-                    c.edit_actions.clone().or_else(|| {
-                        Some(Actions::Single(Action::InsertString {
-                            s: c.raw_insert_text(),
-                        }))
-                    })
-                }
-            }),
+                    CompletionAction::Resolve(lsp_id, tx_req) => {
+                        let pending =
+                            PendingParams::ResolveCompletionItem(Box::new(c.comp_item.clone()));
+                        let req = Req::Pending(PendingRequest { lsp_id, pending });
+                        if let Err(e) = tx_req.send(req) {
+                            die!("LSP manager died: {e}")
+                        }
+
+                        None
+                    }
+                })
+            }
 
             _ => None,
         }
@@ -274,21 +221,66 @@ impl LspRequest for req::ResolveCompletionItem {
             }
         };
 
-        let mut edit_actions = match comp_item.text_edit.as_ref() {
-            Some(CompletionTextEdit::Edit(edit)) => {
-                actions_from_text_edit(edit, enc, false).to_vec()
-            }
-            Some(CompletionTextEdit::InsertAndReplace(_)) | None => Vec::new(),
-        };
-
-        edit_actions.extend(
-            comp_item
-                .additional_text_edits
-                .unwrap_or_default()
-                .iter()
-                .flat_map(|te| actions_from_text_edit(te, enc, true)),
-        );
-
-        Some(Actions::Multi(edit_actions))
+        Some(actions_for_resolved_completion_item(comp_item, enc))
     }
+}
+
+/// Once a completion item is fully resolved (no `data` field or following a completionItem/resolve
+/// request) we need to combine the edits both from the primary edit itself and any additional
+/// edits that are given.
+///
+/// We assume that each TextEdit is a single edit to the current buffer. "Additional edits" need to
+/// be made via the xdot as the LSP protocol specifies that they are edits that need to be made to
+/// the file without affecting the editor's cursor position. Annoyingly the protocol doesn't
+/// provide any mechanism for specifying the final cursor position following a multi-part edit like
+/// this so we're left to figure out the correct final cursor position ourselves.
+fn actions_for_resolved_completion_item(
+    comp_item: CompletionItem,
+    enc: PositionEncoding,
+) -> Actions {
+    let mut edit_actions = match comp_item.text_edit.as_ref() {
+        Some(CompletionTextEdit::Edit(edit)) => {
+            vec![
+                Action::DotSetFromCoords {
+                    coords: Coords::new_from_range(edit.range, enc),
+                },
+                Action::InsertString {
+                    s: edit.new_text.clone(),
+                },
+            ]
+        }
+
+        Some(CompletionTextEdit::InsertAndReplace(_)) => Vec::new(),
+
+        None => {
+            // From the LSP spec docs on the insertText field:
+            // 	 A string that should be inserted into a document when selecting
+            //   this completion. When omitted the label is used as the insert text
+            //   for this item.
+            vec![Action::InsertString {
+                s: comp_item
+                    .insert_text
+                    .clone()
+                    .unwrap_or_else(|| comp_item.label.clone()),
+            }]
+        }
+    };
+
+    edit_actions.extend(
+        comp_item
+            .additional_text_edits
+            .unwrap_or_default()
+            .iter()
+            .flat_map(|edit| {
+                let coords = Coords::new_from_range(edit.range, enc);
+                [
+                    Action::XDotSetFromCoords { coords },
+                    Action::XInsertString {
+                        s: edit.new_text.clone(),
+                    },
+                ]
+            }),
+    );
+
+    Actions::Multi(edit_actions)
 }
