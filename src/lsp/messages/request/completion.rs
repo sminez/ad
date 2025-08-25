@@ -284,3 +284,28 @@ fn actions_for_resolved_completion_item(
 
     Actions::Multi(edit_actions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ad_event::Source;
+    use simple_test_case::test_case;
+    use std::sync::mpsc::channel;
+
+    #[test_case("foo", Some("foo"); "alphanum")]
+    #[test_case("foo::", None; "punctuation following alphanum")]
+    #[test_case("foo::bar", Some("bar"); "alphanum following punctuation")]
+    #[test]
+    fn mb_completions_initial_input(s: &str, expected: Option<&str>) {
+        let (tx, _rx) = channel();
+        let completions = Completions(Vec::new());
+        let mut buffers = Buffers::new_stubbed(&[1], tx, Default::default());
+        buffers
+            .active_mut()
+            .handle_action(Action::InsertString { s: s.to_string() }, Source::Fsys);
+
+        let initial_input = completions.initial_input(&buffers);
+
+        assert_eq!(initial_input.as_deref(), expected);
+    }
+}
