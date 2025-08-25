@@ -100,23 +100,37 @@ impl Config {
         Self::try_load_from_path(&path, &home)
     }
 
-    /// Check to see if there is a known language for this buffer
-    pub fn lang_for_buffer(&self, b: &Buffer) -> Option<&str> {
-        let path = b.path()?;
-        let fname = path.file_name()?.to_string_lossy();
-        let os_ext = path.extension().unwrap_or_default();
-        let ext = os_ext.to_str().unwrap_or_default();
+    /// For a [Buffer], check to see if we know the correct language associated with the file and
+    /// associated [LangConfig].
+    pub fn lang_config_for_buffer(&self, b: &Buffer) -> Option<(&String, &LangConfig)> {
         let first_line = b.line(0).map(|l| l.to_string()).unwrap_or_default();
 
-        self.languages
-            .iter()
-            .find(|(_, c)| {
-                c.filenames.iter().any(|f| *f == fname)
-                    || c.extensions.iter().any(|e| e == ext)
-                    || c.first_lines.iter().any(|l| first_line.starts_with(l))
-            })
+        lang_config_for_path_and_first_line(b.path()?, &first_line, &self.languages)
+    }
+
+    /// Check to see if there is a known language for this [Buffer].
+    pub fn lang_for_buffer(&self, b: &Buffer) -> Option<&str> {
+        self.lang_config_for_buffer(b)
             .map(|(name, _)| name.as_str())
     }
+}
+
+/// For an explicitly provided path and first line of a file, check to see if we know the
+/// correct language associated with the file and associated [LangConfig].
+pub fn lang_config_for_path_and_first_line<'a>(
+    path: &Path,
+    first_line: &str,
+    languages: &'a HashMap<String, LangConfig>,
+) -> Option<(&'a String, &'a LangConfig)> {
+    let fname = path.file_name()?.to_string_lossy();
+    let os_ext = path.extension().unwrap_or_default();
+    let ext = os_ext.to_str().unwrap_or_default();
+
+    languages.iter().find(|(_, c)| {
+        c.filenames.iter().any(|f| *f == fname)
+            || c.extensions.iter().any(|e| e == ext)
+            || c.first_lines.iter().any(|l| first_line.starts_with(l))
+    })
 }
 
 /// Top level configuration for the editor
@@ -249,8 +263,7 @@ pub struct LspConfig {
 }
 
 impl LspConfig {
-    pub fn root_for_buffer<'a>(&self, b: &'a Buffer) -> Option<&'a Path> {
-        let d = b.dir()?;
+    pub fn root_for_dir<'a>(&self, d: &'a Path) -> Option<&'a Path> {
         for root in self.roots.iter() {
             if let Some(p) = parent_dir_containing(d, root) {
                 return Some(p);
@@ -258,6 +271,10 @@ impl LspConfig {
         }
 
         None
+    }
+
+    pub fn root_for_buffer<'a>(&self, b: &'a Buffer) -> Option<&'a Path> {
+        self.root_for_dir(b.dir()?)
     }
 }
 
