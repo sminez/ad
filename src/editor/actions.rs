@@ -134,6 +134,8 @@ pub enum Action {
     TsShowTree,
     Undo,
     ViewLogs,
+    XDotSetFromCoords { coords: Coords },
+    XInsertString { s: String },
     Yank,
 
     DebugBufferContents,

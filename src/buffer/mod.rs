@@ -556,6 +556,13 @@ impl Buffer {
         self.xdot.addr(self)
     }
 
+    /// Extract the current [Word][TextObject::Word] under dot.
+    ///
+    /// Calling this method does not modify the dot state of the buffer.
+    pub fn word_under_dot(&self, dot: Dot) -> String {
+        TextObject::word_under_dot(dot, self)
+    }
+
     /// The number of lines currently held in the buffer.
     #[inline]
     pub fn len_lines(&self) -> usize {
@@ -846,6 +853,9 @@ impl Buffer {
             Action::DotSet(t, count) => self.set_dot(t, count),
             Action::DotSetFromCoords { coords } => self.set_dot_from_coords(coords),
 
+            Action::XDotSetFromCoords { coords } => self.set_xdot_from_coords(coords),
+            Action::XInsertString { s } => self.insert_xdot(s),
+
             Action::RenameActiveBuffer { name } => return self.set_filename(name),
             Action::RawInput { i } => return self.handle_raw_input(i),
 
@@ -920,6 +930,12 @@ impl Buffer {
         let mut addr: Addr = coords.as_addr(self);
         self.dot = self.map_addr(&mut addr);
         self.dot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(self.txt.len_chars());
+    }
+
+    fn set_xdot_from_coords(&mut self, coords: Coords) {
+        let mut addr: Addr = coords.as_addr(self);
+        self.xdot = self.map_addr(&mut addr);
         self.xdot.clamp_idx(self.txt.len_chars());
     }
 
@@ -1173,10 +1189,15 @@ impl Buffer {
 
     /// Insert a string into the buffer using the current xdot rather than dot.
     pub(crate) fn insert_xdot(&mut self, s: String) {
-        let dot = self.dot;
+        // We convert the current dot (character offsets) to an address (line, column) in order to
+        // attempt to preserve the correct cursor position if xdot ends up altering buffer content
+        // before the current dot.
+        // This can still result in the resulting dot being incorrect if the number of lines in the
+        // buffer changes as a result of this insert.
+        let mut addr = Addr::from_dot(self.dot, self);
         self.dot = self.xdot;
         self.handle_action(Action::InsertString { s }, Source::Fsys);
-        (self.xdot, self.dot) = (self.dot, dot);
+        (self.xdot, self.dot) = (self.dot, self.map_addr(&mut addr));
         self.dot.clamp_idx(self.txt.len_chars()); // xdot clamped as part of handling the insert
     }
 }
