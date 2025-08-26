@@ -121,10 +121,7 @@ impl LspServerNotification for Progress {
 /// a given file overwrites our current state
 impl LspServerNotification for PublishDiagnostics {
     fn handle_params(lsp_id: usize, params: Self::Params, man: &mut LspManager) -> Option<Actions> {
-        let encoding = match man.clients.get(&lsp_id) {
-            Some(c) => c.position_encoding,
-            None => return None,
-        };
+        let encoding = man.clients.get(&lsp_id)?.position_encoding;
 
         let PublishDiagnosticsParams {
             uri, diagnostics, ..

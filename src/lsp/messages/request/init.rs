@@ -142,13 +142,7 @@ impl LspRequest for Initialize {
     ) -> Option<Actions> {
         match Capabilities::try_new(res) {
             Some(c) => {
-                let client = match man.clients.get_mut(&lsp_id) {
-                    Some(client) => client,
-                    None => {
-                        man.send_status(format!("no attached LSP client for {lang}"));
-                        return None;
-                    }
-                };
+                let client = man.clients.get_mut(&lsp_id)?;
 
                 debug!(%lsp_id, "LSP initialized");
                 client.status = Status::Running;

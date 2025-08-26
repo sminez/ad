@@ -49,14 +49,7 @@ impl LspRequest for req::Completion {
         _: (),
         man: &mut LspManager,
     ) -> Option<Actions> {
-        let enc = match man.clients.get_mut(&lsp_id) {
-            Some(client) => client.position_encoding,
-            None => {
-                man.send_status("no attached LSP client".to_string());
-                return None;
-            }
-        };
-
+        let enc = man.clients.get(&lsp_id)?.position_encoding;
         let items = match resp? {
             CompletionResponse::List(l) => l.items,
             CompletionResponse::Array(items) => items,
@@ -213,13 +206,7 @@ impl LspRequest for req::ResolveCompletionItem {
         _: (),
         man: &mut LspManager,
     ) -> Option<Actions> {
-        let enc = match man.clients.get_mut(&lsp_id) {
-            Some(client) => client.position_encoding,
-            None => {
-                man.send_status("no attached LSP client".to_string());
-                return None;
-            }
-        };
+        let enc = man.clients.get(&lsp_id)?.position_encoding;
 
         Some(actions_for_resolved_completion_item(comp_item, enc))
     }

@@ -40,14 +40,7 @@ impl LspRequest for req::References {
         _: (),
         man: &mut LspManager,
     ) -> Option<Actions> {
-        let enc = match man.clients.get_mut(&lsp_id) {
-            Some(client) => client.position_encoding,
-            None => {
-                man.send_status("no attached LSP client".to_string());
-                return None;
-            }
-        };
-
+        let enc = man.clients.get_mut(&lsp_id)?.position_encoding;
         let refs: Vec<_> = locs?
             .into_iter()
             .map(|loc| Reference::from_loc(loc, enc))
@@ -58,6 +51,7 @@ impl LspRequest for req::References {
                 path: r.path.clone(),
             })
             .collect();
+
         actions.push(Action::MbSelect(References(refs).into_selector()));
 
         Some(Actions::Multi(actions))
