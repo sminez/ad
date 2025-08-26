@@ -24,7 +24,7 @@ use crate::{
 use std::{
     cell::RefCell,
     char,
-    cmp::{Ordering, min},
+    cmp::Ordering,
     collections::HashMap,
     io::{Read, Stdout, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
@@ -224,13 +224,8 @@ impl Tui {
                     rline.push_str(&Style::Bg(bg).to_string());
                 }
 
-                let len = min(self.screen_cols, rline.len());
                 let width = self.screen_cols;
-                lines.push(format!(
-                    "{:<width$}{}\r\n",
-                    &rline[0..len],
-                    Cursor::ClearRight
-                ));
+                lines.push(format!("{rline:<width$}{}\r\n", Cursor::ClearRight));
             }
         }
 
@@ -1029,5 +1024,32 @@ mod tests {
             .replace("#", &Style::Bg(cs.bg).to_string());
 
         assert_eq!(s, expected);
+    }
+
+    // Reproduction and regression test for https://github.com/sminez/ad/issues/137
+    #[test]
+    fn minibuffer_lines_with_multibyte_chars_dont_panic() {
+        let s = "  56 | Fastställa att under samtliga öppetdagar den här veckan så finns det alltid minst en";
+        let b = Buffer::new_virtual(0, "test", s, Default::default());
+
+        let mb = MiniBufferState {
+            cx: 0,
+            n_visible_lines: 10,
+            selected_line_idx: 0,
+            prompt: "> ",
+            input: Default::default(),
+            b: Some(&b),
+            top: 0,
+            bottom: 0,
+        };
+
+        let mut tui = Tui::new(Default::default());
+        tui.screen_cols = 91;
+
+        // In 137 this was panicking due to indexing into the rendered line using self.screen_cols
+        // as a raw byte offset. The fix is simply not to truncate in that way as render_chars is
+        // already ensuring that the buffer it is building up is staying within the available
+        // screen space.
+        tui.render_minibuffer_state(&mb, 4, &Default::default());
     }
 }
