@@ -7,7 +7,7 @@ use crate::{
         messages::{request::LspRequest, txtdoc_pos},
     },
 };
-use lsp_types::{Location, request as req};
+use lsp_types::{Location, ReferenceContext, ReferenceParams, request as req};
 
 impl LspRequest for req::References {
     type Pending = ();
@@ -20,8 +20,6 @@ impl LspRequest for req::References {
             character,
         }: Self::Data,
     ) -> Self::Params {
-        use lsp_types::{ReferenceContext, ReferenceParams};
-
         ReferenceParams {
             text_document_position: txtdoc_pos(&file, line, character),
             work_done_progress_params: Default::default(),

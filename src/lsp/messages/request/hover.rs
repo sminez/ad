@@ -5,7 +5,7 @@ use crate::{
         messages::{request::LspRequest, txtdoc_pos},
     },
 };
-use lsp_types::request::HoverRequest;
+use lsp_types::{HoverContents, HoverParams, MarkedString, request::HoverRequest};
 
 impl LspRequest for HoverRequest {
     type Pending = ();
@@ -18,7 +18,7 @@ impl LspRequest for HoverRequest {
             character,
         }: Self::Data,
     ) -> Self::Params {
-        lsp_types::HoverParams {
+        HoverParams {
             text_document_position_params: txtdoc_pos(&file, line, character),
             work_done_progress_params: Default::default(),
         }
@@ -34,8 +34,6 @@ impl LspRequest for HoverRequest {
         _: Self::Pending,
         _: &mut LspManager,
     ) -> Option<Actions> {
-        use lsp_types::{HoverContents, MarkedString};
-
         let ms_to_string = |ms: MarkedString| match ms {
             MarkedString::String(s) => s,
             MarkedString::LanguageString(ls) => ls.value,
