@@ -9,7 +9,7 @@ use crate::{
         rpc::{Message, Request, RequestId, Response},
     },
 };
-use lsp_types::WorkDoneProgressCreateParams;
+use lsp_types::{WorkDoneProgressCreateParams, request::WorkDoneProgressCreate};
 use tracing::{error, warn};
 
 /// Incoming requests from the server handle and respone to
@@ -79,7 +79,7 @@ impl RequestHandler<'_> {
     }
 }
 
-impl LspServerRequest for lsp_types::request::WorkDoneProgressCreate {
+impl LspServerRequest for WorkDoneProgressCreate {
     fn handle_params(
         lsp_id: usize,
         req_id: RequestId,

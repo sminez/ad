@@ -6,6 +6,11 @@ use crate::{
     input::Event,
     lsp::{Diagnostic, LspManager, rpc::Notification},
 };
+use lsp_types::{
+    ProgressParamsValue, PublishDiagnosticsParams, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressEnd, WorkDoneProgressReport,
+    notification::{Progress, PublishDiagnostics},
+};
 use tracing::{error, warn};
 
 /// Notifications sent from the server to us that we need to handle
@@ -58,14 +63,10 @@ impl NotificationHandler<'_> {
     }
 }
 
-impl LspServerNotification for lsp_types::notification::Progress {
+impl LspServerNotification for Progress {
     fn handle_params(lsp_id: usize, params: Self::Params, man: &mut LspManager) -> Option<Actions> {
         use ProgressParamsValue::*;
         use WorkDoneProgress::*;
-        use lsp_types::{
-            ProgressParamsValue, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
-            WorkDoneProgressReport,
-        };
 
         let actions = |title: &str, message: Option<String>, perc: Option<u32>| {
             let message = message.unwrap_or_default();
@@ -118,10 +119,8 @@ impl LspServerNotification for lsp_types::notification::Progress {
 /// Currently throwing away a LOT of the information contained in the payload from the server
 /// Servers are in control over the state of diagnostics so any push of diagnostic state for
 /// a given file overwrites our current state
-impl LspServerNotification for lsp_types::notification::PublishDiagnostics {
+impl LspServerNotification for PublishDiagnostics {
     fn handle_params(lsp_id: usize, params: Self::Params, man: &mut LspManager) -> Option<Actions> {
-        use lsp_types::PublishDiagnosticsParams;
-
         let encoding = match man.clients.get(&lsp_id) {
             Some(c) => c.position_encoding,
             None => return None,

@@ -4,6 +4,14 @@ use crate::lsp::{
     messages::{txt_doc_id, uri},
     rpc::{Message, Notification},
 };
+use lsp_types::{
+    DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    InitializedParams, TextDocumentContentChangeEvent, TextDocumentItem,
+    VersionedTextDocumentIdentifier,
+    notification::{
+        DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit, Initialized,
+    },
+};
 use std::borrow::Cow;
 
 /// Notifications sent from us to the server
@@ -42,15 +50,25 @@ pub(crate) trait LspNotification: lsp_types::notification::Notification {
     fn prepare(data: Self::Data) -> Self::Params;
 }
 
-impl LspNotification for lsp_types::notification::DidChangeTextDocument {
+impl LspNotification for DidOpenTextDocument {
+    type Data = (String, String, String);
+
+    fn prepare((language_id, path, text): Self::Data) -> Self::Params {
+        DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri(&path),
+                language_id,
+                version: 1,
+                text,
+            },
+        }
+    }
+}
+
+impl LspNotification for DidChangeTextDocument {
     type Data = (String, String, i32);
 
     fn prepare((path, text, version): Self::Data) -> Self::Params {
-        use lsp_types::{
-            DidChangeTextDocumentParams, TextDocumentContentChangeEvent,
-            VersionedTextDocumentIdentifier,
-        };
-
         DidChangeTextDocumentParams {
             text_document: VersionedTextDocumentIdentifier {
                 uri: uri(&path),
@@ -65,43 +83,26 @@ impl LspNotification for lsp_types::notification::DidChangeTextDocument {
     }
 }
 
-impl LspNotification for lsp_types::notification::DidCloseTextDocument {
+impl LspNotification for DidCloseTextDocument {
     type Data = String;
 
     fn prepare(path: Self::Data) -> Self::Params {
-        lsp_types::DidCloseTextDocumentParams {
+        DidCloseTextDocumentParams {
             text_document: txt_doc_id(&path),
         }
     }
 }
 
-impl LspNotification for lsp_types::notification::DidOpenTextDocument {
-    type Data = (String, String, String);
-
-    fn prepare((language_id, path, text): Self::Data) -> Self::Params {
-        use lsp_types::{DidOpenTextDocumentParams, TextDocumentItem};
-
-        DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri(&path),
-                language_id,
-                version: 1,
-                text,
-            },
-        }
-    }
-}
-
-impl LspNotification for lsp_types::notification::Exit {
+impl LspNotification for Exit {
     type Data = ();
 
     fn prepare(_: Self::Data) -> Self::Params {}
 }
 
-impl LspNotification for lsp_types::notification::Initialized {
+impl LspNotification for Initialized {
     type Data = ();
 
     fn prepare(_: Self::Data) -> Self::Params {
-        lsp_types::InitializedParams {}
+        InitializedParams {}
     }
 }
