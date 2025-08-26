@@ -169,6 +169,14 @@ impl Coords {
         (filepath, coords)
     }
 
+    pub(crate) fn new_from_range(r: lsp_types::Range, encoding: PositionEncoding) -> Self {
+        Coords {
+            encoding,
+            start: r.start,
+            end: r.end,
+        }
+    }
+
     pub fn line(&self) -> u32 {
         self.start.line
     }
@@ -177,9 +185,14 @@ impl Coords {
         let (sr, sc) = self.encoding.parse_lsp_position(b, self.start);
         let (er, ec) = self.encoding.parse_lsp_position(b, self.end);
 
-        Addr::Compound(
-            AddrBase::LineAndColumn(sr, sc).into(),
-            AddrBase::LineAndColumn(er, ec).into(),
-        )
+        if (sr, sc) == (er, ec) {
+            Addr::Simple(AddrBase::LineAndColumn(sr, sc).into())
+        } else {
+            Addr::Compound(
+                AddrBase::LineAndColumn(sr, sc).into(),
+                // LSP ranges include the end position
+                AddrBase::LineAndColumn(er, ec - 1).into(),
+            )
+        }
     }
 }

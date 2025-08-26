@@ -26,10 +26,15 @@ pub enum TextObject {
 }
 
 impl TextObject {
-    pub fn set_dot(&self, b: &mut Buffer) {
+    /// Helper function for finding the [TextObject::Word] under the given [Dot] within a buffer.
+    pub fn word_under_dot(dot: Dot, b: &Buffer) -> String {
+        FindWord::Fwd.expand(dot, b).content(b)
+    }
+
+    pub fn as_dot(&self, b: &Buffer) -> Dot {
         use TextObject::*;
 
-        let dot = match self {
+        match self {
             Arr(arr) => b.dot.active_cur().arr(*arr, b).into(),
             BufferEnd => Cur::buffer_end(b).into(),
             BufferStart => Cur::buffer_start().into(),
@@ -47,9 +52,11 @@ impl TextObject {
             .collapse_null_range(),
             Paragraph => FindParagraph::Fwd.expand(b.dot, b),
             Word => FindWord::Fwd.expand(b.dot, b),
-        };
+        }
+    }
 
-        b.dot = dot;
+    pub fn set_dot(&self, b: &mut Buffer) {
+        b.dot = self.as_dot(b);
     }
 
     pub fn extend_dot_forward(&self, b: &mut Buffer) {

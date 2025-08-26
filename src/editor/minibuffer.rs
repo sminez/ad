@@ -256,6 +256,7 @@ where
         &mut self,
         prompt: &str,
         initial_lines: Vec<String>,
+        initial_input: Option<String>,
         on_change: F,
     ) -> MiniBufferSelection {
         let mut mb = MiniBuffer::new(
@@ -265,6 +266,11 @@ where
             on_change,
             self.config.clone(),
         );
+
+        if let Some(s) = initial_input {
+            mb.input
+                .handle_action(Action::InsertString { s }, Source::Fsys);
+        }
 
         loop {
             mb.update_state();
@@ -279,7 +285,7 @@ where
     /// Use the minibuffer to prompt for user input
     pub(crate) fn minibuffer_prompt(&mut self, prompt: &str) -> Option<String> {
         trace!(%prompt, "opening mini-buffer");
-        match self.prompt_w_callback(prompt, vec![], |_| None) {
+        match self.prompt_w_callback(prompt, vec![], None, |_| None) {
             MiniBufferSelection::UserInput { input } => Some(input),
             _ => None,
         }
@@ -299,7 +305,7 @@ where
         prompt: &str,
         initial_lines: Vec<String>,
     ) -> MiniBufferSelection {
-        self.prompt_w_callback(prompt, initial_lines, |_| None)
+        self.prompt_w_callback(prompt, initial_lines, None, |_| None)
     }
 
     /// Use a [MiniBuffer] to select from the newline delimited output of running a shell command.
@@ -322,7 +328,7 @@ where
             }
         };
 
-        self.prompt_w_callback(prompt, initial_lines, |_| None)
+        self.prompt_w_callback(prompt, initial_lines, None, |_| None)
     }
 }
 
@@ -332,6 +338,11 @@ pub(crate) trait MbSelect: Send + Sync {
     fn clone_selector(&self) -> MbSelector;
     fn prompt_and_options(&self, buffers: &Buffers) -> (String, Vec<String>);
     fn selected_actions(&self, sel: MiniBufferSelection) -> Option<Actions>;
+
+    #[allow(unused_variables)]
+    fn initial_input(&self, buffers: &Buffers) -> Option<String> {
+        None
+    }
 
     fn into_selector(self) -> MbSelector
     where
@@ -368,7 +379,8 @@ impl MbSelector {
         S: System,
     {
         let (prompt, options) = self.0.prompt_and_options(ed.layout.buffers());
-        let selection = ed.prompt_w_callback(&prompt, options, |_| None);
+        let initial_input = self.0.initial_input(ed.layout.buffers());
+        let selection = ed.prompt_w_callback(&prompt, options, initial_input, |_| None);
         if let Some(actions) = self.0.selected_actions(selection) {
             ed.handle_actions(actions, Source::Fsys);
         }

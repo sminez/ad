@@ -82,6 +82,7 @@ pub enum Action {
     JumpListBack,
     KillRunningChild,
     LoadDot { new_window: bool },
+    LspCompletion,
     LspGotoDeclaration,
     LspGotoDefinition,
     LspGotoTypeDefinition,
@@ -134,6 +135,8 @@ pub enum Action {
     TsShowTree,
     Undo,
     ViewLogs,
+    XDotSetFromCoords { coords: Coords },
+    XInsertString { s: String },
     Yank,
 
     DebugBufferContents,

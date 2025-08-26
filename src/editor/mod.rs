@@ -331,7 +331,7 @@ where
     }
 
     #[inline]
-    fn handle_event(&mut self, event: Event) {
+    pub fn handle_event(&mut self, event: Event) {
         match event {
             Event::Input(i) => self.handle_input(i),
             Event::Action(a) => self.handle_action(a, Source::Fsys),
@@ -608,6 +608,9 @@ where
             LspStop => self
                 .lsp_manager
                 .stop_client(self.layout.active_buffer_ignoring_scratch()),
+            LspCompletion => self
+                .lsp_manager
+                .completion(self.layout.active_buffer_ignoring_scratch()),
             LspGotoDeclaration => self
                 .lsp_manager
                 .goto_declaration(self.layout.active_buffer_ignoring_scratch()),

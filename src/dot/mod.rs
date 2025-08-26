@@ -15,9 +15,9 @@ pub(crate) mod find;
 mod range;
 mod text_object;
 
-pub(crate) use cur::Cur;
-pub(crate) use range::Range;
-pub(crate) use text_object::TextObject;
+pub use cur::Cur;
+pub use range::Range;
+pub use text_object::TextObject;
 
 /// A Dot represents the currently selected contents of a Buffer.
 ///

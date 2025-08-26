@@ -4,7 +4,7 @@
 //!   https://microsoft.github.io/language-server-protocol/specification
 use crate::{
     buffer::{Buffer, Buffers},
-    config::{LangConfig, LspConfig},
+    config::{LangConfig, LspConfig, lang_config_for_path_and_first_line},
     die,
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
     input::Event,
@@ -19,6 +19,7 @@ use crate::{
 use lsp_types::{NumberOrString, Uri, request::Initialize};
 use std::{
     collections::HashMap,
+    path::Path,
     sync::{
         Arc, RwLock,
         mpsc::{Receiver, Sender, channel},
@@ -93,13 +94,19 @@ impl LspManagerHandle {
             .map(|(id, caps)| (*id, caps.position_encoding))
     }
 
-    fn config_for_buffer(&self, b: &Buffer) -> Option<(&String, &LspConfig)> {
-        let os_ext = b.path()?.extension()?;
-        let ext = os_ext.to_str()?;
-        self.configs
-            .iter()
-            .find(|(_, c)| c.extensions.iter().any(|e| e == ext))
+    fn config_for_path_and_first_line(
+        &self,
+        path: &Path,
+        first_line: &str,
+    ) -> Option<(&String, &LspConfig)> {
+        lang_config_for_path_and_first_line(path, first_line, &self.configs)
             .and_then(|(name, c)| c.lsp.as_ref().map(|lsp| (name, lsp)))
+    }
+
+    fn config_for_buffer(&self, b: &Buffer) -> Option<(&String, &LspConfig)> {
+        let first_line = b.line(0).map(|l| l.to_string()).unwrap_or_default();
+
+        self.config_for_path_and_first_line(b.path()?, &first_line)
     }
 
     fn start_req_for_buf(&self, bs: &Buffers) -> Option<Req> {
@@ -267,6 +274,16 @@ impl LspManagerHandle {
         }
     }
 
+    pub fn completion(&self, b: &Buffer) {
+        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+            if b.dirty {
+                self.document_changed(b);
+            }
+            debug!("sending LSP textDocument/completion ({id})");
+            self.send(id, PendingParams::Completion(enc.buffer_pos(b)))
+        }
+    }
+
     pub fn find_references(&self, b: &Buffer) {
         if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
@@ -288,7 +305,7 @@ pub struct LspManager {
     // lspID -> map of progress token -> title
     progress_tokens: HashMap<usize, HashMap<NumberOrString, String>>,
     diagnostics: Arc<RwLock<HashMap<Uri, Vec<Diagnostic>>>>,
-    tx_req: Sender<Req>,
+    pub(super) tx_req: Sender<Req>,
     tx_events: Sender<Event>,
     next_id: usize,
 }
@@ -345,32 +362,35 @@ impl LspManager {
     }
 
     fn handle_pending(&mut self, PendingRequest { lsp_id, pending }: PendingRequest) {
-        use lsp_types::{
-            notification::{DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument},
-            request::{
-                GotoDeclaration, GotoDefinition, GotoTypeDefinition, HoverRequest, References,
-            },
-        };
+        use lsp_types::{notification as not, request as req};
 
         match pending {
             PendingParams::DocumentOpen {
                 lang,
                 path,
                 content,
-            } => DidOpenTextDocument::send(lsp_id, (lang, path, content), self),
-            PendingParams::DocumentClose { path } => DidCloseTextDocument::send(lsp_id, path, self),
+            } => not::DidOpenTextDocument::send(lsp_id, (lang, path, content), self),
+            PendingParams::DocumentClose { path } => {
+                not::DidCloseTextDocument::send(lsp_id, path, self)
+            }
             PendingParams::DocumentChange {
                 path,
                 content,
                 version,
-            } => DidChangeTextDocument::send(lsp_id, (path, content, version as i32), self),
-            PendingParams::GotoDeclaration(pos) => GotoDeclaration::send(lsp_id, pos, (), self),
-            PendingParams::GotoDefinition(pos) => GotoDefinition::send(lsp_id, pos, (), self),
-            PendingParams::GotoTypeDefinition(pos) => {
-                GotoTypeDefinition::send(lsp_id, pos, (), self)
+            } => not::DidChangeTextDocument::send(lsp_id, (path, content, version as i32), self),
+            PendingParams::GotoDeclaration(pos) => {
+                req::GotoDeclaration::send(lsp_id, pos, (), self)
             }
-            PendingParams::Hover(pos) => HoverRequest::send(lsp_id, pos, (), self),
-            PendingParams::FindReferences(pos) => References::send(lsp_id, pos, (), self),
+            PendingParams::GotoDefinition(pos) => req::GotoDefinition::send(lsp_id, pos, (), self),
+            PendingParams::GotoTypeDefinition(pos) => {
+                req::GotoTypeDefinition::send(lsp_id, pos, (), self)
+            }
+            PendingParams::Hover(pos) => req::HoverRequest::send(lsp_id, pos, (), self),
+            PendingParams::Completion(pos) => req::Completion::send(lsp_id, pos, (), self),
+            PendingParams::ResolveCompletionItem(item) => {
+                req::ResolveCompletionItem::send(lsp_id, item, (), self)
+            }
+            PendingParams::FindReferences(pos) => req::References::send(lsp_id, pos, (), self),
         }
     }
 
@@ -404,6 +424,8 @@ impl LspManager {
             GotoDefinition => req::GotoDefinition::handle(lsp_id, res, (), self),
             GotoTypeDefinition => req::GotoTypeDefinition::handle(lsp_id, res, (), self),
             Hover => req::HoverRequest::handle(lsp_id, res, (), self),
+            Completion => req::Completion::handle(lsp_id, res, (), self),
+            ResolveCompletionItem => req::ResolveCompletionItem::handle(lsp_id, res, (), self),
             Initialize(l, ob) => req::Initialize::handle(lsp_id, res, (l, ob), self),
         };
 
@@ -528,6 +550,8 @@ pub(crate) enum PendingParams {
     GotoDefinition(Pos),
     GotoTypeDefinition(Pos),
     Hover(Pos),
+    Completion(Pos),
+    ResolveCompletionItem(Box<lsp_types::CompletionItem>),
 }
 
 #[derive(Debug)]
@@ -537,6 +561,8 @@ pub(crate) enum Pending {
     GotoDefinition,
     GotoTypeDefinition,
     Hover,
+    Completion,
+    ResolveCompletionItem,
     Initialize(String, Vec<PendingParams>),
 }
 

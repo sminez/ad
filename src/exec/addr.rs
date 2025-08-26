@@ -47,6 +47,25 @@ pub enum Addr {
 }
 
 impl Addr {
+    pub fn from_dot(dot: Dot, b: &Buffer) -> Self {
+        match dot {
+            Dot::Cur { c } => {
+                let (y, x) = c.as_yx(b);
+                Self::Simple(AddrBase::LineAndColumn(y, x).into())
+            }
+
+            Dot::Range { r } => {
+                let (y1, x1) = r.start.as_yx(b);
+                let (y2, x2) = r.end.as_yx(b);
+
+                Self::Compound(
+                    AddrBase::LineAndColumn(y1, x1).into(),
+                    AddrBase::LineAndColumn(y2, x2).into(),
+                )
+            }
+        }
+    }
+
     pub fn full() -> Self {
         Addr::Compound(AddrBase::Bof.into(), AddrBase::Eof.into())
     }

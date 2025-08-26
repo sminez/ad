@@ -238,7 +238,6 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         [ Char('g'), Char('t') ] => [ LspGotoTypeDefinition ],
         "LSP: show hover";
         [ Ctrl('k') ] => [ LspHover ],
-
     };
 
     keymap.set_default(|&i| match i {
