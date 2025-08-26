@@ -179,6 +179,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "save the current buffer to disk ignoring external changes",
         ),
         (
+            vec!["lsp-completion"],
+            "trigger auto-completion for the word under dot using the minibuffer (requires an attached LSP server)",
+        ),
+        (
             vec!["lsp-find-references"],
             "show references to the symbol under the current cursor in the mini-buffer (requires an attached LSP server)",
         ),
