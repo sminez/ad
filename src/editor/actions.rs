@@ -428,8 +428,8 @@ where
     pub(super) fn set_clipboard(&mut self, s: String) {
         trace!("setting clipboard content");
         match self.system.set_clipboard(&s) {
-            Ok(_) => self.set_status_message("Yanked selection to system clipboard"),
-            Err(e) => self.set_status_message(format!("Error setting system clipboard: {e}")),
+            Ok(_) => self.set_status_message("Yanked selection to clipboard"),
+            Err(e) => self.set_status_message(format!("Error setting clipboard: {e}")),
         }
     }
 
@@ -437,7 +437,7 @@ where
         trace!("pasting from clipboard");
         match self.system.read_clipboard() {
             Ok(s) => self.handle_action(Action::InsertString { s }, source),
-            Err(e) => self.set_status_message(format!("Error reading system clipboard: {e}")),
+            Err(e) => self.set_status_message(format!("Error reading clipboard: {e}")),
         }
     }
 
