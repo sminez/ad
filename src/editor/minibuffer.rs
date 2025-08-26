@@ -374,7 +374,7 @@ impl cmp::PartialEq for MbSelector {
 }
 
 impl MbSelector {
-    pub(crate) fn run<S>(self, ed: &mut Editor<S>)
+    pub(crate) fn run<S>(&self, ed: &mut Editor<S>)
     where
         S: System,
     {
