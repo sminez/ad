@@ -16,9 +16,8 @@ use std::{
     ops::{Deref, DerefMut},
     path::Path,
 };
-use streaming_iterator::StreamingIterator;
 use tracing::{error, info};
-use tree_sitter::{self as ts, ffi::TSLanguage};
+use tree_sitter::{self as ts, StreamingIterator, ffi::TSLanguage};
 
 pub const SUPPORTED_PREDICATES: [&str; 0] = [];
 

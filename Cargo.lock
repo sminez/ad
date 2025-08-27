@@ -15,7 +15,6 @@ dependencies = [
  "serde_json",
  "simple_test_case",
  "simple_txtar",
- "streaming-iterator",
  "toml",
  "tracing",
  "tracing-subscriber",
