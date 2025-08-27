@@ -2,7 +2,7 @@
 //! communicating with LSP servers.
 //!
 //! The implementation here is heavily inspired by the lsp-server module found in
-//! rust-analyzer: https://github.com/rust-lang/rust-analyzer/tree/master/lib/lsp-server
+//! rust-analyzer: <https://github.com/rust-lang/rust-analyzer/tree/master/lib/lsp-server>
 use lsp_types::NumberOrString;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::Value;

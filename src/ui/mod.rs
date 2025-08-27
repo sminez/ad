@@ -45,7 +45,7 @@ pub trait UserInterface {
     fn set_cursor_shape(&mut self, cur_shape: CurShape);
 }
 
-/// Sent by the [Editor] to a [Ui] when internal state has changed in such a way that
+/// Sent by the Editor to a [UserInterface] when internal state has changed in such a way that
 /// a UI update _may_ be required.
 ///
 /// In cases where the data is cheap to pass directly it is included, otherwise updates

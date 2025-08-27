@@ -1,7 +1,7 @@
 //! Built-in minimal LSP support for ad
 //!
 //! See the LSP spec for details of semantics:
-//!   https://microsoft.github.io/language-server-protocol/specification
+//!   <https://microsoft.github.io/language-server-protocol/specification>
 use crate::{
     buffer::{Buffer, Buffers},
     config::{LangConfig, LspConfig, lang_config_for_path_and_first_line},

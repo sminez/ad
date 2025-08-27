@@ -10,18 +10,18 @@ use std::{
 };
 use tracing::warn;
 
-/// A wrapper around an Arc<RwLock<T>> so that the owner is only
+/// A wrapper around an `Arc<RwLock<T>>` so that the owner is only
 /// permitted read access to the underlying value.
 #[derive(Debug, Default, Clone)]
 pub struct ReadOnlyLock<T>(Arc<RwLock<T>>);
 
 impl<T> ReadOnlyLock<T> {
-    /// Construct a new ReadOnlyLock wrapping an inner Arc<RwLock<T>>
+    /// Construct a new ReadOnlyLock wrapping an inner `Arc<RwLock<T>>`
     pub fn new(inner: Arc<RwLock<T>>) -> Self {
         Self(inner)
     }
 
-    /// Obtain a read guard from the underlying RwLock
+    /// Obtain a read guard from the underlying `RwLock`
     pub fn read(&self) -> LockResult<RwLockReadGuard<'_, T>> {
         self.0.read()
     }

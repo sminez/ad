@@ -2,7 +2,7 @@
 //! the Sam text editor's structural regular expressions.
 //!
 //! Thompson's original paper on writing a regex engine can be found here:
-//!   https://dl.acm.org/doi/pdf/10.1145/363347.363387
+//!   <https://dl.acm.org/doi/pdf/10.1145/363347.363387>
 use std::{iter::Peekable, str::Chars};
 
 mod ast;

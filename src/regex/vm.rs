@@ -1,7 +1,7 @@
 //! Virtual machine based implementation based on the instruction set described
 //! in Russ Cox's second article in the series and the source of plan9 Sam:
-//!   https://swtch.com/~rsc/regexp/regexp2.html
-//!   https://github.com/sminez/plan9port/blob/master/src/cmd/sam/regexp.c
+//!   <https://swtch.com/~rsc/regexp/regexp2.html>
+//!   <https://github.com/sminez/plan9port/blob/master/src/cmd/sam/regexp.c>
 //!
 //! The compilation step used is custom (rather than using a YACC parser).
 //!
@@ -152,7 +152,7 @@ impl Regex {
         }
     }
 
-    /// Iterate over all non-overlapping matches of this Regex for a given [GapBuffer] input.
+    /// Iterate over all non-overlapping matches of this Regex for a given GapBuffer input.
     pub fn match_gapbuffer_all<'a, 'b>(
         &'a mut self,
         gb: &'b GapBuffer,

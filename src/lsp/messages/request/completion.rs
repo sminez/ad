@@ -14,7 +14,7 @@ use lsp_types::{
 };
 use std::sync::mpsc::Sender;
 
-// https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion
+// <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion>
 impl LspRequest for req::Completion {
     type Pending = ();
     type Data = Pos;

@@ -180,7 +180,7 @@ impl Default for FsysConfig {
 /// A colorscheme for rendering the UI.
 ///
 /// UI elements are available as properties and syntax stylings are available as a map of string
-/// tag to [Style]s that should be applied.
+/// tag to [Styles] that should be applied.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ColorScheme {
     pub bg: Color,

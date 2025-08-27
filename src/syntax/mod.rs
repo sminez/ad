@@ -11,7 +11,7 @@
 //!   - [TK_DEFAULT] tokens are injected between those identified by the user's query so
 //!     that the full token stream from a [TokenIter] will always contain the complete
 //!     text of the raw buffer line
-//!   - [RangeToken]s are tagged byte offsets within the parent [GapBuffer] which may be used
+//!   - [RangeToken]s are tagged byte offsets within the parent GapBuffer which may be used
 //!     to extract and render sub-regions of text. In order to implement horizontal scrolling
 //!     and clamping of text based on the available screen columns, a UI implementation will
 //!     need to make use of [unicode_width::UnicodeWidthChar] in order to determine whether
@@ -61,7 +61,7 @@ impl SyntaxState {
         }
     }
 
-    /// Mirror an edit that has been made to the underlying [GapBuffer] to the syntax state in
+    /// Mirror an edit that has been made to the underlying GapBuffer to the syntax state in
     /// order to keep syntax ranges in sync.
     pub fn edit(&mut self, ch_start: usize, ch_old_end: usize, ch_new_end: usize, gb: &GapBuffer) {
         match self {
@@ -218,7 +218,7 @@ impl Ord for SyntaxRange {
 
 /// Yield sub-iterators of tokens per-line in a file.
 ///
-/// Any given [SyntaxRange] coming from the underlying [Tokenizer] may be
+/// Any given SyntaxRange coming from the underlying Tokenizer may be
 /// used by multiple [TokenIter]s coming from this iterator if the range
 /// in question spans multiple lines
 #[derive(Debug)]

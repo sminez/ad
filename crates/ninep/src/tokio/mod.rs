@@ -15,7 +15,7 @@ pub mod server;
 
 /// Asynchronous IO support for reading and writing 9p messages
 pub trait AsyncNineP: NineP + Send + Sync {
-    /// Encode self as bytes for the 9p protocol and write to the given [SyncStream].
+    /// Encode self as bytes for the 9p protocol and write to the given [AsyncWrite].
     fn write_to<W>(&self, w: &mut W) -> impl Future<Output = io::Result<()>> + Send
     where
         W: AsyncWrite + Unpin + Send,
@@ -23,7 +23,7 @@ pub trait AsyncNineP: NineP + Send + Sync {
         write_to(self, w)
     }
 
-    /// Decode self from 9p protocol bytes coming from the given [SyncStream].
+    /// Decode self from 9p protocol bytes coming from the given [AsyncRead].
     fn read_from<R>(buf: &SharedBuf, r: &mut R) -> impl Future<Output = io::Result<Self>> + Send
     where
         R: AsyncRead + Unpin + Send,
@@ -72,7 +72,7 @@ where
     }
 }
 
-/// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
+/// A Stream that makes use of the tokio [AsyncRead] and [AsyncWrite] traits to perform IO
 #[allow(async_fn_in_trait)]
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + Sized + 'static {
     /// Reply to the specified tag with a given Result. Err's will be converted to 9p error

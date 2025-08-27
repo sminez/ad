@@ -2,7 +2,7 @@
 //!
 //!
 //! ## Mount Point
-//! https://www.pathname.com/fhs/pub/fhs-2.3.html#VARLIBLTEDITORGTEDITORBACKUPFILESAN
+//! <https://www.pathname.com/fhs/pub/fhs-2.3.html#VARLIBLTEDITORGTEDITORBACKUPFILESAN>
 //!
 //! `/var/lib/ad` feels like it would be the "correct" place to mount the filesystem but
 //! this would need to be created with something like:

@@ -1,11 +1,11 @@
 //! A plumbing interface for user defined "loading" of text inspired by plan 9's plumber.
 //!
 //! See the following papers and man pages for references on the original plan 9 system:
-//!   - http://doc.cat-v.org/plan_9/4th_edition/papers/plumb
-//!   - http://man.cat-v.org/plan_9_3rd_ed/1/plumb
-//!   - http://man.cat-v.org/plan_9_3rd_ed/2/plumb
-//!   - http://man.cat-v.org/plan_9_3rd_ed/4/plumber
-//!   - http://man.cat-v.org/plan_9_3rd_ed/6/plumb
+//!   - <http://doc.cat-v.org/plan_9/4th_edition/papers/plumb>
+//!   - <http://man.cat-v.org/plan_9_3rd_ed/1/plumb>
+//!   - <http://man.cat-v.org/plan_9_3rd_ed/2/plumb>
+//!   - <http://man.cat-v.org/plan_9_3rd_ed/4/plumber>
+//!   - <http://man.cat-v.org/plan_9_3rd_ed/6/plumb>
 use crate::regex::Regex;
 use std::{
     collections::BTreeMap,

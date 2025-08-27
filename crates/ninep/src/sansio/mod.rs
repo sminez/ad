@@ -1,6 +1,6 @@
 //! Sans-IO layer for working with the 9p protocol to write clients and servers
 //!
-//! See https://sans-io.readthedocs.io/how-to-sans-io.html for information on sans-io
+//! See <https://sans-io.readthedocs.io/how-to-sans-io.html> for information on sans-io
 use crate::{
     sansio::protocol::{Rdata, Rmessage},
     Result,

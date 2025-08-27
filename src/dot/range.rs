@@ -9,7 +9,7 @@ use crate::{buffer::Buffer, dot::Cur};
 /// [Buffer].
 ///
 /// A Range where `start == end` is considered a "null range" and may be collapsed to a single
-/// cursor via the [collapse_null_range][crate::dot::Dot::collapse_null_range] method on `Dot`.
+/// cursor via the collapse_null_range method on `Dot`.
 ///
 /// # Why do this?
 ///

@@ -297,7 +297,7 @@ where
     }
 }
 
-/// An iterator of [Vec<u8>] chunks out of a given file.
+/// An iterator of [`Vec<u8>`] chunks out of a given file.
 #[derive(Debug)]
 pub struct ChunkIter<S>
 where

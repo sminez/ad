@@ -632,7 +632,7 @@ impl Buffer {
         cx
     }
 
-    /// The line at the requested index returned as a [Slice].
+    /// The line at the requested index returned as a Slice.
     pub fn line(&self, y: usize) -> Option<Slice<'_>> {
         if y >= self.len_lines() {
             None

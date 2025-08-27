@@ -81,7 +81,7 @@ async fn tcp_socket(port: u16) -> TcpListener {
 ///
 /// ## Client fids and server-side qids
 /// [Server] handles establishing and maintaining per-client sessions along with all of their `fids`,
-/// as such, [Serve9p] only needs to worry about maintaining `qids` for resources.
+/// as such, [AsyncServe9p] only needs to worry about maintaining `qids` for resources.
 ///
 /// The source code of [Server] is a useful reference for those wanting to learn more.
 pub trait AsyncServe9p: Send + Sync + 'static {
@@ -106,8 +106,8 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<FileMeta>> + Send;
 
-    /// Open an existing file in the requested mode for subsequent I/O via [read](Serve9p::read) and
-    /// [write](Serve9p::write) calls.
+    /// Open an existing file in the requested mode for subsequent I/O via [read](AsyncServe9p::read) and
+    /// [write](AsyncServe9p::write) calls.
     ///
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
     /// bytes that will be supported per read/write call on this resource.

@@ -8,7 +8,7 @@ use crate::{
 /// An input event that can be processed by the editor event loop
 #[derive(Debug)]
 pub enum Event {
-    /// A [Message] received from the virtual filesystem interface
+    /// A Message received from the virtual filesystem interface
     Message(Message),
     /// An [Input] from the user
     Input(Input),

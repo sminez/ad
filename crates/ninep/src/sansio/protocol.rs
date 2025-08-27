@@ -1,6 +1,6 @@
 //! Sans-io 9p protocol implementation
 //!
-//!   http://man.cat-v.org/plan_9/5/
+//!   <http://man.cat-v.org/plan_9/5/>
 use crate::sync::SyncNineP;
 use simple_coro::{Coro, CoroState, Handle, ReadyCoro};
 use std::{
@@ -198,7 +198,7 @@ macro_rules! impl_u {
 
 impl_u!(u8, u16, u32, u64);
 
-// [size: u16] [content as bytes...]
+// `[size: u16] [content as bytes...]`
 //
 // From [INTRO(5)](http://man.cat-v.org/plan_9/5/intro):
 //   Data items of larger or variable lengths are represented by a two-byte field specifying
@@ -236,7 +236,7 @@ impl NineP for String {
     }
 }
 
-// [size: u16] [content as bytes...]
+// `[size: u16] [content as bytes...]`
 //
 // From [INTRO(5)](http://man.cat-v.org/plan_9/5/intro):
 //   Data items of larger or variable lengths are represented by a two-byte field specifying
@@ -274,7 +274,7 @@ impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
     }
 }
 
-/// A wrapper around a Vec<u8> for handling data fields in read/write messages
+/// A wrapper around a `Vec<u8>` for handling data fields in read/write messages
 /// ```text
 /// READ(5)
 ///  NAME
@@ -361,32 +361,32 @@ impl NineP for Data {
 }
 
 /// A machine-independent directory entry
-/// http://man.cat-v.org/plan_9/5/stat
+/// <http://man.cat-v.org/plan_9/5/stat>
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawStat {
-    /// size[2]      total byte count of the following data
+    /// `size[2]`      total byte count of the following data
     pub size: u16,
-    /// type[2]      for kernel use
+    /// `type[2]`      for kernel use
     pub ty: u16,
-    /// dev[4]       for kernel use
+    /// `dev[4]`       for kernel use
     pub dev: u32,
     /// Qid type, version and path
     pub qid: Qid,
-    /// mode[4]      permissions and flags
+    /// `mode[4]`      permissions and flags
     pub mode: u32,
-    /// atime[4]     last access time
+    /// `atime[4]`     last access time
     pub atime: u32,
-    /// mtime[4]     last modification time
+    /// `mtime[4]`     last modification time
     pub mtime: u32,
-    /// length[8]    length of file in bytes
+    /// `length[8]`    length of file in bytes
     pub length: u64,
-    /// name[ s ]    file name; must be / if the file is the root directory of the server
+    /// `name[ s ]`    file name; must be / if the file is the root directory of the server
     pub name: String,
-    /// uid[ s ]     owner name
+    /// `uid[ s ]`     owner name
     pub uid: String,
-    /// gid[ s ]     group name
+    /// `gid[ s ]`     group name
     pub gid: String,
-    /// muid[ s ]    name of the user who last modified the file
+    /// `muid[ s ]`    name of the user who last modified the file
     pub muid: String,
 }
 
@@ -458,12 +458,12 @@ impl NineP for RawStat {
 /// on the same server hierarchy are the same if and only if their qids are the same.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Qid {
-    /// qid.type[1] the type of the file (directory, etc.), represented as a bit vector
+    /// `qid.type[1]` the type of the file (directory, etc.), represented as a bit vector
     /// corresponding to the high 8 bits of the file's mode word.
     pub ty: u8,
-    /// qid.vers[4]  version number for given path
+    /// `qid.vers[4]`  version number for given path
     pub version: u32,
-    /// qid.path[8]  the file server's unique identification for the file
+    /// `qid.path[8]`  the file server's unique identification for the file
     pub path: u64,
 }
 
@@ -497,7 +497,7 @@ impl NineP for Qid {
 }
 
 /// Taken from the enum in fcall.h in the plan9 source.
-///   https://github.com/9fans/plan9port/blob/master/include/fcall.h#L80
+///   <https://github.com/9fans/plan9port/blob/master/include/fcall.h#L80>
 ///
 /// This is just used internally to help with defining the encode / decode behaviour
 /// of the various message types.
@@ -643,7 +643,7 @@ macro_rules! impl_message_format {
 /// ```txt
 ///   size[4] type[1] tag[2] | content[...]
 /// ```
-/// where the [MessageType] is a T variant.
+/// where the content is a [Tdata].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tmessage {
     /// Each T-message has a tag field, chosen and used by the client to identify the message. The
@@ -693,8 +693,8 @@ macro_rules! impl_tdata {
 }
 
 impl_tdata! {
-    /// http://man.cat-v.org/plan_9/5/version
-    /// size[4] Tversion tag[2] | msize[4] version[s]
+    /// <http://man.cat-v.org/plan_9/5/version>
+    /// `size[4] Tversion tag[2] | msize[4] version[s]`
     Version => Tversion {
         /// The requested message size
         msize: u32,
@@ -702,8 +702,8 @@ impl_tdata! {
         version: String,
     }
 
-    /// http://man.cat-v.org/plan_9/5/attach
-    /// size[4] Tauth tag[2] | afid[4] uname[s] aname[s]
+    /// <http://man.cat-v.org/plan_9/5/attach>
+    /// `size[4] Tauth tag[2] | afid[4] uname[s] aname[s]`
     Auth => Tauth {
         /// The fid to authenticate against
         afid: u32,
@@ -713,8 +713,8 @@ impl_tdata! {
         aname: String,
     }
 
-    /// http://man.cat-v.org/plan_9/5/attach
-    /// size[4] Tattach tag[2] | fid[4] afid[4] uname[s] aname[s]
+    /// <http://man.cat-v.org/plan_9/5/attach>
+    /// `size[4] Tattach tag[2] | fid[4] afid[4] uname[s] aname[s]`
     Attach => Tattach {
         /// The fid to attach to
         fid: u32,
@@ -726,15 +726,15 @@ impl_tdata! {
         aname: String,
     }
 
-    /// http://man.cat-v.org/plan_9/5/flush
-    /// size[4] Tflush tag[2] | oldtag[2]
+    /// <http://man.cat-v.org/plan_9/5/flush>
+    /// `size[4] Tflush tag[2] | oldtag[2]`
     Flush => Tflush {
         /// The tag to flush
         old_tag: u16,
     }
 
-    /// http://man.cat-v.org/plan_9/5/walk
-    /// size[4] Twalk tag[2] | fid[4] newfid[4] nwname[2] nwname*(wname[s])
+    /// <http://man.cat-v.org/plan_9/5/walk>
+    /// `size[4] Twalk tag[2] | fid[4] newfid[4] nwname[2] nwname*(wname[s])`
     Walk => Twalk {
         /// The fid to walk from
         fid: u32,
@@ -744,8 +744,8 @@ impl_tdata! {
         wnames: Vec<String>,
     }
 
-    /// http://man.cat-v.org/plan_9/5/open
-    /// size[4] Topen tag[2] | fid[4] mode[1]
+    /// <http://man.cat-v.org/plan_9/5/open>
+    /// `size[4] Topen tag[2] | fid[4] mode[1]`
     Open => Topen {
         /// The fid to open
         fid: u32,
@@ -753,8 +753,8 @@ impl_tdata! {
         mode: u8,
     }
 
-    /// http://man.cat-v.org/plan_9/5/open
-    /// size[4] Tcreate tag[2] | fid[4] name[s] perm[4] mode[1]
+    /// <http://man.cat-v.org/plan_9/5/open>
+    /// `size[4] Tcreate tag[2] | fid[4] name[s] perm[4] mode[1]`
     Create => Tcreate {
         /// The fid to associate with the directory where the file should be created
         fid: u32,
@@ -766,8 +766,8 @@ impl_tdata! {
         mode: u8,
     }
 
-    /// http://man.cat-v.org/plan_9/5/read
-    /// size[4] Tread tag[2] | fid[4] offset[8] count[4]
+    /// <http://man.cat-v.org/plan_9/5/read>
+    /// `size[4] Tread tag[2] | fid[4] offset[8] count[4]`
     Read => Tread {
         /// The fid to read
         fid: u32,
@@ -777,8 +777,8 @@ impl_tdata! {
         count: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/read
-    /// size[4] Twrite tag[2] | fid[4] offset[8] count[4] data[count]
+    /// <http://man.cat-v.org/plan_9/5/read>
+    /// `size[4] Twrite tag[2] | fid[4] offset[8] count[4] data[count]`
     Write => Twrite {
         /// The fid to write to
         fid: u32,
@@ -788,31 +788,31 @@ impl_tdata! {
         data: Data,
     }
 
-    /// http://man.cat-v.org/plan_9/5/clunk
-    /// size[4] Tclunk tag[2] | fid[4]
+    /// <http://man.cat-v.org/plan_9/5/clunk>
+    /// `size[4] Tclunk tag[2] | fid[4]`
     Clunk => Tclunk {
         /// The fid to be closed
         fid: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/remove
-    /// size[4] Tremove tag[2] | fid[4]
+    /// <http://man.cat-v.org/plan_9/5/remove>
+    /// `size[4] Tremove tag[2] | fid[4]`
     Remove => Tremove {
         /// The fid to be removed
         fid: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/stat
-    /// size[4] Tstat tag[2] | fid[4]
+    /// <http://man.cat-v.org/plan_9/5/stat>
+    /// `size[4] Tstat tag[2] | fid[4]`
     Stat => Tstat {
-        /// The fid to request a [Stat] for
+        /// The fid to request a stat for
         fid: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/stat
-    /// size[4] Twstat tag[2] | fid[4] stat[n]
+    /// <http://man.cat-v.org/plan_9/5/stat>
+    /// `size[4] Twstat tag[2] | fid[4] stat[n]`
     Wstat => Twstat {
-        /// The fid to update the [Stat] for
+        /// The fid to update the stat for
         fid: u32,
         /// The size of the following stat
         size: u16,
@@ -830,7 +830,7 @@ impl_tdata! {
 /// ```txt
 ///   size[4] type[1] tag[2] | content[...]
 /// ```
-/// where the [MessageType] is a R variant.
+/// where the content is a [Rdata].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rmessage {
     /// Each T-message has a tag field, chosen and used by the client to identify the message. The
@@ -874,8 +874,8 @@ macro_rules! impl_rdata {
 }
 
 impl_rdata! {
-    /// http://man.cat-v.org/plan_9/5/version
-    /// size[4] Rversion tag[2] | msize[4] version[s]
+    /// <http://man.cat-v.org/plan_9/5/version>
+    /// `size[4] Rversion tag[2] | msize[4] version[s]`
     Version => Rversion {
         /// Supported message size
         msize: u32,
@@ -883,40 +883,40 @@ impl_rdata! {
         version: String,
     }
 
-    /// http://man.cat-v.org/plan_9/5/attach
-    /// size[4] Rauth tag[2] | aqid[13]
+    /// <http://man.cat-v.org/plan_9/5/attach>
+    /// `size[4] Rauth tag[2] | aqid[13]`
     Auth => Rauth {
         /// The authenticated Qid of the connected root
         aqid: Qid,
     }
 
-    /// http://man.cat-v.org/plan_9/5/error
-    /// size[4] Rerror tag[2] | ename[s]
+    /// <http://man.cat-v.org/plan_9/5/error>
+    /// `size[4] Rerror tag[2] | ename[s]`
     Error => Rerror {
         /// The contents of the error being returned
         ename: String,
     }
 
-    /// http://man.cat-v.org/plan_9/5/attach
-    /// size[4] Rattach tag[2] | aquid[13]
+    /// <http://man.cat-v.org/plan_9/5/attach>
+    /// `size[4] Rattach tag[2] | aquid[13]`
     Attach => Rattach {
         /// Qid corresponding to the Fid used to attach
         aqid: Qid,
     }
 
-    /// http://man.cat-v.org/plan_9/5/flush
-    /// size[4] Rflush tag[2]
+    /// <http://man.cat-v.org/plan_9/5/flush>
+    /// `size[4] Rflush tag[2]`
     Flush => Rflush {}
 
-    /// http://man.cat-v.org/plan_9/5/walk
-    /// size[4] Rwalk tag[2] | nwqid[2] nwqid*(wqid[13])
+    /// <http://man.cat-v.org/plan_9/5/walk>
+    /// `size[4] Rwalk tag[2] | nwqid[2] nwqid*(wqid[13])`
     Walk => Rwalk {
         /// Qids for the path elements walked
         wqids: Vec<Qid>,
     }
 
-    /// http://man.cat-v.org/plan_9/5/open
-    /// size[4] Ropen tag[2] | qid[13] iounit[4]
+    /// <http://man.cat-v.org/plan_9/5/open>
+    /// `size[4] Ropen tag[2] | qid[13] iounit[4]`
     Open => Ropen {
         /// Qid of the opened resource
         qid: Qid,
@@ -924,8 +924,8 @@ impl_rdata! {
         iounit: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/open
-    /// size[4] Rcreate tag[2] | qid[13] iounit[4]
+    /// <http://man.cat-v.org/plan_9/5/open>
+    /// `size[4] Rcreate tag[2] | qid[13] iounit[4]`
     Create => Rcreate {
         /// Qid of the created resource
         qid: Qid,
@@ -933,30 +933,30 @@ impl_rdata! {
         iounit: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/read
-    /// size[4] Rread tag[2] | count[4] data[count]
+    /// <http://man.cat-v.org/plan_9/5/read>
+    /// `size[4] Rread tag[2] | count[4] data[count]`
     Read => Rread {
         /// The bytes read
         data: Data,
     }
 
-    /// http://man.cat-v.org/plan_9/5/read
-    /// size[4] Rwrite tag[2] | count[4]
+    /// <http://man.cat-v.org/plan_9/5/read>
+    /// `size[4] Rwrite tag[2] | count[4]`
     Write => Rwrite {
         /// The number of bytes written
         count: u32,
     }
 
-    /// http://man.cat-v.org/plan_9/5/clunk
-    /// size[4] Rclunk tag[2]
+    /// <http://man.cat-v.org/plan_9/5/clunk>
+    /// `size[4] Rclunk tag[2]`
     Clunk => Rclunk {}
 
-    /// http://man.cat-v.org/plan_9/5/remove
-    /// size[4] Rremove tag[2]
+    /// <http://man.cat-v.org/plan_9/5/remove>
+    /// `size[4] Rremove tag[2]`
     Remove => Rremove {}
 
-    /// http://man.cat-v.org/plan_9/5/stat
-    /// size[4] Rstat tag[2] | stat[n]
+    /// <http://man.cat-v.org/plan_9/5/stat>
+    /// `size[4] Rstat tag[2] | stat[n]`
     Stat => Rstat {
         /// The size of the following stat
         size: u16,
@@ -964,8 +964,8 @@ impl_rdata! {
         stat: RawStat,
     }
 
-    /// http://man.cat-v.org/plan_9/5/stat
-    /// size[4] Rwstat tag[2]
+    /// <http://man.cat-v.org/plan_9/5/stat>
+    /// `size[4] Rwstat tag[2]`
     Wstat => Rwstat {}
 }
 

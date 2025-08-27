@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 type Result<T> = std::result::Result<T, String>;
 
-const MAX_CHARS: usize = 256;
+pub const MAX_CHARS: usize = 256;
 
 /// acme makes a distinction between direct writes to /body and /tag vs
 /// text entering the buffer via one of the other fsys files but I'm not

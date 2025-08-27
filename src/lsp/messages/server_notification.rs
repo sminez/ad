@@ -1,6 +1,6 @@
 //! LSP notifications sent from the server to us, the client.
 //!
-//! https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage
+//! <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage>
 use crate::{
     editor::{Action, Actions},
     input::Event,

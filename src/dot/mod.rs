@@ -1,7 +1,7 @@
 //! Sam style dot manipulation
 //!
-//! See http://sam.cat-v.org/ for details on how sam works, particularly
-//! http://doc.cat-v.org/plan_9/4th_edition/papers/sam/ which is the original paper
+//! See <http://sam.cat-v.org/> for details on how sam works, particularly
+//! <http://doc.cat-v.org/plan_9/4th_edition/papers/sam/> which is the original paper
 //! where Rob Pike lays out how the editor works.
 //!
 //! All indexing is 0-based when working with the contents of a specific buffer.

@@ -1,6 +1,6 @@
 //! LSP requests sent from the server to us, the client
 //!
-//! https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage
+//! <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage>
 use crate::{
     editor::Actions,
     input::Event,

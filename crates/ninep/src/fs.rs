@@ -121,11 +121,11 @@ impl Perm {
     }
 }
 
-/// http://p9f.org/magic/man2html/2/iounit
+/// <http://p9f.org/magic/man2html/2/iounit>
 ///
 /// Reads and writes of files are transmitted using the 9P protocol (see intro(5)) and in general,
 /// operations involving large amounts of data must be broken into smaller pieces by the operating
-/// system. The `I/O unit' associated with each file descriptor records the maximum size, in bytes,
+/// system. The `I/O unit` associated with each file descriptor records the maximum size, in bytes,
 /// that may be read or written without breaking up the transfer.
 pub type IoUnit = u32;
 

@@ -45,13 +45,13 @@ pub trait SyncNineP: NineP {
 
 impl<T> SyncNineP for T where T: NineP {}
 
-/// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
+/// A Stream that makes use of the standard library [Read] and [Write] traits to perform IO
 pub trait SyncStream: Read + Write + Send + Sized + 'static {}
 
 impl SyncStream for UnixStream {}
 impl SyncStream for TcpStream {}
 
-/// A [Stream] that makes use of the standard library [Read] and [Write] traits to perform IO
+/// A Stream that makes use of the standard library [Read] and [Write] traits to perform IO
 /// and additionally supports cloning the stream.
 pub trait SyncServerStream: SyncStream {
     /// Clone this stream, accounting for operating system errors

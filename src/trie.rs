@@ -199,7 +199,7 @@ where
 /// handled in a similar way.
 pub type DefaultMapping<K, V> = fn(&K) -> Option<V>;
 
-/// The result of querying a [Try] for a particular Key.
+/// The result of querying a [Trie] for a particular Key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueryResult<V> {
     /// A leaf value associated with the key used in the query

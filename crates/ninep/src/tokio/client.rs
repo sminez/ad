@@ -294,7 +294,7 @@ where
     }
 }
 
-/// An asynchronous stream of [Vec<u8>] chunks out of a given file.
+/// An asynchronous stream of [`Vec<u8>`] chunks out of a given file.
 #[derive(Debug)]
 pub struct ChunkStream<S>
 where
