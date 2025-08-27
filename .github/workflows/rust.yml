@@ -68,10 +68,10 @@ jobs:
   rustdoc-links:
     name: Check doc links are valid
     runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings -D rustdoc::broken-intra-doc-links"
 
     steps:
     - uses: actions/checkout@v4
     - uses: hecrj/setup-rust-action@v2
-      with:
-        rust-version: nightly
-    - run: cargo rustdoc --all-features
+    - run: cargo doc --all-features --workspace
