@@ -41,18 +41,18 @@ codegen-units = 16
 
 [dependencies]
 ad_event = { version = "0.3", path = "crates/ad_event" }
-libc = "0.2.172"
-libloading = "0.8.7"
+libc = "0.2.175"
+libloading = "0.8.8"
 lsp-types = "0.97.0"
 ninep = { version = "0.4", path = "crates/ninep", default-features = false }
 serde = "1.0.219"
-serde_json = "1.0.140"
+serde_json = "1.0.143"
 streaming-iterator = "0.1.9"
-toml = { version = "0.8.22", features = [ "preserve_order" ] }
+toml = { version = "0.9.5", features = [ "preserve_order" ] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = [ "fmt" ] }
-tree-sitter = "0.25.4"
-unicode-width = "0.2.0"
+tree-sitter = "0.25.8"
+unicode-width = "0.2.1"
 
 [dev-dependencies]
 simple_test_case = "1"
