@@ -5,7 +5,7 @@ use crate::{
     lsp::{
         LspManager, Pending, PendingParams, PendingRequest, Pos, PositionEncoding, Req,
         capabilities::Coords,
-        messages::{request::LspRequest, txtdoc_pos},
+        messages::{EditAction, edit_actions_as_editor_actions, request::LspRequest, txtdoc_pos},
     },
 };
 use lsp_types::{
@@ -220,40 +220,6 @@ impl LspRequest for req::ResolveCompletionItem {
     }
 }
 
-// How Helix handles parsing a CompletionItem into its edit transaction format:
-//   https://github.com/helix-editor/helix/blob/master/helix-lsp/src/lib.rs#L397
-//   https://github.com/helix-editor/helix/blob/master/helix-lsp/src/lib.rs#L317
-//   https://github.com/helix-editor/helix/blob/master/helix-term/src/ui/completion.rs#L582
-
-#[derive(Debug)]
-struct EditAction {
-    coords: Coords,
-    s: String,
-    use_xdot: bool,
-}
-
-impl EditAction {
-    fn into_actions(
-        EditAction {
-            coords,
-            s,
-            use_xdot,
-        }: EditAction,
-    ) -> [Action; 2] {
-        if use_xdot {
-            [
-                Action::XDotSetFromCoords { coords },
-                Action::XInsertString { s },
-            ]
-        } else {
-            [
-                Action::DotSetFromCoords { coords },
-                Action::InsertString { s },
-            ]
-        }
-    }
-}
-
 /// Once a completion item is fully resolved (no `data` field or following a completionItem/resolve
 /// request) we need to combine the edits both from the primary edit itself and any additional
 /// edits that are given.
@@ -263,25 +229,14 @@ impl EditAction {
 /// without affecting the editor's cursor position. Annoyingly the protocol doesn't provide any
 /// mechanism for specifying the final cursor position following a multi-part edit like this so
 /// we're left to figure out the correct final cursor position ourselves.
-///
-/// From the docs on TextEdit:
-///   If n TextEdits are applied to a text document all text edits describe changes to the initial
-///   document version. Execution wise text edits should applied from the bottom to the top of the
-///   text document. Overlapping text edits are not supported.
-///
-/// Also see <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textEditArray>
 fn actions_for_resolved_completion_item(
     comp_item: CompletionItem,
     pos: Pos,
     enc: PositionEncoding,
 ) -> Actions {
-    let mut edit_actions = match comp_item.text_edit.as_ref() {
+    let mut edit_actions = match comp_item.text_edit {
         Some(CompletionTextEdit::Edit(edit)) => {
-            vec![EditAction {
-                coords: Coords::new_from_range(edit.range, enc),
-                s: edit.new_text.clone(),
-                use_xdot: false,
-            }]
+            vec![EditAction::from_text_edit(edit, enc).using_dot()]
         }
 
         Some(CompletionTextEdit::InsertAndReplace(_)) => {
@@ -309,21 +264,11 @@ fn actions_for_resolved_completion_item(
         comp_item
             .additional_text_edits
             .unwrap_or_default()
-            .iter()
-            .map(|edit| EditAction {
-                coords: Coords::new_from_range(edit.range, enc),
-                s: edit.new_text.clone(),
-                use_xdot: true,
-            }),
+            .into_iter()
+            .map(|edit| EditAction::from_text_edit(edit, enc)),
     );
 
-    edit_actions.sort_by_key(|a| a.coords);
-    edit_actions.reverse();
-
-    let actions: Vec<Action> = edit_actions
-        .into_iter()
-        .flat_map(EditAction::into_actions)
-        .collect();
+    let actions = edit_actions_as_editor_actions(edit_actions);
 
     trace!("Actions for completion: {actions:#?}");
 
