@@ -13,10 +13,11 @@ use lsp_types::{
     CompletionTriggerKind, request as req,
 };
 use std::sync::mpsc::Sender;
+use tracing::{error, trace};
 
 // <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion>
 impl LspRequest for req::Completion {
-    type Pending = ();
+    type Pending = Pos;
     type Data = Pos;
 
     fn prepare(
@@ -39,14 +40,14 @@ impl LspRequest for req::Completion {
         }
     }
 
-    fn pending(_: Self::Pending) -> Pending {
-        Pending::Completion
+    fn pending(pos: Self::Pending) -> Pending {
+        Pending::Completion(pos)
     }
 
     fn handle_res(
         lsp_id: usize,
         resp: Option<CompletionResponse>,
-        _: (),
+        pos: Pos,
         man: &mut LspManager,
     ) -> Option<Actions> {
         let enc = man.clients.get(&lsp_id)?.position_encoding;
@@ -57,7 +58,7 @@ impl LspRequest for req::Completion {
 
         let completions: Vec<_> = items
             .into_iter()
-            .map(|item| Completion::new(item, enc, lsp_id, &man.tx_req))
+            .map(|item| Completion::new(item, pos.clone(), enc, lsp_id, &man.tx_req))
             .collect();
 
         Some(Actions::Single(Action::MbSelect(
@@ -75,13 +76,14 @@ struct Completion {
 
 #[derive(Debug, Clone)]
 enum CompletionAction {
-    Resolve(usize, Sender<Req>),
+    Resolve(Pos, usize, Sender<Req>),
     Actions(Actions),
 }
 
 impl Completion {
     fn new(
         comp_item: CompletionItem,
+        pos: Pos,
         enc: PositionEncoding,
         lsp_id: usize,
         tx_req: &Sender<Req>,
@@ -95,9 +97,13 @@ impl Completion {
         // server itself in order to resolve the request so we shouldn't be doing anything
         // with it other than passing it back).
         let actions = if comp_item.data.is_some() {
-            CompletionAction::Resolve(lsp_id, tx_req.clone())
+            CompletionAction::Resolve(pos, lsp_id, tx_req.clone())
         } else {
-            CompletionAction::Actions(actions_for_resolved_completion_item(comp_item.clone(), enc))
+            CompletionAction::Actions(actions_for_resolved_completion_item(
+                comp_item.clone(),
+                pos,
+                enc,
+            ))
         };
 
         Self {
@@ -165,9 +171,11 @@ impl MbSelect for Completions {
                 self.0.get(cy).and_then(|c| match c.actions.clone() {
                     CompletionAction::Actions(actions) => Some(actions),
 
-                    CompletionAction::Resolve(lsp_id, tx_req) => {
-                        let pending =
-                            PendingParams::ResolveCompletionItem(Box::new(c.comp_item.clone()));
+                    CompletionAction::Resolve(pos, lsp_id, tx_req) => {
+                        let pending = PendingParams::ResolveCompletionItem(
+                            Box::new(c.comp_item.clone()),
+                            pos,
+                        );
                         let req = Req::Pending(PendingRequest { lsp_id, pending });
                         if let Err(e) = tx_req.send(req) {
                             die!("LSP manager died: {e}")
@@ -189,26 +197,60 @@ impl MbSelect for Completions {
 // modifications to buffer state as part of resolving the original completion item when there are
 // additional actions to resolve.
 impl LspRequest for req::ResolveCompletionItem {
-    type Pending = ();
+    type Pending = Pos;
     type Data = Box<CompletionItem>;
 
     fn prepare(item: Self::Data) -> Self::Params {
         *item
     }
 
-    fn pending(_: Self::Pending) -> Pending {
-        Pending::ResolveCompletionItem
+    fn pending(pos: Self::Pending) -> Pending {
+        Pending::ResolveCompletionItem(pos)
     }
 
     fn handle_res(
         lsp_id: usize,
         comp_item: CompletionItem,
-        _: (),
+        pos: Pos,
         man: &mut LspManager,
     ) -> Option<Actions> {
         let enc = man.clients.get(&lsp_id)?.position_encoding;
 
-        Some(actions_for_resolved_completion_item(comp_item, enc))
+        Some(actions_for_resolved_completion_item(comp_item, pos, enc))
+    }
+}
+
+// How Helix handles parsing a CompletionItem into its edit transaction format:
+//   https://github.com/helix-editor/helix/blob/master/helix-lsp/src/lib.rs#L397
+//   https://github.com/helix-editor/helix/blob/master/helix-lsp/src/lib.rs#L317
+//   https://github.com/helix-editor/helix/blob/master/helix-term/src/ui/completion.rs#L582
+
+#[derive(Debug)]
+struct EditAction {
+    coords: Coords,
+    s: String,
+    use_xdot: bool,
+}
+
+impl EditAction {
+    fn into_actions(
+        EditAction {
+            coords,
+            s,
+            use_xdot,
+        }: EditAction,
+    ) -> [Action; 2] {
+        if use_xdot {
+            [
+                Action::XDotSetFromCoords { coords },
+                Action::XInsertString { s },
+            ]
+        } else {
+            [
+                Action::DotSetFromCoords { coords },
+                Action::InsertString { s },
+            ]
+        }
     }
 }
 
@@ -216,39 +258,49 @@ impl LspRequest for req::ResolveCompletionItem {
 /// request) we need to combine the edits both from the primary edit itself and any additional
 /// edits that are given.
 ///
-/// We assume that each TextEdit is a single edit to the current buffer. "Additional edits" need to
-/// be made via the xdot as the LSP protocol specifies that they are edits that need to be made to
-/// the file without affecting the editor's cursor position. Annoyingly the protocol doesn't
-/// provide any mechanism for specifying the final cursor position following a multi-part edit like
-/// this so we're left to figure out the correct final cursor position ourselves.
+/// Each TextEdit is a single edit to the current buffer. "Additional edits" need to be made via
+/// the xdot as the LSP protocol specifies that they are edits that need to be made to the file
+/// without affecting the editor's cursor position. Annoyingly the protocol doesn't provide any
+/// mechanism for specifying the final cursor position following a multi-part edit like this so
+/// we're left to figure out the correct final cursor position ourselves.
+///
+/// From the docs on TextEdit:
+///   If n TextEdits are applied to a text document all text edits describe changes to the initial
+///   document version. Execution wise text edits should applied from the bottom to the top of the
+///   text document. Overlapping text edits are not supported.
+///
+/// Also see <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textEditArray>
 fn actions_for_resolved_completion_item(
     comp_item: CompletionItem,
+    pos: Pos,
     enc: PositionEncoding,
 ) -> Actions {
     let mut edit_actions = match comp_item.text_edit.as_ref() {
         Some(CompletionTextEdit::Edit(edit)) => {
-            vec![
-                Action::DotSetFromCoords {
-                    coords: Coords::new_from_range(edit.range, enc),
-                },
-                Action::InsertString {
-                    s: edit.new_text.clone(),
-                },
-            ]
+            vec![EditAction {
+                coords: Coords::new_from_range(edit.range, enc),
+                s: edit.new_text.clone(),
+                use_xdot: false,
+            }]
         }
 
-        Some(CompletionTextEdit::InsertAndReplace(_)) => Vec::new(),
+        Some(CompletionTextEdit::InsertAndReplace(_)) => {
+            error!("Unexpected InsertAndReplace response from LSP");
+            Vec::new()
+        }
 
         None => {
             // From the LSP spec docs on the insertText field:
             // 	 A string that should be inserted into a document when selecting
             //   this completion. When omitted the label is used as the insert text
             //   for this item.
-            vec![Action::InsertString {
+            vec![EditAction {
+                coords: Coords::new_from_pos(pos, enc),
                 s: comp_item
                     .insert_text
                     .clone()
                     .unwrap_or_else(|| comp_item.label.clone()),
+                use_xdot: false,
             }]
         }
     };
@@ -258,18 +310,24 @@ fn actions_for_resolved_completion_item(
             .additional_text_edits
             .unwrap_or_default()
             .iter()
-            .flat_map(|edit| {
-                let coords = Coords::new_from_range(edit.range, enc);
-                [
-                    Action::XDotSetFromCoords { coords },
-                    Action::XInsertString {
-                        s: edit.new_text.clone(),
-                    },
-                ]
+            .map(|edit| EditAction {
+                coords: Coords::new_from_range(edit.range, enc),
+                s: edit.new_text.clone(),
+                use_xdot: true,
             }),
     );
 
-    Actions::Multi(edit_actions)
+    edit_actions.sort_by_key(|a| a.coords);
+    edit_actions.reverse();
+
+    let actions: Vec<Action> = edit_actions
+        .into_iter()
+        .flat_map(EditAction::into_actions)
+        .collect();
+
+    trace!("Actions for completion: {actions:#?}");
+
+    Actions::Multi(actions)
 }
 
 #[cfg(test)]

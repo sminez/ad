@@ -386,9 +386,9 @@ impl LspManager {
                 req::GotoTypeDefinition::send(lsp_id, pos, (), self)
             }
             PendingParams::Hover(pos) => req::HoverRequest::send(lsp_id, pos, (), self),
-            PendingParams::Completion(pos) => req::Completion::send(lsp_id, pos, (), self),
-            PendingParams::ResolveCompletionItem(item) => {
-                req::ResolveCompletionItem::send(lsp_id, item, (), self)
+            PendingParams::Completion(pos) => req::Completion::send(lsp_id, pos.clone(), pos, self),
+            PendingParams::ResolveCompletionItem(item, pos) => {
+                req::ResolveCompletionItem::send(lsp_id, item, pos, self)
             }
             PendingParams::FindReferences(pos) => req::References::send(lsp_id, pos, (), self),
         }
@@ -424,8 +424,10 @@ impl LspManager {
             GotoDefinition => req::GotoDefinition::handle(lsp_id, res, (), self),
             GotoTypeDefinition => req::GotoTypeDefinition::handle(lsp_id, res, (), self),
             Hover => req::HoverRequest::handle(lsp_id, res, (), self),
-            Completion => req::Completion::handle(lsp_id, res, (), self),
-            ResolveCompletionItem => req::ResolveCompletionItem::handle(lsp_id, res, (), self),
+            Completion(cur) => req::Completion::handle(lsp_id, res, cur, self),
+            ResolveCompletionItem(cur) => {
+                req::ResolveCompletionItem::handle(lsp_id, res, cur, self)
+            }
             Initialize(l, ob) => req::Initialize::handle(lsp_id, res, (l, ob), self),
         };
 
@@ -551,7 +553,7 @@ pub(crate) enum PendingParams {
     GotoTypeDefinition(Pos),
     Hover(Pos),
     Completion(Pos),
-    ResolveCompletionItem(Box<lsp_types::CompletionItem>),
+    ResolveCompletionItem(Box<lsp_types::CompletionItem>, Pos),
 }
 
 #[derive(Debug)]
@@ -561,8 +563,8 @@ pub(crate) enum Pending {
     GotoDefinition,
     GotoTypeDefinition,
     Hover,
-    Completion,
-    ResolveCompletionItem,
+    Completion(Pos),
+    ResolveCompletionItem(Pos),
     Initialize(String, Vec<PendingParams>),
 }
 

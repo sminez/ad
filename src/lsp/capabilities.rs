@@ -146,9 +146,9 @@ impl PositionEncoding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Coords {
-    encoding: PositionEncoding,
     start: Position,
     end: Position,
+    encoding: PositionEncoding,
 }
 
 impl Coords {
@@ -161,9 +161,9 @@ impl Coords {
             .to_owned();
 
         let coords = Coords {
-            encoding,
             start: loc.range.start,
             end: loc.range.end,
+            encoding,
         };
 
         (filepath, coords)
@@ -171,9 +171,17 @@ impl Coords {
 
     pub(crate) fn new_from_range(r: lsp_types::Range, encoding: PositionEncoding) -> Self {
         Coords {
-            encoding,
             start: r.start,
             end: r.end,
+            encoding,
+        }
+    }
+
+    pub(crate) fn new_from_pos(pos: Pos, encoding: PositionEncoding) -> Self {
+        Coords {
+            start: lsp_types::Position::new(pos.line, pos.character),
+            end: lsp_types::Position::new(pos.line, pos.character),
+            encoding,
         }
     }
 
