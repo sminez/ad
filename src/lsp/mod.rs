@@ -11,12 +11,12 @@ use crate::{
     lsp::{
         capabilities::{Capabilities, PositionEncoding},
         client::{LspClient, LspMessage},
-        messages::{LspNotification, LspRequest, NotificationHandler, RequestHandler},
+        messages::{LspNotification, LspRequest, NotificationHandler, RequestHandler, txt_doc_id},
         rpc::{Message, Notification, Request, RequestId, Response},
     },
     util::ReadOnlyLock,
 };
-use lsp_types::{NumberOrString, Uri, request::Initialize};
+use lsp_types::{NumberOrString, TextDocumentIdentifier, Uri, request::Initialize};
 use std::{
     collections::HashMap,
     path::Path,
@@ -293,6 +293,19 @@ impl LspManagerHandle {
             self.send(id, PendingParams::FindReferences(enc.buffer_pos(b)))
         }
     }
+
+    pub fn format(&self, b: &Buffer) {
+        if let Some((id, _)) = self.lsp_id_and_encoding_for(b) {
+            if b.dirty {
+                self.document_changed(b);
+            }
+            debug!("sending LSP textDocument/formatting ({id})");
+            self.send(
+                id,
+                PendingParams::Formatting(txt_doc_id(b.full_name()), b.tabstop() as u32),
+            )
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -391,6 +404,9 @@ impl LspManager {
                 req::ResolveCompletionItem::send(lsp_id, item, pos, self)
             }
             PendingParams::FindReferences(pos) => req::References::send(lsp_id, pos, (), self),
+            PendingParams::Formatting(text_doc, tab_size) => {
+                req::Formatting::send(lsp_id, (text_doc, tab_size), (), self)
+            }
         }
     }
 
@@ -420,6 +436,7 @@ impl LspManager {
 
         let actions = match p {
             FindReferences => req::References::handle(lsp_id, res, (), self),
+            Formatting => req::Formatting::handle(lsp_id, res, (), self),
             GotoDeclaration => req::GotoDeclaration::handle(lsp_id, res, (), self),
             GotoDefinition => req::GotoDefinition::handle(lsp_id, res, (), self),
             GotoTypeDefinition => req::GotoTypeDefinition::handle(lsp_id, res, (), self),
@@ -534,6 +551,7 @@ pub(crate) struct PendingRequest {
 
 #[derive(Debug)]
 pub(crate) enum PendingParams {
+    Completion(Pos),
     DocumentChange {
         path: String,
         content: String,
@@ -548,24 +566,25 @@ pub(crate) enum PendingParams {
         content: String,
     },
     FindReferences(Pos),
+    Formatting(TextDocumentIdentifier, u32),
     GotoDeclaration(Pos),
     GotoDefinition(Pos),
     GotoTypeDefinition(Pos),
     Hover(Pos),
-    Completion(Pos),
     ResolveCompletionItem(Box<lsp_types::CompletionItem>, Pos),
 }
 
 #[derive(Debug)]
 pub(crate) enum Pending {
+    Completion(Pos),
     FindReferences,
+    Formatting,
     GotoDeclaration,
     GotoDefinition,
     GotoTypeDefinition,
     Hover,
-    Completion(Pos),
-    ResolveCompletionItem(Pos),
     Initialize(String, Vec<PendingParams>),
+    ResolveCompletionItem(Pos),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

@@ -10,10 +10,11 @@ use crate::{
 };
 use lsp_types::{
     ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability,
-    DynamicRegistrationClientCapabilities, GeneralClientCapabilities, HoverClientCapabilities,
-    InitializeParams, MarkupKind, NumberOrString, PositionEncodingKind,
-    TextDocumentClientCapabilities, Uri, WindowClientCapabilities, WorkDoneProgressParams,
-    WorkspaceClientCapabilities, WorkspaceFolder,
+    CompletionItemCapabilityResolveSupport, DynamicRegistrationClientCapabilities,
+    GeneralClientCapabilities, HoverClientCapabilities, InitializeParams, MarkupKind,
+    NumberOrString, PositionEncodingKind, TextDocumentClientCapabilities, Uri,
+    WindowClientCapabilities, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
+    WorkspaceSymbolClientCapabilities,
     notification::Initialized,
     request::{Initialize, Request as _, Shutdown},
 };
@@ -68,20 +69,24 @@ impl LspRequest for Initialize {
             }]),
             initialization_options,
             capabilities: ClientCapabilities {
+                // https://docs.rs/lsp-types/0.97.0/lsp_types/struct.WorkspaceClientCapabilities.html
                 workspace: Some(WorkspaceClientCapabilities {
-                    // https://docs.rs/lsp-types/0.97.0/lsp_types/struct.WorkspaceClientCapabilities.html
+                    apply_edit: Some(true),
                     workspace_folders: Some(true),
                     configuration: Some(true),
+                    symbol: Some(WorkspaceSymbolClientCapabilities {
+                        dynamic_registration: Some(false),
+                        ..Default::default()
+                    }),
+                    execute_command: Some(DynamicRegistrationClientCapabilities {
+                        dynamic_registration: Some(false),
+                    }),
                     did_change_configuration: Some(DynamicRegistrationClientCapabilities {
                         dynamic_registration: Some(false),
                     }),
                     ..Default::default()
                 }),
                 text_document: Some(TextDocumentClientCapabilities {
-                    hover: Some(HoverClientCapabilities {
-                        dynamic_registration: Some(true),
-                        content_format: Some(vec![MarkupKind::PlainText]),
-                    }),
                     completion: Some(CompletionClientCapabilities {
                         dynamic_registration: Some(true),
                         completion_item: Some(CompletionItemCapability {
@@ -92,11 +97,12 @@ impl LspRequest for Initialize {
                             preselect_support: None,
                             tag_support: None,
                             insert_replace_support: Some(false),
-                            resolve_support: Some(
-                                lsp_types::CompletionItemCapabilityResolveSupport {
-                                    properties: vec!["additionalTextEdits".to_string()],
-                                },
-                            ),
+                            resolve_support: Some(CompletionItemCapabilityResolveSupport {
+                                properties: vec![
+                                    "documentation".to_string(),
+                                    "additionalTextEdits".to_string(),
+                                ],
+                            }),
                             insert_text_mode_support: None,
                             label_details_support: None,
                         }),
@@ -104,6 +110,13 @@ impl LspRequest for Initialize {
                         context_support: Some(true),
                         insert_text_mode: None,
                         completion_list: None,
+                    }),
+                    formatting: Some(DynamicRegistrationClientCapabilities {
+                        dynamic_registration: Some(false),
+                    }),
+                    hover: Some(HoverClientCapabilities {
+                        dynamic_registration: Some(false),
+                        content_format: Some(vec![MarkupKind::PlainText]),
                     }),
                     // https://docs.rs/lsp-types/0.97.0/lsp_types/struct.TextDocumentClientCapabilities.html
                     ..Default::default()
@@ -116,7 +129,6 @@ impl LspRequest for Initialize {
                     ..Default::default()
                 }),
                 general: Some(GeneralClientCapabilities {
-                    // Explicitly not supporting utf-16 for now and seeing how well that works...!
                     position_encodings: Some(vec![
                         PositionEncodingKind::UTF32,
                         PositionEncodingKind::UTF8,
@@ -126,6 +138,7 @@ impl LspRequest for Initialize {
                 }),
                 ..Default::default()
             },
+            trace: Some(lsp_types::TraceValue::Verbose),
             ..Default::default()
         }
     }

@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use tracing::error;
 
 mod completion;
+mod format;
 mod goto;
 mod hover;
 mod init;

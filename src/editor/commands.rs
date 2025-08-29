@@ -94,6 +94,7 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
 
         "lsp-completion" => Ok(Single(LspCompletion)),
         "lsp-find-references" => Ok(Single(LspReferences)),
+        "lsp-format" => Ok(Single(LspFormat)),
         "lsp-goto-declaration" => Ok(Single(LspGotoDeclaration)),
         "lsp-goto-definition" => Ok(Single(LspGotoDefinition)),
         "lsp-goto-type-definition" => Ok(Single(LspGotoTypeDefinition)),

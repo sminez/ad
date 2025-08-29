@@ -611,6 +611,9 @@ where
             LspCompletion => self
                 .lsp_manager
                 .completion(self.layout.active_buffer_ignoring_scratch()),
+            LspFormat => self
+                .lsp_manager
+                .format(self.layout.active_buffer_ignoring_scratch()),
             LspGotoDeclaration => self
                 .lsp_manager
                 .goto_declaration(self.layout.active_buffer_ignoring_scratch()),

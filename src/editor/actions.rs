@@ -83,6 +83,7 @@ pub enum Action {
     KillRunningChild,
     LoadDot { new_window: bool },
     LspCompletion,
+    LspFormat,
     LspGotoDeclaration,
     LspGotoDefinition,
     LspGotoTypeDefinition,

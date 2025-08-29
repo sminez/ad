@@ -563,6 +563,10 @@ impl Buffer {
         TextObject::word_under_dot(dot, self)
     }
 
+    pub(crate) fn tabstop(&self) -> usize {
+        config_handle!(self).tabstop
+    }
+
     /// The number of lines currently held in the buffer.
     #[inline]
     pub fn len_lines(&self) -> usize {

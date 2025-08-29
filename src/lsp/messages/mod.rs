@@ -3,7 +3,7 @@ use crate::{
     editor::Action,
     lsp::{Coords, capabilities::PositionEncoding},
 };
-use lsp_types::{TextDocumentIdentifier, TextDocumentPositionParams, TextEdit, Uri};
+use lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams, TextEdit, Uri};
 use std::str::FromStr;
 
 mod notification;
@@ -20,13 +20,13 @@ pub(super) use server_request::RequestHandler;
 fn txtdoc_pos(file: &str, line: u32, character: u32) -> TextDocumentPositionParams {
     TextDocumentPositionParams {
         text_document: txt_doc_id(file),
-        position: lsp_types::Position { line, character },
+        position: Position { line, character },
     }
 }
 
 #[inline]
-fn txt_doc_id(path: &str) -> TextDocumentIdentifier {
-    lsp_types::TextDocumentIdentifier { uri: uri(path) }
+pub(crate) fn txt_doc_id(path: &str) -> TextDocumentIdentifier {
+    TextDocumentIdentifier { uri: uri(path) }
 }
 
 #[inline]
