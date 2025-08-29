@@ -15,7 +15,7 @@ use lsp_types::{
 use std::sync::mpsc::Sender;
 use tracing::{error, trace};
 
-// <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion>
+/// <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion>
 impl LspRequest for req::Completion {
     type Pending = Pos;
     type Data = Pos;
@@ -169,9 +169,13 @@ impl MbSelect for Completions {
         match sel {
             MiniBufferSelection::Line { cy, .. } => {
                 self.0.get(cy).and_then(|c| match c.actions.clone() {
-                    CompletionAction::Actions(actions) => Some(actions),
+                    CompletionAction::Actions(actions) => {
+                        trace!("Complation actions: {actions:#?}");
+                        Some(actions)
+                    }
 
                     CompletionAction::Resolve(pos, lsp_id, tx_req) => {
+                        trace!("Resolving additional edit actions for completion");
                         let pending = PendingParams::ResolveCompletionItem(
                             Box::new(c.comp_item.clone()),
                             pos,
@@ -215,8 +219,11 @@ impl LspRequest for req::ResolveCompletionItem {
         man: &mut LspManager,
     ) -> Option<Actions> {
         let enc = man.clients.get(&lsp_id)?.position_encoding;
+        let actions = actions_for_resolved_completion_item(comp_item, pos, enc);
 
-        Some(actions_for_resolved_completion_item(comp_item, pos, enc))
+        trace!("Resolved complation actions: {actions:#?}");
+
+        Some(actions)
     }
 }
 
@@ -269,8 +276,6 @@ fn actions_for_resolved_completion_item(
     );
 
     let actions = edit_actions_as_editor_actions(edit_actions);
-
-    trace!("Actions for completion: {actions:#?}");
 
     Actions::Multi(actions)
 }
