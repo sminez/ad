@@ -2,7 +2,7 @@ use crate::{
     buffer::Buffers,
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
     lsp::{
-        LspManager, Pending, Pos, PositionEncoding,
+        LspManager, Pos, PositionEncoding,
         capabilities::Coords,
         messages::{request::LspRequest, txtdoc_pos},
     },
@@ -10,10 +10,10 @@ use crate::{
 use lsp_types::{Location, ReferenceContext, ReferenceParams, request as req};
 
 impl LspRequest for req::References {
-    type Pending = ();
     type Data = Pos;
+    type Pending = ();
 
-    fn prepare(
+    fn build_params(
         Pos {
             file,
             line,
@@ -28,10 +28,6 @@ impl LspRequest for req::References {
                 include_declaration: false,
             },
         }
-    }
-
-    fn pending(_: Self::Pending) -> Pending {
-        Pending::FindReferences
     }
 
     fn handle_res(

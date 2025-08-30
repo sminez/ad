@@ -1,7 +1,7 @@
 use crate::{
     editor::Actions,
     lsp::{
-        LspManager, Pending,
+        LspManager,
         messages::{EditAction, edit_actions_as_editor_actions, request::LspRequest},
     },
 };
@@ -10,10 +10,10 @@ use lsp_types::{
 };
 
 impl LspRequest for Formatting {
-    type Pending = ();
     type Data = (TextDocumentIdentifier, u32);
+    type Pending = ();
 
-    fn prepare((text_document, tab_size): Self::Data) -> Self::Params {
+    fn build_params((text_document, tab_size): Self::Data) -> Self::Params {
         tracing::debug!("txt doc: {}", text_document.uri.as_str());
         DocumentFormattingParams {
             text_document,
@@ -27,10 +27,6 @@ impl LspRequest for Formatting {
                 properties: Default::default(),
             },
         }
-    }
-
-    fn pending(_: Self::Pending) -> Pending {
-        Pending::Formatting
     }
 
     fn handle_res(

@@ -1,10 +1,13 @@
 use crate::{
     editor::Actions,
     lsp::{
-        LspManager, Pending, PendingParams, PendingRequest,
+        LspManager, PreparedMessage,
         capabilities::Capabilities,
         client::Status,
-        messages::{LspNotification, request::LspRequest},
+        messages::{
+            LspNotification,
+            request::{LspRequest, PendingRequestData},
+        },
         rpc::{Message, Request},
     },
 };
@@ -15,16 +18,25 @@ use lsp_types::{
     NumberOrString, PositionEncodingKind, TextDocumentClientCapabilities, Uri,
     WindowClientCapabilities, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
     WorkspaceSymbolClientCapabilities,
-    notification::Initialized,
+    notification::{DidOpenTextDocument, Initialized},
     request::{Initialize, Request as _, Shutdown},
 };
 
 use std::{borrow::Cow, process, str::FromStr};
 use tracing::debug;
 
+/// The details we need in order to send a [DidOpenTextDocument] notification once the server is
+/// initialized.
+#[derive(Debug)]
+pub(crate) struct OpenDocument {
+    pub(crate) lang: String,
+    pub(crate) path: String,
+    pub(crate) content: String,
+}
+
 impl LspRequest for Initialize {
-    type Pending = (String, Vec<PendingParams>);
     type Data = (String, Option<serde_json::Value>);
+    type Pending = (String, Vec<OpenDocument>);
 
     // Need a custom send impl for initialize as the default one checks that the client is running
     fn send(lsp_id: usize, data: Self::Data, p: Self::Pending, man: &mut LspManager) {
@@ -36,7 +48,7 @@ impl LspRequest for Initialize {
             }
         };
 
-        let params = Self::prepare(data);
+        let params = Self::build_params(data);
         let id = client.next_id();
         let res = client.write(Message::Request(Request {
             id: id.clone(),
@@ -49,10 +61,16 @@ impl LspRequest for Initialize {
             return;
         }
 
-        man.pending.insert((client.id, id), Self::pending(p));
+        man.pending.insert(
+            (client.id, id),
+            Box::new(PendingRequestData::<Self> {
+                lsp_id,
+                pending: Some(p),
+            }),
+        );
     }
 
-    fn prepare((root, initialization_options): Self::Data) -> Self::Params {
+    fn build_params((root, initialization_options): Self::Data) -> Self::Params {
         let basename = root.split("/").last().unwrap_or_default();
 
         #[allow(deprecated)] // root_uri, root_path
@@ -143,14 +161,10 @@ impl LspRequest for Initialize {
         }
     }
 
-    fn pending((lang, open_bufs): Self::Pending) -> Pending {
-        Pending::Initialize(lang, open_bufs)
-    }
-
     fn handle_res(
         lsp_id: usize,
         res: Self::Result,
-        (lang, open_bufs): Self::Pending,
+        (lang, open_docs): Self::Pending,
         man: &mut LspManager,
     ) -> Option<Actions> {
         match Capabilities::try_new(res) {
@@ -164,8 +178,10 @@ impl LspRequest for Initialize {
 
                 Initialized::send(lsp_id, (), man);
 
-                for pending in open_bufs {
-                    man.handle_pending(PendingRequest { lsp_id, pending });
+                for doc in open_docs {
+                    man.handle_prepared_message(PreparedMessage::Notification(Box::new(
+                        DidOpenTextDocument::data(lsp_id, (doc.lang, doc.path, doc.content)),
+                    )));
                 }
             }
 
@@ -178,13 +194,10 @@ impl LspRequest for Initialize {
 }
 
 impl LspRequest for Shutdown {
-    type Pending = ();
     type Data = ();
+    type Pending = ();
 
-    fn prepare(_: Self::Data) -> Self::Params {}
-    fn pending(_: Self::Pending) -> Pending {
-        Pending::GotoDefinition // dummy
-    }
+    fn build_params(_: Self::Data) -> Self::Params {}
 
     fn handle_res(
         _: usize,

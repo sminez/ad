@@ -1,7 +1,7 @@
 use crate::{
     editor::{Action, Actions, ViewPort},
     lsp::{
-        LspManager, Pending, Pos,
+        LspManager, Pos,
         capabilities::Coords,
         messages::{request::LspRequest, txtdoc_pos},
     },
@@ -17,10 +17,10 @@ use tracing::error;
 macro_rules! impl_goto_req {
     ($req_ty:ident) => {
         impl LspRequest for $req_ty {
-            type Pending = ();
             type Data = Pos;
+            type Pending = ();
 
-            fn prepare(
+            fn build_params(
                 Pos {
                     file,
                     line,
@@ -32,10 +32,6 @@ macro_rules! impl_goto_req {
                     work_done_progress_params: Default::default(),
                     partial_result_params: Default::default(),
                 }
-            }
-
-            fn pending(_: Self::Pending) -> Pending {
-                Pending::$req_ty
             }
 
             fn handle_res(

@@ -3,7 +3,7 @@ use crate::{
     die,
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection},
     lsp::{
-        LspManager, Pending, PendingParams, PendingRequest, Pos, PositionEncoding, Req,
+        LspManager, Pos, PositionEncoding, PreparedMessage, Req,
         capabilities::Coords,
         messages::{EditAction, edit_actions_as_editor_actions, request::LspRequest, txtdoc_pos},
     },
@@ -17,10 +17,10 @@ use tracing::{error, trace};
 
 /// <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textDocument_completion>
 impl LspRequest for req::Completion {
-    type Pending = Pos;
     type Data = Pos;
+    type Pending = Pos;
 
-    fn prepare(
+    fn build_params(
         Pos {
             file,
             line,
@@ -38,10 +38,6 @@ impl LspRequest for req::Completion {
                 trigger_character: None,
             }),
         }
-    }
-
-    fn pending(pos: Self::Pending) -> Pending {
-        Pending::Completion(pos)
     }
 
     fn handle_res(
@@ -176,11 +172,14 @@ impl MbSelect for Completions {
 
                     CompletionAction::Resolve(pos, lsp_id, tx_req) => {
                         trace!("Resolving additional edit actions for completion");
-                        let pending = PendingParams::ResolveCompletionItem(
-                            Box::new(c.comp_item.clone()),
-                            pos,
-                        );
-                        let req = Req::Pending(PendingRequest { lsp_id, pending });
+                        let msg =
+                            PreparedMessage::Request(Box::new(req::ResolveCompletionItem::data(
+                                lsp_id,
+                                Box::new(c.comp_item.clone()),
+                                pos,
+                            )));
+
+                        let req = Req::Prepared(msg);
                         if let Err(e) = tx_req.send(req) {
                             die!("LSP manager died: {e}")
                         }
@@ -201,15 +200,11 @@ impl MbSelect for Completions {
 // modifications to buffer state as part of resolving the original completion item when there are
 // additional actions to resolve.
 impl LspRequest for req::ResolveCompletionItem {
-    type Pending = Pos;
     type Data = Box<CompletionItem>;
+    type Pending = Pos;
 
-    fn prepare(item: Self::Data) -> Self::Params {
+    fn build_params(item: Self::Data) -> Self::Params {
         *item
-    }
-
-    fn pending(pos: Self::Pending) -> Pending {
-        Pending::ResolveCompletionItem(pos)
     }
 
     fn handle_res(

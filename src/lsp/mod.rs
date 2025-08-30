@@ -11,12 +11,15 @@ use crate::{
     lsp::{
         capabilities::{Capabilities, PositionEncoding},
         client::{LspClient, LspMessage},
-        messages::{LspNotification, LspRequest, NotificationHandler, RequestHandler, txt_doc_id},
+        messages::{
+            LspNotification, LspRequest, NotificationHandler, OpenDocument, PendingLspRequest,
+            PreparedLspNotification, PreparedLspRequest, RequestHandler, txt_doc_id,
+        },
         rpc::{Message, Notification, Request, RequestId, Response},
     },
     util::ReadOnlyLock,
 };
-use lsp_types::{NumberOrString, TextDocumentIdentifier, Uri, request::Initialize};
+use lsp_types::{NumberOrString, Uri, notification as notif, request as req, request::Initialize};
 use std::{
     collections::HashMap,
     path::Path,
@@ -39,6 +42,12 @@ pub use capabilities::Coords;
 const LSP_FILE: &str = "+lsp";
 
 #[derive(Debug)]
+pub(crate) enum PreparedMessage {
+    Request(Box<dyn PreparedLspRequest>),
+    Notification(Box<dyn PreparedLspNotification>),
+}
+
+#[derive(Debug)]
 pub(crate) enum Req {
     Start {
         lang: String,
@@ -46,12 +55,12 @@ pub(crate) enum Req {
         args: Vec<String>,
         init_opts: Option<serde_json::Value>,
         root: String,
-        open_bufs: Vec<PendingParams>,
+        open_docs: Vec<OpenDocument>,
     },
     Stop {
         lsp_id: usize,
     },
-    Pending(PendingRequest),
+    Prepared(PreparedMessage),
     Message(LspMessage),
 }
 
@@ -74,10 +83,16 @@ impl LspManagerHandle {
         }
     }
 
-    #[inline]
-    fn send(&self, lsp_id: usize, pending: PendingParams) {
-        let req = Req::Pending(PendingRequest { lsp_id, pending });
-        if let Err(e) = self.tx_req.send(req) {
+    fn send_req(&self, req: impl PreparedLspRequest) {
+        let msg = PreparedMessage::Request(Box::new(req));
+        if let Err(e) = self.tx_req.send(Req::Prepared(msg)) {
+            die!("LSP manager died: {e}")
+        }
+    }
+
+    fn send_notification(&self, notif: impl PreparedLspNotification) {
+        let msg = PreparedMessage::Notification(Box::new(notif));
+        if let Err(e) = self.tx_req.send(Req::Prepared(msg)) {
             die!("LSP manager died: {e}")
         }
     }
@@ -113,10 +128,10 @@ impl LspManagerHandle {
         let b = bs.active();
         let (lang, config) = self.config_for_buffer(b)?;
         let root = config.root_for_buffer(b)?.to_str()?.to_owned();
-        let open_bufs: Vec<_> = bs
+        let open_docs: Vec<_> = bs
             .iter()
             .flat_map(|b| match self.config_for_buffer(b) {
-                Some((blang, _)) if blang == lang => Some(PendingParams::DocumentOpen {
+                Some((blang, _)) if blang == lang => Some(OpenDocument {
                     lang: lang.to_owned(),
                     path: b.full_name().to_owned(),
                     content: b.str_contents(),
@@ -131,7 +146,7 @@ impl LspManagerHandle {
             args: config.args.clone(),
             init_opts: config.init_opts.clone(),
             root,
-            open_bufs,
+            open_docs,
         })
     }
 
@@ -191,119 +206,120 @@ impl LspManagerHandle {
             None => return,
         };
 
-        if let Some((id, _)) = self.lsp_id_and_encoding_for(b) {
-            debug!("sending LSP textDocument/didOpen ({id})");
+        if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
+            debug!("sending LSP textDocument/didOpen ({lsp_id})");
             let path = b.full_name().to_string();
             let content = b.str_contents();
 
-            self.send(
-                id,
-                PendingParams::DocumentOpen {
-                    lang,
-                    path,
-                    content,
-                },
-            )
+            self.send_notification(notif::DidOpenTextDocument::data(
+                lsp_id,
+                (lang, path, content),
+            ));
         }
     }
 
     pub fn document_closed(&self, b: &Buffer) {
-        if let Some((id, _)) = self.lsp_id_and_encoding_for(b) {
-            debug!("sending LSP textDocument/didClose ({id})");
+        if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
+            debug!("sending LSP textDocument/didClose ({lsp_id})");
             let path = b.full_name().to_string();
 
-            self.send(id, PendingParams::DocumentClose { path })
+            self.send_notification(notif::DidCloseTextDocument::data(lsp_id, path));
         }
     }
 
     pub fn document_changed(&self, b: &Buffer) {
-        if let Some((id, _)) = self.lsp_id_and_encoding_for(b) {
-            debug!("sending LSP textDocument/didChange ({id})");
+        if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
+            debug!("sending LSP textDocument/didChange ({lsp_id})");
             let path = b.full_name().to_string();
             let content = b.str_contents();
-            let version = b.next_edit_version();
+            let version = b.next_edit_version() as i32;
 
-            self.send(
-                id,
-                PendingParams::DocumentChange {
-                    path,
-                    content,
-                    version,
-                },
-            )
+            self.send_notification(notif::DidChangeTextDocument::data(
+                lsp_id,
+                (path, content, version),
+            ));
         }
     }
 
     pub fn goto_declaration(&self, b: &Buffer) {
-        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/declaration ({id})");
-            self.send(id, PendingParams::GotoDeclaration(enc.buffer_pos(b)))
+
+            debug!("sending LSP textDocument/declaration ({lsp_id})");
+            self.send_req(req::GotoDeclaration::data(lsp_id, enc.buffer_pos(b), ()));
         }
     }
 
     pub fn goto_definition(&self, b: &Buffer) {
-        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/definition ({id})");
-            self.send(id, PendingParams::GotoDefinition(enc.buffer_pos(b)))
+
+            debug!("sending LSP textDocument/definition ({lsp_id})");
+            self.send_req(req::GotoDefinition::data(lsp_id, enc.buffer_pos(b), ()));
         }
     }
 
     pub fn goto_type_definition(&self, b: &Buffer) {
-        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/typeDefinition ({id})");
-            self.send(id, PendingParams::GotoTypeDefinition(enc.buffer_pos(b)))
+
+            debug!("sending LSP textDocument/typeDefinition ({lsp_id})");
+            self.send_req(req::GotoTypeDefinition::data(lsp_id, enc.buffer_pos(b), ()));
         }
     }
 
     pub fn hover(&self, b: &Buffer) {
-        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/hover ({id})");
-            self.send(id, PendingParams::Hover(enc.buffer_pos(b)))
+
+            debug!("sending LSP textDocument/hover ({lsp_id})");
+            self.send_req(req::HoverRequest::data(lsp_id, enc.buffer_pos(b), ()));
         }
     }
 
     pub fn completion(&self, b: &Buffer) {
-        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/completion ({id})");
-            self.send(id, PendingParams::Completion(enc.buffer_pos(b)))
+
+            debug!("sending LSP textDocument/completion ({lsp_id})");
+            let pos = enc.buffer_pos(b);
+            self.send_req(req::Completion::data(lsp_id, pos.clone(), pos));
         }
     }
 
     pub fn find_references(&self, b: &Buffer) {
-        if let Some((id, enc)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/references ({id})");
-            self.send(id, PendingParams::FindReferences(enc.buffer_pos(b)))
+
+            debug!("sending LSP textDocument/references ({lsp_id})");
+            self.send_req(req::References::data(lsp_id, enc.buffer_pos(b), ()));
         }
     }
 
     pub fn format(&self, b: &Buffer) {
-        if let Some((id, _)) = self.lsp_id_and_encoding_for(b) {
+        if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {
                 self.document_changed(b);
             }
-            debug!("sending LSP textDocument/formatting ({id})");
-            self.send(
-                id,
-                PendingParams::Formatting(txt_doc_id(b.full_name()), b.tabstop() as u32),
-            )
+
+            debug!("sending LSP textDocument/formatting ({lsp_id})");
+            self.send_req(req::Formatting::data(
+                lsp_id,
+                (txt_doc_id(b.full_name()), b.tabstop() as u32),
+                (),
+            ));
         }
     }
 }
@@ -314,7 +330,7 @@ pub struct LspManager {
     // lang -> (lspID, server capabilities)
     capabilities: Arc<RwLock<HashMap<String, (usize, Capabilities)>>>,
     // (lspID, ReqID) -> in-flight requests we need a response for
-    pending: HashMap<(usize, RequestId), Pending>,
+    pending: HashMap<(usize, RequestId), Box<dyn PendingLspRequest>>,
     // lspID -> map of progress token -> title
     progress_tokens: HashMap<usize, HashMap<NumberOrString, String>>,
     diagnostics: Arc<RwLock<HashMap<Uri, Vec<Diagnostic>>>>,
@@ -361,10 +377,10 @@ impl LspManager {
                     args,
                     init_opts,
                     root,
-                    open_bufs,
-                } => self.start_client(lang, cmd, args, init_opts, root, open_bufs),
+                    open_docs,
+                } => self.start_client(lang, cmd, args, init_opts, root, open_docs),
                 Req::Stop { lsp_id } => self.stop_client(lsp_id),
-                Req::Pending(p) => self.handle_pending(p),
+                Req::Prepared(p) => self.handle_prepared_message(p),
                 Req::Message(LspMessage { lsp_id, msg }) => match msg {
                     Message::Request(r) => self.handle_request(lsp_id, r),
                     Message::Response(r) => self.handle_response(lsp_id, r),
@@ -374,39 +390,10 @@ impl LspManager {
         }
     }
 
-    fn handle_pending(&mut self, PendingRequest { lsp_id, pending }: PendingRequest) {
-        use lsp_types::{notification as not, request as req};
-
-        match pending {
-            PendingParams::DocumentOpen {
-                lang,
-                path,
-                content,
-            } => not::DidOpenTextDocument::send(lsp_id, (lang, path, content), self),
-            PendingParams::DocumentClose { path } => {
-                not::DidCloseTextDocument::send(lsp_id, path, self)
-            }
-            PendingParams::DocumentChange {
-                path,
-                content,
-                version,
-            } => not::DidChangeTextDocument::send(lsp_id, (path, content, version as i32), self),
-            PendingParams::GotoDeclaration(pos) => {
-                req::GotoDeclaration::send(lsp_id, pos, (), self)
-            }
-            PendingParams::GotoDefinition(pos) => req::GotoDefinition::send(lsp_id, pos, (), self),
-            PendingParams::GotoTypeDefinition(pos) => {
-                req::GotoTypeDefinition::send(lsp_id, pos, (), self)
-            }
-            PendingParams::Hover(pos) => req::HoverRequest::send(lsp_id, pos, (), self),
-            PendingParams::Completion(pos) => req::Completion::send(lsp_id, pos.clone(), pos, self),
-            PendingParams::ResolveCompletionItem(item, pos) => {
-                req::ResolveCompletionItem::send(lsp_id, item, pos, self)
-            }
-            PendingParams::FindReferences(pos) => req::References::send(lsp_id, pos, (), self),
-            PendingParams::Formatting(text_doc, tab_size) => {
-                req::Formatting::send(lsp_id, (text_doc, tab_size), (), self)
-            }
+    fn handle_prepared_message(&mut self, msg: PreparedMessage) {
+        match msg {
+            PreparedMessage::Request(mut req) => req.send(self),
+            PreparedMessage::Notification(mut notif) => notif.send(self),
         }
     }
 
@@ -423,10 +410,7 @@ impl LspManager {
     }
 
     fn handle_response(&mut self, lsp_id: usize, res: Response) {
-        use Pending::*;
-        use lsp_types::request as req;
-
-        let p = match self.pending.remove(&(lsp_id, res.id())) {
+        let mut p = match self.pending.remove(&(lsp_id, res.id())) {
             Some(p) => p,
             None => {
                 warn!("LSP - got response for unknown request: {res:?}");
@@ -434,21 +418,7 @@ impl LspManager {
             }
         };
 
-        let actions = match p {
-            FindReferences => req::References::handle(lsp_id, res, (), self),
-            Formatting => req::Formatting::handle(lsp_id, res, (), self),
-            GotoDeclaration => req::GotoDeclaration::handle(lsp_id, res, (), self),
-            GotoDefinition => req::GotoDefinition::handle(lsp_id, res, (), self),
-            GotoTypeDefinition => req::GotoTypeDefinition::handle(lsp_id, res, (), self),
-            Hover => req::HoverRequest::handle(lsp_id, res, (), self),
-            Completion(cur) => req::Completion::handle(lsp_id, res, cur, self),
-            ResolveCompletionItem(cur) => {
-                req::ResolveCompletionItem::handle(lsp_id, res, cur, self)
-            }
-            Initialize(l, ob) => req::Initialize::handle(lsp_id, res, (l, ob), self),
-        };
-
-        if let Some(actions) = actions
+        if let Some(actions) = p.handle(res, self)
             && self.tx_events.send(Event::Actions(actions)).is_err()
         {
             error!("LSP - sender actions channel closed: exiting");
@@ -499,7 +469,7 @@ impl LspManager {
         args: Vec<String>,
         init_opts: Option<serde_json::Value>,
         root: String,
-        open_bufs: Vec<PendingParams>,
+        open_bufs: Vec<OpenDocument>,
     ) {
         let lsp_id = self.next_id();
         match LspClient::new(lsp_id, &cmd, args, self.tx_req.clone()) {
@@ -541,50 +511,6 @@ impl Pos {
             character,
         }
     }
-}
-
-#[derive(Debug)]
-pub(crate) struct PendingRequest {
-    lsp_id: usize,
-    pending: PendingParams,
-}
-
-#[derive(Debug)]
-pub(crate) enum PendingParams {
-    Completion(Pos),
-    DocumentChange {
-        path: String,
-        content: String,
-        version: usize,
-    },
-    DocumentClose {
-        path: String,
-    },
-    DocumentOpen {
-        lang: String,
-        path: String,
-        content: String,
-    },
-    FindReferences(Pos),
-    Formatting(TextDocumentIdentifier, u32),
-    GotoDeclaration(Pos),
-    GotoDefinition(Pos),
-    GotoTypeDefinition(Pos),
-    Hover(Pos),
-    ResolveCompletionItem(Box<lsp_types::CompletionItem>, Pos),
-}
-
-#[derive(Debug)]
-pub(crate) enum Pending {
-    Completion(Pos),
-    FindReferences,
-    Formatting,
-    GotoDeclaration,
-    GotoDefinition,
-    GotoTypeDefinition,
-    Hover,
-    Initialize(String, Vec<PendingParams>),
-    ResolveCompletionItem(Pos),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

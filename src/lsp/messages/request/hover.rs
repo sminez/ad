@@ -1,17 +1,17 @@
 use crate::{
     editor::{Action, Actions},
     lsp::{
-        LSP_FILE, LspManager, Pending, Pos,
+        LSP_FILE, LspManager, Pos,
         messages::{request::LspRequest, txtdoc_pos},
     },
 };
 use lsp_types::{HoverContents, HoverParams, MarkedString, request::HoverRequest};
 
 impl LspRequest for HoverRequest {
-    type Pending = ();
     type Data = Pos;
+    type Pending = ();
 
-    fn prepare(
+    fn build_params(
         Pos {
             file,
             line,
@@ -22,10 +22,6 @@ impl LspRequest for HoverRequest {
             text_document_position_params: txtdoc_pos(&file, line, character),
             work_done_progress_params: Default::default(),
         }
-    }
-
-    fn pending(_: Self::Pending) -> Pending {
-        Pending::Hover
     }
 
     fn handle_res(

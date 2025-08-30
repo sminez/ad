@@ -11,8 +11,8 @@ mod request;
 mod server_notification;
 mod server_request;
 
-pub(super) use notification::LspNotification;
-pub(super) use request::LspRequest;
+pub(super) use notification::{LspNotification, PreparedLspNotification};
+pub(super) use request::{LspRequest, OpenDocument, PendingLspRequest, PreparedLspRequest};
 pub(super) use server_notification::NotificationHandler;
 pub(super) use server_request::RequestHandler;
 
