@@ -14,7 +14,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         ),
         (
             vec!["balance-all"],
-            "force columns to be the same width and all windows to be the same size withing their respective columns",
+            "force columns to be the same width and all windows to be the same size within their respective columns",
         ),
         (
             vec!["balance-column"],

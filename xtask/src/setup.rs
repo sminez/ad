@@ -7,7 +7,7 @@ ad is a text editor and command line stream editor. The text editor interface fo
 ad is inspired by the likes of vim and kakoune, along with the acme and sam editors
 from plan9. ad aims to provide an 'integrating development environment' as opposed
 to an 'integrated' one: leveraging the surrounding system for the majority of
-functionality outisde of the core text editing actions.
+functionality outside of the core text editing actions.
 ";
 
 const DOTFILE_DIR: &str = ".ad";

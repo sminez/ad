@@ -103,7 +103,7 @@ const CURRENT_BUFFER: &str = "current";
 ///   5.   xdot         -> The text currently held in xdot (a virtual dot not affecting real dot)
 ///   6.   xaddr        -> The address value of xdot
 ///   7.   body         -> The full body of the buffer
-///   8.   event        -> Contol file for intercepting input events for the buffer
+///   8.   event        -> Control file for intercepting input events for the buffer
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
 const QID_OFFSET: u64 = 9;
 

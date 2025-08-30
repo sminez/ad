@@ -437,7 +437,7 @@ fn handle_char(
 ///      treated as non-capturing. If they are required, they will also need to be named.
 ///   3) "(?:...)"
 ///      Non-capturing: allows for grouping and application of repetition / alternation
-///      of compund expressions without contributing to the captured sub-expressions.
+///      of compound expressions without contributing to the captured sub-expressions.
 fn handle_subexp(it: &mut Peekable<Chars<'_>>, root: &mut Vec<Ast>) -> Result<(), Error> {
     let mut sub = Vec::new();
     let kind = match it.peek() {
@@ -642,19 +642,19 @@ mod tests {
         assert_eq!(res, expected);
     }
 
-    #[test_case("abc", "cba"; "lits only")]
-    #[test_case("ab+c", "cb+a"; "lits with plus")]
-    #[test_case("a*bc", "cba*"; "lits with star")]
-    #[test_case("abc?", "c?ba"; "lits with quest")]
+    #[test_case("abc", "cba"; "literals only")]
+    #[test_case("ab+c", "cb+a"; "literals with plus")]
+    #[test_case("a*bc", "cba*"; "literals with star")]
+    #[test_case("abc?", "c?ba"; "literals with quest")] // typos:ignore
     #[test_case("a(bc)+", "(cb)+a"; "repeated capture group")]
     #[test_case("a|b", "b|a"; "alts")]
     #[test_case("[Gg]oo+gle", "elgo+o[Gg]"; "with class and rep")]
     #[test]
-    fn ast_reverse_works(re_fwd: &str, re_bck: &str) {
-        let mut fwd_ast = parse(re_fwd).unwrap();
-        fwd_ast.reverse();
-        let bck_ast = parse(re_bck).unwrap();
+    fn ast_reverse_works(re_forward: &str, re_back: &str) {
+        let mut forward_ast = parse(re_forward).unwrap();
+        forward_ast.reverse();
+        let back_ast = parse(re_back).unwrap();
 
-        assert_eq!(fwd_ast, bck_ast);
+        assert_eq!(forward_ast, back_ast);
     }
 }

@@ -115,7 +115,7 @@ mode you are in you will find that the keys that you press have a different effe
     of editors like Vim and Kakoune then things should feel broadly familiar.
 
     Note that ad follows the "noun verb" approach to motions used in Kakoune rather than the
-    traditional "verb noun" approach used by Vi and its decendants. So you will "select a word
+    traditional "verb noun" approach used by Vi and its descendants. So you will "select a word
     to delete" (Wd) rather than "delete a word" (dw). As a general rule pressing a key on
     its own will set the dot based on the motion used and pressing the same key while holding
     down shift will extend the existing dot to that position instead.
@@ -212,7 +212,7 @@ If your current selection is a single character cursor, Loading will first expan
 surrounding word, filepath or URL before attempting to interpret the selected text.
 
 By default, if no rules are matched then a Load of a file path is defined to be opening that
-file within ad and a Load of any other text will search for the next occurance of that text
+file within ad and a Load of any other text will search for the next occurrence of that text
 within the current buffer. Rules are defined in ~/.ad/plumbing.rules with the default ruleset
 being viewable here:
 
@@ -222,7 +222,7 @@ being viewable here:
 The structure of the 'plumbing.rules' file is as follows:
 
   Comments
-    Any line begining with a '#' is a comment and is ignored when parsing the file.
+    Any line beginning with a '#' is a comment and is ignored when parsing the file.
 
   Variable declarations
     At the top of the file you may have any number of 'var = value' lines that declare a

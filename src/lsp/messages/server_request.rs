@@ -12,7 +12,7 @@ use crate::{
 use lsp_types::{WorkDoneProgressCreateParams, request::WorkDoneProgressCreate};
 use tracing::{error, warn};
 
-/// Incoming requests from the server handle and respone to
+/// Incoming requests from the server handle and respond to
 pub(crate) trait LspServerRequest: lsp_types::request::Request {
     fn handle_params(
         lsp_id: usize,

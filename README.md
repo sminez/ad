@@ -26,7 +26,7 @@ you think. That said, there is currently very little documentation and there are
 a variety of bugs and crashes in places that I've not managed to fully track down yet. If
 you do try it out and spot something that is broken, please raise an issue on GitHub so I
 can look into it. The project is also under active development and while I aim to avoid arbitrary
-incompatible changes to the way the edior works, I am not yet committing to a stable interface,
+incompatible changes to the way the editor works, I am not yet committing to a stable interface,
 keybindings or default behaviours. If you are using `ad` and you find that something is no longer
 working as expected following an update, please refer to the git log for details of what has
 changed.
@@ -81,7 +81,7 @@ If you would like to watch a tour of how `ad` works there is one available [here
 
 `ad` is _not_ trying to replace vim (or kakoune, or emacs) in terms of being a massively
 hackable editor. Rather it is trying to follow the philosophy of acme in being an
-integrat**ing** development environment (rather than integrat**ed**). By which I mean
+integratING development environment (rather than integratED). By which I mean
 that the aim is to provide a comfortable editing environment to work in that supports
 direct interaction with external tools and programs from the outside rather than pulling
 everything **in**.
@@ -111,7 +111,7 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
 - **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
   - Now moved out to its own crate with source code available [here](https://github.com/sminez/ad/crates/ninep).
 - **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
-  the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexability in tinkering
+  the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexibility in tinkering
   with the exec command language.
 - **syntax**: [tree-sitter](https://tree-sitter.github.io/tree-sitter/) based syntax highlighting (with
   optional per-line regex based highlighting if grammars are unavailable for a particular filetype)

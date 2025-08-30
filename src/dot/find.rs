@@ -7,8 +7,8 @@ use crate::{
     exec::IterBoundedChars,
 };
 
-/// A Find is able to locate its next occurance within an indexed character stream and return
-/// an optional pair of start/end indicies denoting the location of the next match.
+/// A Find is able to locate its next occurrence within an indexed character stream and return
+/// an optional pair of start/end indices denoting the location of the next match.
 ///
 /// For more complex patterns, Regex should be used instead
 pub trait Find {

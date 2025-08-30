@@ -166,7 +166,7 @@ impl MbSelect for Completions {
             MiniBufferSelection::Line { cy, .. } => {
                 self.0.get(cy).and_then(|c| match c.actions.clone() {
                     CompletionAction::Actions(actions) => {
-                        trace!("Complation actions: {actions:#?}");
+                        trace!("Completion actions: {actions:#?}");
                         Some(actions)
                     }
 
@@ -216,7 +216,7 @@ impl LspRequest for req::ResolveCompletionItem {
         let enc = man.clients.get(&lsp_id)?.position_encoding;
         let actions = actions_for_resolved_completion_item(comp_item, pos, enc);
 
-        trace!("Resolved complation actions: {actions:#?}");
+        trace!("Resolved completion actions: {actions:#?}");
 
         Some(actions)
     }

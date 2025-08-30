@@ -143,7 +143,7 @@ where
         self.roots.is_empty()
     }
 
-    /// Wether the given key is present in this [Trie] either as a full key or a partial prefix to
+    /// Whether the given key is present in this [Trie] either as a full key or a partial prefix to
     /// multiple keys.
     pub fn contains_key_or_prefix(&self, key: &[K]) -> bool {
         !matches!(self.get(key), QueryResult::Missing)
@@ -402,7 +402,7 @@ mod tests {
         assert_eq!(t.get_exact(k), expected);
     }
 
-    #[test_case("fo", None; "partial should be None")]
+    #[test_case("fo", None; "partial should be None")] // typos:ignore
     #[test_case("bar", None; "missing should be None")]
     #[test_case("fooo", None; "overshoot should be None")]
     #[test_case("foo", Some(1); "exact should be Some")]
@@ -413,7 +413,7 @@ mod tests {
         assert_eq!(t.get_str_exact(k), expected);
     }
 
-    #[test_case("ba", QueryResult::Partial; "partial match")]
+    #[test_case("ba", QueryResult::Partial; "partial match")] // typos:ignore
     #[test_case("bar", QueryResult::Val(2); "exact match")]
     #[test_case("baz", QueryResult::Val(3); "exact match with shared prefix")]
     #[test_case("barf", QueryResult::Missing; "overshot known key")]
@@ -426,7 +426,7 @@ mod tests {
     }
 
     #[test_case("f", &["fold", "food", "fool"]; "first char")]
-    #[test_case("fo", &["fold", "food", "fool"]; "shared prefix")]
+    #[test_case("fo", &["fold", "food", "fool"]; "shared prefix")] // typos:ignore
     #[test_case("foo", &["food", "fool"]; "shared prefix not all match")]
     #[test_case("food", &["food"]; "exact match")]
     #[test_case("foods", &[]; "overshot")]

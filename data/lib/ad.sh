@@ -48,7 +48,7 @@ clearBuffer() {
 # Mark the buffer with the specified id as clean
 markClean() { adCtl "mark-clean $1"; }
 
-# Set the cursor position for the specified buffer to the begining of the file
+# Set the cursor position for the specified buffer to the beginning of the file
 curToBof() { echo -n 0 | bufWrite "$1" addr; }
 
 # Set the cursor position for the specified buffer to the end of the file

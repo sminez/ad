@@ -16,7 +16,7 @@ pub(crate) fn modes() -> Vec<Mode> {
     vec![normal::normal_mode().0, insert::insert_mode().0]
 }
 
-/// Docs for the differnt keybindings available in each mode
+/// Docs for the different keybindings available in each mode
 pub(crate) fn keybindings() -> Vec<(&'static str, Vec<(String, &'static str)>)> {
     vec![
         ("NORMAL", normal::normal_mode().1),

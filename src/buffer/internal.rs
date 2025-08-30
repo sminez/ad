@@ -170,7 +170,7 @@ impl PartialEq<String> for GapBuffer {
 /// when and where the tracking of line endings becomes corrupted. This macro is called at
 /// points where the line_endings map is modified guarded by #[cfg(test)] so that it does not
 /// affect the performance of the editor when it is in use. It is also called in situations
-/// where we are already panicing in order to check to see if the reason for the panic was
+/// where we are already panicking in order to check to see if the reason for the panic was
 /// because there is a bug around line endings that the current test suite didn't catch.
 macro_rules! assert_line_endings {
     ($self:expr) => {{
@@ -561,7 +561,7 @@ impl GapBuffer {
 
     /// Insert a single character at the specifified byte index.
     ///
-    /// This is O(1) if idx is at the current gap start and the gap is large enough to accomodate
+    /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_char(&mut self, char_idx: usize, ch: char) {
         let len = ch.len_utf8();
@@ -594,7 +594,7 @@ impl GapBuffer {
 
     /// Insert a string at the specifified byte index.
     ///
-    /// This is O(1) if idx is at the current gap start and the gap is large enough to accomodate
+    /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
     pub fn insert_str(&mut self, char_idx: usize, s: &str) {
         let len = s.len();
@@ -1509,7 +1509,7 @@ mod tests {
     }
 
     #[test_case(&[(0, "hell")], "helloworl"; "insert front")]
-    #[test_case(&[(1, ", ")], "o, worl"; "insert inner")]
+    #[test_case(&[(1, ", ")], "o, worl"; "insert inner")] // typos:ignore
     #[test_case(&[(5, "d!")], "oworld!"; "insert back")]
     #[test_case(&[(5, "d!"), (0, "hell"), (5, ", ")], "hello, world!"; "insert all")]
     #[test_case(&[(5, "d!"), (0, "hell"), (5, ",\n")], "hello,\nworld!"; "insert all w newline")]

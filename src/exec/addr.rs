@@ -125,7 +125,7 @@ impl SimpleAddr {
     }
 }
 
-/// Primatives for building out addresses
+/// Primitives for building out addresses
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddrBase {
     /// .
@@ -495,7 +495,7 @@ mod tests {
     #[test_case("+", Simple(Eol.into()); "end of line")]
     #[test_case("-+", Simple(CurrentLine.into()); "current line minus plus")]
     #[test_case("+-", Simple(CurrentLine.into()); "current line plus minus")]
-    #[test_case("0", Simple(Bof.into()); "begining of file")]
+    #[test_case("0", Simple(Bof.into()); "beginning of file")]
     #[test_case("$", Simple(Eof.into()); "end of file")]
     #[test_case("3", Simple(Line(2).into()); "single line")]
     #[test_case("+42", Simple(RelativeLine(42).into()); "relative line forward")]

@@ -267,7 +267,7 @@ impl Layout {
         }
 
         if self.buffers.len() == 1 {
-            // We could have been asked to close a non-existant buffer.
+            // We could have been asked to close a non-existent buffer.
             // If this was the last buffer then Editor::delete_buffer will exit
             return self.active_buffer_ignoring_scratch().id == id;
         }

@@ -20,7 +20,7 @@ pub const MAX_DATA_SIZE_FIELD: usize = u32::MAX as usize;
 /// to use more than this is an error.
 pub const MAX_DATA_LEN: usize = 32 * 1024 * 1024;
 
-/// Non IO releated errors that can occur when attempting to serialize a [NineP] type.
+/// Non IO related errors that can occur when attempting to serialize a [NineP] type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteError {
     /// The maximum number of bytes we allow in a Data buffer is [MAX_DATA_LEN]: a client
@@ -55,9 +55,9 @@ struct SharedBufInner {
     buf: Vec<u8>,
 }
 
-/// SAFETY: requres that the safety guarantees for as_inner_mut and as_slice_to are upheld
+/// SAFETY: requires that the safety guarantees for as_inner_mut and as_slice_to are upheld
 unsafe impl Send for SharedBuf {}
-/// SAFETY: requres that the safety guarantees for as_inner_mut and as_slice_to are upheld
+/// SAFETY: requires that the safety guarantees for as_inner_mut and as_slice_to are upheld
 unsafe impl Sync for SharedBuf {}
 
 impl Default for SharedBuf {
@@ -773,7 +773,7 @@ impl_tdata! {
         fid: u32,
         /// The offset in bytes to start reading at
         offset: u64,
-        /// The numbder of bytes to read
+        /// The number of bytes to read
         count: u32,
     }
 

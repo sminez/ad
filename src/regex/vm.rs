@@ -23,7 +23,7 @@ pub(super) const N_SLOTS: usize = 30;
 ///
 /// This is a relatively naive implementation though it does have some
 /// optimisations and runs reasonably quickly. It is not at all designed to
-/// be robust against mallicious input and it does not attempt to support
+/// be robust against malicious input and it does not attempt to support
 /// full PCRE syntax or functionality.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Regex {
@@ -39,7 +39,7 @@ pub struct Regex {
     nlist: Box<[Thread]>,
     /// Pre-allocated SubMatch positions referenced by threads
     sms: Box<[SubMatches]>,
-    /// Available indicies into self.sms for storing SubMatch positions for new threads
+    /// Available indices into self.sms for storing SubMatch positions for new threads
     free_sms: Vec<usize>,
     track_submatches: bool,
     /// Monotonically increasing index used to dedup Threads
@@ -456,6 +456,7 @@ mod tests {
     use super::*;
     use simple_test_case::test_case;
 
+    // typos:off
     #[test_case("foo", "foo", Some("foo"); "literal full string")]
     #[test_case("ba*", "baaaaa", Some("baaaaa"); "zero or more present")]
     #[test_case("ba*", "b", Some("b"); "zero or more not present")]
@@ -528,6 +529,7 @@ mod tests {
     #[test_case("\\b(in|for)\\b", "bob for", Some("for"); "word boundary for alt match not at BOF")]
     #[test_case("[a-zA-Z0-9_\\-./@]+\\.jpe?g", "glenda_space_medium.jpg", Some("glenda_space_medium.jpg"); "complex group")]
     #[test_case("[a-zA-Z¡-￿0-9_\\-./@]+", "foo-bar_99.pdf", Some("foo-bar_99.pdf"); "multibyte group")]
+    // typos:on
     #[test]
     fn match_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = Regex::compile(re).unwrap();
@@ -536,8 +538,8 @@ mod tests {
     }
 
     #[test_case("foo", "foo", Some("foo"); "literal full string")]
-    #[test_case("ba*", " baaaaa foo", Some("baaaaa"); "zero or more present")]
-    #[test_case("ba*", "b foo", Some("b"); "zero or more not present")]
+    #[test_case("ba*", " baaaaa foo", Some("baaaaa"); "zero or more present")] // typos:ignore
+    #[test_case("ba*", "b foo", Some("b"); "zero or more not present")] // typos:ignore
     #[test_case("foo$", "a line that ends with foo\nnow bar", Some("foo"); "BOL holding before newline")]
     #[test_case("\\b\\w+\\b", "foo", Some("foo"); "word boundary at end of input")]
     #[test_case(
@@ -550,7 +552,7 @@ mod tests {
         "his",
         "this is a line\nand another\n- [ ] something to do\n",
         Some("his");
-        "multiline intput"
+        "multiline input"
     )]
     #[test]
     fn rev_match_works(re: &str, s: &str, expected: Option<&str>) {

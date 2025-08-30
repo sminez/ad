@@ -77,7 +77,7 @@ macro_rules! config_handle {
     }};
 }
 
-/// Helper for panicing the program but first ensuring that we have restored the
+/// Helper for panicking the program but first ensuring that we have restored the
 /// terminal state in the same way that we do when the Editor is dropped cleanly
 #[macro_export]
 macro_rules! die {

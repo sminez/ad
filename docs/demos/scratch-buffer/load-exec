@@ -3,12 +3,12 @@ loading and executing text:
 
   - If you search in the scratch buffer the search will take place in the active buffer instead
 
-    -> try loading the string "load" from the scrach buffer
+    -> try loading the string "load" from the scratch buffer
 
 
   - If you load a file path it will be treated as relative to the active buffer
 
-    -> try copying "../../../README.md" to the scrach buffer and loading it
+    -> try copying "../../../README.md" to the scratch buffer and loading it
 
 
   - The same is true for executing text

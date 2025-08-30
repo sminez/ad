@@ -270,7 +270,7 @@ impl BufferNodes {
                     self.known.insert(qid, BufferNode::new(id, qid));
                 }
 
-                // TODO: handle closing defered reads of files associated with this buffer
+                // TODO: handle closing deferred reads of files associated with this buffer
                 LogEvent::Close(id) => {
                     debug!(%id, "removing buffer from fsys state");
                     self.known.retain(|_, v| v.id != id);

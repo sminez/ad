@@ -566,7 +566,7 @@ mod tests {
         assert_eq!(dot_content, "that");
     }
 
-    #[test_case(0, "/oo.fo/ d", "fo│foo"; "regex dot delete")]
+    #[test_case(0, "/oo.fo/ d", "fo│foo"; "regex dot delete")] // typos:ignore
     #[test_case(2, "-/f/,/f/ d", "oo│foo"; "regex dot range delete")]
     #[test_case(0, ", x/foo/ p/$0/", "foo│foo│foo"; "x print")]
     #[test_case(0, ", x/foo/ i/X/", "Xfoo│Xfoo│Xfoo"; "x insert")]

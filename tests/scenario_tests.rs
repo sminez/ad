@@ -25,7 +25,7 @@ use std::{
 };
 
 /// The number of milliseconds to sleep before sending a noop when a render is triggered while we
-/// have an outstanding fsys opertaion pending.
+/// have an outstanding fsys operation pending.
 /// Also used as our poll interval while we wait for fsys to come up before starting a test run
 /// that requires it to be running.
 const FSYS_SLEEP_MS: u64 = 100;
@@ -161,7 +161,7 @@ impl TestCase {
         // -- actions --
         // Actions are not required as the setup of the test alone may be all we need but
         // we provide a default sleep no-op action to handle the first render call that
-        // comes through when the edior starts up.
+        // comes through when the editor starts up.
         let actions = match arr.get("actions") {
             Some(f) => parse_actions(f.content.trim()),
             None => vec![TestAction::SleepMs(100)],
@@ -525,7 +525,7 @@ enum TestAction {
     /// type: <esc>
     /// type: <alt>$single_character
     Input(Input),
-    /// Sleep for a given number of miliseconds.
+    /// Sleep for a given number of milliseconds.
     /// This may be required when running external programs through loading and executing.
     ///
     /// # Examples

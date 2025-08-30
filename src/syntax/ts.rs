@@ -413,7 +413,7 @@ impl Tokenizer {
     pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: usize, to: usize) {
         self.cur.set_byte_range(from..to);
 
-        // This is a streaming-iterator not an interator, hence the odd while-let that follows
+        // This is a streaming-iterator not an iterator, hence the odd while-let that follows
         let mut it = self.cur.captures(&self.q, root, gb);
 
         while let Some((m, idx)) = it.next() {
@@ -421,7 +421,7 @@ impl Tokenizer {
             let r = ByteRange::from(cap.node.range());
             if let Some(prev) = self.ranges.last_mut() {
                 if r == prev.r {
-                    // prefering the the last capture found so that precedence ordering
+                    // preferring the the last capture found so that precedence ordering
                     // in query files matches Neovim & the treesitter-cli
                     prev.cap_idx = Some(cap.index as usize);
                     continue;

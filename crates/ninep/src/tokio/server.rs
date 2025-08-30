@@ -67,7 +67,7 @@ async fn tcp_socket(port: u16) -> TcpListener {
 }
 
 /// A type capable of handling [9p](http://9p.cat-v.org/) requests in order to implement a
-/// 9p virtual filesystem. The [Server] struct is used to handle the lower level protocal and
+/// 9p virtual filesystem. The [Server] struct is used to handle the lower level protocol and
 /// underlying connection, allowing implementers of this trait to focus on the semantics of the
 /// virtual filesystem itself.
 ///

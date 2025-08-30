@@ -83,7 +83,7 @@ impl Edit {
 
             // There are other cases that _could_ be handled here where the kind is still matching
             // and the characters being inserted/deleted are still part of a continuous region of
-            // the buffer, but for now this is sufficent for the common case of the user typing
+            // the buffer, but for now this is sufficient for the common case of the user typing
             // without explicitly moving the cursor.
             _ => Some(e),
         }
@@ -303,7 +303,7 @@ pub(crate) mod tests {
     )]
     #[test_case(
         vec![in_c(0, 'a'), in_c(0, 'b')],
-        &[in_s(0, "ba")];
+        &[in_s(0, "ba")];  // typos:ignore
         "run of characters at same cursor"
     )]
     #[test_case(

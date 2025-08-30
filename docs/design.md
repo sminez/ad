@@ -14,7 +14,7 @@
 
 `ad` is _not_ trying to replace vim (or kakoune, or emacs) in terms of being a massively
 hackable editor. Rather it is trying to follow the philosophy of acme in being an
-integrat**ing** development environment (rather than integrat**ed**). By which I mean
+integratING development environment (rather than integratED). By which I mean
 that the aim is to provide a comfortable editing environment to work in that supports
 direct interaction with external tools and programs from the outside rather than pulling
 everything **in**.

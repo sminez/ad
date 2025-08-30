@@ -550,9 +550,9 @@ where
     ///   - a relative path from the directory of the containing file -> open in ad
     ///   - an absolute path -> open in ad
     ///     - if either have a valid addr following a colon then set dot to that addr
-    ///   - search within the current buffer for the next occurance of dot and select it
+    ///   - search within the current buffer for the next occurrence of dot and select it
     ///
-    /// Loading and executing of dot is part of what makes ad an unsual editor. The semantics are
+    /// Loading and executing of dot is part of what makes ad an unusual editor. The semantics are
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
@@ -702,7 +702,7 @@ where
     ///   - a valid ad command -> execute the command
     ///   - attempt to run as a shell command with args
     ///
-    /// Loading and executing of dot is part of what makes ad an unsual editor. The semantics are
+    /// Loading and executing of dot is part of what makes ad an unusual editor. The semantics are
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.

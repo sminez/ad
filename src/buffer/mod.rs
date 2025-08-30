@@ -67,7 +67,7 @@ pub(crate) enum ActionOutcome {
 pub(crate) enum BufferKind {
     /// A regular buffer that is backed by a file on disk.
     File(PathBuf),
-    /// A directory buffer that is modifyable but cannot be saved
+    /// A directory buffer that is modifiable but cannot be saved
     Directory(PathBuf),
     /// An in-memory buffer that is not exposed through fsys
     Virtual(String),
@@ -186,7 +186,7 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    /// As the name implies, this method MUST be called with the full cannonical file path
+    /// As the name implies, this method MUST be called with the full canonical file path
     pub fn new_from_canonical_file_path(
         id: usize,
         path: PathBuf,
@@ -943,7 +943,7 @@ impl Buffer {
         self.xdot.clamp_idx(self.txt.len_chars());
     }
 
-    /// Extend dot foward and clamp to ensure it is within bounds
+    /// Extend dot forward and clamp to ensure it is within bounds
     fn extend_dot_forward(&mut self, t: TextObject, n: usize) {
         for _ in 0..n {
             t.extend_dot_forward(self);

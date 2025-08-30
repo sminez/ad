@@ -230,7 +230,7 @@ pub struct LineIter<'a> {
     /// full set of syntax ranges for the input
     ranges: &'a [SyntaxRange],
     start_byte: usize,
-    /// the next line to yeild
+    /// the next line to yield
     line: usize,
     dot_range: ByteRange,
     load_exec_range: Option<(bool, ByteRange)>,
@@ -465,7 +465,7 @@ impl Held<'_> {
 /// An iterator of tokens for a single line.
 ///
 /// "default" ranges will be injected in-between the known syntax regions
-/// so a consumer may treat the output of this iterator as a continous,
+/// so a consumer may treat the output of this iterator as a continuous,
 /// non-overlapping set of sub-regions spanning a single line within a
 /// given buffer.
 #[derive(Debug)]
@@ -665,7 +665,7 @@ impl<'a> Iterator for TokenIter<'a> {
             return next;
         }
 
-        // Determine the next token we would emit in the absense of any user selections and then
+        // Determine the next token we would emit in the absence of any user selections and then
         // apply the selections in priority order:
         //   - dot overwrites original syntax highlighting
         //   - load/exec overwrite dot

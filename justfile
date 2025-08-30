@@ -1,6 +1,11 @@
 
 export RUSTDOCFLAGS := "-D warnings -D rustdoc::broken-intra-doc-links"
 
+# Install tooling used in other Just targets
+install-tools:
+	cargo install cargo-nextest
+	cargo install typos-cli
+
 # Check for outstanding TODO comments
 todo:
 	rg 'TODO|FIXME|todo!' src crates
@@ -21,6 +26,10 @@ open-docs:
 format:
 	cargo fmt --all
 
+# Fix spelling mistakes with 'typos'
+fix-spelling:
+	typos --write-changes
+
 # Check all Rust files using clippy
 check-clippy:
 	cargo clippy --workspace --all-targets --all-features --examples --tests -- -D warnings
@@ -33,8 +42,12 @@ check-fmt:
 check-docs:
 	cargo doc --all-features --workspace
 
+# Check for spelling mistakes using 'typos'
+check-spelling:
+	typos
+
 # Run all check targets
-check-all: check-clippy check-fmt check-docs
+check-all: check-clippy check-fmt check-docs check-spelling
 
 # List open GitHub issues using gh
 list-issues:
