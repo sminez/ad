@@ -73,7 +73,6 @@ pub struct LspManagerHandle {
 }
 
 impl LspManagerHandle {
-    #[cfg(test)]
     pub(crate) fn new_stubbed(tx_req: Sender<Req>) -> Self {
         Self {
             tx_req,

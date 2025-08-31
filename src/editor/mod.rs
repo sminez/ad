@@ -341,7 +341,7 @@ where
         }
     }
 
-    pub(super) fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
+    pub fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
         self.layout.clamp_scroll();
         self.layout.update_visible_ts_state();
         self.ui.refresh(
@@ -506,7 +506,7 @@ where
         }
     }
 
-    fn handle_input(&mut self, input: Input) {
+    pub fn handle_input(&mut self, input: Input) {
         self.pending_keys.push(input);
         let maybe_actions =
             self.modes[0].handle_keys(&mut self.pending_keys, &*config_handle!(self));

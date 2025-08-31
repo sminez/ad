@@ -11,8 +11,13 @@ todo:
 	rg 'TODO|FIXME|todo!' src crates
 
 # Run workspace tests using nextest
-test FILTER="":
+test FILTER=".*":
 	cargo nextest run --workspace {{FILTER}}
+
+# Run criterion benchmarks and open the report in firefox
+bench FILTER="":
+	cargo bench -- {{FILTER}}
+	firefox --new-tab target/criterion/report/index.html
 
 # Use entr to run tests every time git tracked files are modified
 watch-tests FILTER="":
