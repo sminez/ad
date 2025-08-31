@@ -15,7 +15,7 @@ mod layout;
 mod tui;
 
 pub use layout::{Layout, SCRATCH_ID};
-pub use tui::Tui;
+pub use tui::{GenericTui, Tui};
 
 /// Something that can be used as a user interface
 pub trait UserInterface {

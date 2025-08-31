@@ -26,7 +26,7 @@ use std::{
     char,
     cmp::Ordering,
     collections::HashMap,
-    io::{Read, Stdout, Write, stdin, stdout},
+    io::{Read, StdoutLock, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
     rc::Rc,
@@ -50,9 +50,11 @@ fn box_draw_str(s: &str, cs: &ColorScheme) -> String {
     format!("{}{}{s}", Style::Fg(cs.minibuffer_hl), Style::Bg(cs.bg))
 }
 
+pub type Tui = GenericTui<StdoutLock<'static>>;
+
 #[derive(Debug)]
-pub struct Tui {
-    stdout: Stdout,
+pub struct GenericTui<W: Write> {
+    stdout: W,
     config: Arc<Mutex<Config>>,
     screen_rows: usize,
     screen_cols: usize,
@@ -75,7 +77,7 @@ impl Default for Tui {
     }
 }
 
-impl Drop for Tui {
+impl<W: Write> Drop for GenericTui<W> {
     fn drop(&mut self) {
         restore_terminal_state(&mut self.stdout);
     }
@@ -83,8 +85,14 @@ impl Drop for Tui {
 
 impl Tui {
     pub fn new(config: Arc<Mutex<Config>>) -> Self {
+        Self::new_with_stdout_handle(config, stdout().lock())
+    }
+}
+
+impl<W: Write> GenericTui<W> {
+    pub fn new_with_stdout_handle(config: Arc<Mutex<Config>>, stdout: W) -> Self {
         let mut tui = Self {
-            stdout: stdout(),
+            stdout,
             config,
             screen_rows: 0,
             screen_cols: 0,
@@ -240,58 +248,13 @@ impl Tui {
 
         lines
     }
-}
 
-impl UserInterface for Tui {
-    fn init(&mut self, tx: Sender<Event>) -> (usize, usize) {
-        let original_termios = get_termios();
-        enable_raw_mode(original_termios);
-        _ = ORIGINAL_TERMIOS.set(original_termios);
-
-        panic::set_hook(Box::new(|panic_info| {
-            let mut stdout = stdout();
-            restore_terminal_state(&mut stdout);
-            _ = stdout.flush();
-
-            // Restoring the terminal state to move us off of the alternate screen
-            // can race with our attempt to print the panic info so given that we
-            // are already in a fatal situation, sleeping briefly to ensure that
-            // the cause of the panic is visible before we exit isn't _too_ bad.
-            std::thread::sleep(std::time::Duration::from_millis(300));
-            eprintln!("Fatal error:\n{panic_info}");
-            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}"));
-        }));
-
-        enable_mouse_support(&mut self.stdout);
-        enable_alternate_screen(&mut self.stdout);
-
-        // SAFETY: we only register our signal handler once
-        unsafe { register_signal_handler() };
-
-        let (screen_rows, screen_cols) = get_termsize();
-        self.screen_rows = screen_rows;
-        self.screen_cols = screen_cols;
-
-        spawn_input_thread(tx);
-
-        (screen_rows, screen_cols)
+    pub fn set_size(&mut self, rows: usize, cols: usize) {
+        self.screen_rows = rows;
+        self.screen_cols = cols;
     }
 
-    fn shutdown(&mut self) {
-        clear_screen(&mut self.stdout);
-    }
-
-    fn state_change(&mut self, change: StateChange) {
-        match change {
-            StateChange::ConfigUpdated => self.update_cached_elements(),
-            StateChange::StatusMessage { msg } => {
-                self.status_message = msg;
-                self.last_status = Instant::now();
-            }
-        }
-    }
-
-    fn refresh(
+    pub fn render_lines(
         &mut self,
         mode_name: &str,
         layout: &Layout,
@@ -299,14 +262,7 @@ impl UserInterface for Tui {
         pending_keys: &[Input],
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
-    ) {
-        self.screen_rows = layout.screen_rows;
-        self.screen_cols = layout.screen_cols;
-
-        if self.screen_cols < MIN_COLS || self.screen_rows < MIN_ROWS {
-            return;
-        }
-
+    ) -> Vec<String> {
         let conf = config_handle!(self);
         let (cs, status_timeout, tabstop, max_mb_lines) = (
             &conf.colorscheme,
@@ -384,6 +340,77 @@ impl UserInterface for Tui {
         };
         lines.push(format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
+        lines
+    }
+}
+
+impl<W: Write> UserInterface for GenericTui<W> {
+    fn init(&mut self, tx: Sender<Event>) -> (usize, usize) {
+        let original_termios = get_termios();
+        enable_raw_mode(original_termios);
+        _ = ORIGINAL_TERMIOS.set(original_termios);
+
+        panic::set_hook(Box::new(|panic_info| {
+            let mut stdout = stdout();
+            restore_terminal_state(&mut stdout);
+            _ = stdout.flush();
+
+            // Restoring the terminal state to move us off of the alternate screen
+            // can race with our attempt to print the panic info so given that we
+            // are already in a fatal situation, sleeping briefly to ensure that
+            // the cause of the panic is visible before we exit isn't _too_ bad.
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            eprintln!("Fatal error:\n{panic_info}");
+            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}"));
+        }));
+
+        enable_mouse_support(&mut self.stdout);
+        enable_alternate_screen(&mut self.stdout);
+
+        // SAFETY: we only register our signal handler once
+        unsafe { register_signal_handler() };
+
+        let (screen_rows, screen_cols) = get_termsize();
+        self.screen_rows = screen_rows;
+        self.screen_cols = screen_cols;
+
+        spawn_input_thread(tx);
+
+        (screen_rows, screen_cols)
+    }
+
+    fn shutdown(&mut self) {
+        clear_screen(&mut self.stdout);
+    }
+
+    fn state_change(&mut self, change: StateChange) {
+        match change {
+            StateChange::ConfigUpdated => self.update_cached_elements(),
+            StateChange::StatusMessage { msg } => {
+                self.status_message = msg;
+                self.last_status = Instant::now();
+            }
+        }
+    }
+
+    fn refresh(
+        &mut self,
+        mode_name: &str,
+        layout: &Layout,
+        n_running: usize,
+        pending_keys: &[Input],
+        held_click: Option<&Click>,
+        mb: Option<MiniBufferState<'_>>,
+    ) {
+        self.screen_rows = layout.screen_rows;
+        self.screen_cols = layout.screen_cols;
+
+        if self.screen_cols < MIN_COLS || self.screen_rows < MIN_ROWS {
+            return;
+        }
+
+        let lines = self.render_lines(mode_name, layout, n_running, pending_keys, held_click, mb);
+
         if let Err(e) = self.stdout.write_all(lines.join("").as_bytes()) {
             die!("Unable to refresh screen: {e}");
         }
@@ -413,12 +440,12 @@ struct WinsIter<'a> {
 }
 
 impl<'a> WinsIter<'a> {
-    fn new(
+    fn new<W: Write>(
         layout: &'a Layout,
         load_exec_range: Option<(bool, Range)>,
         screen_rows: usize,
         tabstop: usize,
-        tui: &'a Tui,
+        tui: &'a GenericTui<W>,
         cs: &'a ColorScheme,
     ) -> Self {
         let col_iters: Vec<_> = layout
@@ -833,9 +860,9 @@ fn render_line<'a>(
 /// Spawn a thread to read from stdin and process user input to send Events to
 /// the main editor event loop.
 fn spawn_input_thread(tx: Sender<Event>) -> JoinHandle<()> {
-    let mut stdin = stdin();
-
     spawn(move || {
+        let mut stdin = stdin().lock();
+
         loop {
             if let Some(key) = try_read_input(&mut stdin) {
                 _ = tx.send(Event::Input(key));

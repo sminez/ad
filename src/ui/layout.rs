@@ -15,7 +15,7 @@ use std::{
     io,
     mem::swap,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc::channel},
 };
 use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
@@ -91,6 +91,17 @@ pub struct Layout {
 }
 
 impl Layout {
+    pub fn new_with_stub_lsp_handle(
+        screen_rows: usize,
+        screen_cols: usize,
+        config: Arc<Mutex<Config>>,
+    ) -> Self {
+        let (tx, _rx) = channel();
+        let lsp_handle = LspManagerHandle::new_stubbed(tx);
+
+        Self::new(screen_rows, screen_cols, Arc::new(lsp_handle), config)
+    }
+
     pub(crate) fn new(
         screen_rows: usize,
         screen_cols: usize,
@@ -161,7 +172,7 @@ impl Layout {
     }
 
     /// Returns the active buffer or the scratch buffer if it is focused
-    pub(crate) fn active_buffer(&self) -> &Buffer {
+    pub fn active_buffer(&self) -> &Buffer {
         if self.scratch.is_focused {
             &self.scratch.b
         } else {
@@ -196,7 +207,7 @@ impl Layout {
         self.scratch.toggle();
     }
 
-    pub(crate) fn open_or_focus<P: AsRef<Path>>(
+    pub fn open_or_focus<P: AsRef<Path>>(
         &mut self,
         path: P,
         mut new_window: bool,
@@ -1045,7 +1056,7 @@ impl Layout {
     }
 
     /// Scroll the [View] under the given cursor coordinates up or down by a single line
-    pub(crate) fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
+    pub fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
         let tabstop = config_handle!(self).tabstop;
         let mut x_offset = 0;
         let mut y_offset = 0;
@@ -1089,6 +1100,18 @@ impl Layout {
             }
         }
 
+        // Default to scrolling the active window
+        let n_cols = self.cols.focus.n_cols;
+        let win = &mut self.cols.focus.wins.focus;
+        let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+        apply_scroll(b, win, n_cols, tabstop, true, up);
+
+        #[cfg(test)]
+        assert_invariants!(self);
+    }
+
+    pub fn scroll_active(&mut self, up: bool) {
+        let tabstop = config_handle!(self).tabstop;
         let n_cols = self.cols.focus.n_cols;
         let win = &mut self.cols.focus.wins.focus;
         let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
