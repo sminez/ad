@@ -26,7 +26,7 @@ use std::{
     char,
     cmp::Ordering,
     collections::HashMap,
-    io::{Read, StdoutLock, Write, stdin, stdout},
+    io::{BufWriter, Read, StdoutLock, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
     rc::Rc,
@@ -54,7 +54,7 @@ pub type Tui = GenericTui<StdoutLock<'static>>;
 
 #[derive(Debug)]
 pub struct GenericTui<W: Write> {
-    stdout: W,
+    stdout: BufWriter<W>,
     config: Arc<Mutex<Config>>,
     screen_rows: usize,
     screen_cols: usize,
@@ -92,7 +92,7 @@ impl Tui {
 impl<W: Write> GenericTui<W> {
     pub fn new_with_stdout_handle(config: Arc<Mutex<Config>>, stdout: W) -> Self {
         let mut tui = Self {
-            stdout,
+            stdout: BufWriter::new(stdout),
             config,
             screen_rows: 0,
             screen_cols: 0,
