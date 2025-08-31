@@ -39,10 +39,9 @@ codegen-units = 1
 
 # Used with https://github.com/flamegraph-rs/flamegraph
 [profile.flamegraph]
+inherits = "release"
 debug=true
 strip = false
-lto = true
-codegen-units = 1
 
 # For a release optimised build that is quicker to run while iterating locally
 [profile.release-test]
