@@ -334,6 +334,7 @@ where
     pub fn handle_event(&mut self, event: Event) {
         match event {
             Event::Input(i) => self.handle_input(i),
+            Event::Inputs(i) => self.handle_inputs(i),
             Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Actions(a) => self.handle_actions(a, Source::Fsys),
             Event::Message(msg) => self.handle_message(msg),
@@ -364,10 +365,11 @@ where
         self.modes[0].cur_shape
     }
 
-    pub(crate) fn block_for_input(&mut self) -> Input {
+    pub(crate) fn block_for_input(&mut self) -> Vec<Input> {
         loop {
             match self.rx_events.recv().unwrap() {
-                Event::Input(k) => return k,
+                Event::Input(i) => return vec![i],
+                Event::Inputs(i) => return i,
                 Event::Action(a) => self.handle_action(a, Source::Fsys),
                 Event::Actions(a) => self.handle_actions(a, Source::Fsys),
                 Event::Message(msg) => self.handle_message(msg),
@@ -513,6 +515,15 @@ where
 
         if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);
+        }
+    }
+
+    pub fn handle_inputs(&mut self, inputs: Vec<Input>) {
+        for input in inputs.into_iter() {
+            self.handle_input(input);
+            if !self.running {
+                break;
+            };
         }
     }
 

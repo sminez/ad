@@ -12,6 +12,8 @@ pub enum Event {
     Message(Message),
     /// An [Input] from the user
     Input(Input),
+    /// Multiple successive [Input]s from the user
+    Inputs(Vec<Input>),
     /// An [Action] for the event loop to handle
     Action(Action),
     /// Multiple [Action]s to be handled in a batch

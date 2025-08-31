@@ -11,7 +11,7 @@ todo:
 	rg 'TODO|FIXME|todo!' src crates
 
 # Run workspace tests using nextest
-test FILTER=".*":
+test FILTER="":
 	cargo nextest run --workspace {{FILTER}}
 
 # Run criterion benchmarks and open the report in firefox

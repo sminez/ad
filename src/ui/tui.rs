@@ -26,7 +26,7 @@ use std::{
     char,
     cmp::Ordering,
     collections::HashMap,
-    io::{BufWriter, Read, StdoutLock, Write, stdin, stdout},
+    io::{BufReader, BufWriter, Read, StdoutLock, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
     rc::Rc,
@@ -861,12 +861,41 @@ fn render_line<'a>(
 /// the main editor event loop.
 fn spawn_input_thread(tx: Sender<Event>) -> JoinHandle<()> {
     spawn(move || {
-        let mut stdin = stdin().lock();
+        // Stdin already has an internal BufReader but there is no way to access it to check if
+        // there is any data buffered. We need to be able to check if there is at least another 4
+        // bytes for us to attempt to parse without blocking on another read so we wrap things with
+        // our own BufReader that we can work with.
+        // In my testing for this I wasn't able to pull more that 4092 bytes at a time from stdin
+        // so keeping the default buffer size of 8k is sufficient.
+        let mut stdin = BufReader::new(stdin().lock());
 
         loop {
-            if let Some(key) = try_read_input(&mut stdin) {
-                _ = tx.send(Event::Input(key));
-            } else if win_size_changed() {
+            if let Some(input) = try_read_input(&mut stdin) {
+                // If the next read would potentially block then send what we already have.
+                if stdin.buffer().len() < 4 {
+                    _ = tx.send(Event::Input(input));
+                    continue;
+                }
+
+                // Parse as many inputs as possible while we have enough buffered data to parse a
+                // maximally sized utf8 character of 4 bytes. This isn't guaranteed to be
+                // sufficient to parse a full Input but if we have at least 4 bytes then we
+                // are at least part way through the next user input.
+                let mut inputs = vec![input];
+
+                while stdin.buffer().len() >= 4 {
+                    match try_read_input(&mut stdin) {
+                        Some(input) => inputs.push(input),
+                        None => break,
+                    }
+                }
+
+                _ = tx.send(Event::Inputs(inputs));
+            }
+
+            // Always check for the window size changing after processing multiple inputs or if we
+            // failed to read anything.
+            if win_size_changed() {
                 let (rows, cols) = get_termsize();
                 _ = tx.send(Event::WinsizeChanged { rows, cols });
             }

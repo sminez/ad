@@ -275,9 +275,11 @@ where
         loop {
             mb.update_state();
             self.refresh_screen_w_minibuffer(Some(mb.current_state()));
-            let input = self.block_for_input();
-            if let Some(selection) = mb.handle_input(input) {
-                return selection;
+            let inputs = self.block_for_input();
+            for input in inputs.into_iter() {
+                if let Some(selection) = mb.handle_input(input) {
+                    return selection;
+                }
             }
         }
     }
