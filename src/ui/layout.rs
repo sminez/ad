@@ -1055,7 +1055,7 @@ impl Layout {
         bufid == current_bufid
     }
 
-    /// Scroll the [View] under the given cursor coordinates up or down by `scroll_rows`
+    /// Scroll the `View` under the given cursor coordinates up or down by `scroll_rows`
     pub fn scroll_view(&mut self, x: usize, y: usize, up: bool, scroll_rows: usize) {
         let tabstop = config_handle!(self).tabstop;
         let mut x_offset = 0;
@@ -1464,7 +1464,7 @@ fn apply_scroll(
     tabstop: usize,
     focused: bool,
     up: bool,
-    scoll_rows: usize,
+    scroll_rows: usize,
 ) {
     let n_rows = win.n_rows;
     let view = &mut win.view;
@@ -1478,9 +1478,9 @@ fn apply_scroll(
     let mut need_clamp = false;
 
     if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
-        cur = Cur::from_yx(y.saturating_sub(scoll_rows), x, b);
+        cur = Cur::from_yx(y.saturating_sub(scroll_rows), x, b);
     } else if !up && y == view.row_off && view.row_off < y_max {
-        cur = Cur::from_yx(min(y + scoll_rows, y_max), x, b);
+        cur = Cur::from_yx(min(y + scroll_rows, y_max), x, b);
         need_clamp = true;
     };
 
@@ -1495,9 +1495,9 @@ fn apply_scroll(
     }
 
     view.row_off = if up {
-        view.row_off.saturating_sub(scoll_rows)
+        view.row_off.saturating_sub(scroll_rows)
     } else {
-        view.row_off + scoll_rows
+        view.row_off + scroll_rows
     };
 
     if focused {

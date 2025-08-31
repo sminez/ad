@@ -5,13 +5,43 @@ use ad_editor::{
     system::DefaultSystem,
     ui::{GenericTui, Layout, UserInterface},
 };
-use criterion::{Criterion, criterion_group};
+use criterion::{BenchmarkGroup, Criterion, criterion_group, measurement::WallTime};
 use std::{
     env::current_dir,
     hint::black_box,
     io::{self, Write},
     sync::{Arc, Mutex},
 };
+
+fn criterion_benchmark(c: &mut Criterion) {
+    let mut group = c.benchmark_group("TUI render");
+
+    fixed_view(&mut group, "single window", &["src/util.rs"]);
+    fixed_view(&mut group, "two windows", &["src/util.rs", "src/term.rs"]);
+
+    single_window_editor_scroll_inputs(
+        &mut group,
+        "single window editor scroll inputs stdout",
+        EditorMode::Terminal,
+    );
+
+    let config = Config::try_load().unwrap();
+    let mut tui = GenericTui::new_with_stdout_handle(
+        Arc::new(Mutex::new(config.clone())),
+        StdoutSink(Vec::with_capacity(512 * 1024)),
+    );
+    tui.set_size(80, 160);
+
+    single_window_editor_scroll_inputs(
+        &mut group,
+        "single window editor scroll inputs sink",
+        EditorMode::Boxed(Box::new(tui)),
+    );
+
+    group.finish();
+}
+
+criterion_group!(benches, criterion_benchmark);
 
 struct StdoutSink(Vec<u8>);
 
@@ -51,11 +81,9 @@ fn tui_and_layout(files: &[&str]) -> (GenericTui<StdoutSink>, Layout) {
     (tui, layout)
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("TUI render");
-
-    let (mut tui, layout) = tui_and_layout(&["src/util.rs"]);
-    group.bench_function("single window", |b| {
+fn fixed_view(group: &mut BenchmarkGroup<'_, WallTime>, title: &str, files: &[&str]) {
+    let (mut tui, layout) = tui_and_layout(files);
+    group.bench_function(title, |b| {
         b.iter(|| {
             tui.refresh(
                 black_box("NORMAL"),
@@ -67,80 +95,17 @@ fn criterion_benchmark(c: &mut Criterion) {
             );
         })
     });
+}
 
-    let (mut tui, layout) = tui_and_layout(&["src/util.rs", "src/term.rs"]);
-    group.bench_function("two windows", |b| {
-        b.iter(|| {
-            tui.refresh(
-                black_box("NORMAL"),
-                black_box(&layout),
-                black_box(0),
-                black_box(&[]),
-                black_box(None),
-                black_box(None),
-            );
-        })
-    });
-
-    let (mut tui, mut layout) = tui_and_layout(&["src/ui/tui.rs"]);
-    let mut n = 0;
-    let mut up = false;
-
-    group.bench_function("single window scroll active", |b| {
-        b.iter(|| {
-            tui.refresh(
-                black_box("NORMAL"),
-                black_box(&layout),
-                black_box(0),
-                black_box(&[]),
-                black_box(None),
-                black_box(None),
-            );
-
-            n += 1;
-            if n == 500 {
-                n = 0;
-                up = !up;
-            }
-            layout.scroll_active(up);
-        })
-    });
-
-    let (mut tui, mut layout) = tui_and_layout(&["src/ui/tui.rs"]);
-    let mut n = 0;
-    let mut up = false;
-
-    group.bench_function("single window scroll view", |b| {
-        b.iter(|| {
-            tui.refresh(
-                black_box("NORMAL"),
-                black_box(&layout),
-                black_box(0),
-                black_box(&[]),
-                black_box(None),
-                black_box(None),
-            );
-
-            n += 1;
-            if n == 500 {
-                n = 0;
-                up = !up;
-            }
-            layout.scroll_view(20, 20, up);
-        })
-    });
-
-    let config = Config::try_load().unwrap();
-    let mut tui = GenericTui::new_with_stdout_handle(
-        Arc::new(Mutex::new(config.clone())),
-        StdoutSink(Vec::with_capacity(512 * 1024)),
-    );
-    tui.set_size(80, 160);
-
+fn single_window_editor_scroll_inputs(
+    group: &mut BenchmarkGroup<'_, WallTime>,
+    title: &str,
+    editor_mode: EditorMode,
+) {
     let mut e = Editor::new_with_system_and_initial_files(
         Config::try_load(),
         PlumbingRules::try_load(),
-        EditorMode::Boxed(Box::new(tui)),
+        editor_mode,
         LogBuffer::default(),
         DefaultSystem::without_clipboard_provider(),
         &["src/ui/tui.rs"],
@@ -149,7 +114,7 @@ fn criterion_benchmark(c: &mut Criterion) {
     let mut n = 0;
     let mut btn = MouseButton::WheelDown;
 
-    group.bench_function("single window editor scroll inputs", |b| {
+    group.bench_function(title, |b| {
         b.iter(|| {
             n += 1;
             if n == 500 {
@@ -161,6 +126,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 };
             }
 
+            e.refresh_screen_w_minibuffer(None);
             e.handle_input(Input::Mouse(MouseEvent {
                 k: MouseEventKind::Press,
                 m: MouseMod::NoMod,
@@ -168,11 +134,6 @@ fn criterion_benchmark(c: &mut Criterion) {
                 x: 20,
                 y: 20,
             }));
-            e.refresh_screen_w_minibuffer(None);
         })
     });
-
-    group.finish();
 }
-
-criterion_group!(benches, criterion_benchmark);
