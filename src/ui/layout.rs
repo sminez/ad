@@ -1055,8 +1055,8 @@ impl Layout {
         bufid == current_bufid
     }
 
-    /// Scroll the [View] under the given cursor coordinates up or down by a single line
-    pub fn scroll_view(&mut self, x: usize, y: usize, up: bool) {
+    /// Scroll the [View] under the given cursor coordinates up or down by `scroll_rows`
+    pub fn scroll_view(&mut self, x: usize, y: usize, up: bool, scroll_rows: usize) {
         let tabstop = config_handle!(self).tabstop;
         let mut x_offset = 0;
         let mut y_offset = 0;
@@ -1069,6 +1069,7 @@ impl Layout {
                 tabstop,
                 self.scratch.is_focused,
                 up,
+                scroll_rows,
             );
 
             #[cfg(test)]
@@ -1091,7 +1092,8 @@ impl Layout {
                 let b = self.buffers.with_id_mut(win.view.bufid).unwrap_or_else(|| {
                     die!("invalid buffer ID {}", win.view.bufid);
                 });
-                apply_scroll(b, win, col.n_cols, tabstop, focused_col && focused_win, up);
+                let focused = focused_col && focused_win;
+                apply_scroll(b, win, col.n_cols, tabstop, focused, up, scroll_rows);
 
                 #[cfg(test)]
                 assert_invariants!(self);
@@ -1104,18 +1106,7 @@ impl Layout {
         let n_cols = self.cols.focus.n_cols;
         let win = &mut self.cols.focus.wins.focus;
         let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-        apply_scroll(b, win, n_cols, tabstop, true, up);
-
-        #[cfg(test)]
-        assert_invariants!(self);
-    }
-
-    pub fn scroll_active(&mut self, up: bool) {
-        let tabstop = config_handle!(self).tabstop;
-        let n_cols = self.cols.focus.n_cols;
-        let win = &mut self.cols.focus.wins.focus;
-        let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-        apply_scroll(b, win, n_cols, tabstop, true, up);
+        apply_scroll(b, win, n_cols, tabstop, true, up, scroll_rows);
 
         #[cfg(test)]
         assert_invariants!(self);
@@ -1473,6 +1464,7 @@ fn apply_scroll(
     tabstop: usize,
     focused: bool,
     up: bool,
+    scoll_rows: usize,
 ) {
     let n_rows = win.n_rows;
     let view = &mut win.view;
@@ -1482,12 +1474,13 @@ fn apply_scroll(
         view.cur
     };
     let (y, x) = cur.as_yx(b);
+    let y_max = b.txt.len_lines() - 1;
     let mut need_clamp = false;
 
     if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
-        cur = Cur::from_yx(y - 1, x, b);
-    } else if !up && y == view.row_off && view.row_off < b.txt.len_lines() - 1 {
-        cur = Cur::from_yx(y + 1, x, b);
+        cur = Cur::from_yx(y.saturating_sub(scoll_rows), x, b);
+    } else if !up && y == view.row_off && view.row_off < y_max {
+        cur = Cur::from_yx(min(y + scoll_rows, y_max), x, b);
         need_clamp = true;
     };
 
@@ -1502,9 +1495,9 @@ fn apply_scroll(
     }
 
     view.row_off = if up {
-        view.row_off.saturating_sub(1)
+        view.row_off.saturating_sub(scoll_rows)
     } else {
-        view.row_off + 1
+        view.row_off + scoll_rows
     };
 
     if focused {
