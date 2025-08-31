@@ -15,7 +15,7 @@
 #![allow(text_direction_codepoint_in_literal)]
 
 use libc::termios as Termios;
-use std::{io::Stdout, process, sync::OnceLock};
+use std::{io::Write, process, sync::OnceLock};
 
 pub mod buffer;
 pub mod cli;
@@ -89,7 +89,7 @@ macro_rules! die {
 }
 
 /// Restore the terminal state to what we had originally before starting our UI.
-pub(crate) fn restore_terminal_state(so: &mut Stdout) {
+pub(crate) fn restore_terminal_state(so: &mut impl Write) {
     disable_alternate_screen(so);
     disable_mouse_support(so);
     let t = match ORIGINAL_TERMIOS.get() {

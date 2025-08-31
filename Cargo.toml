@@ -28,10 +28,20 @@ doc = false
 name = "ad"
 path = "src/main.rs"
 
+[[bench]]
+name = "bench_main"
+harness = false
+
 [profile.release]
 strip = true
 lto = true
 codegen-units = 1
+
+# Used with https://github.com/flamegraph-rs/flamegraph
+[profile.flamegraph]
+inherits = "release"
+debug=true
+strip = false
 
 # For a release optimised build that is quicker to run while iterating locally
 [profile.release-test]
@@ -54,6 +64,7 @@ tree-sitter = "0.25.8"
 unicode-width = "0.2.1"
 
 [dev-dependencies]
+criterion = { version = "0.7.0", features = ["html_reports"] }
 simple_test_case = "1"
 simple_txtar = "1"
 tree-sitter-python = "0.23.6"

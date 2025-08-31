@@ -11,6 +11,11 @@ use crate::{
 use ad_event::Source;
 use std::time::Instant;
 
+/// Number of milliseconds between successive mouse inputs under which we enable fast scrolling.
+const FAST_SCROLL_MS: u128 = 5;
+/// Number of rows to scroll per mouse wheel event when fast scrolling is enabled.
+const FAST_SCROLL_ROWS: usize = 5;
+
 /// Transient state that we hold to track the last mouse click we saw while
 /// we wait for it to be released or if the buffer changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +52,25 @@ impl<S> Editor<S>
 where
     S: System,
 {
+    /// When scrolling with the mouse wheel we support two scroll rates based on the interval
+    /// between successive mouse clicks. If the delta between clicks is under [FAST_SCROLL_MS] we
+    /// move into fast scrolling and advance by [FAST_SCROLL_ROWS] per mouse wheel event rather
+    /// than individual rows.
+    ///
+    /// We _could_ be tracking whether or not the last click received was the same mouse wheel
+    /// event in order to avoid false positives when the user is clicking and scrolling at the same
+    /// time but in practice this doesn't seem to be required due to the short interval we are
+    /// using for detecting fast scrolling.
+    fn scroll_rows(&self, last_click_time: Instant) -> usize {
+        let delta = (self.last_click_time - last_click_time).as_millis();
+        if delta < FAST_SCROLL_MS {
+            tracing::warn!("fast scrolling");
+            FAST_SCROLL_ROWS
+        } else {
+            1
+        }
+    }
+
     /// The outcome of a mouse event depends on any prior mouse state that is being held:
     ///   - Left   (click+release):      set Cur Dot at the location of the click
     ///   - Left   (click+hold+release): set Range Dot from click->release with click active
@@ -123,12 +147,14 @@ where
 
             (Press, _, WheelUp) => {
                 self.last_click_was_left = false;
-                self.layout.scroll_view(x, y, true);
+                self.layout
+                    .scroll_view(x, y, true, self.scroll_rows(last_click_time));
             }
 
             (Press, _, WheelDown) => {
                 self.last_click_was_left = false;
-                self.layout.scroll_view(x, y, false);
+                self.layout
+                    .scroll_view(x, y, false, self.scroll_rows(last_click_time));
             }
 
             (Release, m, b) => {

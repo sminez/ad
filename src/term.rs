@@ -8,7 +8,7 @@ use libc::{
 use serde::Deserialize;
 use std::{
     fmt,
-    io::{self, Stdout, Write},
+    io::{self, Write},
     mem, ptr,
     sync::atomic::{AtomicBool, Ordering},
 };
@@ -242,7 +242,7 @@ pub(crate) fn get_termsize() -> (usize, usize) {
     (ts.r as usize, ts.c as usize)
 }
 
-pub(crate) fn clear_screen(stdout: &mut Stdout) {
+pub(crate) fn clear_screen(stdout: &mut impl Write) {
     if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{}", Cursor::ToStart).as_bytes()) {
         panic!("unable to clear screen: {e}");
     }
@@ -251,7 +251,7 @@ pub(crate) fn clear_screen(stdout: &mut Stdout) {
     }
 }
 
-pub(crate) fn enable_mouse_support(stdout: &mut Stdout) {
+pub(crate) fn enable_mouse_support(stdout: &mut impl Write) {
     if let Err(e) = stdout.write_all(ENABLE_MOUSE_SUPPORT.as_bytes()) {
         panic!("unable to enable mouse support: {e}");
     }
@@ -260,7 +260,7 @@ pub(crate) fn enable_mouse_support(stdout: &mut Stdout) {
     }
 }
 
-pub(crate) fn disable_mouse_support(stdout: &mut Stdout) {
+pub(crate) fn disable_mouse_support(stdout: &mut impl Write) {
     if let Err(e) = stdout.write_all(DISABLE_MOUSE_SUPPORT.as_bytes()) {
         panic!("unable to disable mouse support: {e}");
     }
@@ -269,7 +269,7 @@ pub(crate) fn disable_mouse_support(stdout: &mut Stdout) {
     }
 }
 
-pub(crate) fn enable_alternate_screen(stdout: &mut Stdout) {
+pub(crate) fn enable_alternate_screen(stdout: &mut impl Write) {
     if let Err(e) = stdout.write_all(ENABLE_ALTERNATE_SCREEN.as_bytes()) {
         panic!("unable to enable alternate screen: {e}");
     }
@@ -278,7 +278,7 @@ pub(crate) fn enable_alternate_screen(stdout: &mut Stdout) {
     }
 }
 
-pub(crate) fn disable_alternate_screen(stdout: &mut Stdout) {
+pub(crate) fn disable_alternate_screen(stdout: &mut impl Write) {
     if let Err(e) = stdout.write_all(DISABLE_ALTERNATE_SCREEN.as_bytes()) {
         panic!("unable to disable alternate screen: {e}");
     }
