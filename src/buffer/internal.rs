@@ -857,19 +857,29 @@ impl GapBuffer {
         mut byte_offset: usize,
         mut char_offset: usize,
     ) -> usize {
-        let mut to = usize::MAX;
-
+        // When looking for the last character of a buffer containing a single line we can decode
+        // backwards from either the start of the gap or the end of the raw buffer depending on
+        // where the gap currently lies.
         if self.line_endings.is_empty() && char_idx == self.len_chars().saturating_sub(1) {
-            return if self.gap_end == self.cap {
-                self.gap_start.saturating_sub(1)
+            if self.gap_end == self.cap {
+                let ch_end = self.gap_start.saturating_sub(1);
+                // SAFETY: we know that we have valid utf-8 data immediately before the gap
+                let ch = unsafe { decode_char_ending_at(ch_end, &self.data) };
+
+                return self.gap_start.saturating_sub(ch.len_utf8());
             } else {
                 // SAFETY: we know that we have valid data at the end of the buffer as
                 // self.gap_end != self.cap, so decoding the final character is valid
                 let ch = unsafe { decode_char_ending_at(self.cap - 1, &self.data) };
-                self.cap - ch.len_utf8()
+
+                return self.cap.saturating_sub(ch.len_utf8());
             };
         }
 
+        let mut to = usize::MAX;
+
+        // Determine which line the character lies in based on the character index, skipping all
+        // lines that are before the byte offset we were given.
         for (&b, &c) in self
             .line_endings
             .iter()
@@ -1384,6 +1394,39 @@ mod tests {
         gb.move_gap_to(cur);
 
         let byte_idx = gb.char_to_byte(char_idx);
+        assert_eq!(byte_idx, expected, "{:?}", debug_buffer_content(&gb));
+    }
+
+    // Regression test for (gh#140)
+    #[test_case("⍉"; "one multi-byte char")]
+    #[test_case("⌠⌖"; "two multi-byte chars")]
+    #[test_case("؏ foo"; "one multi-byte char followed by ascii")]
+    #[test_case("世界 abc"; "two multi-byte chars followed by ascii")]
+    #[test]
+    fn char_to_byte_works_with_leading_multibyte_char(s: &str) {
+        let mut gb = GapBuffer::new();
+        gb.insert_str(0, s);
+
+        let byte_idx = gb.char_to_byte(0);
+        assert_eq!(byte_idx, 0, "{:?}", debug_buffer_content(&gb));
+    }
+
+    // Regression test for (gh#140)
+    #[test_case("⍉", 0; "one multi-byte char")]
+    #[test_case("⌠⌖", 3; "two multi-byte chars")]
+    #[test_case("foo ؏", 4; "ascii followed by one multi-byte char")]
+    #[test_case("abc 世界", 7; "ascii followed by two multi-byte chars")]
+    #[test_case("Hello, world!⍉", 13; "error case from issue 140")]
+    #[test]
+    fn char_to_byte_works_with_single_line_buffers_ending_in_a_multibyte_char(
+        s: &str,
+        expected: usize,
+    ) {
+        let mut gb = GapBuffer::new();
+        gb.insert_str(0, s);
+        let last_char = s.chars().count() - 1;
+
+        let byte_idx = gb.char_to_byte(last_char);
         assert_eq!(byte_idx, expected, "{:?}", debug_buffer_content(&gb));
     }
 
