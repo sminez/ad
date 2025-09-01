@@ -1,4 +1,12 @@
-//! Internal data structures and helpers for maintaining buffer state
+//! Internal data structures and helpers for maintaining buffer state.
+//!
+//! When working at the implementation of this datastructure it is important to keep in mind that
+//! there are several related, but distinct, pairs of concepts:
+//! - The "logical" buffer state as presented to users of the API, vs the "raw" buffer state that
+//!   is actually stored. The logical buffer is guaranteed to be valid utf-8 while the raw buffer
+//!   is allowed to contain arbitrary byte sequences within the current "gap" region.
+//! - Character offsets vs byte offsets. Character offsets only ever apply to the logical buffer
+//!   state while byte offsets can be both logical and raw.
 //!
 //! ### References
 //! - <https://www.cs.unm.edu/~crowley/papers/sds.pdf>
@@ -559,7 +567,7 @@ impl GapBuffer {
         }
     }
 
-    /// Insert a single character at the specifified byte index.
+    /// Insert a single character at the specifified character index.
     ///
     /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
@@ -592,7 +600,7 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
-    /// Insert a string at the specifified byte index.
+    /// Insert a string at the specifified character index.
     ///
     /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
