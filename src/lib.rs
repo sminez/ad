@@ -46,7 +46,7 @@ pub use exec::{CachedStdin, Edit, Program};
 pub use log::LogBuffer;
 pub use plumb::PlumbingRules;
 
-use term::{disable_alternate_screen, disable_mouse_support, set_termios};
+use term::{disable_alternate_screen, disable_bracketed_paste, disable_mouse_support, set_termios};
 
 /// The environment variable to set to control logging within ad
 pub const LOG_LEVEL_ENV_VAR: &str = "AD_LOG";
@@ -92,6 +92,7 @@ macro_rules! die {
 pub(crate) fn restore_terminal_state(so: &mut impl Write) {
     disable_alternate_screen(so);
     disable_mouse_support(so);
+    disable_bracketed_paste(so);
     let t = match ORIGINAL_TERMIOS.get() {
         Some(t) => t,
         None => return,

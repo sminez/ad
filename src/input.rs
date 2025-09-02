@@ -8,16 +8,16 @@ use crate::{
 /// An input event that can be processed by the editor event loop
 #[derive(Debug)]
 pub enum Event {
-    /// A Message received from the virtual filesystem interface
-    Message(Message),
-    /// An [Input] from the user
-    Input(Input),
-    /// Multiple successive [Input]s from the user
-    Inputs(Vec<Input>),
     /// An [Action] for the event loop to handle
     Action(Action),
     /// Multiple [Action]s to be handled in a batch
     Actions(Actions),
+    /// Raw that need to be handled as an insert without applying auto-indent
+    BracketedPaste(String),
+    /// An [Input] from the user
+    Input(Input),
+    /// A Message received from the virtual filesystem interface
+    Message(Message),
     /// A signal that our window size has changed
     WinsizeChanged { rows: usize, cols: usize },
 }

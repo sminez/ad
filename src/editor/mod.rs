@@ -333,10 +333,12 @@ where
     #[inline]
     pub fn handle_event(&mut self, event: Event) {
         match event {
-            Event::Input(i) => self.handle_input(i),
-            Event::Inputs(i) => self.handle_inputs(i),
             Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Actions(a) => self.handle_actions(a, Source::Fsys),
+            Event::BracketedPaste(s) => {
+                self.handle_action(Action::InsertString { s }, Source::Fsys)
+            }
+            Event::Input(i) => self.handle_input(i),
             Event::Message(msg) => self.handle_message(msg),
             Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
         }
@@ -369,7 +371,7 @@ where
         loop {
             match self.rx_events.recv().unwrap() {
                 Event::Input(i) => return vec![i],
-                Event::Inputs(i) => return i,
+                Event::BracketedPaste(s) => return s.chars().map(Input::Char).collect(),
                 Event::Action(a) => self.handle_action(a, Source::Fsys),
                 Event::Actions(a) => self.handle_actions(a, Source::Fsys),
                 Event::Message(msg) => self.handle_message(msg),
@@ -515,15 +517,6 @@ where
 
         if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);
-        }
-    }
-
-    pub fn handle_inputs(&mut self, inputs: Vec<Input>) {
-        for input in inputs.into_iter() {
-            self.handle_input(input);
-            if !self.running {
-                break;
-            };
         }
     }
 

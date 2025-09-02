@@ -12,8 +12,8 @@ use crate::{
     syntax::{LineIter, RangeToken},
     term::{
         CurShape, Cursor, RESET_STYLE, Style, Styles, clear_screen, enable_alternate_screen,
-        enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
-        win_size_changed,
+        enable_bracketed_paste, enable_mouse_support, enable_raw_mode, get_termios, get_termsize,
+        register_signal_handler, win_size_changed,
     },
     ui::{
         Layout, StateChange, UserInterface,
@@ -26,7 +26,7 @@ use std::{
     char,
     cmp::Ordering,
     collections::HashMap,
-    io::{BufReader, BufWriter, Read, StdoutLock, Write, stdin, stdout},
+    io::{BufWriter, Read, StdoutLock, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
     rc::Rc,
@@ -34,6 +34,7 @@ use std::{
     thread::{JoinHandle, spawn},
     time::Instant,
 };
+use tracing::debug;
 use unicode_width::UnicodeWidthChar;
 
 // If the screen dimensions drop below these values then we disable rendering
@@ -366,6 +367,7 @@ impl<W: Write> UserInterface for GenericTui<W> {
 
         enable_mouse_support(&mut self.stdout);
         enable_alternate_screen(&mut self.stdout);
+        enable_bracketed_paste(&mut self.stdout);
 
         // SAFETY: we only register our signal handler once
         unsafe { register_signal_handler() };
@@ -857,40 +859,60 @@ fn render_line<'a>(
     buf
 }
 
+#[derive(Debug)]
+enum RawInput {
+    Input(Input),
+    // Control sequences
+    // https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h2-Bracketed-Paste-Mode
+    // https://invisible-island.net/xterm/xterm-paste64.html
+    BPasteStart,
+}
+
+impl From<Input> for RawInput {
+    fn from(value: Input) -> Self {
+        Self::Input(value)
+    }
+}
+
 /// Spawn a thread to read from stdin and process user input to send Events to
 /// the main editor event loop.
 fn spawn_input_thread(tx: Sender<Event>) -> JoinHandle<()> {
     spawn(move || {
-        // Stdin already has an internal BufReader but there is no way to access it to check if
-        // there is any data buffered. We need to be able to check if there is at least another 4
-        // bytes for us to attempt to parse without blocking on another read so we wrap things with
-        // our own BufReader that we can work with.
-        // In my testing for this I wasn't able to pull more that 4092 bytes at a time from stdin
-        // so keeping the default buffer size of 8k is sufficient.
-        let mut stdin = BufReader::new(stdin().lock());
+        let mut stdin = stdin().lock();
 
         loop {
-            if let Some(input) = try_read_input(&mut stdin) {
-                // If the next read would potentially block then send what we already have.
-                if stdin.buffer().len() < 4 {
-                    _ = tx.send(Event::Input(input));
+            match try_read_input(&mut stdin) {
+                Some(RawInput::Input(i)) => {
+                    _ = tx.send(Event::Input(i));
                     continue;
                 }
 
-                // Parse as many inputs as possible while we have enough buffered data to parse a
-                // maximally sized utf8 character of 4 bytes. This isn't guaranteed to be
-                // sufficient to parse a full Input but if we have at least 4 bytes then we
-                // are at least part way through the next user input.
-                let mut inputs = vec![input];
+                Some(RawInput::BPasteStart) => {
+                    let mut s = String::new();
+                    let mut buf = Vec::with_capacity(6);
 
-                while stdin.buffer().len() >= 4 {
-                    match try_read_input(&mut stdin) {
-                        Some(input) => inputs.push(input),
-                        None => break,
+                    while let Some(c) = try_read_char(&mut stdin) {
+                        match (c, buf.as_slice()) {
+                            ('\x1b', [])
+                            | ('[', ['\x1b'])
+                            | ('2', ['\x1b', '['])
+                            | ('0', ['\x1b', '[', '2'])
+                            | ('1', ['\x1b', '[', '2', '0']) => buf.push(c),
+
+                            ('~', ['\x1b', '[', '2', '0', '1']) => {
+                                _ = tx.send(Event::BracketedPaste(s));
+                                break;
+                            }
+
+                            (c, _) => {
+                                s.extend(buf.drain(..));
+                                s.push(c);
+                            }
+                        }
                     }
                 }
 
-                _ = tx.send(Event::Inputs(inputs));
+                None => (),
             }
 
             // Always check for the window size changing after processing multiple inputs or if we
@@ -926,34 +948,53 @@ fn try_read_char(stdin: &mut impl Read) -> Option<char> {
     Some(char::REPLACEMENT_CHARACTER)
 }
 
-fn try_read_input(stdin: &mut impl Read) -> Option<Input> {
+fn try_read_input(stdin: &mut impl Read) -> Option<RawInput> {
     let c = try_read_char(stdin)?;
 
     // Normal key press
     match Input::from_char(c) {
         Input::Esc => (),
-        key => return Some(key),
+        i => return Some(i.into()),
     }
 
     let c2 = match try_read_char(stdin) {
         Some(c2) => c2,
-        None => return Some(Input::Esc),
+        None => return Some(Input::Esc.into()),
     };
     let c3 = match try_read_char(stdin) {
         Some(c3) => c3,
-        None => return Some(Input::try_from_seq2(c, c2).unwrap_or(Input::Esc)),
+        None => return Some(Input::try_from_seq2(c, c2).unwrap_or(Input::Esc).into()),
     };
 
-    if let Some(key) = Input::try_from_seq2(c2, c3) {
-        return Some(key);
+    if let Some(i) = Input::try_from_seq2(c2, c3) {
+        return Some(i.into());
     }
 
-    if c2 == '['
-        && c3.is_ascii_digit()
-        && let Some('~') = try_read_char(stdin)
-        && let Some(key) = Input::try_from_bracket_tilde(c3)
-    {
-        return Some(key);
+    // https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
+    if c2 == '[' && c3.is_ascii_digit() {
+        let mut digits = vec![c3];
+        loop {
+            match try_read_char(stdin)? {
+                c if c.is_ascii_digit() => digits.push(c),
+                '~' => break,
+                c => {
+                    debug!("unknown CSIC sequence: ^[[{}{c}", String::from_iter(digits));
+                    return None;
+                }
+            }
+        }
+
+        // https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
+        return match digits.as_slice() {
+            ['1' | '7'] => Some(Input::Home.into()),
+            ['4' | '8'] => Some(Input::End.into()),
+            ['3'] => Some(Input::Del.into()),
+            ['5'] => Some(Input::PageUp.into()),
+            ['6'] => Some(Input::PageDown.into()),
+            ['2', '0', '0'] => Some(RawInput::BPasteStart),
+            // 201 == bracketed paste end
+            _ => None,
+        };
     }
 
     // xterm mouse encoding: "^[< Cb;Cx;Cy(;) (M or m) "
@@ -975,10 +1016,10 @@ fn try_read_input(stdin: &mut impl Read) -> Option<Input> {
         let nums: Vec<usize> = s.split(';').map(|s| s.parse::<usize>().unwrap()).collect();
         let (b, x, y) = (nums[0], nums[1], nums[2]);
 
-        return MouseEvent::try_from_raw(b, x, y, m).map(Input::Mouse);
+        return MouseEvent::try_from_raw(b, x, y, m).map(|i| RawInput::Input(Input::Mouse(i)));
     }
 
-    Some(Input::Esc)
+    Some(Input::Esc.into())
 }
 
 #[cfg(test)]

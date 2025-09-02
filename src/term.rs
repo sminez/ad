@@ -20,6 +20,8 @@ const ENABLE_MOUSE_SUPPORT: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1015h\x1b[?1006h
 const DISABLE_MOUSE_SUPPORT: &str = "\x1b[?1006l\x1b[?1015l\x1b[?1002l\x1b[?1000l";
 const ENABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049h";
 const DISABLE_ALTERNATE_SCREEN: &str = "\x1b[?1049l";
+const ENABLE_BRACKETED_PASTE: &str = "\x1b[?2004h";
+const DISABLE_BRACKETED_PASTE: &str = "\x1b[?2004l";
 pub const RESET_STYLE: &str = "\x1b[m";
 
 /// Used for storing and checking whether or not we've received a signal that our window
@@ -242,49 +244,46 @@ pub(crate) fn get_termsize() -> (usize, usize) {
     (ts.r as usize, ts.c as usize)
 }
 
-pub(crate) fn clear_screen(stdout: &mut impl Write) {
-    if let Err(e) = stdout.write_all(format!("{CLEAR_SCREEN}{}", Cursor::ToStart).as_bytes()) {
-        panic!("unable to clear screen: {e}");
+#[inline]
+fn write_control_seq(seq: &str, desc: &str, stdout: &mut impl Write) {
+    if let Err(e) = stdout.write_all(seq.as_bytes()) {
+        panic!("unable to {desc}: {e}");
     }
     if let Err(e) = stdout.flush() {
-        panic!("unable to clear screen: {e}");
+        panic!("unable to {desc}: {e}");
     }
+}
+
+pub(crate) fn clear_screen(stdout: &mut impl Write) {
+    write_control_seq(
+        &format!("{CLEAR_SCREEN}{}", Cursor::ToStart),
+        "clear screen",
+        stdout,
+    )
 }
 
 pub(crate) fn enable_mouse_support(stdout: &mut impl Write) {
-    if let Err(e) = stdout.write_all(ENABLE_MOUSE_SUPPORT.as_bytes()) {
-        panic!("unable to enable mouse support: {e}");
-    }
-    if let Err(e) = stdout.flush() {
-        panic!("unable to enable mouse support: {e}");
-    }
+    write_control_seq(ENABLE_MOUSE_SUPPORT, "enable mouse support", stdout)
 }
 
 pub(crate) fn disable_mouse_support(stdout: &mut impl Write) {
-    if let Err(e) = stdout.write_all(DISABLE_MOUSE_SUPPORT.as_bytes()) {
-        panic!("unable to disable mouse support: {e}");
-    }
-    if let Err(e) = stdout.flush() {
-        panic!("unable to disable mouse support: {e}");
-    }
+    write_control_seq(DISABLE_MOUSE_SUPPORT, "disable mouse support", stdout)
 }
 
 pub(crate) fn enable_alternate_screen(stdout: &mut impl Write) {
-    if let Err(e) = stdout.write_all(ENABLE_ALTERNATE_SCREEN.as_bytes()) {
-        panic!("unable to enable alternate screen: {e}");
-    }
-    if let Err(e) = stdout.flush() {
-        panic!("unable to enable alternate screen: {e}");
-    }
+    write_control_seq(ENABLE_ALTERNATE_SCREEN, "enable alternate screen", stdout)
 }
 
 pub(crate) fn disable_alternate_screen(stdout: &mut impl Write) {
-    if let Err(e) = stdout.write_all(DISABLE_ALTERNATE_SCREEN.as_bytes()) {
-        panic!("unable to disable alternate screen: {e}");
-    }
-    if let Err(e) = stdout.flush() {
-        panic!("unable to disable alternate screen: {e}");
-    }
+    write_control_seq(DISABLE_ALTERNATE_SCREEN, "disable alternate screen", stdout)
+}
+
+pub(crate) fn enable_bracketed_paste(stdout: &mut impl Write) {
+    write_control_seq(ENABLE_BRACKETED_PASTE, "enable bracketed paste", stdout)
+}
+
+pub(crate) fn disable_bracketed_paste(stdout: &mut impl Write) {
+    write_control_seq(DISABLE_BRACKETED_PASTE, "disable bracketed paste", stdout)
 }
 
 pub(crate) fn enable_raw_mode(mut t: Termios) {
