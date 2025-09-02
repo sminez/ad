@@ -14,7 +14,6 @@ impl LspRequest for Formatting {
     type Pending = ();
 
     fn build_params((text_document, tab_size): Self::Data) -> Self::Params {
-        tracing::debug!("txt doc: {}", text_document.uri.as_str());
         DocumentFormattingParams {
             text_document,
             work_done_progress_params: Default::default(),

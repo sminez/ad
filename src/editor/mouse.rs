@@ -64,7 +64,6 @@ where
     fn scroll_rows(&self, last_click_time: Instant) -> usize {
         let delta = (self.last_click_time - last_click_time).as_millis();
         if delta < FAST_SCROLL_MS {
-            tracing::warn!("fast scrolling");
             FAST_SCROLL_ROWS
         } else {
             1
