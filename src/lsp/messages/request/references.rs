@@ -7,7 +7,10 @@ use crate::{
         messages::{request::LspRequest, txtdoc_pos},
     },
 };
-use lsp_types::{Location, ReferenceContext, ReferenceParams, request as req};
+use lsp_types::{
+    Location, NumberOrString, ReferenceContext, ReferenceParams, WorkDoneProgressParams,
+    request as req,
+};
 
 impl LspRequest for req::References {
     type Data = Pos;
@@ -22,7 +25,9 @@ impl LspRequest for req::References {
     ) -> Self::Params {
         ReferenceParams {
             text_document_position: txtdoc_pos(&file, line, character),
-            work_done_progress_params: Default::default(),
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: Some(NumberOrString::String("references".into())),
+            },
             partial_result_params: Default::default(),
             context: ReferenceContext {
                 include_declaration: false,

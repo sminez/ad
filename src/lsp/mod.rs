@@ -242,6 +242,15 @@ impl LspManagerHandle {
         }
     }
 
+    pub fn document_saved(&self, b: &Buffer) {
+        if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
+            debug!("sending LSP textDocument/didSave ({lsp_id})");
+            let path = b.full_name().to_string();
+
+            self.send_notification(notif::DidSaveTextDocument::data(lsp_id, path));
+        }
+    }
+
     pub fn goto_declaration(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
             if b.dirty {

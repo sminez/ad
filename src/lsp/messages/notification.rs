@@ -6,11 +6,11 @@ use crate::lsp::{
 };
 use lsp_types::{
     DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    InitializedParams, TextDocumentContentChangeEvent, TextDocumentItem,
+    DidSaveTextDocumentParams, InitializedParams, TextDocumentContentChangeEvent, TextDocumentItem,
     VersionedTextDocumentIdentifier,
     notification::{
-        self as notif, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument, Exit,
-        Initialized,
+        self as notif, DidChangeTextDocument, DidCloseTextDocument, DidOpenTextDocument,
+        DidSaveTextDocument, Exit, Initialized,
     },
 };
 use std::{borrow::Cow, fmt};
@@ -121,6 +121,17 @@ impl LspNotification for DidChangeTextDocument {
                 range_length: None,
                 text,
             }],
+        }
+    }
+}
+
+impl LspNotification for DidSaveTextDocument {
+    type Data = String;
+
+    fn build_params(path: Self::Data) -> Self::Params {
+        DidSaveTextDocumentParams {
+            text_document: txt_doc_id(&path),
+            text: None,
         }
     }
 }

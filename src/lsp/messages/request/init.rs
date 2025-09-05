@@ -1,4 +1,5 @@
 use crate::{
+    VERSION,
     editor::Actions,
     lsp::{
         LspManager, PreparedMessage,
@@ -12,10 +13,11 @@ use crate::{
     },
 };
 use lsp_types::{
-    ClientCapabilities, CompletionClientCapabilities, CompletionItemCapability,
-    CompletionItemCapabilityResolveSupport, DynamicRegistrationClientCapabilities,
+    ClientCapabilities, ClientInfo, CompletionClientCapabilities, CompletionItemCapability,
+    CompletionItemCapabilityResolveSupport, DiagnosticTag, DynamicRegistrationClientCapabilities,
     GeneralClientCapabilities, HoverClientCapabilities, InitializeParams, MarkupKind,
-    NumberOrString, PositionEncodingKind, TextDocumentClientCapabilities, Uri,
+    NumberOrString, PositionEncodingKind, PublishDiagnosticsClientCapabilities, TagSupport,
+    TextDocumentClientCapabilities, TextDocumentSyncClientCapabilities, Uri,
     WindowClientCapabilities, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
     WorkspaceSymbolClientCapabilities,
     notification::{DidOpenTextDocument, Initialized},
@@ -76,8 +78,13 @@ impl LspRequest for Initialize {
         #[allow(deprecated)] // root_uri, root_path
         InitializeParams {
             process_id: Some(process::id()),
+            client_info: Some(ClientInfo {
+                name: "ad".to_string(),
+                version: Some(VERSION.to_string()),
+            }),
+            // trace: Some(lsp_types::TraceValue::Verbose),
             work_done_progress_params: WorkDoneProgressParams {
-                work_done_token: Some(NumberOrString::String("abc123".to_string())),
+                work_done_token: Some(NumberOrString::String("init".to_string())),
             },
             root_path: Some(root.to_string()),
             root_uri: Some(Uri::from_str(&format!("file://{root}")).unwrap()),
@@ -136,6 +143,18 @@ impl LspRequest for Initialize {
                         dynamic_registration: Some(false),
                         content_format: Some(vec![MarkupKind::PlainText]),
                     }),
+                    synchronization: Some(TextDocumentSyncClientCapabilities {
+                        dynamic_registration: Some(false),
+                        did_save: Some(true),
+                        ..Default::default()
+                    }),
+                    publish_diagnostics: Some(PublishDiagnosticsClientCapabilities {
+                        version_support: Some(true),
+                        tag_support: Some(TagSupport {
+                            value_set: vec![DiagnosticTag::UNNECESSARY, DiagnosticTag::DEPRECATED],
+                        }),
+                        ..Default::default()
+                    }),
                     // https://docs.rs/lsp-types/0.97.0/lsp_types/struct.TextDocumentClientCapabilities.html
                     ..Default::default()
                 }),
@@ -156,7 +175,6 @@ impl LspRequest for Initialize {
                 }),
                 ..Default::default()
             },
-            trace: Some(lsp_types::TraceValue::Verbose),
             ..Default::default()
         }
     }

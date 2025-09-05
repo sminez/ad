@@ -331,6 +331,7 @@ where
         let b = self.layout.active_buffer_mut_ignoring_scratch();
         let msg = b.save_to_disk_at(p, force);
         self.lsp_manager.document_changed(b);
+        self.lsp_manager.document_saved(b);
         self.set_status_message(msg);
         let id = self.active_buffer_id();
         _ = self.tx_fsys.send(LogEvent::Save(id));
