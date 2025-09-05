@@ -13,7 +13,7 @@ mod server_request;
 
 pub(super) use notification::{LspNotification, PreparedLspNotification};
 pub(super) use request::{LspRequest, OpenDocument, PendingLspRequest, PreparedLspRequest};
-pub(super) use server_notification::NotificationHandler;
+pub(super) use server_notification::{Diagnostic, Diagnostics, NotificationHandler};
 pub(super) use server_request::RequestHandler;
 
 #[inline]

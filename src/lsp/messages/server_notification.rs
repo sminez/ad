@@ -2,16 +2,21 @@
 //!
 //! <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage>
 use crate::{
-    editor::{Action, Actions},
+    buffer::Buffers,
+    editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
     input::Event,
-    lsp::{Diagnostic, LspManager, rpc::Notification},
+    lsp::{
+        LspManager,
+        capabilities::{Coords, PositionEncoding},
+        rpc::Notification,
+    },
 };
 use lsp_types::{
-    ProgressParamsValue, PublishDiagnosticsParams, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressEnd, WorkDoneProgressReport,
+    DiagnosticSeverity, Location, ProgressParamsValue, PublishDiagnosticsParams, Uri,
+    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd, WorkDoneProgressReport,
     notification::{Progress, PublishDiagnostics},
 };
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 /// Notifications sent from the server to us that we need to handle
 pub(crate) trait LspServerNotification: lsp_types::notification::Notification {
@@ -127,6 +132,8 @@ impl LspServerNotification for PublishDiagnostics {
             uri, diagnostics, ..
         } = params;
 
+        debug!(uri=%uri.to_string(), n=%diagnostics.len(), "received new diagnostics");
+
         let new_diagnostics: Vec<Diagnostic> = diagnostics
             .into_iter()
             .map(|d| Diagnostic::new(uri.clone(), d, encoding))
@@ -136,5 +143,85 @@ impl LspServerNotification for PublishDiagnostics {
         guard.insert(uri, new_diagnostics);
 
         None
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Diagnostic {
+    path: String,
+    content: String,
+    coords: Coords,
+}
+
+impl Diagnostic {
+    pub(crate) fn new(uri: Uri, d: lsp_types::Diagnostic, encoding: PositionEncoding) -> Self {
+        let loc = Location {
+            uri: uri.clone(),
+            range: d.range,
+        };
+        let (path, coords) = Coords::new(loc, encoding);
+        let fname = path
+            .split("/")
+            .last()
+            .expect("str::split always returns at least one element");
+        let source = d.source.unwrap_or_else(|| "unknown".to_string());
+
+        let severity = match d.severity.unwrap_or(DiagnosticSeverity::ERROR) {
+            DiagnosticSeverity::ERROR => "ERROR",
+            DiagnosticSeverity::HINT => "HINT ",
+            DiagnosticSeverity::WARNING => "WARN ",
+            DiagnosticSeverity::INFORMATION => "INFO ",
+            _ => "???  ",
+        };
+
+        let content = format!(
+            "({severity} {source}) {fname}:{} {}",
+            coords.line() + 1, // UI lines start at 1
+            d.message
+                .lines()
+                .next()
+                .expect("str::lines always returns at least one line")
+        );
+
+        Diagnostic {
+            path,
+            content,
+            coords,
+        }
+    }
+
+    pub fn as_actions(&self) -> Actions {
+        Actions::Multi(vec![
+            Action::OpenFile {
+                path: self.path.clone(),
+            },
+            Action::DotSetFromCoords {
+                coords: self.coords,
+            },
+            Action::SetViewPort(ViewPort::Center),
+        ])
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Diagnostics(pub(crate) Vec<Diagnostic>);
+
+impl MbSelect for Diagnostics {
+    fn clone_selector(&self) -> MbSelector {
+        self.clone().into_selector()
+    }
+
+    fn prompt_and_options(&self, _: &Buffers) -> (String, Vec<String>) {
+        (
+            "Diagnostics> ".to_owned(),
+            self.0.iter().map(|d| d.content.clone()).collect(),
+        )
+    }
+
+    fn selected_actions(&self, sel: MiniBufferSelection) -> Option<Actions> {
+        match sel {
+            MiniBufferSelection::Line { cy, .. } => self.0.get(cy).map(|d| d.as_actions()),
+            _ => None,
+        }
     }
 }

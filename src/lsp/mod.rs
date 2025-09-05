@@ -6,14 +6,15 @@ use crate::{
     buffer::{Buffer, Buffers},
     config::{LangConfig, LspConfig, lang_config_for_path_and_first_line},
     die,
-    editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
+    editor::{Action, MbSelect},
     input::Event,
     lsp::{
         capabilities::{Capabilities, PositionEncoding},
         client::{LspClient, LspMessage},
         messages::{
-            LspNotification, LspRequest, NotificationHandler, OpenDocument, PendingLspRequest,
-            PreparedLspNotification, PreparedLspRequest, RequestHandler, txt_doc_id,
+            Diagnostic, Diagnostics, LspNotification, LspRequest, NotificationHandler,
+            OpenDocument, PendingLspRequest, PreparedLspNotification, PreparedLspRequest,
+            RequestHandler, txt_doc_id,
         },
         rpc::{Message, Notification, Request, RequestId, Response},
     },
@@ -191,6 +192,7 @@ impl LspManagerHandle {
             self.document_changed(b);
             sleep(Duration::from_millis(300));
         }
+
         debug!("showing LSP diagnostics");
         let guard = self.diagnostics.read().unwrap();
         let mut diags: Vec<Diagnostic> = guard.values().flatten().cloned().collect();
@@ -508,67 +510,6 @@ impl Pos {
             file: file.into(),
             line,
             character,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Diagnostic {
-    path: String,
-    content: String,
-    coords: Coords,
-}
-
-impl Diagnostic {
-    fn new(uri: Uri, d: lsp_types::Diagnostic, encoding: PositionEncoding) -> Self {
-        let loc = lsp_types::Location {
-            uri: uri.clone(),
-            range: d.range,
-        };
-        let (path, coords) = Coords::new(loc, encoding);
-        let fname = path.split("/").last().unwrap();
-        let source = d.source.map(|s| format!("({s}) ")).unwrap_or_default();
-        let content = format!("{source}{fname}:{} {}", coords.line(), d.message);
-
-        Diagnostic {
-            path,
-            content,
-            coords,
-        }
-    }
-
-    pub fn as_actions(&self) -> Actions {
-        Actions::Multi(vec![
-            Action::OpenFile {
-                path: self.path.clone(),
-            },
-            Action::DotSetFromCoords {
-                coords: self.coords,
-            },
-            Action::SetViewPort(ViewPort::Center),
-        ])
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Diagnostics(Vec<Diagnostic>);
-
-impl MbSelect for Diagnostics {
-    fn clone_selector(&self) -> MbSelector {
-        self.clone().into_selector()
-    }
-
-    fn prompt_and_options(&self, _: &Buffers) -> (String, Vec<String>) {
-        (
-            "Diagnostics> ".to_owned(),
-            self.0.iter().map(|d| d.content.clone()).collect(),
-        )
-    }
-
-    fn selected_actions(&self, sel: MiniBufferSelection) -> Option<Actions> {
-        match sel {
-            MiniBufferSelection::Line { cy, .. } => self.0.get(cy).map(|d| d.as_actions()),
-            _ => None,
         }
     }
 }
