@@ -17,6 +17,8 @@
 use libc::termios as Termios;
 use std::{io::Write, process, sync::OnceLock};
 
+pub use ad_event::Source;
+
 pub mod buffer;
 pub mod cli;
 pub mod config;

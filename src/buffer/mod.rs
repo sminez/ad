@@ -57,7 +57,7 @@ const HTTP: &str = "http://";
 // Used to inform the editor that further action needs to be taken by it after a Buffer has
 // finished processing a given Action.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ActionOutcome {
+pub enum ActionOutcome {
     SetClipboard(String),
     SetStatusMessage(String),
 }
@@ -151,15 +151,11 @@ impl BufferKind {
             }
 
             _ => {
-                let mut raw = match fs::read_to_string(&path) {
+                let raw = match fs::read_to_string(&path) {
                     Ok(contents) => normalize_line_endings(contents),
                     Err(e) if e.kind() == ErrorKind::NotFound => String::new(),
                     Err(e) => return Err(e),
                 };
-
-                if raw.ends_with('\n') {
-                    raw.pop();
-                }
 
                 Ok((Self::File(path), raw))
             }
@@ -473,18 +469,12 @@ impl Buffer {
 
     /// The raw binary contents of this buffer
     pub fn contents(&self) -> Vec<u8> {
-        let mut contents: Vec<u8> = self.txt.bytes();
-        contents.push(b'\n');
-
-        contents
+        self.txt.bytes()
     }
 
     /// The utf-8 string contents of this buffer
     pub fn str_contents(&self) -> String {
-        let mut s = self.txt.to_string();
-        s.push('\n');
-
-        s
+        self.txt.to_string()
     }
 
     pub(crate) fn pretty_print_ts_tree(&self) -> Option<String> {
@@ -822,7 +812,7 @@ impl Buffer {
     }
 
     /// The error result of this function is an error string that should be displayed to the user
-    pub(crate) fn handle_action(&mut self, a: Action, source: Source) -> Option<ActionOutcome> {
+    pub fn handle_action(&mut self, a: Action, source: Source) -> Option<ActionOutcome> {
         match a {
             Action::Delete => {
                 let (c, deleted) = self.delete_dot(self.dot, Some(source));
@@ -928,6 +918,19 @@ impl Buffer {
         }
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+    }
+
+    /// Set this Buffer's dot to an explicit cursor position, clamping to EOB.
+    pub fn set_dot_from_cursor(&mut self, idx: usize) {
+        self.dot = Cur::new(idx).into();
+        self.dot.clamp_idx(self.txt.len_chars());
+    }
+
+    /// Set this Buffer's dot to an explicit [Range], clamping to EOB.
+    pub fn set_dot_from_range(&mut self, from: usize, to: usize) {
+        self.dot = Dot::from(Range::from_cursors(Cur::new(from), Cur::new(to), false))
+            .collapse_null_range();
+        self.dot.clamp_idx(self.txt.len_chars());
     }
 
     fn set_dot_from_coords(&mut self, coords: Coords) {
@@ -1524,8 +1527,7 @@ pub(crate) mod tests {
     fn normalizes_line_endings_insert_string(s: &str, expected: &str) {
         let mut b = Buffer::new_virtual(0, "test", "", Default::default());
         b.insert_string(Dot::Cur { c: c(0) }, s.to_string(), None);
-        // we force a trailing newline so account for that as well
-        assert_eq!(b.str_contents(), format!("{expected}\n"));
+        assert_eq!(b.str_contents(), expected);
     }
 
     #[test_case('\r', "\n"; "CR")]
@@ -1535,8 +1537,7 @@ pub(crate) mod tests {
     fn normalizes_line_endings_insert_char(ch: char, expected: &str) {
         let mut b = Buffer::new_virtual(0, "test", "", Default::default());
         b.insert_char(Dot::Cur { c: c(0) }, ch, None);
-        // we force a trailing newline so account for that as well
-        assert_eq!(b.str_contents(), format!("{expected}\n"));
+        assert_eq!(b.str_contents(), expected);
     }
 
     // Computing tree-sitter edits involves working with references to the old positions within the

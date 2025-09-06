@@ -45,12 +45,10 @@ type: \nxd
 4
 -- expected-buffer-3 --
 baz
-
 -- expected-buffer-4 --
 bar.txt
 baz.txt
 foo.txt
 bar.txt
 foo.txt
-
 

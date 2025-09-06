@@ -19,4 +19,3 @@ type: x\n
 2
 -- expected-buffer-2 --
 some synthesised data
-

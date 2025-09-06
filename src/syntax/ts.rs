@@ -510,7 +510,7 @@ mod tests {
         ts.update(gb, 0, gb.len());
         b.syntax_state = Some(SyntaxState::Ts(ts));
 
-        assert_eq!(b.str_contents(), "fn main() {}\n");
+        assert_eq!(b.str_contents(), "fn main() {}");
 
         let ranges = match b.syntax_state.as_ref() {
             Some(SyntaxState::Ts(ts)) => ts.t.range_tokens(),
@@ -538,7 +538,7 @@ mod tests {
             _ => panic!("no ts state"),
         };
 
-        assert_eq!(b.str_contents(), "fn main(){}\n");
+        assert_eq!(b.str_contents(), "fn main(){}");
         assert_eq!(ranges.len(), 5);
 
         // these two should have moved left one character

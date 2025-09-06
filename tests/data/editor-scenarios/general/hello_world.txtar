@@ -13,4 +13,3 @@ type: <esc>
 1
 -- expected-buffer-1 --
 hello, world!
-

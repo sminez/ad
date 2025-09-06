@@ -634,8 +634,7 @@ mod tests {
 
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         while b.handle_action(Action::Undo, Source::Keyboard).is_none() {}
-        let mut final_content = String::from_utf8(b.contents()).unwrap();
-        final_content.pop(); // The newline that we append
+        let final_content = String::from_utf8(b.contents()).unwrap();
 
         assert_eq!(&final_content, initial_content);
     }

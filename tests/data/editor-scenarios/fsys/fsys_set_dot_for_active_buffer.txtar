@@ -13,6 +13,5 @@ fsys: write buffers/1/addr /world.*$/
 1
 -- expected-buffer-1 --
 hello, world!
-
 -- expected-buffer-dot-1 --
 world!

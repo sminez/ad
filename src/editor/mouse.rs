@@ -327,7 +327,7 @@ mod tests {
         ],
         None,
         "some",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "left click drag selection complete"
@@ -340,7 +340,7 @@ mod tests {
         ],
         None,
         "some",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
@@ -355,7 +355,7 @@ mod tests {
         ],
         None,
         "some",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
@@ -369,7 +369,7 @@ mod tests {
         ],
         Some(Click::new(Left, r(0, 3, false))),
         "some",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "left click drag selection without release"
@@ -381,7 +381,7 @@ mod tests {
         ],
         Some(Click::new(Right, r(0, 3, false))),
         "t",  // default dot position
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "right click drag selection without release"
@@ -393,7 +393,7 @@ mod tests {
         ],
         Some(Click::new(Middle, r(0, 3, false))),
         "t",  // default dot position
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "middle click drag selection without release"
@@ -407,7 +407,7 @@ mod tests {
         ],
         None,
         "some",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
@@ -423,7 +423,7 @@ mod tests {
         ],
         None,
         "some",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
@@ -441,7 +441,7 @@ mod tests {
         ],
         None,
         "text",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::ChordedArgument, 5, 8, "text"),
@@ -459,7 +459,7 @@ mod tests {
         ],
         None,
         " ",
-        " text to test with\n",
+        " text to test with",
         "some",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -476,7 +476,7 @@ mod tests {
         ],
         None,
         " ",
-        "X text to test with\n",
+        "X text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -496,7 +496,7 @@ mod tests {
         ],
         None,
         " ",
-        "some text to test with\n",
+        "some text to test with",
         "some",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -518,7 +518,7 @@ mod tests {
         ],
         None,
         "t",
-        "Xtext to test with\n",
+        "Xtext to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -539,7 +539,7 @@ mod tests {
         ],
         None,
         " ",
-        " text to test with\n",
+        " text to test with",
         "some",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -558,7 +558,7 @@ mod tests {
         ],
         None,
         " ",
-        "X text to test with\n",
+        "X text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -577,7 +577,7 @@ mod tests {
         ],
         None,
         " ",
-        "X text to test with\n",
+        "X text to test with",
         "X",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -596,7 +596,7 @@ mod tests {
         ],
         None,
         " ",
-        " text to test with\n",
+        " text to test with",
         "some",
         &[
             FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
@@ -613,7 +613,7 @@ mod tests {
         ],
         None,
         "t",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "right click cancel with left"
@@ -628,7 +628,7 @@ mod tests {
         ],
         None,
         "t",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "right click cancel with middle"
@@ -643,7 +643,7 @@ mod tests {
         ],
         None,
         "t",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "middle click cancel with left"
@@ -658,7 +658,7 @@ mod tests {
         ],
         None,
         "t",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "middle click cancel with right"
@@ -672,7 +672,7 @@ mod tests {
         ],
         None,
         "text",
-        "some text to test with\n",
+        "some text to test with",
         "X",
         &[];
         "double left click"

@@ -18,4 +18,3 @@ malformed config file: TOML parse error at line 2, column 15
 2 | show_splash = "should be a bool"
   |               ^^^^^^^^^^^^^^^^^^
 invalid type: string "should be a bool", expected a boolean
-
