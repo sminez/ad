@@ -476,10 +476,10 @@ impl GapBuffer {
 
     /// An exclusive range of characters from the buffer
     pub fn slice(&self, char_from: usize, char_to: usize) -> Slice<'_> {
-        let from = self.char_to_raw_byte(char_from);
-        let to = self.offset_char_to_raw_byte(char_to, from, char_from);
+        let byte_from = self.char_to_raw_byte(char_from);
+        let byte_to = self.offset_char_to_raw_byte(char_to, byte_from, char_from);
 
-        Slice::from_raw_offsets(from, to, self)
+        Slice::from_raw_offsets(byte_from, byte_to, self)
     }
 
     pub fn as_slice(&self) -> Slice<'_> {
@@ -638,8 +638,9 @@ impl GapBuffer {
 
     /// Remove the requested character index from the visible region of the buffer
     pub fn remove_char(&mut self, char_idx: usize) {
-        let idx = self.char_to_byte(char_idx);
-        let len = self.char_len(self.char_to_raw_byte(char_idx));
+        let raw_idx = self.char_to_raw_byte(char_idx);
+        let idx = self.raw_byte_to_byte(raw_idx);
+        let len = self.char_len(raw_idx);
 
         if idx != self.gap_start {
             self.move_gap_to(idx);
@@ -905,11 +906,21 @@ impl GapBuffer {
 
         let slice_enclosed_gap = self.gap_start >= byte_offset && self.gap_end <= to;
         // Cur landed inside the gap or we counted over the gap while iterating the slice above
-        if cur > self.gap_start && (cur <= self.gap_end || slice_enclosed_gap) {
+        if cur >= self.gap_start && (cur < self.gap_end || slice_enclosed_gap) {
             cur += self.gap();
         }
 
         cur
+    }
+
+    /// Used in tests to ensure that the data inside of the gap can't accidentally be read into as
+    /// valid buffer content due to there not making sufficient edits to the buffer state during the
+    /// test.
+    #[cfg(test)]
+    fn shred_gap(&mut self) {
+        for b in self.data[self.gap_start..self.gap_end].iter_mut() {
+            *b = b'\0';
+        }
     }
 }
 
@@ -1274,6 +1285,8 @@ mod tests {
     fn insert_into_empty_string_initial_gb_works() {
         let mut gb = GapBuffer::from(String::new());
         gb.insert_char(0, 'a');
+        gb.shred_gap();
+
         assert_eq!(gb.to_string(), "a");
     }
 
@@ -1299,6 +1312,8 @@ mod tests {
         );
 
         gb.insert_char(5, 'X');
+        gb.shred_gap();
+
         println!("after insert X:   {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 1);
         assert_eq!(
@@ -1308,6 +1323,7 @@ mod tests {
         );
 
         gb.insert_char(3, '界');
+        gb.shred_gap();
         println!("after insert 界:  {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 2);
         assert_eq!(
@@ -1318,6 +1334,7 @@ mod tests {
 
         assert_eq!(gb.char(3), '界');
         gb.remove_char(3);
+        gb.shred_gap();
         println!("after remove 界:  {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 1);
         assert_eq!(
@@ -1328,6 +1345,7 @@ mod tests {
 
         assert_eq!(gb.char(5), 'X');
         gb.remove_char(5);
+        gb.shred_gap();
         println!("after remove X:   {:?}", debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s);
         assert_eq!(
@@ -1348,6 +1366,7 @@ mod tests {
         for i in 0..gb.len_chars() {
             let idx = gb.char_to_byte(i);
             gb.move_gap_to(idx);
+            gb.shred_gap();
 
             // Splitting into the two sections like this allows us to verify that
             // we have valid utf-8 encoded text on either side of the gap.
@@ -1369,6 +1388,7 @@ mod tests {
         for i in 0..gb.len_chars() {
             let idx = gb.char_to_byte(i);
             gb.move_gap_to(idx);
+            gb.shred_gap();
             assert_eq!(gb.len_lines(), 3);
 
             assert_eq!(gb.line(0).to_string(), "hello, world!\n", "idx={idx}");
@@ -1392,6 +1412,7 @@ mod tests {
         assert_eq!(s.len(), 27, "EOF case is not 0..s.len()");
         assert_eq!("世".len(), 3);
         gb.move_gap_to(cur);
+        gb.shred_gap();
 
         let byte_idx = gb.char_to_byte(char_idx);
         assert_eq!(byte_idx, expected, "{:?}", debug_buffer_content(&gb));
@@ -1406,6 +1427,7 @@ mod tests {
     fn char_to_byte_works_with_leading_multibyte_char(s: &str) {
         let mut gb = GapBuffer::new();
         gb.insert_str(0, s);
+        gb.shred_gap();
 
         let byte_idx = gb.char_to_byte(0);
         assert_eq!(byte_idx, 0, "{:?}", debug_buffer_content(&gb));
@@ -1424,30 +1446,36 @@ mod tests {
     ) {
         let mut gb = GapBuffer::new();
         gb.insert_str(0, s);
+        gb.shred_gap();
         let last_char = s.chars().count() - 1;
 
         let byte_idx = gb.char_to_byte(last_char);
         assert_eq!(byte_idx, expected, "{:?}", debug_buffer_content(&gb));
     }
 
-    #[test_case(0, 0, 0; "BOF cur at BOF")]
-    #[test_case(27, 0, 0; "BOF cur at EOF")]
-    #[test_case(27, 5, 5; "in the buffer cur at EOF")]
-    #[test_case(5, 5, 5; "in the buffer cur at gap")]
-    #[test_case(5, 3, 3; "in the buffer cur before gap")]
-    #[test_case(5, 11, 79; "in the buffer cur after gap")]
-    #[test_case(5, 7, 71; "multi byte 1")]
-    #[test_case(5, 8, 74; "multi byte 2")]
+    #[test_case(0, 0, 64, 'h'; "BOF cur at BOF")]
+    #[test_case(27, 0, 0, 'h'; "BOF cur at EOF")]
+    #[test_case(27, 5, 5, ','; "in the buffer cur at EOF")]
+    #[test_case(5, 5, 69, ','; "in the buffer cur at gap")]
+    #[test_case(5, 3, 3, 'l'; "in the buffer cur after gap")]
+    #[test_case(5, 11, 79, 'h'; "in the buffer cur before gap")]
+    #[test_case(5, 7, 71, '世'; "multi byte 1")]
+    #[test_case(5, 8, 74, '界'; "multi byte 2")]
     #[test]
-    fn char_to_raw_byte_works(cur: usize, char_idx: usize, expected: usize) {
+    fn char_to_raw_byte_works(cur: usize, char_idx: usize, expected: usize, expected_ch: char) {
         let s = "hello, 世界!\nhow are you?";
         let mut gb = GapBuffer::from(s);
         assert_eq!(s.len(), 27, "EOF case is not 0..s.len()");
         assert_eq!("世".len(), 3);
         gb.move_gap_to(cur);
+        gb.shred_gap();
 
-        let char_idx = gb.char_to_raw_byte(char_idx);
-        assert_eq!(char_idx, expected, "{:?}", debug_buffer_content(&gb));
+        let byte_idx = gb.char_to_raw_byte(char_idx);
+        assert_eq!(byte_idx, expected, "{:?}", debug_buffer_content(&gb));
+
+        // SAFETY: safe if the test is passing
+        let ch = unsafe { decode_char_at(byte_idx, &gb.data) };
+        assert_eq!(ch, expected_ch);
     }
 
     #[test_case(0, 0, "hello, world!\n"; "first line cur at BOF")]
@@ -1460,6 +1488,7 @@ mod tests {
     fn slice_to_string_works(cur: usize, line: usize, expected: &str) {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
         gb.move_gap_to(cur);
+        gb.shred_gap();
 
         assert_eq!(gb.line(line).to_string(), expected);
     }
@@ -1510,6 +1539,7 @@ mod tests {
 
         for &(idx, ch) in inserts {
             gb.insert_char(idx, ch);
+            gb.shred_gap();
         }
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
@@ -1519,12 +1549,19 @@ mod tests {
     fn insert_char_with_moving_cur() {
         let mut gb = GapBuffer::from("hello ");
         gb.insert_char(6, 'w');
+        gb.shred_gap();
         gb.insert_char(7, 'o');
+        gb.shred_gap();
         gb.insert_char(8, 'r');
+        gb.shred_gap();
         gb.insert_char(9, 'l');
+        gb.shred_gap();
         gb.insert_char(10, 'd');
+        gb.shred_gap();
         gb.insert_char(11, '!');
+        gb.shred_gap();
         gb.insert_char(5, ',');
+        gb.shred_gap();
 
         assert_eq!(
             gb.to_string(),
@@ -1542,6 +1579,7 @@ mod tests {
 
         println!("initial: {:?}", raw_debug_buffer_content(&gb));
         gb.insert_char(6, '\n');
+        gb.shred_gap();
         println!("insert:  {:?}", raw_debug_buffer_content(&gb));
 
         assert_eq!(gb.len_lines(), 3);
@@ -1551,6 +1589,7 @@ mod tests {
 
         for idx in 0..=gb.len_chars() {
             gb.move_gap_to(idx);
+            gb.shred_gap();
             assert_eq!(gb.len_lines(), 3);
 
             assert_eq!(gb.line(0).to_string(), "hello,\n", "idx={idx}");
@@ -1569,6 +1608,7 @@ mod tests {
         let mut gb = GapBuffer::from("oworl");
         for &(idx, s) in inserts {
             gb.insert_str(idx, s);
+            gb.shred_gap();
         }
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
@@ -1582,9 +1622,11 @@ mod tests {
 
         let s2 = " sailor\nisn't this fun?\nwhat a wonderful\n";
         gb.insert_str(6, s2);
+        gb.shred_gap();
 
         for idx in 0..=gb.len_chars() {
             gb.move_gap_to(idx);
+            gb.shred_gap();
             assert_eq!(gb.len_lines(), 5);
 
             assert_eq!(gb.line(0).to_string(), "hello, sailor\n", "idx={idx}");
@@ -1603,7 +1645,9 @@ mod tests {
     fn remove_char(idx: usize, expected: &str) {
         let mut gb = GapBuffer::from("hello, world!");
         gb.move_gap_to(6); // space before world
+        gb.shred_gap();
         gb.remove_char(idx);
+        gb.shred_gap();
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
@@ -1615,6 +1659,7 @@ mod tests {
         assert_eq!(gb.len_lines(), 2);
 
         gb.remove_char(13);
+        gb.shred_gap();
 
         assert_eq!(gb.len_lines(), 1);
         assert_eq!(gb.line(0).to_string(), "hello, world!how are you?");
@@ -1632,7 +1677,9 @@ mod tests {
 
         let mut gb = GapBuffer::from(s);
         gb.move_gap_to(6); // space before world
+        gb.shred_gap();
         gb.remove_range(from, to);
+        gb.shred_gap();
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
     }
@@ -1643,14 +1690,17 @@ mod tests {
         let mut gb = GapBuffer::from(s);
 
         gb.remove_range(0, 3);
+        gb.shred_gap();
         assert_eq!(gb.to_string(), "│foo│foo");
         assert_eq!(gb.len_chars(), 8);
 
         gb.remove_range(1, 4);
+        gb.shred_gap();
         assert_eq!(gb.to_string(), "││foo");
         assert_eq!(gb.len_chars(), 5);
 
         gb.remove_range(2, 5);
+        gb.shred_gap();
         assert_eq!(gb.to_string(), "││");
         assert_eq!(gb.len_chars(), 2);
     }
@@ -1660,6 +1710,7 @@ mod tests {
         let s = "hello, world!\nthis is the last line";
         let mut gb = GapBuffer::from(s);
         gb.remove_range(14, s.len());
+        gb.shred_gap();
         assert_eq!(gb.to_string(), "hello, world!\n");
         assert_eq!(gb.len_lines(), 2);
     }
@@ -1674,6 +1725,7 @@ mod tests {
         assert_eq!(gb.len_lines(), 2);
 
         gb.remove_range(from, to);
+        gb.shred_gap();
 
         assert_eq!(gb.len_lines(), 1);
         assert_eq!(gb.to_string(), expected);
@@ -1687,7 +1739,9 @@ mod tests {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
         gb.insert_char(6, ch);
+        gb.shred_gap();
         gb.remove_char(6);
+        gb.shred_gap();
 
         assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
     }
@@ -1706,6 +1760,7 @@ mod tests {
         }
 
         gb.insert_str(6, edit);
+        gb.shred_gap();
         assert_eq!(gb.len_lines(), expected_lines);
         println!("insert:  {:?}", raw_debug_buffer_content(&gb));
         for n in 0..gb.len_lines() {
@@ -1713,6 +1768,7 @@ mod tests {
         }
 
         gb.remove_range(6, 6 + edit.len());
+        gb.shred_gap();
         println!("remove:  {:?}", raw_debug_buffer_content(&gb));
         for n in 0..gb.len_lines() {
             println!("{:?}", gb.line(n).to_string());
@@ -1767,6 +1823,7 @@ mod tests {
         for i in 0..gb.len_chars() {
             let idx = gb.char_to_byte(i);
             gb.move_gap_to(idx);
+            gb.shred_gap();
 
             let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
             assert_eq!(&v, expected, "idx={idx}");
@@ -1784,6 +1841,7 @@ mod tests {
         for i in 0..gb.len_chars() {
             let idx = gb.char_to_byte(i);
             gb.move_gap_to(idx);
+            gb.shred_gap();
 
             let chars: String = gb.line(0).chars().collect();
             assert_eq!(chars, s, "idx={idx}");
@@ -1804,6 +1862,7 @@ mod tests {
         assert_eq!(s2, "");
 
         gb.move_gap_to(12);
+        gb.shred_gap();
         println!("after move:  {:?}", raw_debug_buffer_content(&gb));
 
         let slice = gb.slice(6, 17);
@@ -1813,9 +1872,26 @@ mod tests {
     }
 
     #[test]
+    fn null_slice_is_empty() {
+        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
+
+        for i in 0..gb.len_chars() {
+            let idx = gb.char_to_byte(i);
+            gb.move_gap_to(idx);
+            gb.shred_gap();
+
+            let slice = gb.slice(0, 0);
+
+            assert!(slice.left.is_empty(), "{i} slice left: {:?}", slice.left);
+            assert!(slice.right.is_empty(), "{i} slice right: {:?}", slice.right);
+        }
+    }
+
+    #[test]
     fn slice_eq_str_works() {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
         gb.move_gap_to(3);
+        gb.shred_gap();
         let slice = gb.slice(0, 5);
         assert_eq!(slice, "hello");
     }
@@ -1829,6 +1905,7 @@ mod tests {
         for i in 0..gb.len_chars() {
             let idx = gb.char_to_byte(i);
             gb.move_gap_to(idx);
+            gb.shred_gap();
 
             let byte_from = gb.char_to_raw_byte(char_from);
             let byte_to = gb.char_to_raw_byte(char_to);
@@ -1843,11 +1920,13 @@ mod tests {
     fn _insert_chars(gb: &mut GapBuffer, s: &str) {
         for (idx, ch) in s.chars().enumerate() {
             gb.insert_char(idx + 4, ch);
+            gb.shred_gap();
         }
     }
 
     fn _insert_str(gb: &mut GapBuffer, s: &str) {
         gb.insert_str(4, s);
+        gb.shred_gap();
     }
 
     #[test_case(_insert_chars; "individual chars")]
@@ -1865,6 +1944,7 @@ mod tests {
 
         assert_eq!(gb.char(8), '🦊');
         gb.remove_char(8);
+        gb.shred_gap();
 
         assert_eq!(slice_str(&gb), "foo\n世\n界 \n bar\nbaz\n");
     }
@@ -1884,12 +1964,16 @@ mod tests {
         let mut gb =
             GapBuffer::from("// does it need to be a doc comment? that is a long enough line to");
         gb.move_gap_to(0);
+        gb.shred_gap();
         assert_eq!(gb.char_to_raw_byte(65), 129);
         gb.move_gap_to(10);
+        gb.shred_gap();
         assert_eq!(gb.char_to_raw_byte(65), 129);
         gb.move_gap_to(66);
+        gb.shred_gap();
         assert_eq!(gb.char_to_raw_byte(65), 65);
         gb.insert_char(66, '\n');
+        gb.shred_gap();
         assert_eq!(
             gb.to_string(),
             "// does it need to be a doc comment? that is a long enough line to\n"
@@ -1902,6 +1986,7 @@ mod tests {
     fn as_strs_works(byte_idx: usize, left: &str, right: &str) {
         let mut gb = GapBuffer::from("foo bar");
         gb.move_gap_to(byte_idx);
+        gb.shred_gap();
 
         let (l, r) = gb.as_strs();
 
@@ -1914,6 +1999,7 @@ mod tests {
     fn as_str_works(byte_idx: usize) {
         let mut gb = GapBuffer::from("foo bar");
         gb.move_gap_to(byte_idx);
+        gb.shred_gap();
 
         let s = gb.as_str();
 
