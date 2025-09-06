@@ -418,7 +418,11 @@ impl GapBuffer {
             idx + 1
         };
 
-        Slice::from_raw_offsets(from, to, self)
+        if from == to {
+            Slice::NULL
+        } else {
+            Slice::from_raw_offsets(from, to, self)
+        }
     }
 
     /// The number of characters in the requested line.
@@ -468,6 +472,10 @@ impl GapBuffer {
 
     /// An exclusive range of characters from the buffer
     pub fn slice_from_byte_offsets(&self, byte_from: usize, byte_to: usize) -> Slice<'_> {
+        if byte_from == byte_to {
+            return Slice::NULL;
+        }
+
         let from = self.byte_to_raw_byte(byte_from);
         let to = self.byte_to_raw_byte(byte_to);
 
@@ -476,6 +484,10 @@ impl GapBuffer {
 
     /// An exclusive range of characters from the buffer
     pub fn slice(&self, char_from: usize, char_to: usize) -> Slice<'_> {
+        if char_from == char_to {
+            return Slice::NULL;
+        }
+
         let byte_from = self.char_to_raw_byte(char_from);
         let byte_to = self.offset_char_to_raw_byte(char_to, byte_from, char_from);
 
@@ -935,6 +947,12 @@ pub struct Slice<'a> {
 }
 
 impl<'a> Slice<'a> {
+    const NULL: Slice<'a> = Slice {
+        from: 0,
+        left: &[],
+        right: &[],
+    };
+
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
         let to = min(to, gb.data.len());
@@ -954,11 +972,6 @@ impl<'a> Slice<'a> {
             left: &gb.data[from..gb.gap_start],
             right: &gb.data[gb.gap_end..to],
         }
-    }
-
-    /// The byte offset that this slice starts at within the parent [GapBuffer].
-    pub fn byte_from(&self) -> usize {
-        self.from
     }
 
     /// The number of utf-8 characters within this slice.
