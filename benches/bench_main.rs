@@ -6,4 +6,5 @@ criterion_main! {
     benchmarks::rsc_pathological_regex::benches,
     benchmarks::burntsushi_torture_regex::benches,
     benchmarks::tui_render::benches,
+    benchmarks::ts_update::benches,
 }

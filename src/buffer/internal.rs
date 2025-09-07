@@ -65,13 +65,13 @@ pub struct GapBuffer {
     data: Box<[u8]>,
     /// current size of the allocation for data
     cap: usize,
-    /// byte offset to the first character in the gap
+    /// raw byte offset to the first character in the gap
     gap_start: usize,
-    /// byte offset to the last character in the gap
+    /// raw byte offset to the last character in the gap
     gap_end: usize,
     /// size in bytes for the next gap when re-allocating
     next_gap: usize,
-    /// line ending byte offset -> char offset
+    /// line ending raw byte offset -> char offset
     line_endings: BTreeMap<ByteOffset, CharOffset>,
     /// total number of characters in the buffer
     /// this is != line_endings.last() if there is no trailing newline
@@ -577,6 +577,20 @@ impl GapBuffer {
             let k = *self.line_endings.iter().nth(line_idx - 1).unwrap().1;
             Some(k + 1)
         }
+    }
+
+    /// Convert a line index to the byte index of its first character
+    ///
+    /// # Panics
+    /// This method will panic if the given byte index is out of bounds
+    pub fn line_to_byte(&self, line_idx: usize) -> usize {
+        let raw = if line_idx == 0 {
+            0
+        } else {
+            *self.line_endings.iter().nth(line_idx - 1).unwrap().0 + 1
+        };
+
+        self.raw_byte_to_byte(raw)
     }
 
     /// Insert a single character at the specifified character index.

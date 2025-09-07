@@ -112,10 +112,10 @@ impl TsState {
         self.t.clear();
     }
 
-    pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
-        let raw_from = gb.char_to_byte(gb.line_to_char(from));
-        let raw_to = if from + n_rows + 1 < gb.len_lines() {
-            gb.char_to_byte(gb.line_to_char(from + n_rows + 1))
+    pub fn update(&mut self, gb: &GapBuffer, from_row: usize, n_rows: usize) {
+        let raw_from = gb.line_to_byte(from_row);
+        let raw_to = if from_row + n_rows + 1 < gb.len_lines() {
+            gb.line_to_byte(from_row + n_rows + 1)
         } else {
             gb.len()
         };
