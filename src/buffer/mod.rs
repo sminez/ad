@@ -615,7 +615,13 @@ impl Buffer {
             if c == '\t' {
                 rx += (tabstop - 1) - (rx % tabstop);
             }
-            rx += 1;
+
+            // FIXME: this method probably needs to be part of the UI trait because of this line.
+            // This is needed because the TUI uses SGR (1006) mouse coordinates which end up
+            // reporting x coordinates in terms of cell widths, so utf8 wide characters need to be
+            // accounted for:
+            //   https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Extended-coordinates
+            rx += unicode_width::UnicodeWidthChar::width(c).unwrap_or(1);
 
             if rx > buf_rx {
                 break;

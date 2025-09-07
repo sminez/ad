@@ -1711,6 +1711,34 @@ mod tests {
         );
     }
 
+    #[test_case(1, 1, "f"; "before wide char SOB")]
+    #[test_case(4, 1, " "; "immediately before wide char")]
+    #[test_case(5, 1, "世"; "on first wide char")]
+    #[test_case(7, 1, "界"; "on second wide char")]
+    #[test_case(9, 1, " "; "after second wide char")]
+    #[test_case(1, 2, "🦊"; "second line first wide char")]
+    #[test_case(3, 2, "⌖"; "second line multibyte single cell char")]
+    #[test_case(6, 2, "a"; "second line ascii after wide and multibyte")]
+    #[test]
+    fn cur_from_screen_coords_handles_wide_utf8_chars(x: usize, y: usize, s: &str) {
+        let mut l = test_layout(&[1], 80, 100);
+        // This is a mix of ascii and utf-8 multi-byte characters where some (but not all) of the
+        // multi-byte characters have width > 1. Our handling of the raw x position given to us
+        // from terminal input needs to be based on _character width_ rather than the number of
+        // bytes in the character.
+        let content = "foo 世界 ⌠\n🦊⌖ bar".to_string();
+        l.active_buffer_mut().insert_xdot(content);
+
+        // cur_from_screen_coords has to account for the additional UI elements we have in place
+        // for the sign column so this gets added on here to allow the test case parameters to
+        // represent the logical position within the buffer.
+        let (_, w_sgncol) = l.active_buffer().sign_col_dims();
+        let c = l.cur_from_screen_coords(x + w_sgncol, y);
+        l.active_buffer_mut().dot = Dot::Cur { c };
+
+        assert_eq!(l.active_buffer().dot_contents(), s, "click=({x}, {y})");
+    }
+
     #[test_case(0, &[1, 2, 3, 4]; "0")]
     #[test_case(1, &[0, 2, 3, 4]; "1")]
     #[test_case(2, &[0, 1, 3, 4]; "2")]

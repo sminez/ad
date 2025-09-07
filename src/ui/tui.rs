@@ -997,7 +997,8 @@ fn try_read_input(stdin: &mut impl Read) -> Option<RawInput> {
         };
     }
 
-    // xterm mouse encoding: "^[< Cb;Cx;Cy(;) (M or m) "
+    // xterm SGR (1006) mouse encoding: "^[< Cb;Cx;Cy(;) (M or m) "
+    //   https://invisible-island.net/xterm/ctlseqs/ctlseqs.html#h3-Extended-coordinates
     if c2 == '[' && c3 == '<' {
         let mut buf = Vec::new();
         let m;
