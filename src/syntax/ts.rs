@@ -198,10 +198,9 @@ impl<'a> ts::TextProvider<&'a [u8]> for &'a GapBuffer {
             end_byte,
             ..
         } = node.range();
-        let char_from = self.raw_byte_to_char(self.byte_to_raw_byte(start_byte));
-        let char_to = self.raw_byte_to_char(self.byte_to_raw_byte(end_byte));
 
-        self.slice(char_from, char_to).slice_iter()
+        self.slice_from_byte_offsets(start_byte, end_byte)
+            .slice_iter()
     }
 }
 

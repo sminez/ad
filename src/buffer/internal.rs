@@ -17,8 +17,9 @@
 //! - <https://coredumped.dev/2023/08/09/text-showdown-gap-buffers-vs-ropes/>
 //! - <https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation>
 use std::{
+    cell::UnsafeCell,
     cmp::{Ordering, max, min},
-    collections::BTreeMap,
+    collections::{BTreeMap, HashMap},
     fmt,
 };
 
@@ -57,6 +58,44 @@ fn count_chars(bytes: &[u8]) -> usize {
 type ByteOffset = usize;
 type CharOffset = usize;
 
+/// A simple [HashMap] based cache of mappings from character positions to byte positions within
+/// the buffer since the last time it was modified (either by altering the logical buffer content,
+/// moving the gap or resizing the buffer).
+#[derive(Debug)]
+struct CharToByteCache(UnsafeCell<HashMap<CharOffset, ByteOffset>>);
+
+impl CharToByteCache {
+    fn clear(&self) {
+        // SAFETY: Only called internally as part of methods that have mutable access to the buffer
+        unsafe { (&mut *self.0.get()).clear() }
+    }
+
+    fn get(&self, char_idx: CharOffset) -> Option<ByteOffset> {
+        // SAFETY: Only called in offset_char_to_raw_byte when used to return cached values
+        unsafe { (&*self.0.get()).get(&char_idx).copied() }
+    }
+
+    fn insert(&self, char_idx: CharOffset, byte_idx: ByteOffset) {
+        // SAFETY: Only called in offset_char_to_raw_byte when used to cache values
+        unsafe {
+            (&mut *self.0.get()).insert(char_idx, byte_idx);
+        }
+    }
+}
+
+impl Clone for CharToByteCache {
+    fn clone(&self) -> Self {
+        // SAFETY: We only reach in to the inner map to clone it and wrap in a new UnsafeCell
+        unsafe { Self(UnsafeCell::new((&*self.0.get()).clone())) }
+    }
+}
+impl PartialEq for CharToByteCache {
+    fn eq(&self, _: &Self) -> bool {
+        true // we don't care about the cache for GapBuffer equality
+    }
+}
+impl Eq for CharToByteCache {}
+
 /// An implementation of a gap buffer that tracks internal meta-data to help with accessing
 /// sub-regions of the text such as character ranges and lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,11 +110,13 @@ pub struct GapBuffer {
     gap_end: usize,
     /// size in bytes for the next gap when re-allocating
     next_gap: usize,
-    /// line ending raw byte offset -> char offset
-    line_endings: BTreeMap<ByteOffset, CharOffset>,
     /// total number of characters in the buffer
     /// this is != line_endings.last() if there is no trailing newline
     n_chars: usize,
+    /// line ending raw byte offset -> char offset
+    line_endings: BTreeMap<ByteOffset, CharOffset>,
+    /// Simple cache of computed char->byte mappings since the last time the buffer was modified
+    char_to_byte_cache: CharToByteCache,
 }
 
 impl Default for GapBuffer {
@@ -115,6 +156,7 @@ impl From<String> for GapBuffer {
             next_gap,
             n_chars,
             line_endings,
+            char_to_byte_cache: CharToByteCache(UnsafeCell::new(HashMap::new())),
         };
 
         gb.move_gap_to(0);
@@ -140,6 +182,7 @@ impl From<&str> for GapBuffer {
             next_gap,
             n_chars,
             line_endings,
+            char_to_byte_cache: CharToByteCache(UnsafeCell::new(HashMap::new())),
         };
 
         gb.move_gap_to(0);
@@ -498,18 +541,13 @@ impl GapBuffer {
         self.slice(0, self.len_chars())
     }
 
-    fn chars_in_raw_range(&self, raw_from: usize, raw_to: usize) -> usize {
+    pub fn chars_in_raw_range(&self, raw_from: usize, raw_to: usize) -> usize {
         if raw_to <= self.gap_start || raw_from >= self.gap_end {
             count_chars(&self.data[raw_from..raw_to])
         } else {
             count_chars(&self.data[raw_from..self.gap_start])
                 + count_chars(&self.data[self.gap_end..raw_to])
         }
-    }
-
-    /// Convert a byte index to a character index
-    pub fn raw_byte_to_char(&self, byte_idx: usize) -> usize {
-        self.chars_in_raw_range(0, byte_idx)
     }
 
     /// Convert a character index to the index of the line containing it
@@ -621,6 +659,7 @@ impl GapBuffer {
                 (bidx, cidx)
             }
         });
+        self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
@@ -657,6 +696,7 @@ impl GapBuffer {
                 (bidx, cidx)
             }
         });
+        self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
@@ -670,6 +710,8 @@ impl GapBuffer {
 
         if idx != self.gap_start {
             self.move_gap_to(idx);
+        } else {
+            self.char_to_byte_cache.clear();
         }
 
         self.gap_end += len;
@@ -684,6 +726,7 @@ impl GapBuffer {
                 *count -= 1;
             }
         }
+        self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
@@ -725,6 +768,7 @@ impl GapBuffer {
                 *count = char_from;
             }
         }
+        self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
@@ -765,6 +809,7 @@ impl GapBuffer {
         self.data = buf.into_boxed_slice();
         self.gap_end += gap_increase;
         self.cap = cap;
+        self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
@@ -824,6 +869,7 @@ impl GapBuffer {
         self.data.copy_within(src, dest);
         self.gap_end = byte_idx + gap;
         self.gap_start = byte_idx;
+        self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
@@ -884,6 +930,10 @@ impl GapBuffer {
         mut byte_offset: usize,
         mut char_offset: usize,
     ) -> usize {
+        if let Some(i) = self.char_to_byte_cache.get(char_idx) {
+            return i;
+        }
+
         // When looking for the last character of a buffer containing a single line we can decode
         // backwards from either the start of the gap or the end of the raw buffer depending on
         // where the gap currently lies.
@@ -893,13 +943,17 @@ impl GapBuffer {
                 // SAFETY: we know that we have valid utf-8 data immediately before the gap
                 let ch = unsafe { decode_char_ending_at(ch_end, &self.data) };
 
-                return self.gap_start.saturating_sub(ch.len_utf8());
+                let i = self.gap_start.saturating_sub(ch.len_utf8());
+                self.char_to_byte_cache.insert(char_idx, i);
+                return i;
             } else {
                 // SAFETY: we know that we have valid data at the end of the buffer as
                 // self.gap_end != self.cap, so decoding the final character is valid
                 let ch = unsafe { decode_char_ending_at(self.cap - 1, &self.data) };
 
-                return self.cap.saturating_sub(ch.len_utf8());
+                let i = self.cap.saturating_sub(ch.len_utf8());
+                self.char_to_byte_cache.insert(char_idx, i);
+                return i;
             };
         }
 
@@ -914,7 +968,10 @@ impl GapBuffer {
         {
             match c.cmp(&char_idx) {
                 Ordering::Less => (byte_offset, char_offset) = (b, c),
-                Ordering::Equal => return b,
+                Ordering::Equal => {
+                    self.char_to_byte_cache.insert(char_idx, b);
+                    return b;
+                }
                 Ordering::Greater => {
                     to = b;
                     break;
@@ -936,6 +993,7 @@ impl GapBuffer {
             cur += self.gap();
         }
 
+        self.char_to_byte_cache.insert(char_idx, cur);
         cur
     }
 
