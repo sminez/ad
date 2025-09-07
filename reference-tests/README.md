@@ -1,6 +1,6 @@
 # Editing reference tests
 
-These tests use a set of [editing traces][0] developed by the author of [jumprope-rs].
+These tests use a set of [editing traces][0] developed by the author of [jumprope-rs][1].
 The setup is inspired by the tests found [here][2] for the [rune][3] text editor.
 
 
