@@ -106,6 +106,7 @@ struct RawEditorConfig {
     tabstop: Option<usize>,
     expand_tab: Option<bool>,
     match_indent: Option<bool>,
+    lsp_autostart: Option<bool>,
     status_timeout: Option<u64>,
     double_click_ms: Option<u64>,
     minibuffer_lines: Option<usize>,
@@ -127,6 +128,7 @@ impl RawEditorConfig {
         set_if_some!(tabstop, self, cfg);
         set_if_some!(expand_tab, self, cfg);
         set_if_some!(match_indent, self, cfg);
+        set_if_some!(lsp_autostart, self, cfg);
         set_if_some!(status_timeout, self, cfg);
         set_if_some!(double_click_ms, self, cfg);
         set_if_some!(minibuffer_lines, self, cfg);

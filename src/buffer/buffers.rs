@@ -89,6 +89,9 @@ impl Buffers {
             Err(e) => return Err(e),
         };
 
+        // Opening a directory from an existing directory buffer replaces the existing content
+        // rather than opening a new buffer in order to prevent the issue in Acme where drilling
+        // down into subdirectories results in having multiple.
         if self.active().kind.is_dir() && path.metadata().map(|m| m.is_dir()).unwrap_or_default() {
             let b = self.active_mut();
             b.kind = BufferKind::Directory(path);
@@ -97,6 +100,8 @@ impl Buffers {
             return Ok(None);
         }
 
+        // If we already have the requested path open then we focus that buffer instead of opening
+        // a duplicate.
         let existing_id = self.with_path(&path).map(|b| b.id);
         if let Some(existing_id) = existing_id {
             self.notify_lsp_changes_if_dirty();
@@ -105,10 +110,10 @@ impl Buffers {
             return Ok(None);
         }
 
+        // Otherwise we load the file and add it to the buffer list.
         let id = self.next_id;
         self.next_id += 1;
         let mut b = Buffer::new_from_canonical_file_path(id, path, self.config.clone())?;
-        self.lsp_handle.document_opened(&b);
 
         // Remove an empty unnamed buffer if the user has now opened a file and we have not
         // been told to retain it (typically because we have an open window showing it)
@@ -118,6 +123,8 @@ impl Buffers {
             self.record_jump_position();
             self.push_buffer(b);
         }
+
+        self.lsp_handle.document_opened(self);
 
         Ok(Some(id))
     }
@@ -136,7 +143,7 @@ impl Buffers {
         self.next_id += 1;
 
         if let Ok(b) = Buffer::new_from_canonical_file_path(id, p, self.config.clone()) {
-            self.lsp_handle.document_opened(&b);
+            self.lsp_handle.document_opened(self);
             self.inner.insert_at(Position::Tail, b);
         }
     }

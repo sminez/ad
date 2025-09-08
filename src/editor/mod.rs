@@ -146,6 +146,7 @@ where
         let lsp_manager = Arc::new(LspManager::spawn(
             config.languages.clone(),
             tx_events.clone(),
+            config.lsp_autostart,
         ));
 
         let config = Arc::new(Mutex::new(config));

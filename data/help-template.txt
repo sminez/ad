@@ -408,6 +408,13 @@ Example config.toml section:
   lsp.roots = ["Cargo.toml"]
 
 
+By default, ad will automatically start an available LSP server if one is configured when
+documents are opened. To prevent this behaviour you can set the `lsp_autostart` property
+of your main editor config to false:
+
+[editor]
+lsp_autostart = false
+
 ---
 
 >> Syntax Highlighting

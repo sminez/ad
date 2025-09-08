@@ -71,6 +71,7 @@ pub struct LspManagerHandle {
     capabilities: ReadOnlyLock<HashMap<String, (usize, Capabilities)>>,
     diagnostics: ReadOnlyLock<HashMap<Uri, Vec<Diagnostic>>>,
     configs: HashMap<String, LangConfig>,
+    autostart: bool,
 }
 
 impl LspManagerHandle {
@@ -80,6 +81,7 @@ impl LspManagerHandle {
             capabilities: Default::default(),
             diagnostics: Default::default(),
             configs: Default::default(),
+            autostart: false,
         }
     }
 
@@ -106,6 +108,14 @@ impl LspManagerHandle {
             .read()
             .unwrap()
             .get(lang.as_str())
+            .map(|(id, caps)| (*id, caps.position_encoding))
+    }
+
+    fn lsp_id_and_encoding_for_lang(&self, lang: &str) -> Option<(usize, PositionEncoding)> {
+        self.capabilities
+            .read()
+            .unwrap()
+            .get(lang)
             .map(|(id, caps)| (*id, caps.position_encoding))
     }
 
@@ -201,21 +211,37 @@ impl LspManagerHandle {
         Action::MbSelect(Diagnostics(diags).into_selector())
     }
 
-    pub fn document_opened(&self, b: &Buffer) {
+    /// Notify an attached LSP server that a document has been opened.
+    ///
+    /// If the `editor.lsp_autostart` config value is true then attempt to start the server if one
+    /// is not already running.
+    pub fn document_opened(&self, bs: &Buffers) {
+        let b = bs.active();
         let lang = match self.config_for_buffer(b) {
-            Some((lang, _)) => lang.clone(),
+            Some((lang, _)) => lang,
             None => return,
         };
 
-        if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
-            debug!("sending LSP textDocument/didOpen ({lsp_id})");
-            let path = b.full_name().to_string();
-            let content = b.str_contents();
+        tracing::info!("AUTOSTART LSP: {}", self.autostart);
 
-            self.send_notification(notif::DidOpenTextDocument::data(
-                lsp_id,
-                (lang, path, content),
-            ));
+        match self.lsp_id_and_encoding_for_lang(lang) {
+            Some((lsp_id, _)) => {
+                debug!("sending LSP textDocument/didOpen ({lsp_id})");
+                let path = b.full_name().to_string();
+                let content = b.str_contents();
+
+                self.send_notification(notif::DidOpenTextDocument::data(
+                    lsp_id,
+                    (lang.clone(), path, content),
+                ));
+            }
+
+            None if self.autostart => {
+                tracing::info!("STARTING LSP");
+                self.start_client(bs);
+            }
+
+            None => (),
         }
     }
 
@@ -353,6 +379,7 @@ impl LspManager {
     pub fn spawn(
         configs: HashMap<String, LangConfig>,
         tx_events: Sender<Event>,
+        autostart: bool,
     ) -> LspManagerHandle {
         let (tx_req, rx_req) = channel();
         let manager = Self {
@@ -375,6 +402,7 @@ impl LspManager {
             capabilities,
             diagnostics,
             configs,
+            autostart,
         }
     }
 
