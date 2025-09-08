@@ -40,6 +40,18 @@ jobs:
     - name: Run tests
       run: cargo nextest run --workspace --no-fail-fast
 
+  reference_tests:
+    name: Run refrence editing tests on stable
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: hecrj/setup-rust-action@v2
+      with:
+        rust-version: stable
+    - uses: taiki-e/install-action@nextest
+    - name: Run tests
+      run: cd reference-tests && cargo nextest run --no-fail-fast
+
   rustfmt:
     name: Ensure rustfmt is happy
     runs-on: ubuntu-latest
