@@ -102,7 +102,7 @@ impl Config {
 }
 
 /// For an explicitly provided path and first line of a file, check to see if we know the
-/// correct language associated with the file and associated [LangConfig].
+/// correct language associated with the file and associated [FtypeConfig].
 pub fn ftype_config_for_path_and_first_line<'a>(
     path: &Path,
     first_line: &str,

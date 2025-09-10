@@ -105,7 +105,7 @@ const CURRENT_BUFFER: &str = "current";
 ///   7.   body         -> The full body of the buffer
 ///   8.   event        -> Control file for intercepting input events for the buffer
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
-///   10.  language     -> ad's view of what language is configured for the buffer
+///   10.  filetype     -> ad's view of what filetype is configured for the buffer
 const QID_OFFSET: u64 = 10;
 
 const TOP_LEVEL_QIDS: [u64; 8] = [
