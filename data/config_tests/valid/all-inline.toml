@@ -66,58 +66,58 @@ label = { fg = "#E6C384" }
 "<space> w k" = { run = "prev-window" }
 "<space> w l" = { run = "next-column" }
 
-[languages.bash]
+[filetypes.bash]
 extensions = ["sh", "bash"]
 first_lines = ["#!/usr/bin/bash", "#!/usr/bin/sh", "#!/usr/bin/env bash", "#!/usr/bin/env sh"]
 
-[languages.dart]
+[filetypes.dart]
 extensions = ["dart"]
 lsp.command = "dart"
 lsp.args = ["language-server", "--protocol=lsp"]
 lsp.roots = ["melos.yaml", "pubspec.yaml"]
 
-[languages.graphql]
+[filetypes.graphql]
 extensions = ["graphql"]
 
-[languages.json]
+[filetypes.json]
 extensions = ["json"]
 
-[languages.make]
+[filetypes.make]
 filenames = ["Makefile"]
 
-[languages.markdown]
+[filetypes.markdown]
 extensions = ["md"]
 
-[languages.proto]
+[filetypes.proto]
 extensions = ["proto"]
 
-[languages.python]
+[filetypes.python]
 extensions = ["py"]
 lsp.command = "pylsp"
 lsp.roots = ["dummy.py"]
 
-[languages.r]
+[filetypes.r]
 extensions = ["R"]
 lsp.command = "R"
 lsp.args = ["--slave", "-e", "languageserver::run()"]
 lsp.roots = ["dummy.R"]
 
-[languages.rust]
+[filetypes.rust]
 extensions = ["rs"]
 lsp.command = "rust-analyzer"
 lsp.roots = ["Cargo.toml"]
 
-[languages.scheme]
+[filetypes.scheme]
 extensions = ["scm"]
 
-[languages.sql]
+[filetypes.sql]
 extensions = ["sql"]
 
-[languages.swift]
+[filetypes.swift]
 extensions = ["swift"]
 
-[languages.toml]
+[filetypes.toml]
 extensions = ["toml"]
 
-[languages.yaml]
+[filetypes.yaml]
 extensions = ["yaml", "yml"]

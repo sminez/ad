@@ -22,7 +22,7 @@ pub(super) struct RawConfig {
     filesystem: Option<FsysConfig>,
     tree_sitter: Option<TsConfig>,
     colorscheme: Option<PathOrStruct<RawColorScheme>>,
-    languages: Option<PathOrStruct<HashMap<String, RawLangConfig>>>,
+    filetypes: Option<PathOrStruct<HashMap<String, RawLangConfig>>>,
     keys: Option<PathOrStruct<KeyBindings>>,
 }
 
@@ -49,16 +49,16 @@ impl RawConfig {
             .unwrap_or_default()
             .into_inner(config_dir, &phome, &mut errs)
             .resolve(&mut errs);
-        let raw_languages = self
-            .languages
+        let raw_filetypes = self
+            .filetypes
             .map(|pos| pos.into_inner(config_dir, &phome, &mut errs))
             .unwrap_or_default();
 
-        let languages = raw_languages
+        let filetypes = raw_filetypes
             .into_iter()
-            .map(|(lang, raw)| {
+            .map(|(ftype, raw)| {
                 let conf = raw.resolve(config_dir, &phome, &mut errs);
-                (lang, conf)
+                (ftype, conf)
             })
             .collect();
 
@@ -76,7 +76,7 @@ impl RawConfig {
             filesystem,
             tree_sitter,
             colorscheme,
-            filetypes: languages,
+            filetypes,
             keys,
         };
 
@@ -375,6 +375,12 @@ mod tests {
     #[test]
     fn valid_config_parses(path: &str, content: &str) {
         let raw: RawConfig = toml::from_str(content).unwrap();
+
+        // The test cases should all be attempting to set these keys
+        assert!(raw.colorscheme.is_some(), "no colorscheme set");
+        assert!(raw.filetypes.is_some(), "no filetypes set");
+        assert!(raw.keys.is_some(), "no keys set");
+
         let res = raw.resolve(path, "");
         assert!(res.is_ok(), "{path} {res:?}");
     }
