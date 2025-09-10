@@ -444,12 +444,21 @@ where
                 default_handled();
             }
 
-            ReadBufferName { id } => self.send_buffer_resp(id, tx, |b| b.full_name().to_string()),
-            ReadBufferAddr { id } => self.send_buffer_resp(id, tx, |b| b.addr()),
+            ReadBufferName { id } => {
+                self.send_buffer_resp(id, tx, |b| format!("{}\n", b.full_name()))
+            }
+            ReadBufferAddr { id } => self.send_buffer_resp(id, tx, |b| format!("{}\n", b.addr())),
             ReadBufferDot { id } => self.send_buffer_resp(id, tx, |b| b.dot_contents()),
-            ReadBufferXAddr { id } => self.send_buffer_resp(id, tx, |b| b.xaddr()),
+            ReadBufferXAddr { id } => self.send_buffer_resp(id, tx, |b| format!("{}\n", b.xaddr())),
             ReadBufferXDot { id } => self.send_buffer_resp(id, tx, |b| b.xdot_contents()),
             ReadBufferBody { id } => self.send_buffer_resp(id, tx, |b| b.str_contents()),
+            ReadBufferFtype { id } => self.send_buffer_resp(id, tx, |b| {
+                format!(
+                    "{}\n",
+                    b.configured_filetype()
+                        .unwrap_or_else(|| "unknown".to_string())
+                )
+            }),
 
             SetBufferName { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 b.set_filename(s.trim());
