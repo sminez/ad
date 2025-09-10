@@ -31,7 +31,7 @@ use tracing::debug;
 /// initialized.
 #[derive(Debug)]
 pub(crate) struct OpenDocument {
-    pub(crate) lang: String,
+    pub(crate) ftype: String,
     pub(crate) path: String,
     pub(crate) content: String,
 }
@@ -182,7 +182,7 @@ impl LspRequest for Initialize {
     fn handle_res(
         lsp_id: usize,
         res: Self::Result,
-        (lang, open_docs): Self::Pending,
+        (ftype, open_docs): Self::Pending,
         man: &mut LspManager,
     ) -> Option<Actions> {
         match Capabilities::try_new(res) {
@@ -192,13 +192,13 @@ impl LspRequest for Initialize {
                 debug!(%lsp_id, "LSP initialized");
                 client.status = Status::Running;
                 client.position_encoding = c.position_encoding;
-                man.capabilities.write().unwrap().insert(lang, (lsp_id, c));
+                man.capabilities.write().unwrap().insert(ftype, (lsp_id, c));
 
                 Initialized::send(lsp_id, (), man);
 
                 for doc in open_docs {
                     man.handle_prepared_message(PreparedMessage::Notification(Box::new(
-                        DidOpenTextDocument::data(lsp_id, (doc.lang, doc.path, doc.content)),
+                        DidOpenTextDocument::data(lsp_id, (doc.ftype, doc.path, doc.content)),
                     )));
                 }
             }

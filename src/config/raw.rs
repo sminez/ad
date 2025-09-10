@@ -2,7 +2,7 @@
 //! it into our internal data types.
 use crate::{
     config::{
-        ColorScheme, Config, DEFAULT_CONFIG, EditorConfig, FsysConfig, KeyBindings, LangConfig,
+        ColorScheme, Config, DEFAULT_CONFIG, EditorConfig, FsysConfig, FtypeConfig, KeyBindings,
         LspConfig, TsConfig,
     },
     syntax::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
@@ -76,7 +76,7 @@ impl RawConfig {
             filesystem,
             tree_sitter,
             colorscheme,
-            languages,
+            filetypes: languages,
             keys,
         };
 
@@ -274,7 +274,7 @@ pub struct RawLangConfig {
 }
 
 impl RawLangConfig {
-    fn resolve(self, config_path: &Path, home: &Path, errs: &mut Vec<String>) -> LangConfig {
+    fn resolve(self, config_path: &Path, home: &Path, errs: &mut Vec<String>) -> FtypeConfig {
         let re_syntax = match self.re_syntax {
             None => Vec::new(),
             Some(path) => match try_read::<Table>(&path, config_path, home) {
@@ -302,7 +302,7 @@ impl RawLangConfig {
             },
         };
 
-        LangConfig {
+        FtypeConfig {
             extensions: self.extensions,
             first_lines: self.first_lines,
             filenames: self.filenames,

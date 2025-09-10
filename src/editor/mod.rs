@@ -144,7 +144,7 @@ where
 
         let show_splash = config.show_splash;
         let lsp_manager = Arc::new(LspManager::spawn(
-            config.languages.clone(),
+            config.filetypes.clone(),
             tx_events.clone(),
             config.lsp_autostart,
         ));

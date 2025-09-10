@@ -4,7 +4,7 @@
 //!   <https://microsoft.github.io/language-server-protocol/specification>
 use crate::{
     buffer::{Buffer, Buffers},
-    config::{LangConfig, LspConfig, lang_config_for_path_and_first_line},
+    config::{FtypeConfig, LspConfig, ftype_config_for_path_and_first_line},
     die,
     editor::{Action, MbSelect},
     input::Event,
@@ -51,7 +51,7 @@ pub(crate) enum PreparedMessage {
 #[derive(Debug)]
 pub(crate) enum Req {
     Start {
-        lang: String,
+        ftype: String,
         cmd: String,
         args: Vec<String>,
         init_opts: Option<serde_json::Value>,
@@ -70,7 +70,7 @@ pub struct LspManagerHandle {
     tx_req: Sender<Req>,
     capabilities: ReadOnlyLock<HashMap<String, (usize, Capabilities)>>,
     diagnostics: ReadOnlyLock<HashMap<Uri, Vec<Diagnostic>>>,
-    configs: HashMap<String, LangConfig>,
+    configs: HashMap<String, FtypeConfig>,
     autostart: bool,
 }
 
@@ -102,20 +102,20 @@ impl LspManagerHandle {
     /// Will return None if there is no active client with recorded capabilities for the
     /// given language.
     fn lsp_id_and_encoding_for(&self, b: &Buffer) -> Option<(usize, PositionEncoding)> {
-        let (lang, _) = &self.config_for_buffer(b)?;
+        let (ftype, _) = &self.config_for_buffer(b)?;
 
         self.capabilities
             .read()
             .unwrap()
-            .get(lang.as_str())
+            .get(ftype.as_str())
             .map(|(id, caps)| (*id, caps.position_encoding))
     }
 
-    fn lsp_id_and_encoding_for_lang(&self, lang: &str) -> Option<(usize, PositionEncoding)> {
+    fn lsp_id_and_encoding_for_ftype(&self, ftype: &str) -> Option<(usize, PositionEncoding)> {
         self.capabilities
             .read()
             .unwrap()
-            .get(lang)
+            .get(ftype)
             .map(|(id, caps)| (*id, caps.position_encoding))
     }
 
@@ -124,7 +124,7 @@ impl LspManagerHandle {
         path: &Path,
         first_line: &str,
     ) -> Option<(&String, &LspConfig)> {
-        lang_config_for_path_and_first_line(path, first_line, &self.configs)
+        ftype_config_for_path_and_first_line(path, first_line, &self.configs)
             .and_then(|(name, c)| c.lsp.as_ref().map(|lsp| (name, lsp)))
     }
 
@@ -136,13 +136,13 @@ impl LspManagerHandle {
 
     fn start_req_for_buf(&self, bs: &Buffers) -> Option<Req> {
         let b = bs.active();
-        let (lang, config) = self.config_for_buffer(b)?;
+        let (ftype, config) = self.config_for_buffer(b)?;
         let root = config.root_for_buffer(b)?.to_str()?.to_owned();
         let open_docs: Vec<_> = bs
             .iter()
             .flat_map(|b| match self.config_for_buffer(b) {
-                Some((blang, _)) if blang == lang => Some(OpenDocument {
-                    lang: lang.to_owned(),
+                Some((bftype, _)) if bftype == ftype => Some(OpenDocument {
+                    ftype: ftype.to_owned(),
                     path: b.full_name().to_owned(),
                     content: b.str_contents(),
                 }),
@@ -151,7 +151,7 @@ impl LspManagerHandle {
             .collect();
 
         Some(Req::Start {
-            lang: lang.to_owned(),
+            ftype: ftype.to_owned(),
             cmd: config.command.clone(),
             args: config.args.clone(),
             init_opts: config.init_opts.clone(),
@@ -184,12 +184,12 @@ impl LspManagerHandle {
     }
 
     pub fn show_server_capabilities(&self, b: &Buffer) -> Option<(&'static str, String)> {
-        let (lang, _) = &self.config_for_buffer(b)?;
+        let (ftype, _) = &self.config_for_buffer(b)?;
         let txt = self
             .capabilities
             .read()
             .unwrap()
-            .get(lang.as_str())?
+            .get(ftype.as_str())?
             .1
             .as_pretty_json()?;
 
@@ -217,14 +217,12 @@ impl LspManagerHandle {
     /// is not already running.
     pub fn document_opened(&self, bs: &Buffers) {
         let b = bs.active();
-        let lang = match self.config_for_buffer(b) {
-            Some((lang, _)) => lang,
+        let ftype = match self.config_for_buffer(b) {
+            Some((ftype, _)) => ftype,
             None => return,
         };
 
-        tracing::info!("AUTOSTART LSP: {}", self.autostart);
-
-        match self.lsp_id_and_encoding_for_lang(lang) {
+        match self.lsp_id_and_encoding_for_ftype(ftype) {
             Some((lsp_id, _)) => {
                 debug!("sending LSP textDocument/didOpen ({lsp_id})");
                 let path = b.full_name().to_string();
@@ -232,12 +230,11 @@ impl LspManagerHandle {
 
                 self.send_notification(notif::DidOpenTextDocument::data(
                     lsp_id,
-                    (lang.clone(), path, content),
+                    (ftype.clone(), path, content),
                 ));
             }
 
             None if self.autostart => {
-                tracing::info!("STARTING LSP");
                 self.start_client(bs);
             }
 
@@ -363,7 +360,7 @@ impl LspManagerHandle {
 #[derive(Debug)]
 pub struct LspManager {
     clients: HashMap<usize, LspClient>,
-    // lang -> (lspID, server capabilities)
+    // ftype -> (lspID, server capabilities)
     capabilities: Arc<RwLock<HashMap<String, (usize, Capabilities)>>>,
     // (lspID, ReqID) -> in-flight requests we need a response for
     pending: HashMap<(usize, RequestId), Box<dyn PendingLspRequest>>,
@@ -377,7 +374,7 @@ pub struct LspManager {
 
 impl LspManager {
     pub fn spawn(
-        configs: HashMap<String, LangConfig>,
+        configs: HashMap<String, FtypeConfig>,
         tx_events: Sender<Event>,
         autostart: bool,
     ) -> LspManagerHandle {
@@ -410,13 +407,13 @@ impl LspManager {
         for r in rx_req.into_iter() {
             match r {
                 Req::Start {
-                    lang,
+                    ftype,
                     cmd,
                     args,
                     init_opts,
                     root,
                     open_docs,
-                } => self.start_client(lang, cmd, args, init_opts, root, open_docs),
+                } => self.start_client(ftype, cmd, args, init_opts, root, open_docs),
                 Req::Stop { lsp_id } => self.stop_client(lsp_id),
                 Req::Prepared(p) => self.handle_prepared_message(p),
                 Req::Message(LspMessage { lsp_id, msg }) => match msg {
@@ -502,7 +499,7 @@ impl LspManager {
 
     fn start_client(
         &mut self,
-        lang: String,
+        ftype: String,
         cmd: String,
         args: Vec<String>,
         init_opts: Option<serde_json::Value>,
@@ -517,7 +514,7 @@ impl LspManager {
             }
         };
 
-        Initialize::send(lsp_id, (root, init_opts), (lang, open_bufs), self);
+        Initialize::send(lsp_id, (root, init_opts), (ftype, open_bufs), self);
         self.send_status("LSP server started");
     }
 
