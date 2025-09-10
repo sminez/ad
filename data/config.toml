@@ -137,6 +137,9 @@ extensions = ["graphql"]
 [languages.json]
 extensions = ["json"]
 
+[languages.just]
+filenames = ["justfile"]
+
 [languages.make]
 filenames = ["Makefile"]
 
