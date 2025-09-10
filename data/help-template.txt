@@ -372,11 +372,31 @@ using any language you wish.
 
   http://man.cat-v.org/plan_9/5/
 
-ad itself can be used as a simple 9p client to explore the filesystem:
+ad itself can be used as a simple 9p client to explore the filesystem (run 'ad --help' in
+your terminal for details of each of the available commands):
 
-  ad -9p ls ad
-  ad -9p ls ad/buffers/1
-  ad -9p read ad/buffers/1/dot
+  $ ad -9p ls ad
+  log                # read only log of events in the editor
+  minibuffer         # control file for selecting text using the minibuffer
+  scratch            # control file for reading and appending to the scratch buffer
+  ctl                # control file for issuing commands to ad
+  buffers            # directory of control files for open buffers
+
+  $ ad -9p ls ad/buffers
+  1                  # directory of control files for buffer id=1
+  current            # the id of the current buffer
+  index              # a line per open buffer in the format 'id\tpath'
+
+  $ ad -9p ls ad/buffers/1
+  addr               # the row:col,row:col address of the current buffer dot
+  body               # the string content of the buffer
+  dot                # the currently selected text within the buffer
+  event              # control file for intercepting user input events to the buffer
+  filename           # the current filename for the buffer
+  filetype           # the filetype used by ad for this buffer (as set in your config.toml)
+  output             # output from stdout/err of commands run within the buffer
+  xaddr              # the row:col,row:col address of the current buffer xdot
+  xdot               # the currently selected xdot content
 
 If you have the fusermount(1) and 9pfuse(4) programs installed then you can set the "auto_mount"
 property in ~/.ad/config.toml to true and mount the filesystem directly at ~/.ad/mnt when ad starts.
@@ -420,11 +440,11 @@ lsp_autostart = false
 >> Syntax Highlighting
 
 ad supports syntax highlighting via tree-sitter. In order to enable syntax highlighting for a given
-file type you will need to ensure that you have:
+filetype you will need to ensure that you have:
 
-  - a compiled '$lang.so' file in your configured 'parser_dir' directory
-  - a 'highlights.scm' file for that file type in your configured 'syntax_query_dir' directory.
-  - a '[[languages]]' entry for the language in your 'config.toml'
+  - a compiled '$ftype.so' file in your configured 'parser_dir' directory
+  - a 'highlights.scm' file for that filetype in your configured 'syntax_query_dir' directory.
+  - a '[filetypes]' entry for the filetype in your 'config.toml'
 
 
 Example config.toml sections:
@@ -432,8 +452,7 @@ Example config.toml sections:
   parser_dir = "~/.ad/tree-sitter/parsers"
   syntax_query_dir = "~/.ad/tree-sitter/queries"
 
-  [[languages]]
-  name = "rust"
+  [filetypes.rust]
   extensions = ["rs"]
   first_lines = []
 

@@ -1,6 +1,6 @@
 [package]
 name = "ad-editor"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2024"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"

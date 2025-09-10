@@ -1,7 +1,7 @@
 # Everything in an external file where possible
 
 colorscheme = "../../colorschemes/default_dark.toml"
-languages = "../valid-langs.toml"
+filetypes = "../valid-ftypes.toml"
 keys = "../valid-keys.toml"
 
 [editor]

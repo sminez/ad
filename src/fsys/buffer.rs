@@ -25,6 +25,7 @@ const XADDR: &str = "xaddr";
 const BODY: &str = "body";
 const EVENT: &str = "event";
 const OUTPUT: &str = "output";
+const FILETYPE: &str = "filetype";
 
 pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] = [
     (1, FILENAME),
@@ -35,6 +36,7 @@ pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] = [
     (6, BODY),
     (7, EVENT),
     (8, OUTPUT),
+    (9, FILETYPE),
 ];
 
 fn parent_and_fname(qid: u64) -> (u64, &'static str) {
@@ -386,6 +388,7 @@ impl BufferNode {
             BODY => Req::ReadBufferBody { id: self.id },
             XDOT => Req::ReadBufferXDot { id: self.id },
             XADDR => Req::ReadBufferXAddr { id: self.id },
+            FILETYPE => Req::ReadBufferFtype { id: self.id },
             OUTPUT => return Some(String::new()),
             _ => return None, // can hit this as part of walk for unknown files
         };
@@ -413,6 +416,7 @@ impl BufferNode {
             BODY => Req::ReadBufferBody { id: self.id },
             XDOT => Req::ReadBufferXDot { id: self.id },
             XADDR => Req::ReadBufferXAddr { id: self.id },
+            FILETYPE => Req::ReadBufferFtype { id: self.id },
             OUTPUT => return InternalRead::Immediate(Vec::new()),
             EVENT => {
                 // ignoring offset
@@ -476,8 +480,8 @@ mod tests {
     use simple_test_case::test_case;
 
     #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
-    #[test_case(10, 8, DOT; "dot second buffer")]
-    #[test_case(23, 17, BODY; "body second buffer")]
+    #[test_case(10, 8, DOT; "dot first buffer")]
+    #[test_case(24, 18, BODY; "body second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);

@@ -1,6 +1,8 @@
 //! A [Buffer] represents a single file or in memory text buffer open within the editor.
 use crate::{
-    Config, MAX_NAME_LEN, UNNAMED_BUFFER, config_handle,
+    Config, MAX_NAME_LEN, UNNAMED_BUFFER,
+    config::ftype_config_for_path_and_first_line,
+    config_handle,
     dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
     editor::Action,
     exec::{Addr, Address, IterBoundedChars},
@@ -289,10 +291,10 @@ impl Buffer {
     /// Clear any existing tree-sitter state and then attempt to detect and set the state
     /// based on this buffer's BufferKind
     fn try_set_ts_state(&mut self) {
-        let cfg = config_handle!(self);
         self.syntax_state = None;
-        if let Some(lang) = cfg.lang_for_buffer(self) {
-            match SyntaxState::try_new(lang, &self.txt, &cfg) {
+        if let Some(lang) = self.configured_filetype() {
+            let cfg = config_handle!(self);
+            match SyntaxState::try_new(&lang, &self.txt, &cfg) {
                 Ok(state) => self.syntax_state = Some(state),
                 Err(msg) => error!("unable to initialise syntax state: {msg}"),
             }
@@ -465,6 +467,16 @@ impl Buffer {
     /// Check whether or not this is an unnamed buffer
     pub fn is_unnamed(&self) -> bool {
         self.kind == BufferKind::Unnamed
+    }
+
+    /// Check the current [Config] to see if this buffer matches a known filetype configuration.
+    pub fn configured_filetype(&self) -> Option<String> {
+        let lang_configs = &config_handle!(self).filetypes;
+        let first_line = self.line(0).map(|l| l.to_string()).unwrap_or_default();
+
+        self.path()
+            .and_then(|path| ftype_config_for_path_and_first_line(path, &first_line, lang_configs))
+            .map(|(lang, _)| lang.clone())
     }
 
     /// The raw binary contents of this buffer

@@ -30,7 +30,7 @@ pub struct Config {
     pub filesystem: FsysConfig,
     pub tree_sitter: TsConfig,
     pub colorscheme: ColorScheme,
-    pub languages: HashMap<String, LangConfig>,
+    pub filetypes: HashMap<String, FtypeConfig>,
     pub keys: KeyBindings,
 }
 
@@ -99,34 +99,20 @@ impl Config {
 
         Self::try_load_from_path(&path, &home)
     }
-
-    /// For a [Buffer], check to see if we know the correct language associated with the file and
-    /// associated [LangConfig].
-    pub fn lang_config_for_buffer(&self, b: &Buffer) -> Option<(&String, &LangConfig)> {
-        let first_line = b.line(0).map(|l| l.to_string()).unwrap_or_default();
-
-        lang_config_for_path_and_first_line(b.path()?, &first_line, &self.languages)
-    }
-
-    /// Check to see if there is a known language for this [Buffer].
-    pub fn lang_for_buffer(&self, b: &Buffer) -> Option<&str> {
-        self.lang_config_for_buffer(b)
-            .map(|(name, _)| name.as_str())
-    }
 }
 
 /// For an explicitly provided path and first line of a file, check to see if we know the
-/// correct language associated with the file and associated [LangConfig].
-pub fn lang_config_for_path_and_first_line<'a>(
+/// correct language associated with the file and associated [FtypeConfig].
+pub fn ftype_config_for_path_and_first_line<'a>(
     path: &Path,
     first_line: &str,
-    languages: &'a HashMap<String, LangConfig>,
-) -> Option<(&'a String, &'a LangConfig)> {
+    filetypes: &'a HashMap<String, FtypeConfig>,
+) -> Option<(&'a String, &'a FtypeConfig)> {
     let fname = path.file_name()?.to_string_lossy();
     let os_ext = path.extension().unwrap_or_default();
     let ext = os_ext.to_str().unwrap_or_default();
 
-    languages.iter().find(|(_, c)| {
+    filetypes.iter().find(|(_, c)| {
         c.filenames.iter().any(|f| *f == fname)
             || c.extensions.iter().any(|e| e == ext)
             || c.first_lines.iter().any(|l| first_line.starts_with(l))
@@ -236,7 +222,7 @@ impl Default for TsConfig {
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
-pub struct LangConfig {
+pub struct FtypeConfig {
     #[serde(default)]
     pub extensions: Vec<String>,
     #[serde(default)]

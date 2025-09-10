@@ -59,6 +59,9 @@ pub enum Req {
     ReadBufferBody {
         id: usize,
     },
+    ReadBufferFtype {
+        id: usize,
+    },
     SetBufferName {
         id: usize,
         s: String,

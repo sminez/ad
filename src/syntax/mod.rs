@@ -45,7 +45,7 @@ pub enum SyntaxState {
 impl SyntaxState {
     pub fn try_new(lang: &str, gb: &GapBuffer, cfg: &Config) -> Result<Self, String> {
         let lang_cfg = cfg
-            .languages
+            .filetypes
             .get(lang)
             .ok_or_else(|| format!("unknown language {lang:?}"))?;
 
