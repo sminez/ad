@@ -211,11 +211,24 @@ fn open_9p_sockets() -> io::Result<Vec<String>> {
 
 fn list_open_sessions() {
     fn inner() -> io::Result<()> {
+        let mut had_unresponsive = false;
+
         for ns in open_9p_sockets()?.into_iter() {
-            let mut client = UnixClient::new_unix(&ns, "")?;
+            let mut client = match UnixClient::new_unix(&ns, "") {
+                Ok(client) => client,
+                Err(e) => {
+                    println!("{ns}\tunresponsive: {e}");
+                    had_unresponsive = true;
+                    continue;
+                }
+            };
             let id = client.read_str("buffers/current")?;
             let fname = client.read_str(format!("buffers/{id}/filename"))?;
             println!("{ns}\t{fname}");
+        }
+
+        if had_unresponsive {
+            println!("\nYou can remove unresponsive sockets using --rm-sockets");
         }
 
         Ok(())
