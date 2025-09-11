@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Toggle line commenting for the lines within dot based on the filetype.
+#
+# This script requires a data file containing mappings between ad filetype
+# names and the comment string that should be used for adding and removing
+# line comments.
+# 
+# Each line in the file should be of the form "$filetype $comment_str". e.g.
+#   bash #
+#   rust //
+#   toml #
+
+source "$HOME/.ad/lib/ad.sh"
+
+FTYPE_COMMENT_STRS="$HOME/.ad/lib/ftype-comment-chars.txt"
+
+requireAd
+id="$(currentBufferId)"
+addr="$(bufRead "$id" addr | sed -E 's/(.+):.+,(.+):.+/\1,\2/')"
+ftype="$(bufRead "$id" filetype)"
+comment_str="$(grep "$ftype" "$FTYPE_COMMENT_STRS" | cut -d' ' -f2)"
+
+if [ -z "$comment_str" ]; then
+  adCtl "echo no configured comment string for $ftype"
+  exit 1
+fi
+
+echo '-,/\n/' | bufWrite "$id" xaddr # expand xdot to full lines
+
+# If every line starts with the comment string then we're uncommenting otherwise
+# we're commenting out everything, even lines that already start with the comment
+# string
+xdot="$(bufRead "$id" xdot)"
+n_lines="$(echo "$xdot" | wc -l)"
+n_comment_lines="$(echo "$xdot" | grep "^\\s*$comment_str" | wc -l)"
+
+if [ "$n_lines" != "$n_comment_lines" ]; then
+  # expand to lines -> for each line -> insert comment_str at the start
+  adEdit "-,/\\n/ x:.*\\n: i:$comment_str :"
+else
+  # expand to lines -> for each line start up to comment_str -> remove comment_str
+  adEdit "-,/\\n/ x/.+\\n/ s:^(\\s*?)$comment_str ?:\$1:"
+fi
+
+echo "$addr" | bufWrite "$id" addr
