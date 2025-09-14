@@ -10,8 +10,11 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
-use ninep::sync::client::{ReadLineIter, UnixClient};
-use std::{io, io::Write, os::unix::net::UnixStream, str::FromStr};
+use ninep::{
+    sansio::server::socket_dir,
+    sync::client::{ReadLineIter, UnixClient},
+};
+use std::{env, fs, io, io::Write, os::unix::net::UnixStream, str::FromStr};
 
 mod event;
 
@@ -264,4 +267,110 @@ impl FromStr for LogEvent {
 
         Ok(evt)
     }
+}
+
+fn open_9p_sockets() -> io::Result<Vec<String>> {
+    let mut ad_sockets = Vec::new();
+    for entry in fs::read_dir(socket_dir())? {
+        let entry = entry?;
+        let fname = entry.file_name();
+        if let Some(s) = fname.to_str()
+            && s.starts_with("ad-")
+        {
+            ad_sockets.push(s.to_string());
+        }
+    }
+
+    Ok(ad_sockets)
+}
+
+/// Metadata for an ad editor session.
+#[derive(Debug)]
+pub struct SessionMeta {
+    /// The socket name within [socket_dir] for this session.
+    pub socket_name: String,
+    /// Whether or not the session is currently unresponsive.
+    ///
+    /// A session can become unresponsive when it crashes before successfully
+    /// removing it's filesystem socket.
+    pub is_unresponsive: bool,
+    /// The id of the currently active buffer.
+    pub active_buffer_id: String,
+    /// Metadata for the buffers open in this session.
+    pub buffers: Vec<BufferMeta>,
+}
+
+impl SessionMeta {
+    /// Create a new [Client] for this session.
+    pub fn client_for_session(&self) -> io::Result<Client> {
+        Ok(Client {
+            inner: UnixClient::new_unix(&self.socket_name, "")?,
+        })
+    }
+
+    /// Remove this session's filesystem socket.
+    pub fn remove_socket(&self) -> io::Result<()> {
+        fs::remove_file(socket_dir().join(&self.socket_name))
+    }
+}
+
+/// Metadata for an open buffer within an ad editor session.
+#[derive(Debug)]
+pub struct BufferMeta {
+    /// The id of the buffer.
+    pub id: String,
+    /// The full filename of the buffer.
+    pub filename: String,
+}
+
+/// Call [SessionMeta::remove_socket] for all currently unresponsive editor sessions.
+pub fn remove_unresponsive_sessions() -> io::Result<()> {
+    for session in list_open_sessions()?.into_iter() {
+        if session.is_unresponsive {
+            session.remove_socket()?;
+        }
+    }
+
+    Ok(())
+}
+
+/// List open `ad` editor sessions and their current state.
+pub fn list_open_sessions() -> io::Result<Vec<SessionMeta>> {
+    let mut sessions = Vec::new();
+
+    for ns in open_9p_sockets()?.into_iter() {
+        let mut client = match UnixClient::new_unix(&ns, "") {
+            Ok(client) => client,
+            Err(_) => {
+                sessions.push(SessionMeta {
+                    socket_name: ns,
+                    is_unresponsive: true,
+                    active_buffer_id: String::new(),
+                    buffers: Vec::new(),
+                });
+                continue;
+            }
+        };
+        let active_buffer_id = client.read_str("buffers/current")?;
+        let buffers = client
+            .read_str("buffers/index")?
+            .lines()
+            .map(|line| {
+                let mut it = line.split_whitespace();
+                let id = it.next().map(String::from).unwrap_or_default();
+                let filename = it.next().map(String::from).unwrap_or_default();
+
+                BufferMeta { id, filename }
+            })
+            .collect();
+
+        sessions.push(SessionMeta {
+            socket_name: ns,
+            is_unresponsive: false,
+            active_buffer_id,
+            buffers,
+        });
+    }
+
+    Ok(sessions)
 }
