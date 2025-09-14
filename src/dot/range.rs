@@ -65,6 +65,10 @@ impl Range {
         cur.idx >= self.start.idx && cur.idx <= self.end.idx
     }
 
+    pub(crate) fn intersects_range(&self, other: &Range) -> bool {
+        self.start.idx <= other.end.idx && other.start.idx <= self.end.idx
+    }
+
     /// Extends the STARTING cursor to its line start
     #[must_use]
     pub(super) fn extend_to_line_start(mut self, b: &Buffer) -> Self {
