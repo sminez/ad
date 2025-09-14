@@ -208,13 +208,7 @@ impl<T> ZipList<T> {
 
     /// Rotate the ZipList until the current focused element is in the head position
     pub fn rotate_focus_to_head(&mut self) -> &mut Self {
-        if self.up.is_empty() {
-            return self;
-        }
-
-        for item in take(&mut self.up).into_iter().rev() {
-            self.down.push_back(item);
-        }
+        self.down.extend(self.up.drain(..).rev());
 
         self
     }
