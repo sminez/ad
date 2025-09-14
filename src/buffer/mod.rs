@@ -348,16 +348,16 @@ impl Buffer {
         None
     }
 
-    pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> String {
+    pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> Result<String, String> {
         if !self.dirty {
-            return "Nothing to save".to_string();
+            return Err("Nothing to save".to_string());
         }
 
         if !force {
             match self.state_changed_on_disk() {
                 Ok(false) => (),
-                Ok(true) => return "File modified on disk, use :w! to force".to_string(),
-                Err(s) => return s,
+                Ok(true) => return Err("File modified on disk, use :w! to force".to_string()),
+                Err(s) => return Err(s),
             }
         }
 
@@ -373,9 +373,9 @@ impl Buffer {
             Ok(_) => {
                 self.dirty = false;
                 self.last_save = SystemTime::now();
-                format!("\"{display_path}\" {n_lines}L {n_bytes}B written")
+                Ok(format!("\"{display_path}\" {n_lines}L {n_bytes}B written"))
             }
-            Err(e) => format!("Unable to save buffer: {e}"),
+            Err(e) => Err(format!("Unable to save buffer: {e}")),
         }
     }
 
