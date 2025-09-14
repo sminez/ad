@@ -1,30 +1,36 @@
 use ad_editor::{
-    Args, CachedStdin, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer, PlumbingRules,
-    Program,
+    CachedStdin, CliAction, Cmd9p, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer,
+    PlumbingRules, Program, USAGE, VERSION,
 };
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
     env, fmt, fs,
     io::{self, Read, Write},
+    path::PathBuf,
     process::exit,
 };
 use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 
 fn main() {
-    let args = match Args::try_parse() {
-        Ok(args) => args,
-        Err((msg, code)) => {
+    let action = match CliAction::try_parse() {
+        Ok(action) => action,
+        Err(msg) => {
             println!("{msg}");
-            exit(code);
+            exit(1);
         }
     };
 
-    let files = match args {
-        Args::RunScript { script, files } => return run_script(&script, files),
-        Args::NineP { args } => return run_9p_oneshot(args),
-        Args::ListSessions => return list_open_sessions(),
-        Args::RmSockets => return remove_open_sockets(),
-        Args::OpenEditor { files } => files,
+    let files = match action {
+        // Only the OpenEditor action results in running the main editor behaviour
+        CliAction::OpenEditor { files } => files,
+
+        // All other actions are run immediately before exiting
+        CliAction::ShowHelp => print_and_exit(USAGE),
+        CliAction::ShowVersion => print_and_exit(&format!("ad v{VERSION}")),
+        CliAction::RunScript { script, files } => return run_script(&script, files),
+        CliAction::NineP { aname, cmd, path } => return run_9p(aname, cmd, path),
+        CliAction::ListSessions => return list_open_sessions(),
+        CliAction::RmSockets => return remove_open_sockets(),
     };
 
     let log_buffer = LogBuffer::default();
@@ -54,6 +60,11 @@ fn fatal(msg: impl fmt::Display) -> ! {
     exit(1);
 }
 
+fn print_and_exit(msg: &str) -> ! {
+    println!("{msg}");
+    exit(0);
+}
+
 fn log_level_from_env() -> LevelFilter {
     match env::var(LOG_LEVEL_ENV_VAR) {
         Ok(s) => s.parse().unwrap_or(LevelFilter::INFO),
@@ -61,7 +72,7 @@ fn log_level_from_env() -> LevelFilter {
     }
 }
 
-fn run_script(script: &str, files: Vec<String>) {
+fn run_script(script: &str, files: Vec<PathBuf>) {
     let mut prog = match Program::try_parse(script) {
         Ok(prog) => prog,
         Err(e) => {
@@ -87,12 +98,12 @@ fn run_script(script: &str, files: Vec<String>) {
         let s = match fs::read_to_string(path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("unable to open file '{path}': {e}");
+                eprintln!("unable to open file '{}': {e}", path.display());
                 exit(1);
             }
         };
 
-        if let Err(e) = prog.execute_on_string(s, path, &mut buf) {
+        if let Err(e) = prog.execute_on_string(s, path.to_str().unwrap(), &mut buf) {
             eprintln!("error running script: {e:?}");
             exit(1);
         }
@@ -101,36 +112,10 @@ fn run_script(script: &str, files: Vec<String>) {
     io::stdout().write_all(&buf).unwrap();
 }
 
-fn run_9p_oneshot(args: Vec<String>) {
-    let mut args = args.into_iter().peekable();
-
-    let aname = match args.peek() {
-        Some(s) => {
-            if s == "-A" {
-                args.next();
-                match args.next() {
-                    Some(aname) => aname,
-                    None => fatal("no aname provided"),
-                }
-            } else {
-                String::new()
-            }
-        }
-        None => fatal("no aname provided"),
-    };
-
-    let cmd = match args.next() {
-        Some(cmd) => cmd,
-        None => fatal("no 9p command provided"),
-    };
-
-    let path_opt = args.next();
-    let (ns, path) = match path_opt.as_ref() {
-        Some(path) => match path.split_once('/') {
-            Some((ns, path)) => (ns, path),
-            None => (path.as_str(), ""),
-        },
-        None => fatal("no path provided"),
+fn run_9p(aname: String, action: Cmd9p, path: String) {
+    let (ns, path) = match path.split_once('/') {
+        Some((ns, path)) => (ns, path),
+        None => (path.as_str(), ""),
     };
 
     let client = match client_for_ns(ns, aname) {
@@ -138,9 +123,29 @@ fn run_9p_oneshot(args: Vec<String>) {
         Err(e) => fatal(e.to_string()),
     };
 
-    if let Err(e) = run_9p_command(&cmd, path, client) {
+    if let Err(e) = run_9p_command(action, path, client) {
         fatal(e.to_string());
     }
+}
+
+fn run_9p_command(action: Cmd9p, path: &str, mut client: UnixClient) -> io::Result<()> {
+    match action {
+        Cmd9p::Read => print!("{}", client.read_str(path)?),
+
+        Cmd9p::Write => {
+            let mut content = String::new();
+            io::stdin().read_to_string(&mut content)?;
+            client.write_str(path, 0, &content)?;
+        }
+
+        Cmd9p::List => {
+            for stat in client.read_dir(path)?.into_iter() {
+                println!("{}", stat.fm.name);
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Depending on the requested namespace and the presence or absence of an "AD_PID" env var we may
@@ -170,28 +175,6 @@ fn client_for_ns(ns: &str, aname: String) -> io::Result<UnixClient> {
     };
 
     UnixClient::new_unix(ns, aname)
-}
-
-fn run_9p_command(cmd: &str, path: &str, mut client: UnixClient) -> io::Result<()> {
-    match cmd {
-        "read" => print!("{}", client.read_str(path)?),
-
-        "write" => {
-            let mut content = String::new();
-            io::stdin().read_to_string(&mut content)?;
-            client.write_str(path, 0, &content)?;
-        }
-
-        "ls" => {
-            for stat in client.read_dir(path)?.into_iter() {
-                println!("{}", stat.fm.name);
-            }
-        }
-
-        _ => fatal(format!("unknown command: {cmd}")),
-    }
-
-    Ok(())
 }
 
 fn open_9p_sockets() -> io::Result<Vec<String>> {

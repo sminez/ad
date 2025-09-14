@@ -41,7 +41,7 @@ pub mod ui;
 pub mod util;
 pub mod ziplist;
 
-pub use cli::Args;
+pub use cli::{CliAction, Cmd9p, USAGE};
 pub use config::Config;
 pub use editor::{Editor, EditorMode};
 pub use exec::{CachedStdin, Edit, Program};
@@ -52,8 +52,9 @@ use term::{disable_alternate_screen, disable_bracketed_paste, disable_mouse_supp
 
 /// The environment variable to set to control logging within ad
 pub const LOG_LEVEL_ENV_VAR: &str = "AD_LOG";
+/// The current version of the editor
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub(crate) const UNNAMED_BUFFER: &str = "[No Name]";
 pub(crate) const MAX_NAME_LEN: usize = 50;
 

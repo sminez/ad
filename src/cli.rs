@@ -1,9 +1,9 @@
 //! CLI parser
 //! See main.rs for the usage of the parsed arguments
-use crate::VERSION;
-use std::{env, fs};
+use lexopt::{Parser, prelude::*};
+use std::{fs, path::PathBuf};
 
-const USAGE: &str = "\
+pub const USAGE: &str = "\
 usage: ad [options] [file ...]     Edit file(s)
 
 options:
@@ -19,60 +19,172 @@ options:
 ";
 
 #[derive(Debug)]
-pub enum Args {
-    OpenEditor { files: Vec<String> },
-    RunScript { script: String, files: Vec<String> },
-    NineP { args: Vec<String> },
+pub enum CliAction {
+    OpenEditor {
+        files: Vec<PathBuf>,
+    },
+    RunScript {
+        script: String,
+        files: Vec<PathBuf>,
+    },
+    NineP {
+        aname: String,
+        cmd: Cmd9p,
+        path: String,
+    },
     ListSessions,
     RmSockets,
+    ShowHelp,
+    ShowVersion,
 }
 
-impl Args {
-    pub fn try_parse() -> Result<Self, (String, i32)> {
-        let args = env::args().skip(1);
-        Self::try_parse_iter(args)
+#[derive(Debug)]
+pub enum Cmd9p {
+    Read,
+    Write,
+    List,
+}
+
+impl CliAction {
+    pub fn try_parse() -> Result<Self, String> {
+        let mut parser = Parser::from_env();
+
+        Self::try_from_parser(&mut parser).map_err(|e| e.to_string())
     }
 
-    fn try_parse_iter(mut args: impl Iterator<Item = String>) -> Result<Self, (String, i32)> {
-        match args.next().as_deref() {
-            Some("-e" | "--expression") => match args.next() {
-                Some(script) => Ok(Args::RunScript {
-                    script,
-                    files: args.collect(),
-                }),
-                None => Err(("no script provided".to_string(), 1)),
-            },
+    fn try_from_parser(parser: &mut Parser) -> Result<Self, lexopt::Error> {
+        let mut action: Option<CliAction> = None;
 
-            Some("-f" | "--script-file") => match args.next() {
-                Some(fname) => match fs::read_to_string(&fname) {
-                    Ok(script) => Ok(Args::RunScript {
-                        script,
-                        files: args.collect(),
-                    }),
-                    Err(e) => Err((format!("unable to load script file from {fname}: {e}"), 1)),
-                },
-                None => Err(("no script file provided".to_string(), 1)),
-            },
-
-            Some("-9p") => Ok(Args::NineP {
-                args: args.collect(),
-            }),
-
-            Some("-l" | "--list-sessions") => Ok(Args::ListSessions),
-            Some("--rm-sockets") => Ok(Args::RmSockets),
-
-            Some("-h" | "--help") => Err((USAGE.to_string(), 0)),
-            Some("-v" | "--version") => Err((format!("ad v{VERSION}"), 0)),
-
-            Some(fname) => {
-                let mut files = vec![fname.to_string()];
-                files.extend(args);
-
-                Ok(Args::OpenEditor { files })
+        loop {
+            // If we've already parsed a valid action and there are arguments remaining then the
+            // command line as a whole is invalid.
+            if action.is_some()
+                && let Some(raw_args) = parser.try_raw_args()
+            {
+                match raw_args.peek() {
+                    Some(arg) => return Err(lexopt::Error::UnexpectedArgument(arg.to_os_string())),
+                    None => break,
+                }
             }
-            None => Ok(Args::OpenEditor { files: Vec::new() }),
+
+            if let Some(true) = is_9p_option(parser) {
+                action = Some(parse_9p(parser)?);
+                continue;
+            }
+
+            match parser.next()? {
+                Some(arg) => match arg {
+                    Short('e') | Long("expression") => {
+                        let script = parser
+                            .value()?
+                            .into_string()
+                            .map_err(lexopt::Error::NonUnicodeValue)?;
+                        let files: Vec<PathBuf> = match parser.values() {
+                            Ok(vals) => vals.map(PathBuf::from).collect(),
+                            Err(_) => Vec::new(),
+                        };
+                        action = Some(CliAction::RunScript { script, files });
+                    }
+
+                    Short('f') | Long("script-file") => {
+                        let fname = parser.value()?;
+                        match fs::read_to_string(&fname) {
+                            Ok(script) => {
+                                let files: Vec<PathBuf> = match parser.values() {
+                                    Ok(vals) => vals.map(PathBuf::from).collect(),
+                                    Err(_) => Vec::new(),
+                                };
+                                action = Some(CliAction::RunScript { script, files });
+                            }
+
+                            Err(e) => {
+                                return Err(lexopt::Error::from(format!(
+                                    "unable to load script file from {}: {e}",
+                                    fname.to_string_lossy()
+                                )));
+                            }
+                        }
+                    }
+
+                    Short('l') | Long("list-sessions") => action = Some(CliAction::ListSessions),
+                    Short('v') | Long("version") => action = Some(CliAction::ShowVersion),
+                    Short('h') | Long("help") => action = Some(CliAction::ShowHelp),
+                    Long("rm-sockets") => action = Some(CliAction::RmSockets),
+
+                    Value(fname) if action.is_none() => {
+                        let files: Vec<PathBuf> = match parser.values() {
+                            Ok(vals) => std::iter::once(fname)
+                                .chain(vals)
+                                .map(PathBuf::from)
+                                .collect(),
+                            Err(_) => vec![PathBuf::from(fname)],
+                        };
+
+                        action = Some(CliAction::OpenEditor { files });
+                    }
+
+                    _ => return Err(arg.unexpected()),
+                },
+
+                None => break,
+            }
         }
+
+        Ok(action.unwrap_or_else(|| CliAction::OpenEditor { files: Vec::new() }))
     }
+}
+
+fn is_9p_option(parser: &mut Parser) -> Option<bool> {
+    let mut raw = parser.try_raw_args()?;
+    let arg = raw.peek()?.to_str()?;
+
+    if arg == "-9p" {
+        raw.next(); // consume the -9p arg
+        Some(true)
+    } else {
+        Some(false)
+    }
+}
+
+fn parse_9p(parser: &mut Parser) -> Result<CliAction, lexopt::Error> {
+    let arg = parser.next()?.ok_or(lexopt::Error::MissingValue {
+        option: Some("9p".into()),
+    })?;
+
+    let mut aname = String::new();
+
+    let next = match arg {
+        Short('A') => {
+            aname = parser
+                .value()?
+                .into_string()
+                .map_err(lexopt::Error::NonUnicodeValue)?;
+            parser.next()?
+        }
+        Value(val) => Some(Value(val)),
+        _ => return Err(arg.unexpected()),
+    };
+
+    let cmd = match next {
+        Some(arg) => match arg {
+            Value(cmd) => match cmd.to_str() {
+                Some("read") => Cmd9p::Read,
+                Some("write") => Cmd9p::Write,
+                Some("ls") => Cmd9p::List,
+                _ => return Err(Value(cmd).unexpected()),
+            },
+            _ => return Err(arg.unexpected()),
+        },
+        None => return Err(lexopt::Error::from("no command provided for -9p")),
+    };
+
+    let path = match parser.next()? {
+        Some(Value(s)) => s.into_string().map_err(lexopt::Error::NonUnicodeValue)?,
+        Some(arg) => return Err(arg.unexpected()),
+        None => return Err(lexopt::Error::from("no path provided for -9p")),
+    };
+
+    Ok(CliAction::NineP { aname, cmd, path })
 }
 
 #[cfg(test)]
@@ -97,18 +209,19 @@ mod tests {
     #[test_case("-9p -A foo read ad/buffers/index"; "9p read with aname")]
     #[test_case("-9p -A foo write ad/buffers/1/dot"; "9p write with aname")]
     #[test_case("-9p -A foo ls ad/buffers"; "9p ls with aname")]
-    #[test]
-    fn valid_args(cmd_line: &str) {
-        let it = cmd_line.split_whitespace().map(|s| s.to_string());
-        let res = Args::try_parse_iter(it);
-        assert!(res.is_ok(), "{res:?}");
-    }
-
-    // help and version return as error cases rather than constructing args
     #[test_case("-h"; "short help")]
     #[test_case("--help"; "long help")]
     #[test_case("-v"; "short version")]
     #[test_case("--version"; "long version")]
+    #[test]
+    fn valid_args(cmd_line: &str) {
+        let it = cmd_line.split_whitespace().map(|s| s.to_string());
+        let mut parser = Parser::from_args(it);
+        let res = CliAction::try_from_parser(&mut parser);
+
+        assert!(res.is_ok(), "{res:?}");
+    }
+
     // actually invalid argument cases
     #[test_case("-e"; "edit script with no script")]
     #[test_case("--expression"; "edit script with no script long")]
@@ -119,7 +232,9 @@ mod tests {
     #[test]
     fn invalid_args(cmd_line: &str) {
         let it = cmd_line.split_whitespace().map(|s| s.to_string());
-        let res = Args::try_parse_iter(it);
+        let mut parser = Parser::from_args(it);
+        let res = CliAction::try_from_parser(&mut parser);
+
         assert!(res.is_err(), "{res:?}");
     }
 }
