@@ -144,7 +144,7 @@ impl Default for EditorConfig {
             status_timeout: 3,
             double_click_ms: 200,
             minibuffer_lines: 8,
-            find_command: "fd -t f".to_string(),
+            find_command: "fd --hidden".to_string(),
         }
     }
 }
