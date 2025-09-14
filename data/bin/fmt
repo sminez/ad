@@ -3,20 +3,20 @@
 source "$HOME/.ad/lib/ad.sh"
 
 requireAd
-fname=$(bufRead "$bufid" filename)
-addr=$(bufRead "$bufid" addr)
+fname=$(bufRead "$AD_BUFID" filename)
+addr=$(bufRead "$AD_BUFID" addr)
 maybext="${fname##*.}"
 
 case $maybext in
-  dart) formatted=$(bufRead "$bufid" body | dart format) ;;
-  json) formatted=$(bufRead "$bufid" body | jq) ;;
-  rs) formatted=$(bufRead "$bufid" body | rustfmt --edition 2021) ;;
+  dart) formatted=$(bufRead "$AD_BUFID" body | dart format) ;;
+  json) formatted=$(bufRead "$AD_BUFID" body | jq) ;;
+  rs) formatted=$(bufRead "$AD_BUFID" body | rustfmt --edition 2021) ;;
   *) adError "no format rules found for '$maybext'" ;;
 esac
 
 if [[ -n "$formatted" ]]; then
-  echo -n "," | bufWrite "$bufid" xaddr
-  echo -n "$formatted" | bufWrite "$bufid" xdot
-  echo -n "$addr" | bufWrite "$bufid" addr
+  echo -n "," | bufWrite "$AD_BUFID" xaddr
+  echo -n "$formatted" | bufWrite "$AD_BUFID" xdot
+  echo -n "$addr" | bufWrite "$AD_BUFID" addr
   adCtl "viewport-center"
 fi

@@ -18,7 +18,7 @@ if [ -e "$root/Cargo.toml" ]; then
   lnum="$(echo "$line" | cut -d':' -f2)"
   col="$(echo "$line" | cut -d':' -f3)"
   adCtl "open $root/$fname"
-  bufid=$(currentBufferId)
+  bufid="$(currentBufferId)"
   echo -n "$lnum:$col" | bufWrite "$bufid" "addr"
   adCtl "viewport-center"
 else

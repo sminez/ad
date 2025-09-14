@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/usr/bin/env sh
 
 # This script can be used to send code from an ad buffer to the ad_repl (+win) buffer 
 # and executed. 
@@ -16,7 +16,7 @@ requireAd
 replbuf=$(9p read ad/buffers/index | grep win | cut -c 1)
 
 # read in selected lines and get length 
-varin=$(bufRead "$bufid" dot)
+varin=$(bufRead "$AD_BUFID" dot)
 nlines=$(echo "$varin" | wc -l)
 
 # send to ad_repl buffer

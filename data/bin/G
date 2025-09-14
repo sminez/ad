@@ -9,12 +9,12 @@ requireAd
 pat="$*"
 if [[ -z "$*" ]]; then
   adCtl "expand-dot"
-  pat="$(bufRead "$bufid" dot)"
+  pat="$(bufRead "$AD_BUFID" dot)"
 fi
 
 dirname="$(git rev-parse --show-toplevel)"
 if [[ ! -d "$dirname" ]]; then
-  fname="$(bufRead "$bufid" filename)"
+  fname="$(bufRead "$AD_BUFID" filename)"
   if [[ -d "$fname" ]]; then
     dirname="$fname"
   else
