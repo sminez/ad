@@ -22,7 +22,7 @@
 
 requireAd
 
-fname="$(bufRead "$bufid" filename)"
+fname="$(bufRead "$AD_BUFID" filename)"
 f="$(basename "$fname")"
 d="$(dirname "$fname")"
 
@@ -45,8 +45,8 @@ case "$1" in
     ;;
 esac
 
-echo "$d/$toLoad" | bufWrite "$bufid" filename
+echo "$d/$toLoad" | bufWrite "$AD_BUFID" filename
 adCtl "Get"
 adEdit "0 i/[PrevSlide] [NextSlide]\n\n/"
-curToBof "$bufid"
-markClean "$bufid"
+curToBof "$AD_BUFID"
+markClean "$AD_BUFID"

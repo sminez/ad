@@ -21,7 +21,7 @@ adError() {
 
 # Exit with an error message if this script was not launched from ad itself
 requireAd() {
-  [[ -z "$bufid" ]] && adError "need to be run from inside of ad"
+  [[ -z "$AD_PID" ]] && adError "need to be run from inside of ad"
 }
 
 # Read the contents of an fsys file for the specified buffer

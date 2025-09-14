@@ -37,14 +37,8 @@ pub trait System: fmt::Debug {
     fn kill_child(&mut self, idx: usize);
 
     /// Run an external command and collect its output.
-    fn run_command_blocking(
-        &self,
-        cmd: &str,
-        cwd: &Path,
-        bufid: usize,
-        bufname: &str,
-    ) -> io::Result<String> {
-        run_command_blocking(cmd, cwd, bufid, bufname)
+    fn run_command_blocking(&self, cmd: &str, cwd: &Path, bufid: usize) -> io::Result<String> {
+        run_command_blocking(cmd, cwd, bufid)
     }
 
     /// Run an external command and append its output to the output buffer for `bufid` from a
@@ -55,10 +49,9 @@ pub trait System: fmt::Debug {
         cmd: &str,
         cwd: &Path,
         bufid: usize,
-        bufname: &str,
         tx: Sender<Event>,
     ) -> io::Result<()> {
-        let child = run_command(cmd, cwd, bufid, bufname, tx)?;
+        let child = run_command(cmd, cwd, bufid, tx)?;
         self.store_child_handle(cmd, child);
 
         Ok(())
@@ -71,9 +64,8 @@ pub trait System: fmt::Debug {
         input: &str,
         cwd: &Path,
         bufid: usize,
-        bufname: &str,
     ) -> io::Result<String> {
-        pipe_through_command(cmd, input, cwd, bufid, bufname)
+        pipe_through_command(cmd, input, cwd, bufid)
     }
 }
 
@@ -212,7 +204,7 @@ impl System for DefaultSystem {
     }
 }
 
-fn prepare_command(cmd: &str, cwd: &Path, bufid: usize, bufname: &str) -> Command {
+fn prepare_command(cmd: &str, cwd: &Path, bufid: usize) -> Command {
     let mut args: Vec<&str> = cmd.split_whitespace().collect();
     if args.is_empty() {
         return Command::new("");
@@ -224,17 +216,16 @@ fn prepare_command(cmd: &str, cwd: &Path, bufid: usize, bufname: &str) -> Comman
     let mut command = Command::new(cmd);
     command
         .env("PATH", format!("{home}/.ad/bin:{path}"))
-        .env("ad-pid", crate::pid().to_string())
-        .env("bufid", bufid.to_string())
-        .env("bufname", bufname)
+        .env("AD_PID", crate::pid().to_string())
+        .env("AD_BUFID", bufid.to_string())
         .current_dir(cwd)
         .args(args);
 
     command
 }
 
-fn run_command_blocking(cmd: &str, cwd: &Path, bufid: usize, bufname: &str) -> io::Result<String> {
-    let output = prepare_command(cmd, cwd, bufid, bufname).output()?;
+fn run_command_blocking(cmd: &str, cwd: &Path, bufid: usize) -> io::Result<String> {
+    let output = prepare_command(cmd, cwd, bufid).output()?;
     let mut stdout = String::from_utf8(output.stdout).unwrap_or_default();
     let stderr = String::from_utf8(output.stderr).unwrap_or_default();
     stdout.push_str(&stderr);
@@ -242,14 +233,8 @@ fn run_command_blocking(cmd: &str, cwd: &Path, bufid: usize, bufname: &str) -> i
     Ok(normalize_line_endings(stdout))
 }
 
-fn run_command(
-    cmd: &str,
-    cwd: &Path,
-    bufid: usize,
-    bufname: &str,
-    tx: Sender<Event>,
-) -> io::Result<Child> {
-    let mut child = prepare_command(cmd, cwd, bufid, bufname)
+fn run_command(cmd: &str, cwd: &Path, bufid: usize, tx: Sender<Event>) -> io::Result<Child> {
+    let mut child = prepare_command(cmd, cwd, bufid)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -289,9 +274,8 @@ pub fn pipe_through_command(
     input: &str,
     cwd: &Path,
     bufid: usize,
-    bufname: &str,
 ) -> io::Result<String> {
-    let mut child = prepare_command(cmd, cwd, bufid, bufname)
+    let mut child = prepare_command(cmd, cwd, bufid)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
