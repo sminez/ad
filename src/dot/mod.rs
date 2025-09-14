@@ -114,6 +114,27 @@ impl Dot {
         self.contains(&rng.start) && self.contains(&rng.end)
     }
 
+    /// Apply an offset to the cursors within this [Dot] using saturating subtraction.
+    ///
+    /// [Dot::clamp_idx] will still need to be called in order to ensure that the result
+    /// is within bounds for the given buffer.
+    pub fn with_offset_saturating(mut self, offset: isize) -> Self {
+        match &mut self {
+            Dot::Cur { c } if offset >= 0 => c.idx += offset as usize,
+            Dot::Cur { c } => c.idx = c.idx.saturating_sub(-offset as usize),
+            Dot::Range { r } if offset >= 0 => {
+                r.start.idx += offset as usize;
+                r.end.idx += offset as usize;
+            }
+            Dot::Range { r } => {
+                r.start.idx = r.start.idx.saturating_sub(-offset as usize);
+                r.end.idx = r.end.idx.saturating_sub(-offset as usize);
+            }
+        }
+
+        self
+    }
+
     /// The address representation of this dot in the form that is enterable by the user.
     /// Indices are 1-based rather than their internal 0-based representation.
     pub fn addr(&self, b: &Buffer) -> String {
@@ -201,6 +222,14 @@ impl Dot {
         Dot::Cur { c: self.last_cur() }
     }
 
+    /// The [Dot] equivalent of [Dot::active_cur].
+    #[inline]
+    pub fn collapse_to_active_cur(&self) -> Self {
+        Dot::Cur {
+            c: self.active_cur(),
+        }
+    }
+
     /// Swap the active cursor between `start` and `end` of [Range] dots.
     #[inline]
     pub fn flip(&mut self) {
@@ -210,7 +239,7 @@ impl Dot {
     }
 
     /// If both ends of a Range match then replace with a single Cur
-    pub(crate) fn collapse_null_range(self) -> Self {
+    pub fn collapse_null_range(self) -> Self {
         match self {
             Dot::Range {
                 r: Range { start, end, .. },
@@ -220,7 +249,7 @@ impl Dot {
     }
 
     /// Clamp this dot to be valid for the given Buffer
-    pub(crate) fn clamp_idx(&mut self, max_idx: usize) {
+    pub fn clamp_idx(&mut self, max_idx: usize) {
         match self {
             Dot::Cur { c } => c.clamp_idx(max_idx),
             Dot::Range { r } => {

@@ -1212,17 +1212,56 @@ impl Buffer {
         }
     }
 
-    /// Insert a string into the buffer using the current xdot rather than dot.
+    /// Insert a string into the buffer using the current xdot rather than dot,
+    /// preserving the current dot where possible.
+    ///
+    /// If xdot and dot intersect then the user's current selection is being
+    /// modified. Rather than preserve _part_ of the original selection we
+    /// instead collapse to the furthest point in the buffer that was part of
+    /// the original selection. Or, in the case that xdot fully contains dot,
+    /// we place the cursor at the end of the newly inserted text.
+    ///
+    /// DOT    |---X-| ;   |---|   ; |------X| ; |-X---|
+    /// XDOT |----|    ; |-------X ;   |---|   ;   |----|
+    ///
+    /// We determine the final cursor we collapse to based on the start of xdot
+    /// and the offset coming from the text being inserted.
     pub(crate) fn insert_xdot(&mut self, s: String) {
-        // We convert the current dot (character offsets) to an address (line, column) in order to
-        // attempt to preserve the correct cursor position if xdot ends up altering buffer content
-        // before the current dot.
-        // This can still result in the resulting dot being incorrect if the number of lines in the
-        // buffer changes as a result of this insert.
-        let mut addr = Addr::from_dot(self.dot, self);
+        let mut offset = s.chars().count() as isize;
+
+        if self.dot.as_range().intersects_range(&self.xdot.as_range()) {
+            if self.xdot.first_cur() > self.dot.first_cur()
+                && self.xdot.last_cur() >= self.dot.last_cur()
+            {
+                // The final case shown above: we need to back up a character in
+                // order to land on the last character of the existing dot rather
+                // than the first character of the inserted text.
+                offset = -1;
+            }
+
+            self.dot = self.xdot.collapse_to_first_cur();
+        } else if self.xdot.first_cur() > self.dot.last_cur() {
+            // Nothing to update for dot.
+            // DOT   |---|
+            // XDOT         |----|
+            offset = 0;
+        } else {
+            // In this case, the change in buffer length needs to account for
+            // the text being removed as well as what is being inserted.
+            // DOT          |---|
+            // XDOT  |----|
+            offset -= self.xdot.n_chars() as isize;
+            if self.xdot.is_cur() {
+                // Cursors insert directly into the buffer without removing the character
+                // they are on.
+                offset += 1;
+            }
+        };
+
+        let dot_after_edit = self.dot.with_offset_saturating(offset);
         self.dot = self.xdot;
         self.handle_action(Action::InsertString { s }, Source::Fsys);
-        (self.xdot, self.dot) = (self.dot, self.map_addr(&mut addr));
+        (self.xdot, self.dot) = (self.dot, dot_after_edit);
         self.dot.clamp_idx(self.txt.len_chars()); // xdot clamped as part of handling the insert
     }
 }
@@ -1252,15 +1291,12 @@ pub(crate) mod tests {
     const LINE_1: &str = "This is a test";
     const LINE_2: &str = "involving multiple lines";
 
-    #[test_case(0, 1; "n0")]
-    #[test_case(5, 1; "n5")]
-    #[test_case(10, 2; "n10")]
-    #[test_case(13, 2; "n13")]
-    #[test_case(731, 3; "n731")]
-    #[test_case(930, 3; "n930")]
-    #[test]
-    fn n_digits_works(n: usize, digits: usize) {
-        assert_eq!(n_digits(n), digits);
+    fn c(idx: usize) -> Cur {
+        Cur { idx }
+    }
+
+    fn r(from: usize, to: usize, from_active: bool) -> Range {
+        Range::from_cursors(c(from), c(to), from_active)
     }
 
     pub fn buffer_from_lines(lines: &[&str]) -> Buffer {
@@ -1276,6 +1312,17 @@ pub(crate) mod tests {
 
     fn simple_initial_buffer() -> Buffer {
         buffer_from_lines(&[LINE_1, LINE_2])
+    }
+
+    #[test_case(0, 1; "n0")]
+    #[test_case(5, 1; "n5")]
+    #[test_case(10, 2; "n10")]
+    #[test_case(13, 2; "n13")]
+    #[test_case(731, 3; "n731")]
+    #[test_case(930, 3; "n930")]
+    #[test]
+    fn n_digits_works(n: usize, digits: usize) {
+        assert_eq!(n_digits(n), digits);
     }
 
     #[test]
@@ -1451,10 +1498,6 @@ pub(crate) mod tests {
         assert_eq!(lines, original_lines);
     }
 
-    fn c(idx: usize) -> Cur {
-        Cur { idx }
-    }
-
     #[test]
     fn undo_string_insert_works() {
         let initial_content = "foo foo foo\n";
@@ -1622,5 +1665,79 @@ pub(crate) mod tests {
             b.txt.to_string(),
             "// does it need to be a doc comment? that is a long enough line to\n"
         );
+    }
+
+    #[test_case(
+        Dot::from(r(18, 23, false)), "this is a minimal foo",
+        r(5, 16, false).into(), "is a minimal";
+        "range after"
+    )]
+    #[test_case(
+        Dot::from(r(0, 2, false)), "foos is a minimal buffer",
+        r(5, 16, false).into(), "is a minimal";
+        "range before equal"
+    )]
+    #[test_case(
+        Dot::from(r(0, 3, false)), "foo is a minimal buffer",
+        r(4, 15, false).into(), "is a minimal";
+        "range before truncate"
+    )]
+    #[test_case(
+        Dot::from(r(0, 1, false)), "foois is a minimal buffer",
+        r(6, 17, false).into(), "is a minimal";
+        "range before expand"
+    )]
+    #[test_case(
+        Dot::from(r(0, 6, false)), "foo a minimal buffer",
+        c(3).into(), " ";
+        "range before intersect"
+    )]
+    #[test_case(
+        Dot::from(r(14, 19, false)), "this is a minifooffer",
+        c(13).into(), "i";
+        "range after intersect"
+    )]
+    #[test_case(
+        Dot::from(r(8, 9, false)), "this is foominimal buffer",
+        c(11).into(), "m";
+        "range inside dot"
+    )]
+    #[test_case(
+        Dot::from(r(4, 18, false)), "thisfoouffer",
+        c(7).into(), "u";
+        "range containing dot"
+    )]
+    #[test_case(
+        Dot::from(c(4)), "thisfoo is a minimal buffer",
+        r(8, 19, false).into(), "is a minimal";
+        "cursor before dot"
+    )]
+    #[test_case(
+        Dot::from(c(18)), "this is a minimal foobuffer",
+        r(5, 16, false).into(), "is a minimal";
+        "cursor after dot"
+    )]
+    #[test_case(
+        Dot::from(c(10)), "this is a foominimal buffer",
+        c(13).into(), "m";
+        "cursor inside dot"
+    )]
+    #[test]
+    fn insert_xdot_sets_correct_dot(
+        xdot: Dot,
+        expected_content: &str,
+        expected_dot: Dot,
+        expected_dot_content: &str,
+    ) {
+        let mut b = Buffer::new_virtual(0, "test", "this is a minimal buffer", Default::default());
+        b.xdot = xdot;
+        b.dot = r(5, 16, false).into();
+        assert_eq!(b.dot_contents(), "is a minimal");
+
+        b.insert_xdot("foo".into());
+
+        assert_eq!(b.str_contents(), expected_content);
+        assert_eq!(b.dot, expected_dot);
+        assert_eq!(b.dot_contents(), expected_dot_content);
     }
 }
