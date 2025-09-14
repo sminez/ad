@@ -25,10 +25,26 @@ pub struct Client {
 }
 
 impl Client {
-    /// Create a new client connected to `ad` over its 9p unix socket
+    /// Create a new client connected to `ad` over it's 9p unix socket
     pub fn new() -> io::Result<Self> {
+        let ns = match env::var("AD_PID") {
+            Ok(pid) => format!("ad-{pid}"),
+            Err(_) => "ad".to_string(),
+        };
+
         Ok(Self {
-            inner: UnixClient::new_unix("ad", "")?,
+            inner: UnixClient::new_unix(ns, "")?,
+        })
+    }
+
+    /// Create a new client connected to the `ad` session with the given pid
+    /// over it's 9p unix socket.
+    ///
+    /// When running under ad, the [Client::new] method will automatically find
+    /// and connect to it's parent session.
+    pub fn new_for_pid(pid: &str) -> io::Result<Self> {
+        Ok(Self {
+            inner: UnixClient::new_unix(format!("ad-{pid}"), "")?,
         })
     }
 
