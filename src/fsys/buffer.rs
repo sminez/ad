@@ -205,7 +205,8 @@ impl BufferNodes {
                 .expect("FILENAME to be valid");
             let id = &b.str_id;
 
-            entries.push(format!("{id}\t{filename}\n"));
+            // filename already contains a trailing newline
+            entries.push(format!("{id}\t{filename}"));
         }
 
         entries.join("")

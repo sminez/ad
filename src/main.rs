@@ -143,7 +143,7 @@ fn run_9p_oneshot(args: Vec<String>) {
     }
 }
 
-/// Depending on the requested namespace and the presence or absence of an "ad-pid" env var we may
+/// Depending on the requested namespace and the presence or absence of an "AD_PID" env var we may
 /// need to adjust the ns to include an ad PID
 fn client_for_ns(ns: &str, aname: String) -> io::Result<UnixClient> {
     if ns != "ad" {
@@ -151,7 +151,7 @@ fn client_for_ns(ns: &str, aname: String) -> io::Result<UnixClient> {
     }
 
     let mut ns = ns.to_string();
-    if let Ok(pid) = env::var("ad-pid") {
+    if let Ok(pid) = env::var("AD_PID") {
         ns.push('-');
         ns.push_str(&pid);
     } else {
