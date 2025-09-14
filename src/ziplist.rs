@@ -24,7 +24,8 @@ macro_rules! pop_where {
         let placeholder = ::std::mem::take(&mut $self.$lst);
         let mut remaining = ::std::collections::VecDeque::default();
         let mut popped = None;
-        let pred = $($pred)+;
+        #[allow(unused_mut)]
+        let mut pred = $($pred)+;
 
         for item in placeholder.into_iter() {
             if pred(&item) {
@@ -317,8 +318,8 @@ impl<T> ZipList<T> {
     /// is a single element remaining as the current focus.
     pub fn remove_where_with_default(
         &mut self,
-        pred: impl Fn(&T) -> bool,
-        default: impl Fn() -> T,
+        mut pred: impl FnMut(&T) -> bool,
+        mut default: impl FnMut() -> T,
     ) -> Option<T> {
         if let Some(found) = pop_where!(self, up, |elem: &T| pred(elem)) {
             return Some(found);
@@ -340,14 +341,14 @@ impl<T> ZipList<T> {
     }
 
     /// Map a function over all elements in this [ZipList], returning a new one.
-    pub fn map<F, U>(self, f: F) -> ZipList<U>
+    pub fn map<F, U>(self, mut f: F) -> ZipList<U>
     where
-        F: Fn(T) -> U,
+        F: FnMut(T) -> U,
     {
         ZipList {
             focus: f(self.focus),
-            up: self.up.into_iter().map(&f).collect(),
-            down: self.down.into_iter().map(&f).collect(),
+            up: self.up.into_iter().map(&mut f).collect(),
+            down: self.down.into_iter().map(&mut f).collect(),
         }
     }
 
@@ -356,14 +357,14 @@ impl<T> ZipList<T> {
     /// after it, if there are no elements after then focus moves to the first
     /// remaining element before. If no elements satisfy the predicate then
     /// None is returned.
-    pub fn filter<F>(self, f: F) -> Option<Self>
+    pub fn filter<F>(self, mut f: F) -> Option<Self>
     where
-        F: Fn(&T) -> bool,
+        F: FnMut(&T) -> bool,
     {
         let new_stack = Self {
             focus: self.focus,
-            up: self.up.into_iter().filter(&f).collect(),
-            down: self.down.into_iter().filter(&f).collect(),
+            up: self.up.into_iter().filter(&mut f).collect(),
+            down: self.down.into_iter().filter(&mut f).collect(),
         };
 
         if f(&new_stack.focus) {
@@ -374,12 +375,12 @@ impl<T> ZipList<T> {
         }
     }
 
-    pub fn filter_unchecked<F>(&mut self, f: F)
+    pub fn filter_unchecked<F>(&mut self, mut f: F)
     where
-        F: Fn(&T) -> bool,
+        F: FnMut(&T) -> bool,
     {
-        self.up.retain(&f);
-        self.down.retain(&f);
+        self.up.retain(&mut f);
+        self.down.retain(&mut f);
 
         if !f(&self.focus) {
             self.remove_focused_unchecked();
@@ -474,9 +475,9 @@ impl<T> ZipList<T> {
     ///
     /// Returns true if the focused element changed. If no matching elements are found,
     /// the ZipList will be left in its original state and false is returned.
-    pub fn focus_element_by<F>(&mut self, f: F) -> bool
+    pub fn focus_element_by<F>(&mut self, mut f: F) -> bool
     where
-        F: Fn(&T) -> bool,
+        F: FnMut(&T) -> bool,
     {
         for _ in 0..self.len() {
             if f(&self.focus) {
@@ -492,9 +493,9 @@ impl<T> ZipList<T> {
     ///
     /// If no matching elements are found, the ZipList will be left in
     /// its original state.
-    pub fn focus_element_by_mut<F>(&mut self, f: F) -> bool
+    pub fn focus_element_by_mut<F>(&mut self, mut f: F) -> bool
     where
-        F: Fn(&mut T) -> bool,
+        F: FnMut(&mut T) -> bool,
     {
         for _ in 0..self.len() {
             if f(&mut self.focus) {
@@ -558,9 +559,9 @@ impl<T> ZipList<T> {
 impl<T: Clone> ZipList<T> {
     /// Extract elements satisfying a predicate into a Vec, leaving remaining
     /// elements in their original stack position.
-    pub fn extract<F>(&self, f: F) -> (Option<Self>, Vec<T>)
+    pub fn extract<F>(&self, mut f: F) -> (Option<Self>, Vec<T>)
     where
-        F: Fn(&T) -> bool,
+        F: FnMut(&T) -> bool,
     {
         let mut extracted = Vec::new();
         let mut new_stack = Self {
