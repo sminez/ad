@@ -1,20 +1,24 @@
 use ad_client::{Client, LogEvent};
+use anyhow::Context;
 use std::{
     env,
-    io::{self, BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Write},
     process::exit,
     thread::spawn,
 };
 use subprocess::{Popen, PopenConfig, Redirection};
 
-fn main() -> io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!("no command provided to watch-ad");
         exit(1);
     }
 
-    let dir = env::current_dir()?.display().to_string();
+    let dir = env::current_dir()
+        .context("unable to determine working directory")?
+        .display()
+        .to_string();
 
     let mut client = match Client::new() {
         Ok(client) => client,
@@ -24,8 +28,13 @@ fn main() -> io::Result<()> {
         }
     };
 
-    client.open_in_new_window(format!("{dir}/+watch"))?;
-    let buffer_id = client.current_buffer()?;
+    client
+        .open_in_new_window(format!("{dir}/+watch"))
+        .context("unable to open +watch window")?;
+
+    let buffer_id = client
+        .current_buffer()
+        .context("unable to determine current buffer")?;
     let int_id: usize = buffer_id.parse().unwrap();
 
     clear_and_rerun(&mut client, &buffer_id, &args)?;
@@ -35,7 +44,9 @@ fn main() -> io::Result<()> {
             LogEvent::Close(id) if id == int_id => break,
 
             LogEvent::Save(id) => {
-                let fname = client.read_filename(&id.to_string())?;
+                let fname = client
+                    .read_filename(&id.to_string())
+                    .context("unable to read filename of saved buffer")?;
                 if fname.starts_with(&dir) {
                     clear_and_rerun(&mut client, &buffer_id, &args)?;
                 }
@@ -48,10 +59,16 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> io::Result<()> {
-    client.write_xaddr(id, ",")?;
-    client.write_xdot(id, "\n")?;
-    client.ctl("mark-clean", "")?;
+fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> anyhow::Result<()> {
+    client
+        .write_xaddr(id, ",")
+        .context("unable to write xaddr")?;
+    client
+        .write_xdot(id, "\n")
+        .context("unable to write xdot")?;
+    client
+        .ctl("mark-clean", "")
+        .context("unable to mark buffer clean")?;
 
     let mut child = Popen::create(
         args,
@@ -61,9 +78,11 @@ fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> io::Result
             ..Default::default()
         },
     )
-    .map_err(io::Error::other)?;
+    .context("unable to run command")?;
     let stdout = BufReader::new(child.stdout.take().unwrap());
-    let mut w = client.body_writer(id)?;
+    let mut w = client
+        .body_writer(id)
+        .context("unable to create body writer")?;
 
     spawn(move || {
         for res in stdout.lines() {
@@ -78,6 +97,7 @@ fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> io::Result
             }
 
             _ = w.write_all(line.as_bytes());
+            _ = w.mark_clean();
         }
     });
 

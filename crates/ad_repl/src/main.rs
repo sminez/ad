@@ -5,6 +5,7 @@
 //! - Running "clear" will clear the ad buffer
 //! - Running "exit" will close the shell subprocess as well as the ad buffer
 use ad_client::{Client, EventFilter, Outcome, Source};
+use anyhow::Context;
 use std::{
     env,
     fs::File,
@@ -16,7 +17,7 @@ use subprocess::{Popen, PopenConfig, Redirection};
 
 const PROMPT: &str = "% ";
 
-fn main() -> io::Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut client = match Client::new() {
         Ok(client) => client,
         Err(e) => {
@@ -25,8 +26,12 @@ fn main() -> io::Result<()> {
         }
     };
 
-    client.open_in_new_window("+win")?;
-    let buffer_id = client.current_buffer()?;
+    client
+        .open_in_new_window("+repl")
+        .context("unable to create +repl window")?;
+    let buffer_id = client
+        .current_buffer()
+        .context("unable to get current buffer ID")?;
     let mut env_vars: Vec<(String, String)> = env::vars().collect();
     env_vars.push(("prompt".into(), PROMPT.into()));
 
@@ -45,23 +50,30 @@ fn main() -> io::Result<()> {
             ..Default::default()
         },
     )
-    .map_err(io::Error::other)?;
+    .context("unable to spawn rc")?;
 
     let stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
-    let mut w = client.body_writer(&buffer_id)?;
+    let mut w = client
+        .body_writer(&buffer_id)
+        .context("unable to create body writer")?;
+
     spawn(move || {
         _ = copy(&mut stdout, &mut w);
     });
 
-    client.run_event_filter(
-        &buffer_id,
-        Filter {
-            child,
-            buffer_id: buffer_id.clone(),
-            stdin,
-        },
-    )
+    client
+        .run_event_filter(
+            &buffer_id,
+            Filter {
+                child,
+                buffer_id: buffer_id.clone(),
+                stdin,
+            },
+        )
+        .context("event filter died")?;
+
+    Ok(())
 }
 
 struct Filter {

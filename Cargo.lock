@@ -47,6 +47,7 @@ name = "ad_repl"
 version = "0.4.0"
 dependencies = [
  "ad_client",
+ "anyhow",
  "subprocess",
 ]
 
@@ -55,6 +56,7 @@ name = "ad_watch"
 version = "0.2.0"
 dependencies = [
  "ad_client",
+ "anyhow",
  "subprocess",
 ]
 
@@ -93,6 +95,12 @@ name = "anstyle"
 version = "1.0.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "862ed96ca487e809f1c8e5a8447f6ee2cf102f846893800b20cebdf541fc6bbd"
+
+[[package]]
+name = "anyhow"
+version = "1.0.99"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0674a1ddeecb70197781e945de4b3b8ffb61fa939a5597bcf48503737663100"
 
 [[package]]
 name = "autocfg"

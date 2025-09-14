@@ -25,6 +25,7 @@ pub use event::{EventFilter, Outcome};
 #[derive(Debug, Clone)]
 pub struct Client {
     inner: UnixClient,
+    ns: String,
 }
 
 impl Client {
@@ -36,7 +37,8 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix(ns, "")?,
+            inner: UnixClient::new_unix(&ns, "")?,
+            ns,
         })
     }
 
@@ -46,8 +48,11 @@ impl Client {
     /// When running under ad, the [Client::new] method will automatically find
     /// and connect to it's parent session.
     pub fn new_for_pid(pid: &str) -> io::Result<Self> {
+        let ns = format!("ad-{pid}");
+
         Ok(Self {
-            inner: UnixClient::new_unix(format!("ad-{pid}"), "")?,
+            inner: UnixClient::new_unix(&ns, "")?,
+            ns,
         })
     }
 
@@ -187,12 +192,10 @@ impl Client {
     }
 
     /// Create a [Write] impl that can be used to continuously write to the given path
-    pub fn body_writer(&self, bufid: &str) -> io::Result<impl Write + use<>> {
-        let client = UnixClient::new_unix("ad", "")?;
-
+    pub fn body_writer(&self, bufid: &str) -> io::Result<BodyWriter> {
         Ok(BodyWriter {
             path: format!("buffers/{bufid}/body"),
-            client,
+            client: UnixClient::new_unix(&self.ns, "")?,
         })
     }
 }
@@ -202,6 +205,15 @@ impl Client {
 pub struct BodyWriter {
     path: String,
     client: UnixClient,
+}
+
+impl BodyWriter {
+    /// Mark the buffer as being clean
+    pub fn mark_clean(&mut self) -> io::Result<()> {
+        self.client.write("ctl", 0, "mark-clean".as_bytes())?;
+
+        Ok(())
+    }
 }
 
 impl Write for BodyWriter {
@@ -305,6 +317,7 @@ impl SessionMeta {
     pub fn client_for_session(&self) -> io::Result<Client> {
         Ok(Client {
             inner: UnixClient::new_unix(&self.socket_name, "")?,
+            ns: self.socket_name.clone(),
         })
     }
 
