@@ -2,8 +2,8 @@
 //!
 //! See <https://sans-io.readthedocs.io/how-to-sans-io.html> for information on sans-io
 use crate::{
-    sansio::protocol::{Rdata, Rmessage},
     Result,
+    sansio::protocol::{Rdata, Rmessage},
 };
 
 pub mod client;

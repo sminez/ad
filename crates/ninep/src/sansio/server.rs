@@ -1,10 +1,10 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
-    fs::{FileMeta, FileType, Stat, QID_ROOT},
-    sansio::protocol::{
-        Data, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage, MAX_DATA_LEN,
-    },
     Result,
+    fs::{FileMeta, FileType, QID_ROOT, Stat},
+    sansio::protocol::{
+        Data, MAX_DATA_LEN, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
+    },
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
 use std::{

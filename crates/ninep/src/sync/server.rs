@@ -3,16 +3,16 @@
 //!  [0]: std::io::Read
 //!  [1]: std::io::Write
 use crate::{
+    Result,
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat},
     sansio::{
         protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
-            Attached, Either, Session, SessionType, Unattached, E_ALREADY_ATTACHED,
-            E_CREATE_NON_DIR, E_UNKNOWN_FID,
+            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_UNKNOWN_FID, Either, Session,
+            SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
-    Result,
 };
 use simple_coro::CoroState;
 use std::{
@@ -23,11 +23,11 @@ use std::{
     os::unix::net::UnixListener,
     path::PathBuf,
     sync::mpsc::Receiver,
-    thread::{spawn, JoinHandle},
+    thread::{JoinHandle, spawn},
 };
 
 // re-exports
-pub use crate::sansio::server::{socket_dir, socket_path, ClientId, Server};
+pub use crate::sansio::server::{ClientId, Server, socket_dir, socket_path};
 
 /// The outcome of a client attempting to [read](Serve9p::read) a given file.
 #[derive(Debug)]

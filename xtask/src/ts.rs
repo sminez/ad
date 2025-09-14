@@ -1,4 +1,4 @@
-use crate::{err, project_root, DynResult};
+use crate::{DynResult, err, project_root};
 use std::fs;
 
 pub fn lint_ts_queries() -> DynResult {

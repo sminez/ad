@@ -23,12 +23,12 @@
 //! $ 9p read ninep-server/rw
 //! ```
 use ninep::{
+    Result,
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     sync::server::{ClientId, ReadOutcome, Serve9p, Server},
-    Result,
 };
 use std::{
-    sync::{mpsc::channel, Arc, RwLock},
+    sync::{Arc, RwLock, mpsc::channel},
     thread::{sleep, spawn},
     time::{Duration, SystemTime},
 };

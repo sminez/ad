@@ -23,9 +23,9 @@
 //! $ 9p read ninep-server/rw
 //! ```
 use ninep::{
+    Result,
     fs::{FileMeta, IoUnit, Mode, Perm, Stat},
     tokio::server::{AsyncServe9p, ClientId, ReadOutcome, Server},
-    Result,
 };
 use std::{
     sync::{Arc, RwLock},

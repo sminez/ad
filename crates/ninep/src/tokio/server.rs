@@ -3,26 +3,26 @@
 //!  [0]: tokio::io::AsyncRead
 //!  [1]: tokio::io::AsyncWrite
 use crate::{
+    Result,
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat},
     sansio::{
         protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
         server::{
-            Attached, Either, Session, SessionType, Unattached, E_CREATE_NON_DIR, E_UNKNOWN_FID,
+            Attached, E_CREATE_NON_DIR, E_UNKNOWN_FID, Either, Session, SessionType, Unattached,
         },
     },
     tokio::{AsyncNineP, AsyncStream},
-    Result,
 };
 use simple_coro::CoroState;
 use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
     net::{TcpListener, UnixListener},
-    sync::mpsc::{unbounded_channel, Receiver, UnboundedSender},
-    task::{spawn, JoinHandle},
+    sync::mpsc::{Receiver, UnboundedSender, unbounded_channel},
+    task::{JoinHandle, spawn},
 };
 
 // re-exports
-pub use crate::sansio::server::{socket_dir, socket_path, ClientId, Server};
+pub use crate::sansio::server::{ClientId, Server, socket_dir, socket_path};
 
 /// The outcome of a client attempting to [read](AsyncServe9p::read) a given file.
 #[derive(Debug)]

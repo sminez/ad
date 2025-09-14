@@ -1,4 +1,4 @@
-use crate::{dist_dir, project_root, DynResult};
+use crate::{DynResult, dist_dir, project_root};
 use man::prelude::*;
 use std::{fs, path::PathBuf};
 

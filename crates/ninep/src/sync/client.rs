@@ -2,7 +2,7 @@
 use crate::{
     fs::{Mode, Perm, Stat},
     sansio::{
-        client::{err, State, MSIZE},
+        client::{MSIZE, State, err},
         protocol::{Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
     },
     sync::{SyncNineP, SyncStream},

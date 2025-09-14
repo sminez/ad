@@ -1,7 +1,7 @@
 //! A synchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::protocol::{NineP, SharedBuf},
     Result,
+    sansio::protocol::{NineP, SharedBuf},
 };
 use simple_coro::CoroState;
 use std::{

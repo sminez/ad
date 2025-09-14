@@ -1,7 +1,7 @@
 //! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
-    sansio::protocol::{NineP, Rdata, Rmessage, SharedBuf},
     Result,
+    sansio::protocol::{NineP, Rdata, Rmessage, SharedBuf},
 };
 use simple_coro::CoroState;
 use std::{future::Future, io, marker::Unpin};

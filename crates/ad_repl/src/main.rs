@@ -8,7 +8,7 @@ use ad_client::{Client, EventFilter, Outcome, Source};
 use std::{
     env,
     fs::File,
-    io::{self, copy, Write},
+    io::{self, Write, copy},
     process::exit,
     thread::spawn,
 };

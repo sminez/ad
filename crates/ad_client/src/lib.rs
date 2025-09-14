@@ -43,7 +43,7 @@ impl Client {
     }
 
     /// Iterate over the log events emitted by ad
-    pub fn log_events(&mut self) -> io::Result<impl Iterator<Item = io::Result<LogEvent>>> {
+    pub fn log_events(&mut self) -> io::Result<impl Iterator<Item = io::Result<LogEvent>> + use<>> {
         Ok(self
             .inner
             .iter_lines("log")?
@@ -168,7 +168,7 @@ impl Client {
     }
 
     /// Create a [Write] impl that can be used to continuously write to the given path
-    pub fn body_writer(&self, bufid: &str) -> io::Result<impl Write> {
+    pub fn body_writer(&self, bufid: &str) -> io::Result<impl Write + use<>> {
         let client = UnixClient::new_unix("ad", "")?;
 
         Ok(BodyWriter {
@@ -242,7 +242,7 @@ impl FromStr for LogEvent {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unknown log action {action:?}",
-                ))
+                ));
             }
         };
 
