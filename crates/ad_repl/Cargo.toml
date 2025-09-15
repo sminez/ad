@@ -16,6 +16,11 @@ include = [
 keywords = [ "terminal", "editor", "text-editor", ]
 categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
+[[bin]]
+doc = false
+name = "ad-repl"
+path = "src/main.rs"
+
 [dependencies]
 ad_client = { version = "0.4", path = "../ad_client" }
 anyhow = "1.0.99"

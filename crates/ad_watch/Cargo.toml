@@ -5,7 +5,7 @@ edition = "2024"
 
 [[bin]]
 doc = false
-name = "watch-ad"
+name = "ad-watch"
 path = "src/main.rs"
 
 [dependencies]

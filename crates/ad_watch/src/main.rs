@@ -11,7 +11,7 @@ use subprocess::{Popen, PopenConfig, Redirection};
 fn main() -> anyhow::Result<()> {
     let args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
-        eprintln!("no command provided to watch-ad");
+        eprintln!("no command provided to ad-watch");
         exit(1);
     }
 
@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
 
     client
         .open_in_new_window(format!("{dir}/+watch"))
-        .context("unable to open +watch window")?;
+        .context("unable to open +watch buffer")?;
 
     let buffer_id = client
         .current_buffer()
