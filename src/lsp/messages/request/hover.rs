@@ -44,7 +44,7 @@ impl LspRequest for HoverRequest {
             }
         };
 
-        Some(Actions::Single(Action::OpenVirtualFile {
+        Some(Actions::Single(Action::OpenTransientScratch {
             name: LSP_FILE.to_string(),
             txt,
         }))

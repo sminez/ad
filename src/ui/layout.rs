@@ -1159,8 +1159,8 @@ impl Layout {
 
         let scratch_filter = filter.paired_tag_filter();
         b.input_filter = Some(filter);
-        // Deliberately self.scratch.b rather than self.scratch.buffer_mut() as we don't support
-        // attaching an input filter to transient scratch buffers
+        // Deliberately self.scratch.b.main rather than self.scratch.b.buffer_mut() as we don't
+        // support attaching an input filter to transient scratch buffers
         self.scratch.b.main.input_filter = Some(scratch_filter);
 
         true
@@ -1172,6 +1172,8 @@ impl Layout {
             b.input_filter = None;
         }
 
+        // Deliberately self.scratch.b.main rather than self.scratch.b.buffer_mut() as we don't
+        // support attaching an input filter to transient scratch buffers
         self.scratch.b.main.input_filter = None;
     }
 }
