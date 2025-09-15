@@ -388,7 +388,7 @@ where
         f: fn(&Buffer) -> String,
     ) {
         if id == SCRATCH_ID {
-            _ = tx.send(Ok((f)(&self.layout.scratch.b)));
+            _ = tx.send(Ok((f)(self.layout.scratch.b.buffer())));
             return;
         }
 
@@ -409,7 +409,7 @@ where
         f: F,
     ) {
         if id == SCRATCH_ID {
-            (f)(&mut self.layout.scratch.b, s);
+            (f)(self.layout.scratch.b.buffer_mut(), s);
             _ = tx.send(Ok("handled".to_string()));
             return;
         }
@@ -666,6 +666,7 @@ where
             OpenFileInNewWindow { path } => {
                 self.open_file_relative_to_effective_directory(&path, true)
             }
+            OpenTransientScratch { name, txt } => self.layout.open_transient_scratch(name, txt),
             OpenVirtualFile { name, txt } => self.layout.open_virtual(name, txt, true),
             Paste => self.paste_from_clipboard(source),
             Plumb { txt, new_window } => self.plumb(txt, new_window),

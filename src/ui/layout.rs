@@ -174,7 +174,7 @@ impl Layout {
     /// Returns the active buffer or the scratch buffer if it is focused
     pub fn active_buffer(&self) -> &Buffer {
         if self.scratch.is_focused {
-            &self.scratch.b
+            self.scratch.b.buffer()
         } else {
             self.buffers.active()
         }
@@ -183,7 +183,7 @@ impl Layout {
     /// Returns the active buffer or the scratch buffer if it is focused
     pub(crate) fn active_buffer_mut(&mut self) -> &mut Buffer {
         if self.scratch.is_focused {
-            &mut self.scratch.b
+            self.scratch.b.buffer_mut()
         } else {
             self.buffers.active_mut()
         }
@@ -261,6 +261,20 @@ impl Layout {
         assert_invariants!(self);
     }
 
+    /// Open a new transient scratch buffer.
+    ///
+    /// This will replace the layout position of the main scratch buffer without altering it's
+    /// contents. When the transient buffer is closed, the main scratch buffer will be put back.
+    /// See [Scratch::toggle].
+    pub(crate) fn open_transient_scratch(
+        &mut self,
+        name: impl Into<String>,
+        content: impl Into<String>,
+    ) {
+        self.scratch
+            .set_transient(name.into(), content.into(), self.config.clone());
+    }
+
     /// Returns true if this was the last buffer otherwise false.
     ///
     /// Closing a buffer also updates the UI:
@@ -272,7 +286,7 @@ impl Layout {
     ///     first column
     pub(crate) fn close_buffer(&mut self, id: BufferId) -> bool {
         self.scratch.is_focused = false;
-        if id == self.scratch.b.id {
+        if id == self.scratch.b.buffer().id {
             self.scratch.is_visible = false;
             return false;
         }
@@ -337,7 +351,7 @@ impl Layout {
     }
 
     pub(crate) fn focus_id(&mut self, id: BufferId, force_active: bool) {
-        if id == self.scratch.b.id {
+        if id == self.scratch.b.buffer().id {
             self.scratch.is_focused = true;
             self.scratch.is_visible = true;
             return;
@@ -820,7 +834,7 @@ impl Layout {
 
         if self.scratch.is_focused {
             self.scratch.w.view.force_cursor_to_be_in_view(
-                &mut self.scratch.b,
+                self.scratch.b.buffer_mut(),
                 self.scratch.w.n_rows,
                 self.screen_cols,
                 tabstop,
@@ -845,7 +859,7 @@ impl Layout {
 
         if self.scratch.is_focused {
             self.scratch.w.view.clamp_scroll(
-                &mut self.scratch.b,
+                self.scratch.b.buffer_mut(),
                 self.scratch.w.n_rows,
                 self.screen_cols,
                 tabstop,
@@ -870,7 +884,7 @@ impl Layout {
 
         if self.scratch.is_focused {
             self.scratch.w.view.set_viewport(
-                &mut self.scratch.b,
+                self.scratch.b.buffer_mut(),
                 vp,
                 self.scratch.w.n_rows,
                 self.screen_cols,
@@ -910,7 +924,7 @@ impl Layout {
     pub(crate) fn ui_xy(&self) -> (usize, usize) {
         let (x_offset, y_offset) = self.xy_offsets();
         let (x, y) = if self.scratch.is_focused {
-            self.scratch.w.view.ui_xy(&self.scratch.b)
+            self.scratch.w.view.ui_xy(self.scratch.b.buffer())
         } else {
             self.focused_view().ui_xy(self.active_buffer())
         };
@@ -996,7 +1010,7 @@ impl Layout {
     fn cur_from_screen_coords(&mut self, x: usize, y: usize) -> Cur {
         let (x_offset, y_offset) = self.xy_offsets();
         let (b, win) = if self.scratch.is_focused {
-            (&mut self.scratch.b, &mut self.scratch.w)
+            (self.scratch.b.buffer_mut(), &mut self.scratch.w)
         } else {
             (self.buffers.active_mut(), &mut self.cols.focus.wins.focus)
         };
@@ -1063,7 +1077,7 @@ impl Layout {
 
         if self.row_is_scratch(y) {
             apply_scroll(
-                &mut self.scratch.b,
+                self.scratch.b.buffer_mut(),
                 &mut self.scratch.w,
                 self.screen_cols,
                 tabstop,
@@ -1145,7 +1159,9 @@ impl Layout {
 
         let scratch_filter = filter.paired_tag_filter();
         b.input_filter = Some(filter);
-        self.scratch.b.input_filter = Some(scratch_filter);
+        // Deliberately self.scratch.b rather than self.scratch.buffer_mut() as we don't support
+        // attaching an input filter to transient scratch buffers
+        self.scratch.b.main.input_filter = Some(scratch_filter);
 
         true
     }
@@ -1156,7 +1172,7 @@ impl Layout {
             b.input_filter = None;
         }
 
-        self.scratch.b.input_filter = None;
+        self.scratch.b.main.input_filter = None;
     }
 }
 
@@ -1204,10 +1220,30 @@ impl Column {
 /// State for the scratch buffer
 #[derive(Debug)]
 pub(crate) struct Scratch {
-    pub(crate) b: Buffer,
+    pub(crate) b: ScratchBuf,
     pub(super) w: Window,
     pub(super) is_visible: bool,
     pub(super) is_focused: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct ScratchBuf {
+    main: Buffer,
+    transient: Option<Buffer>,
+}
+
+impl ScratchBuf {
+    pub(crate) fn buffer(&self) -> &Buffer {
+        self.transient.as_ref().unwrap_or(&self.main)
+    }
+
+    pub(crate) fn buffer_mut(&mut self) -> &mut Buffer {
+        self.transient.as_mut().unwrap_or(&mut self.main)
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.main.clear();
+    }
 }
 
 impl Scratch {
@@ -1216,15 +1252,30 @@ impl Scratch {
         let n_rows = config.lock().unwrap().minibuffer_lines;
 
         Self {
-            b: Buffer::new_virtual(SCRATCH_ID, "*scratch*", "", config),
+            b: ScratchBuf {
+                main: Buffer::new_virtual(SCRATCH_ID, "*scratch*", "", config),
+                transient: None,
+            },
             w: Window::new(n_rows, SCRATCH_ID),
             is_visible: false,
             is_focused: false,
         }
     }
 
+    fn set_transient(&mut self, name: String, content: String, config: Arc<Mutex<Config>>) {
+        self.b.transient = Some(Buffer::new_virtual(SCRATCH_ID, name, content, config));
+        self.is_visible = true;
+        self.is_focused = true;
+    }
+
     /// Toggle the visibility of the scratch buffer and focus it if opening.
+    ///
+    /// If the scratch buffer was visible and contained a transient buffer, remove it.
     fn toggle(&mut self) {
+        if self.is_visible && self.b.transient.is_some() {
+            self.b.transient = None;
+        }
+
         self.is_visible = !self.is_visible;
         self.is_focused = self.is_visible;
     }

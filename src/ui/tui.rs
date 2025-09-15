@@ -607,7 +607,7 @@ impl<'a> WinIter<'a> {
         cs: &'a ColorScheme,
         style_cache: Rc<RefCell<HashMap<String, String>>>,
     ) -> Self {
-        let b = &scratch.b;
+        let b = scratch.b.buffer();
         let (w_lnum, _) = b.sign_col_dims();
         let rng = if scratch.is_focused {
             load_exec_range

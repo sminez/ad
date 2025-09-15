@@ -103,6 +103,7 @@ pub enum Action {
     NextWindowInColumn,
     OpenFile { path: String },
     OpenFileInNewWindow { path: String },
+    OpenTransientScratch { name: String, txt: String },
     OpenVirtualFile { name: String, txt: String },
     Paste,
     Plumb { txt: String, new_window: bool },
