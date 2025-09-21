@@ -148,9 +148,9 @@ impl PositionEncoding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Coords {
-    start: Position,
-    end: Position,
-    encoding: PositionEncoding,
+    pub(crate) start: Position,
+    pub(crate) end: Position,
+    pub(crate) encoding: PositionEncoding,
 }
 
 impl Coords {
@@ -192,16 +192,32 @@ impl Coords {
     }
 
     pub fn as_addr(&self, b: &Buffer) -> Addr {
-        let (sr, sc) = self.encoding.parse_lsp_position(b, self.start);
-        let (er, ec) = self.encoding.parse_lsp_position(b, self.end);
+        let (row_start, col_start) = self.encoding.parse_lsp_position(b, self.start);
+        let (mut row_end, mut col_end) = self.encoding.parse_lsp_position(b, self.end);
 
-        if (sr, sc) == (er, ec) {
-            Addr::Simple(AddrBase::LineAndColumn(sr, sc).into())
+        if (row_start, col_start) == (row_end, col_end) {
+            Addr::Simple(AddrBase::LineAndColumn(row_start, col_start).into())
         } else {
+            // From the LSP spec on Ranges:
+            //   https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range
+            //
+            // "If you want to specify a range that contains a line including the line ending
+            // character(s) then use an end position denoting the start of the next line."
+            //
+            // This idea of targeting the line ending character(s) by specifying the first
+            // character of the following line doesn't seem self consistent given that the range is
+            // inclusive? Not sure how an LSP server is supposed to genuinely target the first
+            // character of a given line then...
+            // With that in mind, we need to check for this case and filter for when the line is
+            // actually a blank line otherwise removing full lines doesn't work.
+            if col_end == 0 && !b.txt.line_is_blank(row_end) {
+                row_end = row_end.saturating_sub(1);
+                col_end = b.txt.line(row_end).chars().count().saturating_sub(1);
+            }
+
             Addr::Compound(
-                AddrBase::LineAndColumn(sr, sc).into(),
-                // LSP ranges include the end position
-                AddrBase::LineAndColumn(er, ec - 1).into(),
+                AddrBase::LineAndColumn(row_start, col_start).into(),
+                AddrBase::LineAndColumn(row_end, col_end).into(),
             )
         }
     }

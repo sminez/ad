@@ -352,7 +352,7 @@ impl Regex {
 
     #[inline]
     fn handle_save(&mut self, t: Thread, s: usize, sp: usize, ch: char, initial: bool, rev: bool) {
-        if (!rev && s % 2 == 0) || (rev && s % 2 == 1) {
+        if (!rev && s.is_multiple_of(2)) || (rev && !s.is_multiple_of(2)) {
             let sm = self.sm_update(t.sm, s, sp, initial, rev);
             let th = match t.assertion {
                 Some(a) => assert_thread(t.pc + 1, sm, a),

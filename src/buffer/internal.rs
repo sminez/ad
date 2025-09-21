@@ -468,6 +468,16 @@ impl GapBuffer {
         }
     }
 
+    /// Returns true if the requested line is empty or only contains a single trailing newline.
+    ///
+    /// See [line][Self::line] for panic details.
+    pub fn line_is_blank(&self, line_idx: usize) -> bool {
+        matches!(
+            self.line(line_idx).as_strs(),
+            ("", "") | ("", "\n") | ("\n", "")
+        )
+    }
+
     /// The number of characters in the requested line.
     ///
     /// # Panics

@@ -404,8 +404,7 @@ pub trait Address: IterBoundedChars {
     }
 
     fn map_compound_addr(&self, from: &mut SimpleAddr, to: &mut SimpleAddr) -> Option<Dot> {
-        let d = self.map_simple_addr(from, self.current_dot())?;
-        let c1 = d.first_cur();
+        let c1 = self.map_simple_addr(from, self.current_dot())?.first_cur();
         let c2 = self.map_simple_addr(to, self.current_dot())?.last_cur();
 
         Some(Range::from_cursors(c1, c2, false).into())
