@@ -7,6 +7,7 @@ use crate::{
     },
     key::Arrow,
 };
+use std::cmp::min;
 
 /// A vim-like text object which can be used to manipulate the current Dot in a Buffer
 #[allow(dead_code)]
@@ -26,11 +27,6 @@ pub enum TextObject {
 }
 
 impl TextObject {
-    /// Helper function for finding the [TextObject::Word] under the given [Dot] within a buffer.
-    pub fn word_under_dot(dot: Dot, b: &Buffer) -> String {
-        FindWord::Fwd.expand(dot, b).content(b)
-    }
-
     pub fn as_dot(&self, b: &Buffer) -> Dot {
         use TextObject::*;
 
@@ -278,6 +274,8 @@ impl Find for FindWord {
             start_active,
         } = dot.as_range();
         let max_idx = b.txt.len_chars() - 1;
+        start.idx = min(start.idx, max_idx);
+        end.idx = min(end.idx, max_idx);
 
         if start.idx > 0 {
             let current = CharKind::from(b.txt.char(start.idx));

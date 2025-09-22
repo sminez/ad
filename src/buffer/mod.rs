@@ -558,13 +558,6 @@ impl Buffer {
         self.xdot.addr(self)
     }
 
-    /// Extract the current [Word][TextObject::Word] under dot.
-    ///
-    /// Calling this method does not modify the dot state of the buffer.
-    pub fn word_under_dot(&self, dot: Dot) -> String {
-        TextObject::word_under_dot(dot, self)
-    }
-
     pub(crate) fn tabstop(&self) -> usize {
         config_handle!(self).tabstop
     }

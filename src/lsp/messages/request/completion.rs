@@ -1,7 +1,9 @@
 use crate::{
     buffer::Buffers,
     die,
+    dot::{Cur, Dot, Range},
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection},
+    exec::IterBoundedChars,
     lsp::{
         LspManager, Pos, PositionEncoding, PreparedMessage, Req,
         capabilities::Coords,
@@ -130,16 +132,20 @@ impl MbSelect for Completions {
     }
 
     /// The initial filter input we want is the "word" so far under the cursor.
-    /// We move back a character before expanding in order to use the last character typed rather
-    /// than the current insert position.
-    ///
-    /// > This is a little funky with completions at word boundaries.
     fn initial_input(&self, buffers: &Buffers) -> Option<String> {
         let b = buffers.active();
-        let mut cur = b.dot.active_cur();
-        cur.idx = cur.idx.saturating_sub(1);
+        let cur = b.dot.active_cur();
 
-        let input = buffers.active().word_under_dot(cur.into());
+        // find the start of the "word" we are on
+        let offset = b
+            .rev_iter_between(cur.idx, 0)
+            .take_while(|(_, ch)| ch.is_alphanumeric() || *ch == '_')
+            .count();
+        let start = Cur {
+            idx: cur.idx - offset,
+        };
+        let r = Range::from_cursors(start, cur, false);
+        let input = Dot::from(r).content(b);
 
         match input.chars().next() {
             Some(ch) if ch.is_alphanumeric() => Some(input),
@@ -285,6 +291,8 @@ mod tests {
     #[test_case("foo", Some("foo"); "alphanum")]
     #[test_case("foo::", None; "punctuation following alphanum")]
     #[test_case("foo::bar", Some("bar"); "alphanum following punctuation")]
+    #[test_case("completions.", None; "dot following identifier")]
+    #[test_case("completions.f", Some("f"); "alphanum following dot")]
     #[test]
     fn mb_completions_initial_input(s: &str, expected: Option<&str>) {
         let (tx, _rx) = channel();

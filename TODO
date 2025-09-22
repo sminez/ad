@@ -2,7 +2,6 @@
 
 -- Misc / Editor features --
 
-- [ ] Add line commenting for known languages
 - [ ] Add command & Edit history using minibuffer with hidden lines
 
 - [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
