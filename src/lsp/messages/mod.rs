@@ -131,6 +131,7 @@ pub(crate) fn edit_actions_as_editor_actions(mut edit_actions: Vec<EditAction>) 
 mod tests {
     use super::*;
     use crate::buffer::Buffer;
+    use simple_test_case::test_case;
 
     // The first "blank" line here contains leading whitespace
     const TEST_BUF: &str = r#"fn test() {
@@ -152,26 +153,65 @@ mod tests {
     }
 }"#;
 
-    #[test]
-    fn format_actions_work_when_blank_lines_are_involved() {
-        use ad_event::Source;
-        use lsp_types::{Range, TextEdit};
+    const TEST_BUF_2: &str = r#"use crate::{
+    dot::{
+    Cur, Dot, Range, TextObject, find::find_forward_wrapping},
+};
 
-        let mut b = Buffer::new_virtual(0, "test", TEST_BUF, Default::default());
+fn main() {}"#;
 
-        let text_edits = vec![TextEdit {
+    const EXPECTED_2: &str = r#"use crate::dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping};
+
+fn main() {}"#;
+
+    #[test_case(
+        TEST_BUF, EXPECTED,
+        vec![TextEdit {
             range: Range {
-                start: Position {
-                    line: 4,
-                    character: 0,
-                },
-                end: Position {
-                    line: 6,
-                    character: 0,
-                },
+                start: Position { line: 4, character: 0 },
+                end: Position { line: 6, character: 0 },
             },
             new_text: "".to_string(),
         }];
+        "blank lines being removed"
+    )]
+    #[test_case(
+        TEST_BUF_2, EXPECTED_2,
+        vec![
+            TextEdit {
+                range: Range {
+                    start: Position { line: 0, character: 11 },
+                    end: Position { line: 1, character: 4 }
+                },
+                new_text: "".to_string(),
+            },
+            TextEdit {
+                range: Range {
+                    start: Position { line: 1, character: 10 },
+                    end: Position { line: 2, character: 4 }
+                },
+                new_text: "".to_string(),
+            },
+            TextEdit {
+                range: Range {
+                    start: Position { line: 2, character: 60 },
+                    end: Position { line: 3, character: 0 }
+                },
+                new_text: "".to_string(),
+            }
+        ];
+        "joining lines"
+    )]
+    #[test]
+    fn format_actions_work_when_blank_lines_are_involved(
+        content: &str,
+        expected: &str,
+        text_edits: Vec<TextEdit>,
+    ) {
+        use ad_event::Source;
+        use lsp_types::{Range, TextEdit};
+
+        let mut b = Buffer::new_virtual(0, "test", content, Default::default());
 
         let actions = edit_actions_as_editor_actions(
             text_edits
@@ -184,6 +224,6 @@ mod tests {
             b.handle_action(action, Source::Fsys);
         }
 
-        assert_eq!(b.str_contents(), EXPECTED);
+        assert_eq!(b.str_contents(), expected);
     }
 }

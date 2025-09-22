@@ -212,12 +212,12 @@ impl Coords {
             // actually a blank line otherwise removing full lines doesn't work.
             if col_end == 0 && !b.txt.line_is_blank(row_end) {
                 row_end = row_end.saturating_sub(1);
-                col_end = b.txt.line(row_end).chars().count().saturating_sub(1);
+                col_end = b.txt.line(row_end).chars().count();
             }
 
             Addr::Compound(
                 AddrBase::LineAndColumn(row_start, col_start).into(),
-                AddrBase::LineAndColumn(row_end, col_end).into(),
+                AddrBase::LineAndColumn(row_end, col_end.saturating_sub(1)).into(),
             )
         }
     }

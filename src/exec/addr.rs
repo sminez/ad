@@ -33,6 +33,7 @@ pub enum ParseError {
     NotAnAddress,
     UnclosedDelimiter,
     UnexpectedCharacter(char),
+    ZeroIndexedLineOrColumn,
 }
 
 /// An Addr can be evaluated by a Buffer to produce a valid Dot for using in future editing
@@ -125,7 +126,11 @@ impl SimpleAddr {
     }
 }
 
-/// Primitives for building out addresses
+/// Primitives for building out addresses.
+///
+/// Line and column indices are 1-based to match the editor line numbering and common output
+/// formats from popular compilers and other command line tooling. Internally these indices are
+/// converted to be 0-based to match the internal representation of ad's [Dot].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AddrBase {
     /// .
@@ -235,6 +240,9 @@ impl AddrBase {
             (Some(&c), dir) if c.is_ascii_digit() => {
                 it.next();
                 let line = parse_num(c, it);
+                if line == 0 {
+                    return Err(ParseError::ZeroIndexedLineOrColumn);
+                }
 
                 match (it.peek(), dir) {
                     (Some(':'), Some(_)) => Err(ParseError::NotAnAddress),
@@ -243,15 +251,19 @@ impl AddrBase {
                         it.next();
                         match it.next() {
                             Some(c) if c.is_ascii_digit() => {
-                                let col = parse_num(c, it).saturating_sub(1);
-                                Ok(Self::LineAndColumn(line.saturating_sub(1), col))
+                                let col = parse_num(c, it);
+                                if col == 0 {
+                                    return Err(ParseError::ZeroIndexedLineOrColumn);
+                                }
+
+                                Ok(Self::LineAndColumn(line - 1, col - 1))
                             }
                             Some(c) => Err(ParseError::UnexpectedCharacter(c)),
                             None => Err(ParseError::NotAnAddress),
                         }
                     }
 
-                    (_, None) => Ok(Self::Line(line.saturating_sub(1))),
+                    (_, None) => Ok(Self::Line(line - 1)),
                     (_, Some(Dir::Fwd)) => Ok(Self::RelativeLine(line as isize)),
                     (_, Some(Dir::Bck)) => Ok(Self::RelativeLine(-(line as isize))),
                 }
@@ -551,6 +563,8 @@ mod tests {
 
     #[test_case("0", Dot::default(), "t"; "bof")]
     #[test_case("2", Dot::from_char_indices(15, 26), "and another\n"; "line 2")]
+    #[test_case("2:1", Cur { idx: 15 }.into(), "a"; "line 2 col 1")]
+    #[test_case("2:2", Cur { idx: 16 }.into(), "n"; "line 2 col 2")]
     #[test_case("-1", Dot::from_char_indices(0, 14), "this is a line\n"; "line 1 relative to 2")]
     #[test_case("/something/", Dot::from_char_indices(33, 41), "something"; "regex forward")]
     #[test_case("-/line/", Dot::from_char_indices(10, 13), "line"; "regex back")]

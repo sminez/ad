@@ -62,6 +62,8 @@ pub enum Error {
     UnclosedExpressionGroupBranch,
     /// Unexpected character
     UnexpectedCharacter(char),
+    /// A 0 was provided as a line or column index
+    ZeroIndexedLineOrColumn,
 }
 
 impl From<regex::Error> for Error {
@@ -158,6 +160,7 @@ impl Program {
             }
             Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
             Err(ParseError::InvalidSuffix) => return Err(Error::InvalidSuffix),
+            Err(ParseError::ZeroIndexedLineOrColumn) => return Err(Error::ZeroIndexedLineOrColumn),
         };
 
         consume_whitespace(&mut it);
