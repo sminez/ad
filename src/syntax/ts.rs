@@ -122,7 +122,7 @@ impl TsState {
 
         if let Some((a, b)) = self.t.missing_region(raw_from, raw_to) {
             // To avoid spinning on calling back to the tree-sitter API for individual lines, we
-            // pre-emptively grab a larger block of tokens from the region ahead or behind of the
+            // preemptively grab a larger block of tokens from the region ahead or behind of the
             // requested one if we have missing tokens in that direction.
             const PADDING: usize = 512;
             let byte_from = if b < raw_to {

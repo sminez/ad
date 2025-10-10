@@ -69,7 +69,7 @@ where
         })
     }
 
-    // TODO: re-use this when dynamic config updates are supported
+    // TODO: reuse this when dynamic config updates are supported
     // pub(crate) fn extend_from_pairs(
     //     &mut self,
     //     pairs: Vec<(Vec<K>, V)>,

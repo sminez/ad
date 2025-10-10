@@ -470,7 +470,7 @@ Example directory structure and contents:
 For additional information on how to write tree-sitter queries see the official documentation here:
   https://tree-sitter.github.io/tree-sitter/syntax-highlighting#queries
 
-For a quick way of re-using parsers and queries from neovim, see the following from the nvim-treesitter
+For a quick way of reusing parsers and queries from neovim, see the following from the nvim-treesitter
 project:
   https://github.com/nvim-treesitter/nvim-treesitter/blob/master/lua/nvim-treesitter/parsers.lua
   https://github.com/nvim-treesitter/nvim-treesitter/tree/master/queries

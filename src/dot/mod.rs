@@ -66,7 +66,7 @@ impl Dot {
         }
     }
 
-    /// Convert a [Dot] into character offsets within the buffer idendifying its start and end
+    /// Convert a [Dot] into character offsets within the buffer identifying its start and end
     /// positions.
     ///
     /// For a [Cur] dot the start and end are equal
