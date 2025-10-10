@@ -41,7 +41,7 @@ jobs:
       run: cargo nextest run --workspace --no-fail-fast
 
   reference_tests:
-    name: Run refrence editing tests on stable
+    name: Run reference editing tests on stable
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4

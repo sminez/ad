@@ -612,7 +612,7 @@ mod tests {
     #[test_case("(?<xy>X|Y)", "xy", "X"; "named match on its own")]
     #[test_case("(?<xy>X|Y)(a|b)", "xy", "X"; "named match before unnamed")]
     #[test_case("(e| )(?<xy>X|Y)", "xy", "X"; "named match after unnamed")]
-    #[test_case("(e| )(?<xy>X|Y)(a|b)", "xy", "X"; "named match inbetween unnamed")]
+    #[test_case("(e| )(?<xy>X|Y)(a|b)", "xy", "X"; "named match in between unnamed")]
     #[test]
     fn named_submatch_works(re: &str, name: &str, expected: &str) {
         let mut r = Regex::compile(re).unwrap();

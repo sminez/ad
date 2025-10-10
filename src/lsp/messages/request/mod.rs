@@ -132,7 +132,7 @@ pub(crate) trait LspRequest:
         man: &mut LspManager,
     ) -> Option<Actions>;
 
-    /// Map an error response from the server into editor [Actions] for processin in the main event
+    /// Map an error response from the server into editor [Actions] for processing in the main event
     /// loop. By default this method will error log the raw response before dropping it and taking
     /// no further action.
     #[allow(unused_variables)]
