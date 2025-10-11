@@ -139,11 +139,13 @@ impl Layout {
     /// Calling this method will reset the internal flags used for checking these state changes.
     pub(crate) fn changed_since_last_render(&mut self) -> bool {
         let had_change = self.changed_since_last_render
-            || self.buffers.iter().any(|b| b.changed_since_last_render);
+            || self.buffers.iter().any(|b| b.changed_since_last_render)
+            || self.scratch.b.buffer().changed_since_last_render;
         self.changed_since_last_render = false;
         self.buffers
             .iter_mut()
             .for_each(|b| b.changed_since_last_render = false);
+        self.scratch.b.buffer_mut().changed_since_last_render = false;
 
         had_change
     }

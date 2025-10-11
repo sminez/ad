@@ -59,6 +59,7 @@ pub struct GenericTui<W: Write> {
     screen_cols: usize,
     status_message: String,
     last_status: Instant,
+    mb_last_frame: bool,
     frame: Frame,
 }
 
@@ -90,6 +91,7 @@ impl<W: Write> GenericTui<W> {
             screen_cols: 0,
             status_message: String::new(),
             last_status: Instant::now(),
+            mb_last_frame: false,
             frame,
         }
     }
@@ -150,29 +152,26 @@ impl<W: Write> GenericTui<W> {
 
         self.frame
             .render_windows(layout, load_exec_range, effective_screen_rows, tabstop, cs);
-
         self.frame
             .render_status_bar(cs, mode_name, n_running, active_buffer, self.screen_cols);
+
         self.frame.show_mb = w_minibuffer || layout.scratch.is_visible;
+        self.frame.show_msg_bar = !w_minibuffer;
 
         if w_minibuffer {
             self.frame
                 .render_minibuffer_state(&mb, tabstop, cs, self.screen_cols);
         } else if layout.scratch.is_visible {
-            self.frame.mb_lines.clear();
-            WinRenderer::render_scratch(
+            self.frame.render_scratch(
                 &layout.scratch,
                 scratch_load_exec_range,
                 self.screen_cols,
                 tabstop,
                 cs,
-                &mut self.frame.mb_lines,
-                &mut self.frame.style_cache,
             );
         };
 
-        if !w_minibuffer {
-            self.frame.show_msg_bar = true;
+        if self.frame.show_msg_bar {
             self.frame.render_message_bar(
                 cs,
                 pending_keys,
@@ -181,9 +180,8 @@ impl<W: Write> GenericTui<W> {
                 self.last_status,
                 self.screen_cols,
             );
-        } else {
-            self.frame.show_msg_bar = false;
         };
+
         let (cur_x, cur_y) = if w_minibuffer {
             (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
         } else {
@@ -257,12 +255,17 @@ impl<W: Write> UserInterface for GenericTui<W> {
         self.screen_rows = layout.screen_rows;
         self.screen_cols = layout.screen_cols;
         self.frame.show_msg_bar = mb.is_none();
+        let mb_this_frame = mb.is_some();
 
         if self.screen_cols < MIN_COLS || self.screen_rows < MIN_ROWS {
             return;
         }
 
-        if layout.changed_since_last_render() {
+        // If the UI changed or we have an active minibuffer then we need to rerender the UI.
+        // We also need to re-render on the frame after a minibuffer is closed in order to
+        // get rid of it, as none of the other buffers in the layout will be marked as changed
+        // since the last render.
+        if layout.changed_since_last_render() || mb_this_frame || self.mb_last_frame {
             layout.update_visible_ts_state();
             self.render(mode_name, layout, n_running, pending_keys, held_click, mb);
             if let Err(e) = self.frame.write(&mut self.stdout) {
@@ -288,6 +291,8 @@ impl<W: Write> UserInterface for GenericTui<W> {
         if let Err(e) = self.stdout.flush() {
             die!("Unable to refresh screen: {e}");
         }
+
+        self.mb_last_frame = mb_this_frame;
     }
 
     fn set_cursor_shape(&mut self, cur_shape: CurShape) {
@@ -552,6 +557,37 @@ impl Frame {
             Cursor::ClearRight
         );
     }
+
+    fn render_scratch(
+        &mut self,
+        scratch: &Scratch,
+        load_exec_range: Option<(bool, Range)>,
+        n_cols: usize,
+        tabstop: usize,
+        cs: &ColorScheme,
+    ) {
+        self.mb_lines.clear();
+        let b = scratch.b.buffer();
+        let (w_lnum, _) = b.sign_col_dims();
+        let rng = if scratch.is_focused {
+            load_exec_range
+        } else {
+            None
+        };
+
+        let mut wr = WinRenderer {
+            y: 0,
+            w_lnum,
+            n_cols,
+            tabstop,
+            it: b.iter_tokenized_lines_from(scratch.w.view.row_off, rng),
+            gb: &b.txt,
+            w: &scratch.w,
+            cs,
+        };
+
+        while wr.render_next_line(&mut self.mb_lines, &mut self.style_cache) {}
+    }
 }
 
 struct ColRenderer<'a> {
@@ -660,38 +696,6 @@ struct WinRenderer<'a> {
 }
 
 impl<'a> WinRenderer<'a> {
-    fn render_scratch(
-        scratch: &'a Scratch,
-        load_exec_range: Option<(bool, Range)>,
-        n_cols: usize,
-        tabstop: usize,
-        cs: &'a ColorScheme,
-        buf: &mut String,
-        style_cache: &mut HashMap<String, String>,
-    ) {
-        let b = scratch.b.buffer();
-        let (w_lnum, _) = b.sign_col_dims();
-        let rng = if scratch.is_focused {
-            load_exec_range
-        } else {
-            None
-        };
-        let it = b.iter_tokenized_lines_from(scratch.w.view.row_off, rng);
-
-        let mut wr = WinRenderer {
-            y: 0,
-            w_lnum,
-            n_cols,
-            tabstop,
-            it,
-            gb: &b.txt,
-            w: &scratch.w,
-            cs,
-        };
-
-        while wr.render_next_line(buf, style_cache) {}
-    }
-
     fn render_next_line(
         &mut self,
         buf: &mut String,
