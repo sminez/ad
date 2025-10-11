@@ -265,7 +265,10 @@ impl<W: Write> UserInterface for GenericTui<W> {
         if layout.changed_since_last_render() {
             layout.update_visible_ts_state();
             self.render(mode_name, layout, n_running, pending_keys, held_click, mb);
-        } else if mb.is_none() {
+            if let Err(e) = self.frame.write(&mut self.stdout) {
+                die!("Unable to refresh screen: {e}");
+            }
+        } else if self.frame.show_msg_bar {
             // match self.render in not showing the message bar if the minibuffer is open
             let conf = config_handle!(self);
             let (cs, status_timeout) = (&conf.colorscheme, conf.status_timeout);
@@ -277,10 +280,9 @@ impl<W: Write> UserInterface for GenericTui<W> {
                 self.last_status,
                 self.screen_cols,
             );
-        }
-
-        if let Err(e) = self.frame.write(&mut self.stdout) {
-            die!("Unable to refresh screen: {e}");
+            if let Err(e) = self.frame.write_msg_bar(&mut self.stdout, self.screen_rows) {
+                die!("Unable to refresh screen: {e}");
+            }
         }
 
         if let Err(e) = self.stdout.flush() {
@@ -360,6 +362,17 @@ impl Frame {
             w.write_all(self.msg_bar.as_bytes())?;
         }
 
+        write!(
+            w,
+            "{}{}",
+            Cursor::To(self.cur_x + 1, self.cur_y + 1),
+            Cursor::Show
+        )
+    }
+
+    fn write_msg_bar(&self, w: &mut impl Write, screen_rows: usize) -> io::Result<()> {
+        write!(w, "{}{}", Cursor::Hide, Cursor::To(1, screen_rows + 2))?;
+        w.write_all(self.msg_bar.as_bytes())?;
         write!(
             w,
             "{}{}",

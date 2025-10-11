@@ -924,7 +924,6 @@ impl Layout {
     }
 
     pub(crate) fn clamp_scroll(&mut self) {
-        self.changed_since_last_render = true;
         let tabstop = config_handle!(self).tabstop;
 
         if self.scratch.is_focused {
