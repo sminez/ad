@@ -22,27 +22,25 @@ use crate::{
     ziplist,
 };
 use std::{
-    cell::RefCell,
     char,
     cmp::Ordering,
     collections::HashMap,
-    io::{BufWriter, Read, StdoutLock, Write, stdin, stdout},
+    fmt::Write as _,
+    io::{self, BufWriter, Read, StdoutLock, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
-    rc::Rc,
     sync::{Arc, Mutex, mpsc::Sender},
     thread::{JoinHandle, spawn},
     time::Instant,
 };
 use tracing::debug;
-use unicode_width::UnicodeWidthChar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 // If the screen dimensions drop below these values then we disable rendering
 const MIN_COLS: usize = 20;
 const MIN_ROWS: usize = 5;
 
-// const HLINE: &str = "—"; // em dash
-const HLINE: &str = "-";
+const HLINE: &str = "─";
 const VLINE: &str = "│";
 const TSTR: &str = "├";
 const XSTR: &str = "┼";
@@ -61,15 +59,7 @@ pub struct GenericTui<W: Write> {
     screen_cols: usize,
     status_message: String,
     last_status: Instant,
-    // Box elements for rendering window borders
-    vstr: String,
-    xstr: String,
-    tstr: String,
-    hvh: String,
-    vh: String,
-    // Cache of the ANSI escape code strings required for each fully qualified tree-sitter
-    // highlighting tag. See render_line for details on how the cache is used.
-    style_cache: Rc<RefCell<HashMap<String, String>>>,
+    frame: Frame,
 }
 
 impl Default for Tui {
@@ -92,162 +82,16 @@ impl Tui {
 
 impl<W: Write> GenericTui<W> {
     pub fn new_with_stdout_handle(config: Arc<Mutex<Config>>, stdout: W) -> Self {
-        let mut tui = Self {
+        let frame = Frame::new(config.clone());
+        Self {
             stdout: BufWriter::new(stdout),
             config,
             screen_rows: 0,
             screen_cols: 0,
             status_message: String::new(),
             last_status: Instant::now(),
-            vstr: String::new(),
-            tstr: String::new(),
-            xstr: String::new(),
-            hvh: String::new(),
-            vh: String::new(),
-            style_cache: Default::default(),
-        };
-        tui.update_cached_elements();
-
-        tui
-    }
-
-    fn update_cached_elements(&mut self) {
-        let cs = &config_handle!(self).colorscheme;
-        let vstr = box_draw_str(VLINE, cs);
-        let hstr = box_draw_str(HLINE, cs);
-        self.tstr = box_draw_str(TSTR, cs);
-        self.xstr = box_draw_str(XSTR, cs);
-        self.hvh = format!("{hstr}{vstr}{hstr}");
-        self.vh = format!("{vstr}{hstr}");
-        self.vstr = vstr;
-        self.style_cache.borrow_mut().clear();
-    }
-
-    fn render_status_bar(
-        &self,
-        cs: &ColorScheme,
-        mode_name: &str,
-        n_running: usize,
-        b: &Buffer,
-    ) -> String {
-        let lstatus = format!(
-            "{} {} - {} lines {}",
-            mode_name,
-            b.display_name(),
-            b.len_lines(),
-            if b.dirty { "[+]" } else { "" }
-        );
-        let rstatus = format!(
-            "{}{}",
-            if n_running == 0 {
-                String::new()
-            } else {
-                format!("[{n_running} running] ")
-            },
-            b.dot.addr(b)
-        );
-        let width = self.screen_cols.saturating_sub(lstatus.len());
-
-        format!(
-            "{}{}{lstatus}{rstatus:>width$}{}\r\n",
-            Style::Bg(cs.bar_bg),
-            Style::Fg(cs.fg),
-            Style::Reset
-        )
-    }
-
-    // current prompt and pending chars
-    fn render_message_bar(
-        &self,
-        cs: &ColorScheme,
-        pending_keys: &[Input],
-        status_timeout: u64,
-    ) -> String {
-        let mut buf = String::new();
-        buf.push_str(&Cursor::ClearRight.to_string());
-
-        let mut msg = self.status_message.clone();
-        msg.truncate(self.screen_cols.saturating_sub(10));
-
-        let pending = render_pending(pending_keys);
-        let delta = (Instant::now() - self.last_status).as_secs();
-
-        if !msg.is_empty() && delta < status_timeout {
-            let width = self
-                .screen_cols
-                .saturating_sub(msg.len())
-                .saturating_sub(10);
-            buf.push_str(&format!(
-                "{}{}{msg}{pending:>width$}          ",
-                Style::Fg(cs.fg),
-                Style::Bg(cs.bg)
-            ));
-        } else {
-            let width = self.screen_cols.saturating_sub(10);
-            buf.push_str(&format!(
-                "{}{}{pending:>width$}          ",
-                Style::Fg(cs.fg),
-                Style::Bg(cs.bg)
-            ));
+            frame,
         }
-
-        buf
-    }
-
-    fn render_minibuffer_state(
-        &self,
-        mb: &MiniBufferState<'_>,
-        tabstop: usize,
-        cs: &ColorScheme,
-    ) -> Vec<String> {
-        let mut lines = Vec::new();
-
-        if let Some(b) = mb.b {
-            for i in mb.top..=mb.bottom {
-                let slice = b.line(i).unwrap();
-                let bg = if i == mb.selected_line_idx {
-                    cs.minibuffer_hl
-                } else {
-                    cs.bg
-                };
-
-                let mut cols = 0;
-                let mut chars = slice.chars().peekable();
-                let mut rline = Styles {
-                    fg: Some(cs.fg),
-                    bg: Some(bg),
-                    ..Default::default()
-                }
-                .to_string();
-
-                render_chars(
-                    &mut chars,
-                    None,
-                    self.screen_cols,
-                    tabstop,
-                    &mut cols,
-                    &mut rline,
-                );
-
-                if cols < self.screen_cols {
-                    rline.push_str(&Style::Bg(bg).to_string());
-                }
-
-                let width = self.screen_cols;
-                lines.push(format!("{rline:<width$}{}\r\n", Cursor::ClearRight));
-            }
-        }
-
-        lines.push(format!(
-            "{}{}{}{}{}",
-            Style::Fg(cs.fg),
-            Style::Bg(cs.bg),
-            mb.prompt,
-            mb.input,
-            Cursor::ClearRight
-        ));
-
-        lines
     }
 
     pub fn set_size(&mut self, rows: usize, cols: usize) {
@@ -255,7 +99,7 @@ impl<W: Write> GenericTui<W> {
         self.screen_cols = cols;
     }
 
-    pub fn render_lines(
+    fn render(
         &mut self,
         mode_name: &str,
         layout: &Layout,
@@ -263,7 +107,7 @@ impl<W: Write> GenericTui<W> {
         pending_keys: &[Input],
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
-    ) -> Vec<String> {
+    ) {
         let conf = config_handle!(self);
         let (cs, status_timeout, tabstop, max_mb_lines) = (
             &conf.colorscheme,
@@ -304,44 +148,50 @@ impl<W: Write> GenericTui<W> {
             (load_exec_range, None)
         };
 
-        // We need space for each visible line plus the two commands to hide/show the cursor
-        let mut lines = Vec::with_capacity(self.screen_rows + 2);
-        lines.push(format!("{}{}", Cursor::Hide, Cursor::ToStart));
-        lines.extend(WinsIter::new(
-            layout,
-            load_exec_range,
-            effective_screen_rows,
-            tabstop,
-            self,
-            cs,
-        ));
-        lines.push(self.render_status_bar(cs, mode_name, n_running, active_buffer));
+        self.frame
+            .render_windows(layout, load_exec_range, effective_screen_rows, tabstop, cs);
+
+        self.frame
+            .render_status_bar(cs, mode_name, n_running, active_buffer, self.screen_cols);
+        self.frame.show_mb = w_minibuffer || layout.scratch.is_visible;
 
         if w_minibuffer {
-            lines.append(&mut self.render_minibuffer_state(&mb, tabstop, cs));
+            self.frame
+                .render_minibuffer_state(&mb, tabstop, cs, self.screen_cols);
         } else if layout.scratch.is_visible {
-            lines.extend(WinIter::new_scratch_iter(
+            self.frame.mb_lines.clear();
+            WinRenderer::render_scratch(
                 &layout.scratch,
                 scratch_load_exec_range,
                 self.screen_cols,
                 tabstop,
                 cs,
-                self.style_cache.clone(),
-            ));
-        }
-        if !w_minibuffer {
-            lines.push(self.render_message_bar(cs, pending_keys, status_timeout));
-        }
+                &mut self.frame.mb_lines,
+                &mut self.frame.style_cache,
+            );
+        };
 
-        // Position the cursor
-        let (x, y) = if w_minibuffer {
+        if !w_minibuffer {
+            self.frame.show_msg_bar = true;
+            self.frame.render_message_bar(
+                cs,
+                pending_keys,
+                status_timeout,
+                self.status_message.clone(),
+                self.last_status,
+                self.screen_cols,
+            );
+        } else {
+            self.frame.show_msg_bar = false;
+        };
+        let (cur_x, cur_y) = if w_minibuffer {
             (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
         } else {
             layout.ui_xy()
         };
-        lines.push(format!("{}{}", Cursor::To(x + 1, y + 1), Cursor::Show));
 
-        lines
+        self.frame.cur_x = cur_x;
+        self.frame.cur_y = cur_y;
     }
 }
 
@@ -387,7 +237,7 @@ impl<W: Write> UserInterface for GenericTui<W> {
 
     fn state_change(&mut self, change: StateChange) {
         match change {
-            StateChange::ConfigUpdated => self.update_cached_elements(),
+            StateChange::ConfigUpdated => self.frame.update_cached_elements(),
             StateChange::StatusMessage { msg } => {
                 self.status_message = msg;
                 self.last_status = Instant::now();
@@ -398,7 +248,7 @@ impl<W: Write> UserInterface for GenericTui<W> {
     fn refresh(
         &mut self,
         mode_name: &str,
-        layout: &Layout,
+        layout: &mut Layout,
         n_running: usize,
         pending_keys: &[Input],
         held_click: Option<&Click>,
@@ -406,14 +256,30 @@ impl<W: Write> UserInterface for GenericTui<W> {
     ) {
         self.screen_rows = layout.screen_rows;
         self.screen_cols = layout.screen_cols;
+        self.frame.show_msg_bar = mb.is_none();
 
         if self.screen_cols < MIN_COLS || self.screen_rows < MIN_ROWS {
             return;
         }
 
-        let lines = self.render_lines(mode_name, layout, n_running, pending_keys, held_click, mb);
+        if layout.changed_since_last_render() {
+            layout.update_visible_ts_state();
+            self.render(mode_name, layout, n_running, pending_keys, held_click, mb);
+        } else if mb.is_none() {
+            // match self.render in not showing the message bar if the minibuffer is open
+            let conf = config_handle!(self);
+            let (cs, status_timeout) = (&conf.colorscheme, conf.status_timeout);
+            self.frame.render_message_bar(
+                cs,
+                pending_keys,
+                status_timeout,
+                self.status_message.clone(),
+                self.last_status,
+                self.screen_cols,
+            );
+        }
 
-        if let Err(e) = self.stdout.write_all(lines.join("").as_bytes()) {
+        if let Err(e) = self.frame.write(&mut self.stdout) {
             die!("Unable to refresh screen: {e}");
         }
 
@@ -431,87 +297,263 @@ impl<W: Write> UserInterface for GenericTui<W> {
     }
 }
 
-struct WinsIter<'a> {
-    col_iters: Vec<ColIter<'a>>,
-    buf: Vec<String>,
-    vstr: &'a str,
-    xstr: &'a str,
-    tstr: &'a str,
-    hvh: &'a str,
-    vh: &'a str,
+#[derive(Debug, Default)]
+pub struct Frame {
+    config: Arc<Mutex<Config>>,
+    win_lines: String,
+    status_bar: String,
+    mb_lines: String,
+    show_mb: bool,
+    msg_bar: String,
+    show_msg_bar: bool,
+    cur_x: usize,
+    cur_y: usize,
+    // Box elements for rendering window borders
+    vstr: String,
+    xstr: String,
+    tstr: String,
+    hvh: String,
+    vh: String,
+    // Cache of the ANSI escape code strings required for each fully qualified tree-sitter
+    // highlighting tag. See render_line for details on how the cache is used.
+    style_cache: HashMap<String, String>,
 }
 
-impl<'a> WinsIter<'a> {
-    fn new<W: Write>(
-        layout: &'a Layout,
+impl Frame {
+    fn new(config: Arc<Mutex<Config>>) -> Self {
+        let win_lines_cap = 128 * 1024;
+        let bar_cap = 8 * 1024;
+
+        let mut frame = Self {
+            config,
+            win_lines: String::with_capacity(win_lines_cap),
+            mb_lines: String::with_capacity(bar_cap),
+            status_bar: String::with_capacity(bar_cap),
+            msg_bar: String::with_capacity(bar_cap),
+            ..Default::default()
+        };
+        frame.update_cached_elements();
+
+        frame
+    }
+
+    fn update_cached_elements(&mut self) {
+        let cs = &config_handle!(self).colorscheme;
+        let vstr = box_draw_str(VLINE, cs);
+        let hstr = box_draw_str(HLINE, cs);
+        self.tstr = box_draw_str(TSTR, cs);
+        self.xstr = box_draw_str(XSTR, cs);
+        self.hvh = format!("{hstr}{vstr}{hstr}");
+        self.vh = format!("{vstr}{hstr}");
+        self.vstr = vstr;
+        self.style_cache.clear();
+    }
+
+    fn write(&self, w: &mut impl Write) -> io::Result<()> {
+        write!(w, "{}{}", Cursor::Hide, Cursor::ToStart)?;
+        w.write_all(self.win_lines.as_bytes())?;
+        w.write_all(self.status_bar.as_bytes())?;
+        if self.show_mb {
+            w.write_all(self.mb_lines.as_bytes())?;
+        }
+        if self.show_msg_bar {
+            w.write_all(self.msg_bar.as_bytes())?;
+        }
+
+        write!(
+            w,
+            "{}{}",
+            Cursor::To(self.cur_x + 1, self.cur_y + 1),
+            Cursor::Show
+        )
+    }
+
+    fn render_windows(
+        &mut self,
+        layout: &Layout,
         load_exec_range: Option<(bool, Range)>,
         screen_rows: usize,
         tabstop: usize,
-        tui: &'a GenericTui<W>,
-        cs: &'a ColorScheme,
-    ) -> Self {
-        let col_iters: Vec<_> = layout
+        cs: &ColorScheme,
+    ) {
+        self.win_lines.clear();
+
+        let mut col_renderers: Vec<_> = layout
             .cols
             .iter()
             .map(|(is_focus, col)| {
                 let rng = if is_focus { load_exec_range } else { None };
-                ColIter::new(
-                    col,
-                    layout,
-                    rng,
-                    screen_rows,
-                    tabstop,
-                    cs,
-                    tui.style_cache.clone(),
-                )
+                ColRenderer::new(col, layout, rng, screen_rows, tabstop, cs)
             })
             .collect();
-        let buf = Vec::with_capacity(col_iters.len());
 
-        Self {
-            col_iters,
-            buf,
-            vstr: &tui.vstr,
-            xstr: &tui.xstr,
-            tstr: &tui.tstr,
-            hvh: &tui.hvh,
-            vh: &tui.vh,
+        let n_cols = col_renderers.len();
+        'outer: loop {
+            for (i, cr) in col_renderers.iter_mut().enumerate() {
+                let remaining = cr.render_next_line(&mut self.win_lines, &mut self.style_cache);
+                if i < n_cols - 1 {
+                    self.win_lines.push_str(&self.vstr);
+                }
+                if i == n_cols - 1 && !remaining {
+                    _ = write!(&mut self.win_lines, "{}\r\n", Cursor::ClearRight);
+                    break 'outer;
+                }
+            }
+
+            // col_buf = col_buf
+            //     .replace(&self.hvh, &self.xstr)
+            //     .replace(&self.vh, &self.tstr);
+            // self.win_lines.push_str(&col_buf);
+            _ = write!(&mut self.win_lines, "{}\r\n", Cursor::ClearRight);
         }
+    }
+
+    fn render_status_bar(
+        &mut self,
+        cs: &ColorScheme,
+        mode_name: &str,
+        n_running: usize,
+        b: &Buffer,
+        screen_cols: usize,
+    ) {
+        self.status_bar.clear();
+
+        let lstatus = format!(
+            "{} {} - {} lines {}",
+            mode_name,
+            b.display_name(),
+            b.len_lines(),
+            if b.dirty { "[+]" } else { "" }
+        );
+        let rstatus = format!(
+            "{}{}",
+            if n_running == 0 {
+                String::new()
+            } else {
+                format!("[{n_running} running] ")
+            },
+            b.dot.addr(b)
+        );
+        let width = screen_cols.saturating_sub(UnicodeWidthStr::width(lstatus.as_str()));
+
+        _ = write!(
+            &mut self.status_bar,
+            "{}{}{lstatus}{rstatus:>width$}{}\r\n",
+            Style::Bg(cs.bar_bg),
+            Style::Fg(cs.fg),
+            Style::Reset
+        );
+    }
+
+    // current prompt and pending chars
+    fn render_message_bar(
+        &mut self,
+        cs: &ColorScheme,
+        pending_keys: &[Input],
+        status_timeout: u64,
+        mut msg: String,
+        last_status: Instant,
+        screen_cols: usize,
+    ) {
+        self.msg_bar.clear();
+        self.msg_bar.push_str(&Cursor::ClearRight.to_string());
+        msg.truncate(screen_cols.saturating_sub(10));
+
+        let pending = render_pending(pending_keys);
+        let delta = (Instant::now() - last_status).as_secs();
+
+        if !msg.is_empty() && delta < status_timeout {
+            let width = screen_cols.saturating_sub(msg.len()).saturating_sub(10);
+            _ = write!(
+                &mut self.msg_bar,
+                "{}{}{msg}{pending:>width$}          ",
+                Style::Fg(cs.fg),
+                Style::Bg(cs.bg)
+            );
+        } else {
+            let width = screen_cols.saturating_sub(10);
+            _ = write!(
+                &mut self.msg_bar,
+                "{}{}{pending:>width$}          ",
+                Style::Fg(cs.fg),
+                Style::Bg(cs.bg)
+            );
+        }
+    }
+
+    fn render_minibuffer_state(
+        &mut self,
+        mb: &MiniBufferState<'_>,
+        tabstop: usize,
+        cs: &ColorScheme,
+        screen_cols: usize,
+    ) {
+        self.mb_lines.clear();
+
+        if let Some(b) = mb.b {
+            for i in mb.top..=mb.bottom {
+                let slice = b.line(i).unwrap();
+                let bg = if i == mb.selected_line_idx {
+                    cs.minibuffer_hl
+                } else {
+                    cs.bg
+                };
+
+                let mut cols = 0;
+                let mut chars = slice.chars().peekable();
+                _ = write!(
+                    &mut self.mb_lines,
+                    "{}",
+                    Styles {
+                        fg: Some(cs.fg),
+                        bg: Some(bg),
+                        ..Default::default()
+                    }
+                );
+
+                render_chars(
+                    &mut chars,
+                    None,
+                    screen_cols,
+                    tabstop,
+                    &mut cols,
+                    &mut self.mb_lines,
+                );
+
+                if cols < screen_cols {
+                    self.mb_lines.push_str(&Style::Bg(bg).to_string());
+                }
+
+                let width = screen_cols;
+                _ = write!(&mut self.mb_lines, "{:>width$}\r\n", Cursor::ClearRight);
+            }
+        }
+
+        _ = write!(
+            &mut self.mb_lines,
+            "{}{}{}{}{}",
+            Style::Fg(cs.fg),
+            Style::Bg(cs.bg),
+            mb.prompt,
+            mb.input,
+            Cursor::ClearRight
+        );
     }
 }
 
-impl Iterator for WinsIter<'_> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.buf.clear();
-
-        for it in self.col_iters.iter_mut() {
-            self.buf.push(it.next()?);
-        }
-
-        let mut buf = self.buf.join(self.vstr);
-        buf = buf.replace(self.hvh, self.xstr).replace(self.vh, self.tstr);
-        buf.push_str(&format!("{}\r\n", Cursor::ClearRight));
-
-        Some(buf)
-    }
-}
-
-struct ColIter<'a> {
+struct ColRenderer<'a> {
     inner: ziplist::Iter<'a, Window>,
-    current: Option<WinIter<'a>>,
+    current: Option<WinRenderer<'a>>,
     layout: &'a Layout,
     cs: &'a ColorScheme,
-    style_cache: Rc<RefCell<HashMap<String, String>>>,
     load_exec_range: Option<(bool, Range)>,
     screen_rows: usize,
     tabstop: usize,
     n_cols: usize,
-    yielded: usize,
+    row: usize,
 }
 
-impl<'a> ColIter<'a> {
+impl<'a> ColRenderer<'a> {
     fn new(
         col: &'a Column,
         layout: &'a Layout,
@@ -519,25 +561,21 @@ impl<'a> ColIter<'a> {
         screen_rows: usize,
         tabstop: usize,
         cs: &'a ColorScheme,
-        style_cache: Rc<RefCell<HashMap<String, String>>>,
     ) -> Self {
-        ColIter {
+        ColRenderer {
             inner: col.wins.iter(),
             current: None,
             layout,
             cs,
-            style_cache,
             load_exec_range,
             screen_rows,
             tabstop,
             n_cols: col.n_cols,
-            yielded: 0,
+            row: 0,
         }
     }
-}
 
-impl<'a> ColIter<'a> {
-    fn next_win_iter(&mut self) -> Option<WinIter<'a>> {
+    fn next_window(&mut self) -> Option<WinRenderer<'a>> {
         let (is_focus, w) = self.inner.next()?;
         let b = self
             .layout
@@ -548,7 +586,7 @@ impl<'a> ColIter<'a> {
         let rng = if is_focus { self.load_exec_range } else { None };
         let it = b.iter_tokenized_lines_from(w.view.row_off, rng);
 
-        Some(WinIter {
+        Some(WinRenderer {
             y: 0,
             w_lnum,
             n_cols: self.n_cols,
@@ -557,36 +595,47 @@ impl<'a> ColIter<'a> {
             gb: &b.txt,
             w,
             cs: self.cs,
-            style_cache: self.style_cache.clone(),
         })
     }
-}
 
-impl Iterator for ColIter<'_> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    /// Render the next available line into the provided buffer.
+    ///
+    /// Returns false if there are no more lines to render.
+    fn render_next_line(
+        &mut self,
+        buf: &mut String,
+        style_cache: &mut HashMap<String, String>,
+    ) -> bool {
         if self.current.is_none() {
-            self.current = Some(self.next_win_iter()?);
-        }
-
-        let next_line = self.current.as_mut()?.next();
-        if self.yielded == self.screen_rows {
-            return None;
-        }
-        self.yielded += 1;
-
-        match next_line {
-            Some(line) => Some(line),
-            None => {
-                self.current = None;
-                Some(box_draw_str(&HLINE.repeat(self.n_cols), self.cs))
+            self.current = match self.next_window() {
+                Some(w) => Some(w),
+                None => return false,
             }
         }
+
+        let lines_remaining = self
+            .current
+            .as_mut()
+            .unwrap()
+            .render_next_line(buf, style_cache);
+        self.row += 1;
+
+        if !lines_remaining {
+            self.current = None;
+            _ = write!(
+                buf,
+                "{}{}{}",
+                Style::Fg(self.cs.minibuffer_hl),
+                Style::Bg(self.cs.bg),
+                HLINE.repeat(self.n_cols)
+            );
+        }
+
+        self.row < self.screen_rows
     }
 }
 
-struct WinIter<'a> {
+struct WinRenderer<'a> {
     y: usize,
     w_lnum: usize,
     n_cols: usize,
@@ -595,18 +644,18 @@ struct WinIter<'a> {
     gb: &'a GapBuffer,
     w: &'a Window,
     cs: &'a ColorScheme,
-    style_cache: Rc<RefCell<HashMap<String, String>>>,
 }
 
-impl<'a> WinIter<'a> {
-    fn new_scratch_iter(
+impl<'a> WinRenderer<'a> {
+    fn render_scratch(
         scratch: &'a Scratch,
         load_exec_range: Option<(bool, Range)>,
         n_cols: usize,
         tabstop: usize,
         cs: &'a ColorScheme,
-        style_cache: Rc<RefCell<HashMap<String, String>>>,
-    ) -> Self {
+        buf: &mut String,
+        style_cache: &mut HashMap<String, String>,
+    ) {
         let b = scratch.b.buffer();
         let (w_lnum, _) = b.sign_col_dims();
         let rng = if scratch.is_focused {
@@ -616,7 +665,7 @@ impl<'a> WinIter<'a> {
         };
         let it = b.iter_tokenized_lines_from(scratch.w.view.row_off, rng);
 
-        WinIter {
+        let mut wr = WinRenderer {
             y: 0,
             w_lnum,
             n_cols,
@@ -625,26 +674,27 @@ impl<'a> WinIter<'a> {
             gb: &b.txt,
             w: &scratch.w,
             cs,
-            style_cache,
-        }
+        };
+
+        while wr.render_next_line(buf, style_cache) {}
     }
-}
 
-impl Iterator for WinIter<'_> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    fn render_next_line(
+        &mut self,
+        buf: &mut String,
+        style_cache: &mut HashMap<String, String>,
+    ) -> bool {
         if self.y >= self.w.n_rows {
-            return None;
+            return false;
         }
+
         let file_row = self.y + self.w.view.row_off;
         self.y += 1;
 
-        let next = self.it.next();
-
-        let line = match next {
+        match self.it.next() {
             None => {
-                let mut buf = format!(
+                _ = write!(
+                    buf,
                     "{}{}~ {VLINE:>width$}{}",
                     Style::Fg(self.cs.signcol_fg),
                     Style::Bg(self.cs.bg),
@@ -653,34 +703,35 @@ impl Iterator for WinIter<'_> {
                 );
                 let padding = self.n_cols.saturating_sub(self.w_lnum).saturating_sub(2);
                 buf.push_str(&" ".repeat(padding));
-
-                buf
             }
 
             Some(it) => {
                 // +2 for the leading space and vline chars
                 let padding = self.w_lnum + 2;
 
-                format!(
-                    "{}{} {:>width$}{VLINE}{}",
+                _ = write!(
+                    buf,
+                    "{}{} {:>width$}{VLINE}",
                     Style::Fg(self.cs.signcol_fg),
                     Style::Bg(self.cs.bg),
                     file_row + 1,
-                    render_line(
-                        self.gb,
-                        it,
-                        self.w.view.col_off,
-                        self.n_cols.saturating_sub(padding),
-                        self.tabstop,
-                        self.cs,
-                        &mut self.style_cache
-                    ),
                     width = self.w_lnum
-                )
+                );
+
+                render_line(
+                    self.gb,
+                    it,
+                    self.w.view.col_off,
+                    self.n_cols.saturating_sub(padding),
+                    self.tabstop,
+                    self.cs,
+                    style_cache,
+                    buf,
+                );
             }
         };
 
-        Some(line)
+        true
     }
 }
 
@@ -794,6 +845,7 @@ fn render_chars(
     buf.push_str(RESET_STYLE);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_line<'a>(
     gb: &'a GapBuffer,
     it: impl Iterator<Item = RangeToken<'a>>,
@@ -801,9 +853,9 @@ fn render_line<'a>(
     max_cols: usize,
     tabstop: usize,
     cs: &ColorScheme,
-    style_cache: &mut Rc<RefCell<HashMap<String, String>>>,
-) -> String {
-    let mut buf = String::new();
+    style_cache: &mut HashMap<String, String>,
+    buf: &mut String,
+) {
     let mut to_skip = col_off;
     let mut cols = 0;
 
@@ -828,23 +880,17 @@ fn render_line<'a>(
         // The cache styles are also stored against the original tag rather so they can be looked
         // up directly each time they are used, rather than need to to traverse the fallback path
         // as done in ColorScheme::styles_for.
-        //
-        // We always assume that it safe to borrow the style_cache mutably at this point as we are
-        // only expecting this function to be called as part of a render pass where the clones of
-        // the style_cache Rc are held in different iterators that are processed sequentially in a
-        // single thread.
-        let mut guard = style_cache.borrow_mut();
-        let style_str = match guard.get(tk.tag) {
+        let style_str = match style_cache.get(tk.tag) {
             Some(s) => s,
             None => {
                 let s = cs.styles_for(tk.tag).to_string();
-                guard.insert(tk.tag.to_string(), s);
-                guard.get(tk.tag).unwrap()
+                style_cache.insert(tk.tag.to_string(), s);
+                style_cache.get(tk.tag).unwrap()
             }
         };
 
         buf.push_str(style_str);
-        render_chars(&mut chars, spaces, max_cols, tabstop, &mut cols, &mut buf);
+        render_chars(&mut chars, spaces, max_cols, tabstop, &mut cols, buf);
 
         if cols == max_cols {
             break;
@@ -855,8 +901,6 @@ fn render_line<'a>(
         buf.push_str(&Style::Bg(cs.bg).to_string());
         buf.extend(repeat_n(' ', max_cols - cols));
     }
-
-    buf
 }
 
 #[derive(Debug)]
@@ -1100,21 +1144,23 @@ mod tests {
         ];
 
         let cs = ColorScheme::default();
-        let style_cache: HashMap<String, String> = [
+        let mut style_cache: HashMap<String, String> = [
             ("a".to_owned(), "!".to_owned()),
             (TK_DEFAULT.to_owned(), "|".to_owned()),
         ]
         .into_iter()
         .collect();
 
-        let s = render_line(
+        let mut s = String::new();
+        render_line(
             &gb,
             range_tokens.into_iter(),
             col_off,
             max_cols,
             2,
             &cs,
-            &mut Rc::new(RefCell::new(style_cache)),
+            &mut style_cache,
+            &mut s,
         );
 
         let expected = expected_template
@@ -1148,6 +1194,7 @@ mod tests {
         // as a raw byte offset. The fix is simply not to truncate in that way as render_chars is
         // already ensuring that the buffer it is building up is staying within the available
         // screen space.
-        tui.render_minibuffer_state(&mb, 4, &Default::default());
+        tui.frame
+            .render_minibuffer_state(&mb, 4, &Default::default(), tui.screen_cols);
     }
 }

@@ -82,12 +82,12 @@ fn tui_and_layout(files: &[&str]) -> (GenericTui<StdoutSink>, Layout) {
 }
 
 fn fixed_view(group: &mut BenchmarkGroup<'_, WallTime>, title: &str, files: &[&str]) {
-    let (mut tui, layout) = tui_and_layout(files);
+    let (mut tui, mut layout) = tui_and_layout(files);
     group.bench_function(title, |b| {
         b.iter(|| {
             tui.refresh(
                 black_box("NORMAL"),
-                black_box(&layout),
+                black_box(&mut layout),
                 black_box(0),
                 black_box(&[]),
                 black_box(None),

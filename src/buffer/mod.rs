@@ -176,6 +176,7 @@ pub struct Buffer {
     pub(crate) cached_rx: usize,
     pub(crate) last_save: SystemTime,
     pub(crate) dirty: bool,
+    pub(crate) changed_since_last_render: bool,
     pub(crate) input_filter: Option<InputFilter>,
     pub(crate) syntax_state: Option<SyntaxState>,
     config: Arc<Mutex<Config>>,
@@ -200,6 +201,7 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
+            changed_since_last_render: false,
             input_filter: None,
             syntax_state: None,
             config,
@@ -223,6 +225,7 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
+            changed_since_last_render: false,
             input_filter: None,
             syntax_state: None,
             config,
@@ -255,6 +258,7 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
+            changed_since_last_render: false,
             input_filter: None,
             syntax_state: None,
             config,
@@ -280,6 +284,7 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
+            changed_since_last_render: false,
             input_filter: None,
             syntax_state: None,
             config,
@@ -344,6 +349,7 @@ impl Buffer {
 
         self.kind = kind;
         self.try_set_ts_state();
+        self.changed_since_last_render = true;
 
         None
     }
@@ -397,6 +403,7 @@ impl Buffer {
         self.xdot.clamp_idx(n_chars);
         self.edit_log.clear();
         self.dirty = false;
+        self.changed_since_last_render = true;
         self.last_save = SystemTime::now();
 
         let n_lines = self.txt.len_lines();
@@ -421,6 +428,7 @@ impl Buffer {
             cached_rx: 0,
             last_save: SystemTime::now(),
             dirty: false,
+            changed_since_last_render: false,
             input_filter: None,
             syntax_state: None,
             config,
@@ -675,6 +683,7 @@ impl Buffer {
         };
 
         self.set_dot(TextObject::Delimited(l, r), 1);
+        self.changed_since_last_render = true;
     }
 
     /// If the current dot is a cursor rather than a range, expand it to a sensible range.
@@ -686,6 +695,7 @@ impl Buffer {
             Dot::Cur { c: Cur { idx } } => idx,
             Dot::Range { .. } => return,
         };
+        self.changed_since_last_render = true;
 
         if let Some(dot) = self.try_expand_known(current_index) {
             self.dot = dot;
@@ -820,6 +830,7 @@ impl Buffer {
         self.dot = dot;
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     /// The error result of this function is an error string that should be displayed to the user
@@ -916,9 +927,10 @@ impl Buffer {
 
             Input::Arrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
 
-            _ => (),
+            _ => return None,
         }
 
+        self.changed_since_last_render = true;
         None
     }
 
@@ -929,12 +941,14 @@ impl Buffer {
         }
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     /// Set this Buffer's dot to an explicit cursor position, clamping to EOB.
     pub fn set_dot_from_cursor(&mut self, idx: usize) {
         self.dot = Cur::new(idx).into();
         self.dot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     /// Set this Buffer's dot to an explicit [Range], clamping to EOB.
@@ -942,6 +956,7 @@ impl Buffer {
         self.dot = Dot::from(Range::from_cursors(Cur::new(from), Cur::new(to), false))
             .collapse_null_range();
         self.dot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     fn set_dot_from_coords(&mut self, coords: Coords) {
@@ -949,6 +964,7 @@ impl Buffer {
         self.dot = self.map_addr(&mut addr);
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     fn set_xdot_from_coords(&mut self, coords: Coords) {
@@ -964,6 +980,7 @@ impl Buffer {
         }
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     /// Extend dot backward and clamp to ensure it is within bounds
@@ -973,6 +990,7 @@ impl Buffer {
         }
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
     }
 
     pub(crate) fn new_edit_log_transaction(&mut self) {
@@ -988,6 +1006,7 @@ impl Buffer {
                 }
                 self.edit_log.paused = false;
                 self.dirty = !self.edit_log.is_empty();
+                self.changed_since_last_render = true;
                 None
             }
             None => Some(ActionOutcome::SetStatusMessage(
@@ -1004,6 +1023,8 @@ impl Buffer {
                     self.apply_edit(edit);
                 }
                 self.edit_log.paused = false;
+                self.dirty = true;
+                self.changed_since_last_render = true;
                 None
             }
             None => Some(ActionOutcome::SetStatusMessage(
@@ -1097,6 +1118,7 @@ impl Buffer {
         }
 
         self.mark_dirty();
+        self.changed_since_last_render = true;
 
         (Cur { idx: idx + 1 }, deleted)
     }
@@ -1143,6 +1165,7 @@ impl Buffer {
         }
 
         self.mark_dirty();
+        self.changed_since_last_render = true;
 
         (cur, deleted)
     }
@@ -1174,6 +1197,7 @@ impl Buffer {
 
             self.edit_log.delete_char(cur, ch);
             self.mark_dirty();
+            self.changed_since_last_render = true;
         }
 
         cur
@@ -1195,6 +1219,7 @@ impl Buffer {
 
         self.edit_log.delete_string(r.start, s.clone());
         self.mark_dirty();
+        self.changed_since_last_render = true;
 
         (r.start, Some(s))
     }
@@ -1202,6 +1227,7 @@ impl Buffer {
     pub(crate) fn find_forward(&mut self, s: &str) {
         if let Some(dot) = find_forward_wrapping(&s, self) {
             self.dot = dot;
+            self.changed_since_last_render = true;
         }
     }
 
