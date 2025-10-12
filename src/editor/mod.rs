@@ -347,10 +347,9 @@ where
 
     pub fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
         self.layout.clamp_scroll();
-        self.layout.update_visible_ts_state();
         self.ui.refresh(
             &self.modes[0].name,
-            &self.layout,
+            &mut self.layout,
             self.system.n_running_children(),
             &self.pending_keys,
             self.held_click.as_ref(),

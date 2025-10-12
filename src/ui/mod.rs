@@ -34,7 +34,7 @@ pub trait UserInterface {
     fn refresh(
         &mut self,
         mode_name: &str,
-        layout: &Layout,
+        layout: &mut Layout,
         n_running: usize,
         pending_keys: &[Input],
         held_click: Option<&Click>,
@@ -128,7 +128,7 @@ impl UserInterface for Ui {
     fn refresh(
         &mut self,
         mode_name: &str,
-        layout: &Layout,
+        layout: &mut Layout,
         n_running: usize,
         pending_keys: &[Input],
         held_click: Option<&Click>,

@@ -173,6 +173,10 @@ impl Buffers {
         self.inner.iter().map(|(_, b)| b)
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Buffer> {
+        self.inner.iter_mut().map(|(_, b)| b)
+    }
+
     pub fn close_buffer(&mut self, id: BufferId) {
         let removed = self.inner.remove_where_with_default(
             |b| b.id == id,

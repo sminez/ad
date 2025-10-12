@@ -436,7 +436,7 @@ impl UserInterface for ScriptedUi {
     fn refresh(
         &mut self,
         _mode_name: &str,
-        _layout: &Layout,
+        _layout: &mut Layout,
         _n_running: usize,
         _pending_keys: &[Input],
         _held_click: Option<&Click>,
