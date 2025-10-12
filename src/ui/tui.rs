@@ -55,8 +55,6 @@ pub type Tui = GenericTui<StdoutLock<'static>>;
 pub struct GenericTui<W: Write> {
     stdout: BufWriter<W>,
     config: Arc<Mutex<Config>>,
-    screen_rows: usize,
-    screen_cols: usize,
     status_message: String,
     last_status: Instant,
     mb_last_frame: bool,
@@ -87,8 +85,6 @@ impl<W: Write> GenericTui<W> {
         Self {
             stdout: BufWriter::new(stdout),
             config,
-            screen_rows: 0,
-            screen_cols: 0,
             status_message: String::new(),
             last_status: Instant::now(),
             mb_last_frame: false,
@@ -97,8 +93,8 @@ impl<W: Write> GenericTui<W> {
     }
 
     pub fn set_size(&mut self, rows: usize, cols: usize) {
-        self.screen_rows = rows;
-        self.screen_cols = cols;
+        self.frame.screen_rows = rows;
+        self.frame.screen_cols = cols;
     }
 
     fn render(
@@ -135,7 +131,7 @@ impl<W: Write> GenericTui<W> {
         // This is the screen size that we have to work with for the buffer content we currently want to
         // display. If the minibuffer is active then it take priority over anything else and we always
         // show the status bar as the final two lines of the UI.
-        let effective_screen_rows = self.screen_rows.saturating_sub(offset);
+        let effective_screen_rows = self.frame.screen_rows.saturating_sub(offset);
 
         let load_exec_range = match held_click {
             Some(click) if click.btn == MouseButton::Right || click.btn == MouseButton::Middle => {
@@ -153,22 +149,16 @@ impl<W: Write> GenericTui<W> {
         self.frame
             .render_windows(layout, load_exec_range, effective_screen_rows, tabstop, cs);
         self.frame
-            .render_status_bar(cs, mode_name, n_running, active_buffer, self.screen_cols);
+            .render_status_bar(cs, mode_name, n_running, active_buffer);
 
         self.frame.show_mb = w_minibuffer || layout.scratch.is_visible;
         self.frame.show_msg_bar = !w_minibuffer;
 
         if w_minibuffer {
-            self.frame
-                .render_minibuffer_state(&mb, tabstop, cs, self.screen_cols);
+            self.frame.render_minibuffer_state(&mb, tabstop, cs);
         } else if layout.scratch.is_visible {
-            self.frame.render_scratch(
-                &layout.scratch,
-                scratch_load_exec_range,
-                self.screen_cols,
-                tabstop,
-                cs,
-            );
+            self.frame
+                .render_scratch(&layout.scratch, scratch_load_exec_range, tabstop, cs);
         };
 
         if self.frame.show_msg_bar {
@@ -178,12 +168,11 @@ impl<W: Write> GenericTui<W> {
                 status_timeout,
                 self.status_message.clone(),
                 self.last_status,
-                self.screen_cols,
             );
         };
 
         let (cur_x, cur_y) = if w_minibuffer {
-            (mb.cx, self.screen_rows + mb.n_visible_lines + 1)
+            (mb.cx, self.frame.screen_rows + mb.n_visible_lines + 1)
         } else {
             layout.ui_xy()
         };
@@ -221,8 +210,8 @@ impl<W: Write> UserInterface for GenericTui<W> {
         unsafe { register_signal_handler() };
 
         let (screen_rows, screen_cols) = get_termsize();
-        self.screen_rows = screen_rows;
-        self.screen_cols = screen_cols;
+        self.frame.screen_rows = screen_rows;
+        self.frame.screen_cols = screen_cols;
 
         spawn_input_thread(tx);
 
@@ -252,12 +241,12 @@ impl<W: Write> UserInterface for GenericTui<W> {
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
     ) {
-        self.screen_rows = layout.screen_rows;
-        self.screen_cols = layout.screen_cols;
+        self.frame.screen_rows = layout.screen_rows;
+        self.frame.screen_cols = layout.screen_cols;
         self.frame.show_msg_bar = mb.is_none();
         let mb_this_frame = mb.is_some();
 
-        if self.screen_cols < MIN_COLS || self.screen_rows < MIN_ROWS {
+        if self.frame.screen_cols < MIN_COLS || self.frame.screen_rows < MIN_ROWS {
             return;
         }
 
@@ -281,9 +270,8 @@ impl<W: Write> UserInterface for GenericTui<W> {
                 status_timeout,
                 self.status_message.clone(),
                 self.last_status,
-                self.screen_cols,
             );
-            if let Err(e) = self.frame.write_msg_bar(&mut self.stdout, self.screen_rows) {
+            if let Err(e) = self.frame.write_msg_bar(&mut self.stdout) {
                 die!("Unable to refresh screen: {e}");
             }
         }
@@ -313,6 +301,8 @@ pub struct Frame {
     show_mb: bool,
     msg_bar: String,
     show_msg_bar: bool,
+    screen_rows: usize,
+    screen_cols: usize,
     cur_x: usize,
     cur_y: usize,
     // Box elements for rendering window borders
@@ -375,8 +365,8 @@ impl Frame {
         )
     }
 
-    fn write_msg_bar(&self, w: &mut impl Write, screen_rows: usize) -> io::Result<()> {
-        write!(w, "{}{}", Cursor::Hide, Cursor::To(1, screen_rows + 2))?;
+    fn write_msg_bar(&self, w: &mut impl Write) -> io::Result<()> {
+        write!(w, "{}{}", Cursor::Hide, Cursor::To(1, self.screen_rows + 2))?;
         w.write_all(self.msg_bar.as_bytes())?;
         write!(
             w,
@@ -432,7 +422,6 @@ impl Frame {
         mode_name: &str,
         n_running: usize,
         b: &Buffer,
-        screen_cols: usize,
     ) {
         self.status_bar.clear();
 
@@ -452,7 +441,9 @@ impl Frame {
             },
             b.dot.addr(b)
         );
-        let width = screen_cols.saturating_sub(UnicodeWidthStr::width(lstatus.as_str()));
+        let width = self
+            .screen_cols
+            .saturating_sub(UnicodeWidthStr::width(lstatus.as_str()));
 
         _ = write!(
             &mut self.status_bar,
@@ -471,17 +462,19 @@ impl Frame {
         status_timeout: u64,
         mut msg: String,
         last_status: Instant,
-        screen_cols: usize,
     ) {
         self.msg_bar.clear();
         self.msg_bar.push_str(&Cursor::ClearRight.to_string());
-        msg.truncate(screen_cols.saturating_sub(10));
+        msg.truncate(self.screen_cols.saturating_sub(10));
 
         let pending = render_pending(pending_keys);
         let delta = (Instant::now() - last_status).as_secs();
 
         if !msg.is_empty() && delta < status_timeout {
-            let width = screen_cols.saturating_sub(msg.len()).saturating_sub(10);
+            let width = self
+                .screen_cols
+                .saturating_sub(msg.len())
+                .saturating_sub(10);
             _ = write!(
                 &mut self.msg_bar,
                 "{}{}{msg}{pending:>width$}          ",
@@ -489,7 +482,7 @@ impl Frame {
                 Style::Bg(cs.bg)
             );
         } else {
-            let width = screen_cols.saturating_sub(10);
+            let width = self.screen_cols.saturating_sub(10);
             _ = write!(
                 &mut self.msg_bar,
                 "{}{}{pending:>width$}          ",
@@ -504,7 +497,6 @@ impl Frame {
         mb: &MiniBufferState<'_>,
         tabstop: usize,
         cs: &ColorScheme,
-        screen_cols: usize,
     ) {
         self.mb_lines.clear();
 
@@ -532,17 +524,17 @@ impl Frame {
                 render_chars(
                     &mut chars,
                     None,
-                    screen_cols,
+                    self.screen_cols,
                     tabstop,
                     &mut cols,
                     &mut self.mb_lines,
                 );
 
-                if cols < screen_cols {
+                if cols < self.screen_cols {
                     self.mb_lines.push_str(&Style::Bg(bg).to_string());
                 }
 
-                let width = screen_cols;
+                let width = self.screen_cols;
                 _ = write!(&mut self.mb_lines, "{:>width$}\r\n", Cursor::ClearRight);
             }
         }
@@ -562,7 +554,6 @@ impl Frame {
         &mut self,
         scratch: &Scratch,
         load_exec_range: Option<(bool, Range)>,
-        n_cols: usize,
         tabstop: usize,
         cs: &ColorScheme,
     ) {
@@ -578,7 +569,7 @@ impl Frame {
         let mut wr = WinRenderer {
             y: 0,
             w_lnum,
-            n_cols,
+            n_cols: self.screen_cols,
             tabstop,
             it: b.iter_tokenized_lines_from(scratch.w.view.row_off, rng),
             gb: &b.txt,
@@ -1204,14 +1195,13 @@ mod tests {
             bottom: 0,
         };
 
-        let mut tui = Tui::new(Default::default());
-        tui.screen_cols = 91;
+        let mut frame = Frame::new(Default::default());
+        frame.screen_cols = 91;
 
         // In 137 this was panicking due to indexing into the rendered line using self.screen_cols
         // as a raw byte offset. The fix is simply not to truncate in that way as render_chars is
         // already ensuring that the buffer it is building up is staying within the available
         // screen space.
-        tui.frame
-            .render_minibuffer_state(&mb, 4, &Default::default(), tui.screen_cols);
+        frame.render_minibuffer_state(&mb, 4, &Default::default());
     }
 }
