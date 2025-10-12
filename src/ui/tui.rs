@@ -42,7 +42,8 @@ const MIN_ROWS: usize = 5;
 
 const HLINE: &str = "─";
 const VLINE: &str = "│";
-const TSTR: &str = "├";
+const RTSTR: &str = "├";
+const LTSTR: &str = "┤";
 const XSTR: &str = "┼";
 
 fn box_draw_str(s: &str, cs: &ColorScheme) -> String {
@@ -338,7 +339,7 @@ impl Frame {
         let cs = &config_handle!(self).colorscheme;
         let vstr = box_draw_str(VLINE, cs);
         let hstr = box_draw_str(HLINE, cs);
-        self.tstr = box_draw_str(TSTR, cs);
+        self.tstr = box_draw_str(RTSTR, cs);
         self.xstr = box_draw_str(XSTR, cs);
         self.hvh = format!("{hstr}{vstr}{hstr}");
         self.vh = format!("{vstr}{hstr}");
@@ -397,21 +398,18 @@ impl Frame {
 
         let n_cols = col_renderers.len();
         'outer: loop {
+            let mut remaining;
+            let mut prev_col = None;
+
             for (i, cr) in col_renderers.iter_mut().enumerate() {
-                let remaining = cr.render_next_line(&mut self.win_lines, &mut self.style_cache);
-                if i < n_cols - 1 {
-                    self.win_lines.push_str(&self.vstr);
-                }
+                (remaining, prev_col) =
+                    cr.render_next_line(&mut self.win_lines, prev_col, &mut self.style_cache);
                 if i == n_cols - 1 && !remaining {
                     _ = write!(&mut self.win_lines, "{}\r\n", Cursor::ClearRight);
                     break 'outer;
                 }
             }
 
-            // col_buf = col_buf
-            //     .replace(&self.hvh, &self.xstr)
-            //     .replace(&self.vh, &self.tstr);
-            // self.win_lines.push_str(&col_buf);
             _ = write!(&mut self.win_lines, "{}\r\n", Cursor::ClearRight);
         }
     }
@@ -577,8 +575,14 @@ impl Frame {
             cs,
         };
 
-        while wr.render_next_line(&mut self.mb_lines, &mut self.style_cache) {}
+        while wr.render_next_line(&mut self.mb_lines, None, &mut self.style_cache) {}
     }
+}
+
+#[derive(Clone, Copy)]
+enum PrevCol {
+    Buffer,
+    Hline,
 }
 
 struct ColRenderer<'a> {
@@ -644,34 +648,44 @@ impl<'a> ColRenderer<'a> {
     fn render_next_line(
         &mut self,
         buf: &mut String,
+        prev_col: Option<PrevCol>,
         style_cache: &mut HashMap<String, String>,
-    ) -> bool {
+    ) -> (bool, Option<PrevCol>) {
         if self.current.is_none() {
             self.current = match self.next_window() {
                 Some(w) => Some(w),
-                None => return false,
+                None => return (false, None),
             }
         }
 
-        let lines_remaining = self
-            .current
-            .as_mut()
-            .unwrap()
-            .render_next_line(buf, style_cache);
+        let lines_remaining =
+            self.current
+                .as_mut()
+                .unwrap()
+                .render_next_line(buf, prev_col, style_cache);
         self.row += 1;
 
-        if !lines_remaining {
+        let this_col = if lines_remaining {
+            Some(PrevCol::Buffer)
+        } else {
             self.current = None;
+            let left_edge = match prev_col {
+                Some(PrevCol::Buffer) => RTSTR,
+                Some(PrevCol::Hline) => XSTR,
+                None => "",
+            };
+
             _ = write!(
                 buf,
-                "{}{}{}",
+                "{}{}{left_edge}{}",
                 Style::Fg(self.cs.minibuffer_hl),
                 Style::Bg(self.cs.bg),
                 HLINE.repeat(self.n_cols)
             );
-        }
+            Some(PrevCol::Hline)
+        };
 
-        self.row < self.screen_rows
+        (self.row < self.screen_rows, this_col)
     }
 }
 
@@ -690,6 +704,7 @@ impl<'a> WinRenderer<'a> {
     fn render_next_line(
         &mut self,
         buf: &mut String,
+        prev_col: Option<PrevCol>,
         style_cache: &mut HashMap<String, String>,
     ) -> bool {
         if self.y >= self.w.n_rows {
@@ -698,6 +713,20 @@ impl<'a> WinRenderer<'a> {
 
         let file_row = self.y + self.w.view.row_off;
         self.y += 1;
+
+        if let Some(pc) = prev_col {
+            let left_edge = match pc {
+                PrevCol::Buffer => VLINE,
+                PrevCol::Hline => LTSTR,
+            };
+
+            _ = write!(
+                buf,
+                "{}{}{left_edge}",
+                Style::Fg(self.cs.minibuffer_hl),
+                Style::Bg(self.cs.bg)
+            );
+        }
 
         match self.it.next() {
             None => {
