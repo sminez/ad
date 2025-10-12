@@ -40,11 +40,11 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 const MIN_COLS: usize = 20;
 const MIN_ROWS: usize = 5;
 
-const HLINE: &str = "─";
-const VLINE: &str = "│";
-const RTSTR: &str = "├";
-const LTSTR: &str = "┤";
-const XSTR: &str = "┼";
+const H_STR: &str = "─";
+const V_STR: &str = "│";
+const TR_STR: &str = "├";
+const TL_STR: &str = "┤";
+const X_STR: &str = "┼";
 
 pub type Tui = GenericTui<StdoutLock<'static>>;
 
@@ -642,8 +642,8 @@ impl<'a> ColRenderer<'a> {
         } else {
             self.current = None;
             let left_edge = match prev_col {
-                Some(PrevCol::Buffer) => RTSTR,
-                Some(PrevCol::Hline) => XSTR,
+                Some(PrevCol::Buffer) => TR_STR,
+                Some(PrevCol::Hline) => X_STR,
                 None => "",
             };
 
@@ -652,7 +652,7 @@ impl<'a> ColRenderer<'a> {
                 "{}{}{left_edge}{}",
                 Style::Fg(self.cs.minibuffer_hl),
                 Style::Bg(self.cs.bg),
-                HLINE.repeat(self.n_cols)
+                H_STR.repeat(self.n_cols)
             );
             Some(PrevCol::Hline)
         };
@@ -688,8 +688,8 @@ impl<'a> WinRenderer<'a> {
 
         if let Some(pc) = prev_col {
             let left_edge = match pc {
-                PrevCol::Buffer => VLINE,
-                PrevCol::Hline => LTSTR,
+                PrevCol::Buffer => V_STR,
+                PrevCol::Hline => TL_STR,
             };
 
             _ = write!(
@@ -704,7 +704,7 @@ impl<'a> WinRenderer<'a> {
             None => {
                 _ = write!(
                     buf,
-                    "{}{}~ {VLINE:>width$}{}",
+                    "{}{}~ {V_STR:>width$}{}",
                     Style::Fg(self.cs.signcol_fg),
                     Style::Bg(self.cs.bg),
                     Style::Fg(self.cs.fg),
@@ -720,7 +720,7 @@ impl<'a> WinRenderer<'a> {
 
                 _ = write!(
                     buf,
-                    "{}{} {:>width$}{VLINE}",
+                    "{}{} {:>width$}{V_STR}",
                     Style::Fg(self.cs.signcol_fg),
                     Style::Bg(self.cs.bg),
                     file_row + 1,
