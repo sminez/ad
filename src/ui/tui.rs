@@ -46,10 +46,6 @@ const RTSTR: &str = "├";
 const LTSTR: &str = "┤";
 const XSTR: &str = "┼";
 
-fn box_draw_str(s: &str, cs: &ColorScheme) -> String {
-    format!("{}{}{s}", Style::Fg(cs.minibuffer_hl), Style::Bg(cs.bg))
-}
-
 pub type Tui = GenericTui<StdoutLock<'static>>;
 
 #[derive(Debug)]
@@ -82,14 +78,13 @@ impl Tui {
 
 impl<W: Write> GenericTui<W> {
     pub fn new_with_stdout_handle(config: Arc<Mutex<Config>>, stdout: W) -> Self {
-        let frame = Frame::new(config.clone());
         Self {
             stdout: BufWriter::new(stdout),
             config,
             status_message: String::new(),
             last_status: Instant::now(),
             mb_last_frame: false,
-            frame,
+            frame: Frame::new(),
         }
     }
 
@@ -225,7 +220,7 @@ impl<W: Write> UserInterface for GenericTui<W> {
 
     fn state_change(&mut self, change: StateChange) {
         match change {
-            StateChange::ConfigUpdated => self.frame.update_cached_elements(),
+            StateChange::ConfigUpdated => self.frame.style_cache.clear(),
             StateChange::StatusMessage { msg } => {
                 self.status_message = msg;
                 self.last_status = Instant::now();
@@ -295,7 +290,6 @@ impl<W: Write> UserInterface for GenericTui<W> {
 
 #[derive(Debug, Default)]
 pub struct Frame {
-    config: Arc<Mutex<Config>>,
     win_lines: String,
     status_bar: String,
     mb_lines: String,
@@ -306,45 +300,23 @@ pub struct Frame {
     screen_cols: usize,
     cur_x: usize,
     cur_y: usize,
-    // Box elements for rendering window borders
-    vstr: String,
-    xstr: String,
-    tstr: String,
-    hvh: String,
-    vh: String,
     // Cache of the ANSI escape code strings required for each fully qualified tree-sitter
     // highlighting tag. See render_line for details on how the cache is used.
     style_cache: HashMap<String, String>,
 }
 
 impl Frame {
-    fn new(config: Arc<Mutex<Config>>) -> Self {
+    fn new() -> Self {
         let win_lines_cap = 128 * 1024;
         let bar_cap = 8 * 1024;
 
-        let mut frame = Self {
-            config,
+        Self {
             win_lines: String::with_capacity(win_lines_cap),
             mb_lines: String::with_capacity(bar_cap),
             status_bar: String::with_capacity(bar_cap),
             msg_bar: String::with_capacity(bar_cap),
             ..Default::default()
-        };
-        frame.update_cached_elements();
-
-        frame
-    }
-
-    fn update_cached_elements(&mut self) {
-        let cs = &config_handle!(self).colorscheme;
-        let vstr = box_draw_str(VLINE, cs);
-        let hstr = box_draw_str(HLINE, cs);
-        self.tstr = box_draw_str(RTSTR, cs);
-        self.xstr = box_draw_str(XSTR, cs);
-        self.hvh = format!("{hstr}{vstr}{hstr}");
-        self.vh = format!("{vstr}{hstr}");
-        self.vstr = vstr;
-        self.style_cache.clear();
+        }
     }
 
     fn write(&self, w: &mut impl Write) -> io::Result<()> {
@@ -1224,7 +1196,7 @@ mod tests {
             bottom: 0,
         };
 
-        let mut frame = Frame::new(Default::default());
+        let mut frame = Frame::new();
         frame.screen_cols = 91;
 
         // In 137 this was panicking due to indexing into the rendered line using self.screen_cols
