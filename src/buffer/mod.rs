@@ -367,8 +367,8 @@ impl Buffer {
             }
         }
 
-        let contents = self.contents();
         let n_lines = self.len_lines();
+        let contents = self.txt.make_contiguous();
         let display_path = match path.canonicalize() {
             Ok(cp) => cp.display().to_string(),
             Err(_) => path.display().to_string(),
@@ -485,11 +485,6 @@ impl Buffer {
         self.path()
             .and_then(|path| ftype_config_for_path_and_first_line(path, &first_line, lang_configs))
             .map(|(lang, _)| lang.clone())
-    }
-
-    /// The raw binary contents of this buffer
-    pub fn contents(&self) -> Vec<u8> {
-        self.txt.bytes()
     }
 
     /// The utf-8 string contents of this buffer

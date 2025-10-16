@@ -192,10 +192,8 @@ impl From<&str> for GapBuffer {
 
 impl fmt::Display for GapBuffer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match String::from_utf8(self.bytes()) {
-            Ok(s) => write!(f, "{s}"),
-            Err(_) => Err(fmt::Error),
-        }
+        let (s1, s2) = self.as_strs();
+        write!(f, "{s1}{s2}")
     }
 }
 
@@ -296,18 +294,35 @@ impl GapBuffer {
     pub fn as_str(&mut self) -> &str {
         let raw = self.make_contiguous();
 
-        // SAFETY: we know we have valid utf-8 data internally and as_bytes moves the gap so that
-        // `raw` contains all of the live data within the buffer.
+        // SAFETY: we know we have valid utf-8 data internally and make_contiguous moves the gap so
+        // that `raw` contains all of the live data within the buffer.
         unsafe { std::str::from_utf8_unchecked(raw) }
     }
 
-    /// The contents of the buffer either side of the current gap.
+    /// Assume that the gap is at 0 and return the full contents of the inner buffer as a slice of
+    /// bytes.
+    ///
+    /// # Safety
+    /// You must call [GapBuffer::make_contiguous] before calling this method.
+    pub unsafe fn assume_contiguous_bytes(&self) -> &[u8] {
+        &self.data[self.gap_end..]
+    }
+
+    /// Assume that the gap is at 0 and return the full contents of the inner buffer as a &str
+    ///
+    /// # Safety
+    /// You must call [GapBuffer::make_contiguous] before calling this method.
+    pub unsafe fn assume_contiguous_str(&self) -> &str {
+        // SAFETY: See above
+        unsafe { std::str::from_utf8_unchecked(&self.data[self.gap_end..]) }
+    }
+
+    /// The contents of the buffer either side of the current gap as &str slices.
     ///
     /// If [make_contiguous][GapBuffer::make_contiguous] was previously called, the first `&str`
     /// will be empty and the full content of the buffer will be in the second `&str`.
     pub fn as_strs(&self) -> (&str, &str) {
-        let left = &self.data[0..self.gap_start];
-        let right = &self.data[self.gap_end..];
+        let (left, right) = self.as_byte_slices();
 
         // SAFETY: we know that we have valid utf8 data internally and that the position of the gap
         // does not split any utf-8 codepoints.
@@ -319,16 +334,12 @@ impl GapBuffer {
         }
     }
 
-    /// The raw content of the active data within the buffer.
+    /// The contents of the buffer either side of the current gap as byte slices.
     ///
-    /// For a non allocating version of this when you are able to mutate the buffer (by moving the
-    /// gap) see [make_contiguous][GapBuffer::make_contiguous].
-    pub fn bytes(&self) -> Vec<u8> {
-        let mut v = Vec::with_capacity(self.len());
-        v.extend(&self.data[..self.gap_start]);
-        v.extend(&self.data[self.gap_end..]);
-
-        v
+    /// If [make_contiguous][GapBuffer::make_contiguous] was previously called, the first slice
+    /// will be empty and the full content of the buffer will be in the second slice.
+    pub fn as_byte_slices(&self) -> (&[u8], &[u8]) {
+        (&self.data[0..self.gap_start], &self.data[self.gap_end..])
     }
 
     /// Iterate over the characters of the buffer
