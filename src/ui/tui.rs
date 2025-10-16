@@ -250,7 +250,11 @@ impl<W: Write> UserInterface for GenericTui<W> {
         // We also need to re-render on the frame after a minibuffer is closed in order to
         // get rid of it, as none of the other buffers in the layout will be marked as changed
         // since the last render.
-        if layout.changed_since_last_render() || mb_this_frame || self.mb_last_frame {
+        let need_render = layout.changed_since_last_render()
+            || mb_this_frame
+            || self.mb_last_frame | held_click.is_some();
+
+        if need_render {
             layout.update_visible_ts_state();
             self.render(mode_name, layout, n_running, pending_keys, held_click, mb);
             if let Err(e) = self.frame.write(&mut self.stdout) {
