@@ -19,7 +19,7 @@ use std::{
     io::{self, ErrorKind},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, RwLock,
         atomic::{AtomicUsize, Ordering},
     },
     time::SystemTime,
@@ -179,7 +179,7 @@ pub struct Buffer {
     pub(crate) changed_since_last_render: bool,
     pub(crate) input_filter: Option<InputFilter>,
     pub(crate) syntax_state: Option<SyntaxState>,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
     version: AtomicUsize,
     edit_log: EditLog,
 }
@@ -189,7 +189,7 @@ impl Buffer {
     pub fn new_from_canonical_file_path(
         id: usize,
         path: PathBuf,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> io::Result<Self> {
         let (kind, raw) = BufferKind::try_kind_and_content_from_path(path.clone())?;
         let mut b = Self {
@@ -215,7 +215,7 @@ impl Buffer {
     }
 
     /// Create a new unnamed buffer with the given content
-    pub fn new_unnamed(id: usize, content: impl Into<String>, config: Arc<Mutex<Config>>) -> Self {
+    pub fn new_unnamed(id: usize, content: impl Into<String>, config: Arc<RwLock<Config>>) -> Self {
         Self {
             id,
             kind: BufferKind::Unnamed,
@@ -242,7 +242,7 @@ impl Buffer {
         id: usize,
         name: impl Into<String>,
         content: impl Into<String>,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> Self {
         let mut content = normalize_line_endings(content.into());
         if content.ends_with('\n') {
@@ -273,7 +273,7 @@ impl Buffer {
         id: usize,
         name: String,
         content: String,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> Self {
         Self {
             id,
@@ -418,7 +418,7 @@ impl Buffer {
         format!("\"{display_path}\" {n_lines}L {n_bytes}B loaded")
     }
 
-    pub(super) fn new_minibuffer(config: Arc<Mutex<Config>>) -> Self {
+    pub(super) fn new_minibuffer(config: Arc<RwLock<Config>>) -> Self {
         Self {
             id: usize::MAX,
             kind: BufferKind::MiniBuffer,

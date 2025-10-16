@@ -2,7 +2,7 @@ use ad_editor::{Config, buffer::Buffer};
 use reference_tests::TestData;
 use std::{
     env, fs,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 fn main() {
@@ -24,7 +24,7 @@ fn main() {
     cfg.editor.expand_tab = false;
     cfg.editor.match_indent = false;
 
-    let mut b = Buffer::new_unnamed(0, &test_data.start_content, Arc::new(Mutex::new(cfg)));
+    let mut b = Buffer::new_unnamed(0, &test_data.start_content, Arc::new(RwLock::new(cfg)));
 
     test_data.apply_n(&mut b, steps);
     fs::write("output/rust_output.txt", b.str_contents()).unwrap();

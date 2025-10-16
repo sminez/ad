@@ -8,7 +8,7 @@ use crate::{
 };
 use std::{
     fmt,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{Arc, RwLock, mpsc::Sender},
 };
 
 mod layout;
@@ -91,7 +91,7 @@ impl fmt::Debug for Ui {
 }
 
 impl Ui {
-    pub(crate) fn new(mode: EditorMode, config: Arc<Mutex<Config>>) -> Self {
+    pub(crate) fn new(mode: EditorMode, config: Arc<RwLock<Config>>) -> Self {
         match mode {
             EditorMode::Headless => Self::Headless,
             EditorMode::Terminal => Self::Tui(Tui::new(config)),

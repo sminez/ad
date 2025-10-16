@@ -16,7 +16,7 @@ use std::{
     cmp::{self, min},
     fmt,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 use tracing::trace;
 
@@ -85,7 +85,7 @@ where
         lines: Vec<String>,
         max_height: usize,
         on_change: F,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> Self {
         let line_indices = Vec::with_capacity(lines.len());
         let n_prompt_chars = prompt.chars().count();

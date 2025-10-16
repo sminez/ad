@@ -70,7 +70,7 @@ pub(crate) fn pid() -> u32 {
 #[macro_export]
 macro_rules! config_handle {
     ($self:expr) => {{
-        match $self.config.lock() {
+        match $self.config.read() {
             Ok(config) => config,
             Err(err) => {
                 $self.config.clear_poison();

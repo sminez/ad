@@ -98,7 +98,7 @@ mod tests {
     use super::*;
     use ad_editor::Config;
     use pretty_assertions::assert_eq;
-    use std::sync::{Arc, Mutex};
+    use std::sync::{Arc, RwLock};
 
     fn run_reference_test(name: &str) {
         let path = format!("{}/data/{name}.json.gz", env!("CARGO_MANIFEST_DIR"),);
@@ -107,7 +107,7 @@ mod tests {
         cfg.editor.expand_tab = false;
         cfg.editor.match_indent = false;
 
-        let mut b = Buffer::new_unnamed(0, &test_data.start_content, Arc::new(Mutex::new(cfg)));
+        let mut b = Buffer::new_unnamed(0, &test_data.start_content, Arc::new(RwLock::new(cfg)));
 
         test_data.apply_all(&mut b);
 

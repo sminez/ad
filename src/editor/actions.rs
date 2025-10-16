@@ -394,7 +394,7 @@ where
         info!("reloading config");
         let msg = match Config::try_load() {
             Ok(config) => {
-                *self.config.lock().unwrap() = config;
+                *self.config.write().unwrap() = config;
                 "config reloaded".to_string()
             }
             Err(s) => s,

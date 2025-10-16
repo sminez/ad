@@ -12,7 +12,7 @@ use std::{
     io::{self, ErrorKind},
     mem,
     path::Path,
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 #[cfg(test)]
@@ -33,11 +33,11 @@ pub struct Buffers {
     inner: ZipList<Buffer>,
     jump_list: JumpList,
     lsp_handle: Arc<LspManagerHandle>,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
 }
 
 impl Buffers {
-    pub fn new(lsp_handle: Arc<LspManagerHandle>, config: Arc<Mutex<Config>>) -> Self {
+    pub fn new(lsp_handle: Arc<LspManagerHandle>, config: Arc<RwLock<Config>>) -> Self {
         Self {
             next_id: 1,
             inner: ziplist![Buffer::new_unnamed(0, "", config.clone())],
@@ -48,7 +48,7 @@ impl Buffers {
     }
 
     #[cfg(test)]
-    pub(crate) fn new_with_raw_sender(tx_req: Sender<Req>, config: Arc<Mutex<Config>>) -> Self {
+    pub(crate) fn new_with_raw_sender(tx_req: Sender<Req>, config: Arc<RwLock<Config>>) -> Self {
         Self {
             next_id: 1,
             inner: ziplist![Buffer::new_unnamed(0, "", config.clone())],
@@ -62,7 +62,7 @@ impl Buffers {
     pub(crate) fn new_stubbed(
         ids: &[usize],
         tx_req: Sender<Req>,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> Self {
         Self {
             next_id: ids.last().unwrap() + 1,

@@ -15,7 +15,7 @@ use std::{
     io,
     mem::swap,
     path::Path,
-    sync::{Arc, Mutex, mpsc::channel},
+    sync::{Arc, RwLock, mpsc::channel},
 };
 use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
@@ -76,7 +76,7 @@ pub struct Layout {
     /// The managed buffer state
     buffers: Buffers,
     /// Global editor config
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
     /// An anonymous buffer that sits outside of the main buffer state and acts as though it is the
     /// active buffer for the purposes of Load/Execute.
     pub(crate) scratch: Scratch,
@@ -98,7 +98,7 @@ impl Layout {
     pub fn new_with_stub_lsp_handle(
         screen_rows: usize,
         screen_cols: usize,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> Self {
         let (tx, _rx) = channel();
         let lsp_handle = LspManagerHandle::new_stubbed(tx);
@@ -110,7 +110,7 @@ impl Layout {
         screen_rows: usize,
         screen_cols: usize,
         lsp_handle: Arc<LspManagerHandle>,
-        config: Arc<Mutex<Config>>,
+        config: Arc<RwLock<Config>>,
     ) -> Self {
         let scratch = Scratch::new(config.clone());
         let buffers = Buffers::new(lsp_handle, config.clone());
@@ -1325,8 +1325,8 @@ impl ScratchBuf {
 
 impl Scratch {
     // n_rows is read from config on startup but then not modified after that
-    fn new(config: Arc<Mutex<Config>>) -> Self {
-        let n_rows = config.lock().unwrap().minibuffer_lines;
+    fn new(config: Arc<RwLock<Config>>) -> Self {
+        let n_rows = config.read().unwrap().minibuffer_lines;
 
         Self {
             b: ScratchBuf {
@@ -1339,7 +1339,7 @@ impl Scratch {
         }
     }
 
-    fn set_transient(&mut self, name: String, content: String, config: Arc<Mutex<Config>>) {
+    fn set_transient(&mut self, name: String, content: String, config: Arc<RwLock<Config>>) {
         self.b.transient = Some(Buffer::new_virtual(SCRATCH_ID, name, content, config));
         self.is_visible = true;
         self.is_focused = true;
@@ -1658,7 +1658,7 @@ mod tests {
         }
 
         let (tx, _) = channel();
-        let config = Arc::new(Mutex::new(Config::default()));
+        let config = Arc::new(RwLock::new(Config::default()));
         let scratch = Scratch::new(config.clone());
 
         let mut l = Layout {
@@ -1686,7 +1686,7 @@ mod tests {
     #[test]
     fn opening_file_with_unnamed_split_works() {
         let (tx, _) = channel();
-        let config = Arc::new(Mutex::new(Config::default()));
+        let config = Arc::new(RwLock::new(Config::default()));
         let scratch = Scratch::new(config.clone());
 
         let buffers = Buffers::new_with_raw_sender(tx, config.clone());

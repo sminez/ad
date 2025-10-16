@@ -29,7 +29,7 @@ use std::{
     io::{self, BufWriter, Read, StdoutLock, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{Arc, RwLock, mpsc::Sender},
     thread::{JoinHandle, spawn},
     time::Instant,
 };
@@ -51,7 +51,7 @@ pub type Tui = GenericTui<StdoutLock<'static>>;
 #[derive(Debug)]
 pub struct GenericTui<W: Write> {
     stdout: BufWriter<W>,
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
     status_message: String,
     last_status: Instant,
     mb_last_frame: bool,
@@ -71,13 +71,13 @@ impl<W: Write> Drop for GenericTui<W> {
 }
 
 impl Tui {
-    pub fn new(config: Arc<Mutex<Config>>) -> Self {
+    pub fn new(config: Arc<RwLock<Config>>) -> Self {
         Self::new_with_stdout_handle(config, stdout().lock())
     }
 }
 
 impl<W: Write> GenericTui<W> {
-    pub fn new_with_stdout_handle(config: Arc<Mutex<Config>>, stdout: W) -> Self {
+    pub fn new_with_stdout_handle(config: Arc<RwLock<Config>>, stdout: W) -> Self {
         Self {
             stdout: BufWriter::new(stdout),
             config,

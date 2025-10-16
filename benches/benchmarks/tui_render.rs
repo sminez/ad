@@ -10,7 +10,7 @@ use std::{
     env::current_dir,
     hint::black_box,
     io::{self, Write},
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -27,7 +27,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let config = Config::try_load().unwrap();
     let mut tui = GenericTui::new_with_stdout_handle(
-        Arc::new(Mutex::new(config.clone())),
+        Arc::new(RwLock::new(config.clone())),
         StdoutSink(Vec::with_capacity(512 * 1024)),
     );
     tui.set_size(80, 160);
@@ -64,7 +64,7 @@ impl Write for StdoutSink {
 
 fn tui_and_layout(files: &[&str]) -> (GenericTui<StdoutSink>, Layout) {
     // This will need to point to the TS config for rust
-    let config = Arc::new(Mutex::new(Config::try_load().unwrap()));
+    let config = Arc::new(RwLock::new(Config::try_load().unwrap()));
     let mut tui = GenericTui::new_with_stdout_handle(
         config.clone(),
         StdoutSink(Vec::with_capacity(512 * 1024)),

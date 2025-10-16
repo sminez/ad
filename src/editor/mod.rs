@@ -21,7 +21,7 @@ use std::{
     env, fmt, panic,
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, RwLock,
         mpsc::{Receiver, Sender, channel},
     },
     time::Instant,
@@ -68,7 +68,7 @@ pub struct Editor<S>
 where
     S: System,
 {
-    config: Arc<Mutex<Config>>,
+    config: Arc<RwLock<Config>>,
     system: S,
     ui: Ui,
     cwd: PathBuf,
@@ -149,7 +149,7 @@ where
             config.lsp_autostart,
         ));
 
-        let config = Arc::new(Mutex::new(config));
+        let config = Arc::new(RwLock::new(config));
 
         let ui = Ui::new(mode, config.clone());
         let mut layout = Layout::new(100, 100, lsp_manager.clone(), config.clone());
