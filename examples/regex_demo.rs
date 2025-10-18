@@ -12,27 +12,40 @@
 //! Submatch $2: Some("456")
 //! Match ($0):  "123-456"
 
-use ad_editor::regex::Regex;
+use ad_editor::{buffer::GapBuffer, regex::Regex};
 use std::time::Instant;
 
 fn main() {
+    let mut haystack = "🦊".repeat(10000);
+    haystack.push('\n');
+    haystack = haystack.repeat(100);
+    haystack.push_str("this should work 123-456 other stuff");
+
     let re = "([0-9]+)-([0-9]+)";
-    let s = "this should work 123-456 other stuff";
-
-    println!("regex: {re:?}\ninput {s:?}");
-
     let t1 = Instant::now();
     let mut r = Regex::compile(re).unwrap();
     let d_compile = Instant::now().duration_since(t1).as_micros();
     println!("compile time (micro seconds): {d_compile}");
 
-    println!("\n:: matching against a str");
-    let t1 = Instant::now();
-    let m = r.match_str(s).unwrap();
-    let d_match = Instant::now().duration_since(t1).as_micros();
-    println!("match time (micro seconds): {d_match}");
+    let mut gb = GapBuffer::from(haystack);
 
-    println!("Submatch $1: {:?}", m.str_submatch_text(1, s));
-    println!("Submatch $2: {:?}", m.str_submatch_text(2, s));
-    println!("Match ($0):  {:?}", m.str_match_text(s));
+    println!("\n:: matching against a gap buffer");
+    let t1 = Instant::now();
+    let m = r.match_gb(&mut gb).unwrap();
+    let d_match = Instant::now().duration_since(t1).as_millis();
+    println!("match time (ms): {d_match}");
+
+    println!("Submatch $1: {:?}", m.str_submatch_text(1, gb.as_str()));
+    println!("Submatch $2: {:?}", m.str_submatch_text(2, gb.as_str()));
+    println!("Match ($0):  {:?}", m.str_match_text(gb.as_str()));
+
+    println!("\n:: fast matching against a gap buffer");
+    let t1 = Instant::now();
+    let m = r.match_gb_fast(&mut gb).unwrap();
+    let d_match = Instant::now().duration_since(t1).as_millis();
+    println!("match time (ms): {d_match}");
+
+    println!("Submatch $1: {:?}", m.str_submatch_text(1, gb.as_str()));
+    println!("Submatch $2: {:?}", m.str_submatch_text(2, gb.as_str()));
+    println!("Match ($0):  {:?}", m.str_match_text(gb.as_str()));
 }

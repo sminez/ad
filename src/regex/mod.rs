@@ -71,9 +71,9 @@ const ESCAPES: [Option<char>; 256] = init_escapes();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CharClass {
-    negated: bool,
-    chars: Vec<char>,
-    ranges: Vec<(char, char)>,
+    pub(crate) negated: bool,
+    pub(crate) chars: Vec<char>,
+    pub(crate) ranges: Vec<(char, char)>,
 }
 
 impl CharClass {

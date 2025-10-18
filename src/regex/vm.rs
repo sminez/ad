@@ -14,8 +14,9 @@ use super::{
     compile::{CompiledOps, Inst, Op, Prog, compile_ast, optimise},
     matches::{Match, MatchIter},
 };
-use crate::buffer::{Buffer, GapBuffer};
-use std::{fmt, mem::swap, rc::Rc};
+use crate::buffer::GapBuffer;
+use aho_corasick::AhoCorasick;
+use std::{collections::HashSet, fmt, mem::swap, rc::Rc};
 
 pub(super) const N_SLOTS: usize = 30;
 
@@ -25,12 +26,14 @@ pub(super) const N_SLOTS: usize = 30;
 /// optimisations and runs reasonably quickly. It is not at all designed to
 /// be robust against malicious input and it does not attempt to support
 /// full PCRE syntax or functionality.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Regex {
     /// The original text of the regex
     re: String,
     /// The compiled instructions for running the VM
     prog: Prog,
+    /// Fast searcher for the first potential match site
+    fast_start: Option<Box<AhoCorasick>>,
     /// Names to be used for extracting named submatches
     submatch_names: Rc<[String]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
@@ -53,6 +56,14 @@ pub struct Regex {
     next: Option<char>,
 }
 
+impl PartialEq for Regex {
+    fn eq(&self, other: &Self) -> bool {
+        self.prog == other.prog
+    }
+}
+
+impl Eq for Regex {}
+
 impl fmt::Debug for Regex {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_tuple("Regex").field(&self.re).finish()
@@ -73,12 +84,13 @@ impl Regex {
     pub fn compile(re: impl AsRef<str>) -> Result<Self, Error> {
         let mut ast = parse(re.as_ref())?;
         ast.optimise();
+        let lits = ast.leading_literals();
         let CompiledOps {
             ops,
             submatch_names,
         } = compile_ast(ast, false);
 
-        Ok(Self::new(re.as_ref(), ops, submatch_names))
+        Ok(Self::new(re.as_ref(), ops, submatch_names, lits))
     }
 
     /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
@@ -94,10 +106,15 @@ impl Regex {
             submatch_names,
         } = compile_ast(ast, true);
 
-        Ok(Self::new(re.as_ref(), ops, submatch_names))
+        Ok(Self::new(re.as_ref(), ops, submatch_names, HashSet::new()))
     }
 
-    fn new(re: &str, ops: Vec<Op>, submatch_names: Vec<String>) -> Self {
+    fn new(
+        re: &str,
+        ops: Vec<Op>,
+        submatch_names: Vec<String>,
+        leading_lits: HashSet<String>,
+    ) -> Self {
         let prog: Prog = optimise(ops)
             .into_iter()
             .map(|op| Inst { op, generation: 0 })
@@ -108,9 +125,18 @@ impl Regex {
         let sms = vec![SubMatches::default(); prog.len()].into_boxed_slice();
         let free_sms = (1..prog.len()).collect();
 
+        let fast_start = if leading_lits.is_empty() {
+            None
+        } else {
+            Some(Box::new(
+                AhoCorasick::new(leading_lits).expect("using auto builder so no errors possible"),
+            ))
+        };
+
         Self {
             re: re.to_string(),
             prog,
+            fast_start,
             submatch_names: Rc::from(submatch_names.into_boxed_slice()),
             clist,
             nlist,
@@ -142,27 +168,34 @@ impl Regex {
         }
     }
 
-    /// Iterate over all non-overlapping matches of this Regex for a given [Buffer] input.
-    pub fn match_buffer_all<'a, 'b>(&'a mut self, b: &'b Buffer) -> MatchIter<'a, &'b GapBuffer> {
-        self.track_submatches = true;
-        MatchIter {
-            it: &b.txt,
-            r: self,
-            from: 0,
+    fn get_skip(&self, input: &str) -> usize {
+        if let Some(ac) = self.fast_start.as_ref()
+            && let Some(m) = ac.find(input)
+        {
+            m.start().saturating_sub(2)
+        } else {
+            0
         }
     }
 
-    /// Iterate over all non-overlapping matches of this Regex for a given GapBuffer input.
-    pub fn match_gapbuffer_all<'a, 'b>(
-        &'a mut self,
-        gb: &'b GapBuffer,
-    ) -> MatchIter<'a, &'b GapBuffer> {
+    /// Attempt to match this Regex against a given `&str` input, returning the position
+    /// of the match and all submatches if successful.
+    pub fn match_gb(&mut self, input: &mut GapBuffer) -> Option<Match> {
+        let s = input.as_str();
         self.track_submatches = true;
-        MatchIter {
-            it: gb,
-            r: self,
-            from: 0,
-        }
+        self.match_iter(&mut s.chars().enumerate(), 0)
+    }
+
+    /// Attempt to match this Regex against a given `&str` input, returning the position
+    /// of the match and all submatches if successful.
+    pub fn match_gb_fast(&mut self, input: &mut GapBuffer) -> Option<Match> {
+        self.track_submatches = true;
+        let skip = self.get_skip(input.as_str());
+        // SAFETY: input.as_str() makes input contiguous
+        let s = unsafe { input.substr_from(skip) };
+        let sp = input.byte_to_char(skip);
+
+        self.match_iter(&mut s.chars().enumerate().map(|(i, s)| (i + sp, s)), sp)
     }
 
     /// Attempt to match this Regex against an arbitrary iterator input, returning the
@@ -454,6 +487,7 @@ fn assert_thread(pc: usize, sm: usize, a: Assertion) -> Thread {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::Buffer;
     use simple_test_case::test_case;
 
     // typos:off

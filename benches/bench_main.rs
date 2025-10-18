@@ -8,4 +8,5 @@ criterion_main! {
     benchmarks::tui_render::benches,
     benchmarks::ts_update::benches,
     benchmarks::exec::benches,
+    benchmarks::re_fast_match::benches,
 }

@@ -299,6 +299,15 @@ impl GapBuffer {
         unsafe { std::str::from_utf8_unchecked(raw) }
     }
 
+    /// A contiguous substring of the buffer from the give byte offset.
+    ///
+    /// # Safety
+    /// You must call [GapBuffer::make_contiguous] before calling this method.
+    pub unsafe fn substr_from(&self, byte_offset: usize) -> &str {
+        // SAFETY: See above
+        unsafe { std::str::from_utf8_unchecked(&self.data[self.gap_end + byte_offset..]) }
+    }
+
     /// Assume that the gap is at 0 and return the full contents of the inner buffer as a slice of
     /// bytes.
     ///
@@ -894,6 +903,49 @@ impl GapBuffer {
 
         #[cfg(test)]
         assert_line_endings!(self);
+    }
+
+    /// Convert a logical byte offset into a character offset within the buffer.
+    ///
+    /// This is primarily used to create substrings via the [GapBuffer::substr_from] method when
+    /// running regular expressions over a gap buffer.
+    ///
+    /// This is a simplified version of the equivalent logic in offset_char_to_raw_byte without the
+    /// cache and fast search on single line buffers. This is not typically in the hot path for
+    /// general editor functionality so we don't mind being a little slower in order to keep the
+    /// logic easier to reason about
+    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
+        let mut to = usize::MAX;
+        let byte_idx = self.byte_to_raw_byte(byte_idx);
+        let (mut byte_offset, mut char_offset) = (0, 0);
+
+        // Determine which line the character lies in based on the byte index, skipping all
+        // lines that are before the byte offset we were given.
+        for (&b, &c) in self.line_endings.iter() {
+            match b.cmp(&byte_idx) {
+                Ordering::Less => (byte_offset, char_offset) = (b, c),
+                Ordering::Equal => {
+                    return c;
+                }
+                Ordering::Greater => {
+                    to = b;
+                    break;
+                }
+            }
+        }
+
+        let slice = Slice::from_raw_offsets(byte_offset, to, self);
+        let mut cur = char_offset;
+        let mut byte_cur = byte_offset;
+        for ch in slice.chars() {
+            cur += 1;
+            byte_cur += ch.len_utf8();
+            if byte_cur == byte_idx {
+                break;
+            }
+        }
+
+        cur
     }
 
     /// Convert a character offset within the logical buffer to a byte offset

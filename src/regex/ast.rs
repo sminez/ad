@@ -1,7 +1,13 @@
 //! A simple AST for parsing and manipulating regex strings
 use super::{CharClass, Error, next_char};
 use crate::util::parse_num;
-use std::{iter::Peekable, mem::swap, str::Chars};
+use std::{collections::HashSet, iter::Peekable, mem::swap, str::Chars};
+
+/// Complex regex patterns can cause the generation of leading literal patterns to take
+/// exponentially longer to compute. We impose a hard limit on the number of patterns we collect in
+/// order to keep this under control at the expense of not being able to always find leading
+/// literals for complex patterns.
+const MAX_LEADING_LITERALS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Ast {
@@ -21,6 +27,55 @@ pub(super) enum SmKind {
 }
 
 impl Ast {
+    /// Extract leading literal string fragments from this [Ast].
+    ///
+    /// This is used for determining if we can make use of a fast literal search to determin the
+    /// start of a potential match before dropping into running the regex engine. Doing so can
+    /// result in a significant speedup.
+    pub fn leading_literals(&self) -> HashSet<String> {
+        match self {
+            // Actual literals that we need to collect
+            Self::Comp(Comp::Char(c)) => std::iter::once(c.to_string()).collect(),
+            Self::Comp(Comp::Numeric) => ('0'..='9').map(String::from).collect(),
+
+            Self::Comp(Comp::Class(cls)) if !cls.negated => cls
+                .chars
+                .iter()
+                .map(|ch| ch.to_string())
+                .chain(
+                    cls.ranges
+                        .iter()
+                        .flat_map(|(start, end)| (*start..=*end).map(String::from)),
+                )
+                .take(MAX_LEADING_LITERALS)
+                .collect(),
+
+            // Other comparisons are too broad for us to lift out into leading literals and
+            // assertions are not literals.
+            Self::Comp(_) | Self::Assertion(_) => HashSet::new(),
+
+            Self::SubMatch(_, node) => node.leading_literals(),
+
+            // Nested structure we need to combine
+            Self::Concat(nodes) => leading_literals_for_concat(nodes.iter()),
+
+            Self::Alt(nodes) => nodes
+                .iter()
+                .flat_map(|node| node.leading_literals())
+                .take(MAX_LEADING_LITERALS)
+                .collect(),
+
+            Self::Rep(r, node) => {
+                let mut lits = node.leading_literals();
+                if r.is_nullable() {
+                    lits.insert(String::new());
+                }
+
+                lits
+            }
+        }
+    }
+
     fn concat_or_node(mut nodes: Vec<Ast>) -> Ast {
         match nodes.len() {
             1 => nodes.remove(0),
@@ -107,6 +162,62 @@ impl Ast {
             _ => (),
         }
     }
+}
+
+fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> HashSet<String> {
+    let mut lits = HashSet::new();
+    lits.insert(String::new());
+
+    while let Some(node) = it.next() {
+        if lits.len() > MAX_LEADING_LITERALS {
+            break;
+        }
+
+        // We stop at assertions and repetitions alter how we proceed
+        let rep = match node {
+            Ast::Assertion(_) => break,
+            Ast::Rep(r, _) => Some(r),
+            _ => None,
+        };
+
+        let node_lits = node.leading_literals();
+
+        match rep {
+            // + and * both act as a break condition as we have an unbounded number of characters
+            // to consume. In the case of * we need to account for the case where we didn't match
+            // and include all of the literals that come afterwards directly.
+            Some(Rep::Plus(_)) => {
+                lits = combine(&lits, &node_lits);
+                break;
+            }
+            Some(Rep::Star(_)) => {
+                let remaining = it.clone();
+                let mut star_lits = combine(&lits, &node_lits);
+                star_lits.extend(combine(&lits, &leading_literals_for_concat(remaining)));
+                star_lits.retain(|s| !lits.contains(s)); // remove shorter prefixes
+                lits = star_lits;
+                lits.remove("");
+                break;
+            }
+            _ => {
+                lits = combine(&lits, &node_lits);
+            }
+        };
+    }
+
+    lits
+}
+
+fn combine(lits: &HashSet<String>, node_lits: &HashSet<String>) -> HashSet<String> {
+    lits.iter()
+        .flat_map(|l| {
+            node_lits.iter().map(|nl| {
+                let mut s = l.clone();
+                s.push_str(nl);
+                s
+            })
+        })
+        .collect()
 }
 
 fn compress_cats(nodes: &mut Vec<Ast>) -> bool {
@@ -293,6 +404,10 @@ pub(super) enum Rep {
 }
 
 impl Rep {
+    fn is_nullable(&self) -> bool {
+        matches!(self, Self::Quest(_) | Self::Star(_))
+    }
+
     fn make_lazy(&mut self) {
         match self {
             Rep::Quest(g) => *g = Greed::Lazy,
@@ -656,5 +771,27 @@ mod tests {
         let back_ast = parse(re_back).unwrap();
 
         assert_eq!(forward_ast, back_ast);
+    }
+
+    #[test_case("abc", &["abc"]; "literals only")]
+    #[test_case("ab+c", &["ab"]; "literals with plus")]
+    #[test_case("a+bc", &["a"]; "leading plus")]
+    #[test_case("a*bc", &["a", "bc"]; "leading star")]
+    #[test_case("ab*c", &["ab", "ac"]; "star between lits")]
+    #[test_case("abcd*e", &["abcd", "abce"]; "star between lits long")]
+    #[test_case("a?bc", &["bc", "abc"]; "leading quest")] // typos:ignore
+    #[test_case("abc?", &["ab", "abc"]; "literals with quest")] // typos:ignore
+    #[test_case("a(bc)+", &["abc"]; "repeated capture group")]
+    #[test_case("ac|bd", &["ac", "bd"]; "alts")]
+    #[test_case("ac*x|bd", &["ac", "ax", "bd"]; "alts with star")]
+    #[test_case("[Gg]oo+gle", &["Goo", "goo"]; "with class and rep")]
+    #[test]
+    fn ast_leading_literal_patterns_works(re: &str, expected: &[&str]) {
+        let ast = parse(re).unwrap();
+        println!("AST {ast:?}");
+        let pats = ast.leading_literals();
+        let expected: HashSet<String> = expected.iter().map(|s| s.to_string()).collect();
+
+        assert_eq!(pats, expected);
     }
 }
