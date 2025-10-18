@@ -7,4 +7,5 @@ criterion_main! {
     benchmarks::burntsushi_torture_regex::benches,
     benchmarks::tui_render::benches,
     benchmarks::ts_update::benches,
+    benchmarks::exec::benches,
 }

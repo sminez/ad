@@ -193,17 +193,17 @@ impl Program {
         Ok(Self { initial_dot, exprs })
     }
 
-    /// Execute this program against a given [String].
+    /// Execute this program against a given String.
     pub fn execute_on_string<W>(
         &mut self,
-        s: String,
+        s: impl Into<GapBuffer>,
         fname: &str,
         out: &mut W,
     ) -> Result<Dot, Error>
     where
         W: Write,
     {
-        self.execute(&mut GapBuffer::from(s), fname, out)
+        self.execute(&mut s.into(), fname, out)
     }
 
     /// Execute this program against a given [Edit].

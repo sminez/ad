@@ -34,7 +34,7 @@ use edit::{Edit, EditLog, Kind, Txt};
 
 pub use buffers::BufferId;
 pub(crate) use buffers::Buffers;
-pub(crate) use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
+pub use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.
