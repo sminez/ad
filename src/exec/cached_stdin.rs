@@ -2,6 +2,7 @@ use crate::{
     buffer::GapBuffer,
     dot::Dot,
     exec::{Edit, addr::Address},
+    regex::Haystack,
 };
 use std::{
     cell::RefCell,
@@ -128,6 +129,30 @@ impl Edit for CachedStdin {
 
     fn remove(&mut self, from: usize, to: usize) {
         self.gb.borrow_mut().remove_range(from, to)
+    }
+}
+
+impl<'a> Haystack<'a> for CachedStdin {
+    type Iter = CachedStdinIter<'a>;
+
+    fn try_make_contiguous(&mut self) -> bool {
+        false
+    }
+
+    fn substr_from(&'a self, _byte_offset: usize) -> &'a str {
+        ""
+    }
+
+    fn iter_from(&'a self, char_from: usize) -> Option<Self::Iter> {
+        if self.inner.borrow().closed {
+            None
+        } else {
+            Some(CachedStdinIter {
+                inner: self,
+                from: char_from,
+                to: usize::MAX,
+            })
+        }
     }
 }
 

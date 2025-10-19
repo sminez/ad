@@ -7,10 +7,12 @@ use std::{iter::Peekable, str::Chars};
 
 mod ast;
 mod compile;
+mod haystack;
 mod matches;
 mod vm;
 
-pub use matches::{IndexedChars, Match, MatchIter};
+pub use haystack::Haystack;
+pub use matches::{Match, MatchIter};
 pub use vm::Regex;
 
 /// Errors that can be returned by the regex engine

@@ -15,7 +15,7 @@ mod expr;
 
 use addr::ParseError;
 pub(crate) use addr::{Addr, AddrBase, Address};
-pub use cached_stdin::CachedStdin;
+pub use cached_stdin::{CachedStdin, CachedStdinIter};
 pub(crate) use char_iter::IterBoundedChars;
 use expr::{Expr, ParseOutput};
 

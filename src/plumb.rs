@@ -432,7 +432,7 @@ impl Pattern {
 
             Self::NarrowsTo(re) => {
                 debug!(%msg.cur, "narrowing for provided cur");
-                for m in re.match_str_all(&msg.data) {
+                for m in re.match_str_all(&msg.data.as_str()) {
                     let (from, to) = m.loc();
                     if from <= msg.cur && msg.cur <= to {
                         debug!(%from, %to, "successfully narrowed");

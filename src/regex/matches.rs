@@ -1,10 +1,7 @@
+use crate::regex::Haystack;
+
 use super::vm::{N_SLOTS, Regex};
-use crate::buffer::{GapBuffer, IdxChars};
-use std::{
-    iter::{Enumerate, Skip},
-    rc::Rc,
-    str::Chars,
-};
+use std::rc::Rc;
 
 /// The match location of a Regex against a given input.
 ///
@@ -149,63 +146,28 @@ impl Match {
     }
 }
 
-pub trait IndexedChars {
-    type I: Iterator<Item = (usize, char)>;
-    fn iter_from(&self, from: usize) -> Option<Self::I>;
-}
-
-impl<'a> IndexedChars for &'a str {
-    type I = Skip<Enumerate<Chars<'a>>>;
-
-    fn iter_from(&self, from: usize) -> Option<Self::I> {
-        // This is not at all efficient but we only really make use of strings in test cases where
-        // the length of the string is small. For the "real" impls using GapBuffers, checking the number
-        // of chars in the buffer is O(1) as we cache it.
-        if from >= self.chars().count() {
-            None
-        } else {
-            Some(self.chars().enumerate().skip(from))
-        }
-    }
-}
-
-impl<'a> IndexedChars for &'a GapBuffer {
-    type I = IdxChars<'a>;
-
-    fn iter_from(&self, from: usize) -> Option<Self::I> {
-        if from >= self.len_chars() {
-            None
-        } else {
-            Some(
-                self.slice(from, self.len_chars())
-                    .indexed_chars(from, false),
-            )
-        }
-    }
-}
-
 /// An iterator over sequential, non overlapping matches of a Regex
 /// against a given input
 #[derive(Debug)]
-pub struct MatchIter<'a, I>
+pub struct MatchIter<'a, H>
 where
-    I: IndexedChars,
+    H: Haystack<'a>,
 {
-    pub(super) it: I,
+    pub(super) haystack: &'a H,
     pub(super) r: &'a mut Regex,
     pub(super) from: usize,
 }
 
-impl<I> Iterator for MatchIter<'_, I>
+impl<'a, H> Iterator for MatchIter<'a, H>
 where
-    I: IndexedChars,
+    H: Haystack<'a>,
 {
     type Item = Match;
 
     fn next(&mut self) -> Option<Self::Item> {
         let m = self
             .r
-            .match_iter(&mut self.it.iter_from(self.from)?, self.from)?;
+            .match_iter(&mut self.haystack.iter_from(self.from)?, self.from)?;
 
         let (_, from) = m.loc();
         if from == self.from {

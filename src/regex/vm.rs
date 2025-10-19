@@ -159,10 +159,10 @@ impl Regex {
     }
 
     /// Iterate over all non-overlapping matches of this Regex for a given `&str` input.
-    pub fn match_str_all<'a, 'b>(&'a mut self, input: &'b str) -> MatchIter<'a, &'b str> {
+    pub fn match_str_all<'a>(&'a mut self, input: &'a &'a str) -> MatchIter<'a, &'a str> {
         self.track_submatches = true;
         MatchIter {
-            it: input,
+            haystack: input,
             r: self,
             from: 0,
         }
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn match_all_works(re: &str, s: &str, expected: &[&str]) {
         let mut r = Regex::compile(re).unwrap();
-        let matches: Vec<String> = r.match_str_all(s).map(|m| m.str_match_text(s)).collect();
+        let matches: Vec<String> = r.match_str_all(&s).map(|m| m.str_match_text(s)).collect();
 
         assert_eq!(&matches, expected);
     }
@@ -686,7 +686,7 @@ mod tests {
         let mut r = Regex::compile(".*").unwrap();
         let s = "this is\na multiline\nfile";
 
-        let mut it = r.match_str_all(s);
+        let mut it = r.match_str_all(&s);
 
         // written this way rather than using collect as if we introduce a bug in the MatchIter
         // impl we can end up with an iterator that gets stuck and never terminates.

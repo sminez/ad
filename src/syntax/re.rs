@@ -7,7 +7,7 @@
 use crate::{
     buffer::GapBuffer,
     dot::Range,
-    regex::{IndexedChars, Match, Regex},
+    regex::{Haystack, Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
 
