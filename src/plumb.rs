@@ -305,7 +305,7 @@ impl Pattern {
                     }
                 };
 
-                if let Some(m) = re.match_str(s) {
+                if let Some(m) = re.find(&s.as_str()) {
                     debug!("matched: updating vars");
                     vars.insert("$0".to_string(), m.str_match_text(s));
                     for n in 1..10 {
@@ -432,7 +432,7 @@ impl Pattern {
 
             Self::NarrowsTo(re) => {
                 debug!(%msg.cur, "narrowing for provided cur");
-                for m in re.match_str_all(&msg.data.as_str()) {
+                for m in re.find_iter(&msg.data.as_str()) {
                     let (from, to) = m.loc();
                     if from <= msg.cur && msg.cur <= to {
                         debug!(%from, %to, "successfully narrowed");

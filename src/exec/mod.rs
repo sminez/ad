@@ -77,6 +77,7 @@ pub trait Edit: Address {
     /// Extract the content of a previous submatch so it can be used in templating
     fn submatch(&self, m: &Match, n: usize) -> Option<String> {
         let (from, to) = m.sub_loc(n)?;
+        // FIXME: this is terrible and needs fixing in Match
         Some(self.iter_between(from, to).map(|(_, ch)| ch).collect())
     }
 
@@ -265,7 +266,7 @@ impl Program {
 
             Expr::LoopMatches(mut re) => {
                 let mut initial_matches = Vec::new();
-                while let Some(m) = re.match_iter(&mut ed.iter_between(from, to), from) {
+                while let Some(m) = re.find_between(ed, from, to) {
                     // It's possible for the Regex we're using to match a 0-length string which
                     // would cause us to get stuck trying to advance to the next match position.
                     // If this happens we advance from by a character to ensure that we search
@@ -289,7 +290,7 @@ impl Program {
             Expr::LoopBetweenMatches(mut re) => {
                 let mut initial_matches = Vec::new();
 
-                while let Some(m) = re.match_iter(&mut ed.iter_between(from, to), from) {
+                while let Some(m) = re.find_between(ed, from, to) {
                     let (new_from, new_to) = m.loc();
                     if from < new_from {
                         initial_matches.push(Match::synthetic(from, new_from));
@@ -308,7 +309,7 @@ impl Program {
             }
 
             Expr::IfContains(mut re) => {
-                if re.matches_iter(&mut ed.iter_between(from, to), from) {
+                if re.matches_between(ed, from, to) {
                     self.step(ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
@@ -316,7 +317,7 @@ impl Program {
             }
 
             Expr::IfNotContains(mut re) => {
-                if !re.matches_iter(&mut ed.iter_between(from, to), from) {
+                if !re.matches_between(ed, from, to) {
                     self.step(ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
@@ -353,7 +354,7 @@ impl Program {
                 Ok(Dot::from_char_indices(from, from))
             }
 
-            Expr::Sub(mut re, pat) => match re.match_iter(&mut ed.iter_between(from, to), from) {
+            Expr::Sub(mut re, pat) => match re.find_between(ed, from, to) {
                 Some(m) => {
                     let (mfrom, mto) = m.loc();
                     let s = template_match(&pat, &m, ed, fname)?;

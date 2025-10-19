@@ -29,49 +29,63 @@ pub(super) enum SmKind {
 impl Ast {
     /// Extract leading literal string fragments from this [Ast].
     ///
-    /// This is used for determining if we can make use of a fast literal search to determin the
+    /// This is used for determining if we can make use of a fast literal search to determine the
     /// start of a potential match before dropping into running the regex engine. Doing so can
     /// result in a significant speedup.
     pub fn leading_literals(&self) -> HashSet<String> {
+        let (mut lits, _) = self.leading_literals_inner();
+        lits.remove("");
+        lits
+    }
+
+    fn leading_literals_inner(&self) -> (HashSet<String>, bool) {
         match self {
             // Actual literals that we need to collect
-            Self::Comp(Comp::Char(c)) => std::iter::once(c.to_string()).collect(),
-            Self::Comp(Comp::Numeric) => ('0'..='9').map(String::from).collect(),
+            Self::Comp(Comp::Char(c)) => (std::iter::once(c.to_string()).collect(), true),
+            Self::Comp(Comp::Numeric) => (('0'..='9').map(String::from).collect(), true),
 
-            Self::Comp(Comp::Class(cls)) if !cls.negated => cls
-                .chars
-                .iter()
-                .map(|ch| ch.to_string())
-                .chain(
-                    cls.ranges
-                        .iter()
-                        .flat_map(|(start, end)| (*start..=*end).map(String::from)),
-                )
-                .take(MAX_LEADING_LITERALS)
-                .collect(),
+            // FIXME: fan out from character classes in this way can result in a LOT of leading
+            // literals and really we should be keeping the leading prefixes where possible rather
+            // than the first MAX_LEADING_LITERALS we encounter.
+            Self::Comp(Comp::Class(cls)) if !cls.negated => (
+                cls.chars
+                    .iter()
+                    .map(|ch| ch.to_string())
+                    .chain(
+                        cls.ranges
+                            .iter()
+                            .flat_map(|(start, end)| (*start..=*end).map(String::from)),
+                    )
+                    .take(MAX_LEADING_LITERALS)
+                    .collect(),
+                true,
+            ),
 
             // Other comparisons are too broad for us to lift out into leading literals and
             // assertions are not literals.
-            Self::Comp(_) | Self::Assertion(_) => HashSet::new(),
+            Self::Comp(_) | Self::Assertion(_) => (HashSet::new(), false),
 
-            Self::SubMatch(_, node) => node.leading_literals(),
+            Self::SubMatch(_, node) => node.leading_literals_inner(),
 
             // Nested structure we need to combine
             Self::Concat(nodes) => leading_literals_for_concat(nodes.iter()),
 
-            Self::Alt(nodes) => nodes
-                .iter()
-                .flat_map(|node| node.leading_literals())
-                .take(MAX_LEADING_LITERALS)
-                .collect(),
+            Self::Alt(nodes) => (
+                nodes
+                    .iter()
+                    .flat_map(|node| node.leading_literals())
+                    .take(MAX_LEADING_LITERALS)
+                    .collect(),
+                true,
+            ),
 
             Self::Rep(r, node) => {
                 let mut lits = node.leading_literals();
-                if r.is_nullable() {
+                if r.is_nullable() && !lits.is_empty() {
                     lits.insert(String::new());
                 }
 
-                lits
+                (lits, false)
             }
         }
     }
@@ -164,23 +178,30 @@ impl Ast {
     }
 }
 
-fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> HashSet<String> {
+fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> (HashSet<String>, bool) {
     let mut lits = HashSet::new();
     lits.insert(String::new());
+    let mut ongoing = true;
 
-    while let Some(node) = it.next() {
+    while let Some(node) = it.next()
+        && ongoing
+    {
         if lits.len() > MAX_LEADING_LITERALS {
             break;
         }
 
         // We stop at assertions and repetitions alter how we proceed
         let rep = match node {
-            Ast::Assertion(_) => break,
+            Ast::Assertion(_) => {
+                ongoing = false;
+                break;
+            }
             Ast::Rep(r, _) => Some(r),
             _ => None,
         };
 
-        let node_lits = node.leading_literals();
+        let node_lits;
+        (node_lits, ongoing) = node.leading_literals_inner();
 
         match rep {
             // + and * both act as a break condition as we have an unbounded number of characters
@@ -190,22 +211,26 @@ fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> HashSet<Str
                 lits = combine(&lits, &node_lits);
                 break;
             }
+
             Some(Rep::Star(_)) => {
-                let remaining = it.clone();
-                let mut star_lits = combine(&lits, &node_lits);
-                star_lits.extend(combine(&lits, &leading_literals_for_concat(remaining)));
-                star_lits.retain(|s| !lits.contains(s)); // remove shorter prefixes
-                lits = star_lits;
+                if !node_lits.is_empty() {
+                    let remaining = it.clone();
+                    let mut star_lits = combine(&lits, &node_lits);
+                    let (without_star_lits, _) = leading_literals_for_concat(remaining);
+                    star_lits.extend(combine(&lits, &without_star_lits));
+                    lits = star_lits;
+                }
                 lits.remove("");
                 break;
             }
+
             _ => {
                 lits = combine(&lits, &node_lits);
             }
         };
     }
 
-    lits
+    (lits, ongoing)
 }
 
 fn combine(lits: &HashSet<String>, node_lits: &HashSet<String>) -> HashSet<String> {
@@ -777,14 +802,22 @@ mod tests {
     #[test_case("ab+c", &["ab"]; "literals with plus")]
     #[test_case("a+bc", &["a"]; "leading plus")]
     #[test_case("a*bc", &["a", "bc"]; "leading star")]
-    #[test_case("ab*c", &["ab", "ac"]; "star between lits")]
-    #[test_case("abcd*e", &["abcd", "abce"]; "star between lits long")]
-    #[test_case("a?bc", &["bc", "abc"]; "leading quest")] // typos:ignore
-    #[test_case("abc?", &["ab", "abc"]; "literals with quest")] // typos:ignore
+    #[test_case("ba*", &["b", "ba"]; "star after lit")] // typos:ignore
+    #[test_case("ab*c", &["a", "ab", "ac"]; "star between lits")]
+    #[test_case("abcd*e", &["abc", "abcd", "abce"]; "star between lits long")]
+    #[test_case("a?bc", &["a"]; "leading question mark")]
+    #[test_case("abc?", &["ab", "abc"]; "literals with question mark")]
     #[test_case("a(bc)+", &["abc"]; "repeated capture group")]
     #[test_case("ac|bd", &["ac", "bd"]; "alts")]
-    #[test_case("ac*x|bd", &["ac", "ax", "bd"]; "alts with star")]
+    #[test_case("ac*x|bd", &["a", "ac", "ax", "bd"]; "alts with star")]
     #[test_case("[Gg]oo+gle", &["Goo", "goo"]; "with class and rep")]
+    #[test_case(".*", &[]; "dot star")]
+    #[test_case(".+", &[]; "dot plus")]
+    #[test_case(".?", &[]; "dot question mark")]
+    #[test_case(".*a", &[]; "leading dot star")]
+    #[test_case(".+a", &[]; "leading dot plus")]
+    #[test_case(".?a", &[]; "leading dot question mark")]
+    #[test_case("([0-2]+)-more", &["0", "1", "2"]; "leading submatch")]
     #[test]
     fn ast_leading_literal_patterns_works(re: &str, expected: &[&str]) {
         let ast = parse(re).unwrap();

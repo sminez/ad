@@ -28,20 +28,11 @@ fn main() {
     println!("compile time (micro seconds): {d_compile}");
 
     let mut gb = GapBuffer::from(haystack);
+    gb.make_contiguous();
 
     println!("\n:: matching against a gap buffer");
     let t1 = Instant::now();
-    let m = r.match_gb(&mut gb).unwrap();
-    let d_match = Instant::now().duration_since(t1).as_millis();
-    println!("match time (ms): {d_match}");
-
-    println!("Submatch $1: {:?}", m.str_submatch_text(1, gb.as_str()));
-    println!("Submatch $2: {:?}", m.str_submatch_text(2, gb.as_str()));
-    println!("Match ($0):  {:?}", m.str_match_text(gb.as_str()));
-
-    println!("\n:: fast matching against a gap buffer");
-    let t1 = Instant::now();
-    let m = r.match_gb_fast(&mut gb).unwrap();
+    let m = r.find(&gb).unwrap();
     let d_match = Instant::now().duration_since(t1).as_millis();
     println!("match time (ms): {d_match}");
 

@@ -132,18 +132,26 @@ impl Edit for CachedStdin {
     }
 }
 
-impl<'a> Haystack<'a> for CachedStdin {
-    type Iter = CachedStdinIter<'a>;
+impl Haystack for CachedStdin {
+    fn try_make_contiguous(&mut self) {}
 
-    fn try_make_contiguous(&mut self) -> bool {
+    fn is_contiguous(&self) -> bool {
         false
     }
 
-    fn substr_from(&'a self, _byte_offset: usize) -> &'a str {
-        ""
+    fn substr_from(&self, _byte_offset: usize) -> Option<&str> {
+        None
     }
 
-    fn iter_from(&'a self, char_from: usize) -> Option<Self::Iter> {
+    fn byte_to_char(&self, _byte_idx: usize) -> Option<usize> {
+        None
+    }
+
+    fn char_to_byte(&self, _char_idx: usize) -> Option<usize> {
+        None
+    }
+
+    fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
         if self.inner.borrow().closed {
             None
         } else {
@@ -153,6 +161,22 @@ impl<'a> Haystack<'a> for CachedStdin {
                 to: usize::MAX,
             })
         }
+    }
+
+    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        CachedStdinIter {
+            inner: self,
+            from,
+            to,
+        }
+    }
+
+    fn rev_iter_between(
+        &self,
+        _char_from: usize,
+        _char_to: usize,
+    ) -> impl Iterator<Item = (usize, char)> {
+        std::iter::empty()
     }
 }
 

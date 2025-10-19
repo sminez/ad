@@ -40,14 +40,12 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function(format!("fancy impl blocks {name} (str)"), |b| {
             b.iter(|| prog.execute_on_string(black_box(s), name, black_box(&mut w)));
         });
-
     }
 
     group.finish();
 }
 
 criterion_group!(benches, criterion_benchmark);
-
 
 struct StdoutSink(Vec<u8>);
 

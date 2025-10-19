@@ -11,9 +11,11 @@ mod haystack;
 mod matches;
 mod vm;
 
+// pub mod re2;
+
 pub use haystack::Haystack;
 pub use matches::{Match, MatchIter};
-pub use vm::Regex;
+pub use vm::{Regex, RevRegex};
 
 /// Errors that can be returned by the regex engine
 #[derive(Debug, Clone, PartialEq, Eq)]

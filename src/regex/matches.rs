@@ -1,6 +1,7 @@
-use crate::regex::Haystack;
-
-use super::vm::{N_SLOTS, Regex};
+use crate::regex::{
+    Haystack,
+    vm::{N_SLOTS, Regex},
+};
 use std::rc::Rc;
 
 /// The match location of a Regex against a given input.
@@ -151,7 +152,7 @@ impl Match {
 #[derive(Debug)]
 pub struct MatchIter<'a, H>
 where
-    H: Haystack<'a>,
+    H: Haystack,
 {
     pub(super) haystack: &'a H,
     pub(super) r: &'a mut Regex,
@@ -160,15 +161,12 @@ where
 
 impl<'a, H> Iterator for MatchIter<'a, H>
 where
-    H: Haystack<'a>,
+    H: Haystack,
 {
     type Item = Match;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let m = self
-            .r
-            .match_iter(&mut self.haystack.iter_from(self.from)?, self.from)?;
-
+        let m = self.r.find_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
         if from == self.from {
             self.from += 1;

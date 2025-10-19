@@ -19,7 +19,7 @@ fn main() {
     println!("Compile time: {d_compile} microseconds");
 
     let t1 = Instant::now();
-    assert!(r.matches_str(&s));
+    assert!(r.matches(&s.as_str()));
     let d_match = Instant::now().duration_since(t1).as_secs();
     println!("Match time: {d_match} seconds");
 }

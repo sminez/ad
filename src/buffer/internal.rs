@@ -287,6 +287,11 @@ impl GapBuffer {
         &self.data[self.gap_end..]
     }
 
+    /// Whether or not the full data within the buffer is contiguous (all on one side of the gap).
+    pub fn is_contiguous(&self) -> bool {
+        self.gap_start == 0 || self.gap_end == self.cap
+    }
+
     /// The contents of the buffer as a single `&str`.
     ///
     /// This method requires a mutable reference as we need to move the gap in order to ensure that
@@ -916,14 +921,14 @@ impl GapBuffer {
     /// logic easier to reason about
     pub fn byte_to_char(&self, byte_idx: usize) -> usize {
         let mut to = usize::MAX;
-        let byte_idx = self.byte_to_raw_byte(byte_idx);
-        let (mut byte_offset, mut char_offset) = (0, 0);
+        let raw_byte_idx = self.byte_to_raw_byte(byte_idx);
+        let (mut raw_byte_offset, mut char_offset) = (0, 0);
 
         // Determine which line the character lies in based on the byte index, skipping all
         // lines that are before the byte offset we were given.
         for (&b, &c) in self.line_endings.iter() {
-            match b.cmp(&byte_idx) {
-                Ordering::Less => (byte_offset, char_offset) = (b, c),
+            match b.cmp(&raw_byte_idx) {
+                Ordering::Less => (raw_byte_offset, char_offset) = (b, c),
                 Ordering::Equal => {
                     return c;
                 }
@@ -934,15 +939,16 @@ impl GapBuffer {
             }
         }
 
-        let slice = Slice::from_raw_offsets(byte_offset, to, self);
+        let slice = Slice::from_raw_offsets(raw_byte_offset, to, self);
+        let mut byte_cur = self.raw_byte_to_byte(raw_byte_offset);
         let mut cur = char_offset;
-        let mut byte_cur = byte_offset;
+
         for ch in slice.chars() {
-            cur += 1;
-            byte_cur += ch.len_utf8();
             if byte_cur == byte_idx {
                 break;
             }
+            byte_cur += ch.len_utf8();
+            cur += 1;
         }
 
         cur
@@ -1634,6 +1640,25 @@ mod tests {
         // SAFETY: safe if the test is passing
         let ch = unsafe { decode_char_at(byte_idx, &gb.data) };
         assert_eq!(ch, expected_ch);
+    }
+
+    #[test_case("hello, world! this is the last line"; "ascii no newline")]
+    #[test_case("hello, world!\nthis is the last line"; "ascii single newline")]
+    #[test_case("foo│foo│foo"; "mixed width no newlines")]
+    #[test_case("hello, 世界!\nhow are you?"; "mixed width single newline")]
+    #[test]
+    fn byte_to_char_works(s: &str) {
+        let mut gb = GapBuffer::from(s);
+
+        for pos in 0..gb.len_chars() - 1 {
+            gb.move_gap_to(gb.char_to_byte(pos));
+            gb.shred_gap();
+
+            for (ch_idx, (byte_idx, _ch)) in s.char_indices().enumerate() {
+                let idx = gb.byte_to_char(byte_idx);
+                assert_eq!(idx, ch_idx, "gap@{pos}");
+            }
+        }
     }
 
     #[test_case(0, 0, "hello, world!\n"; "first line cur at BOF")]
