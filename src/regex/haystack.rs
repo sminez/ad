@@ -1,5 +1,6 @@
 //! A haystack is something that can be searched over by a Regex
 use crate::buffer::{Buffer, GapBuffer};
+use std::borrow::Cow;
 
 /// Something that can be searched over by a [Regex][0].
 ///
@@ -7,10 +8,13 @@ use crate::buffer::{Buffer, GapBuffer};
 /// cost of reduced performance.
 ///
 /// [0]: crate::regex::Regex
+#[allow(clippy::len_without_is_empty)]
 pub trait Haystack {
     fn try_make_contiguous(&mut self);
     fn is_contiguous(&self) -> bool;
+    fn len(&self) -> usize;
     fn substr_from(&self, byte_offset: usize) -> Option<&str>;
+    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str>;
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize>;
     fn char_to_byte(&self, char_idx: usize) -> Option<usize>;
@@ -32,6 +36,10 @@ impl Haystack for &str {
         true
     }
 
+    fn len(&self) -> usize {
+        str::len(self)
+    }
+
     fn substr_from(&self, byte_offset: usize) -> Option<&str> {
         if byte_offset > self.len() {
             None
@@ -40,6 +48,10 @@ impl Haystack for &str {
             // SAFETY: assumes a valid byte offset
             Some(unsafe { std::str::from_utf8_unchecked(raw) })
         }
+    }
+
+    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
+        Cow::Borrowed(&self[byte_from..byte_to])
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
@@ -97,6 +109,10 @@ impl Haystack for GapBuffer {
         self.is_contiguous()
     }
 
+    fn len(&self) -> usize {
+        self.len()
+    }
+
     fn substr_from(&self, byte_offset: usize) -> Option<&str> {
         if byte_offset > self.len() {
             None
@@ -104,6 +120,10 @@ impl Haystack for GapBuffer {
             // SAFETY: assumes make_contiguous was called first
             Some(unsafe { self.substr_from(byte_offset) })
         }
+    }
+
+    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
+        self.slice_from_byte_offsets(byte_from, byte_to).into_cow()
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
@@ -160,6 +180,10 @@ impl Haystack for Buffer {
         self.txt.is_contiguous()
     }
 
+    fn len(&self) -> usize {
+        self.txt.len()
+    }
+
     fn substr_from(&self, byte_offset: usize) -> Option<&str> {
         if byte_offset > self.txt.len() {
             None
@@ -167,6 +191,12 @@ impl Haystack for Buffer {
             // SAFETY: assumes make_contiguous was called first
             Some(unsafe { self.txt.substr_from(byte_offset) })
         }
+    }
+
+    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
+        self.txt
+            .slice_from_byte_offsets(byte_from, byte_to)
+            .into_cow()
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {

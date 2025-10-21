@@ -36,10 +36,6 @@ fn criterion_benchmark(c: &mut Criterion) {
         group.bench_function(format!("fancy impl blocks {name} (gap buffer)"), |b| {
             b.iter(|| prog.execute(black_box(&mut gb), name, black_box(&mut w)));
         });
-
-        group.bench_function(format!("fancy impl blocks {name} (str)"), |b| {
-            b.iter(|| prog.execute_on_string(black_box(s), name, black_box(&mut w)));
-        });
     }
 
     group.finish();

@@ -329,12 +329,14 @@ impl Regex {
         H: Haystack,
     {
         if haystack.is_contiguous() {
-            let mut byte_offset = haystack.char_to_byte(char_from)?;
-            byte_offset = self
-                .fast_update_byte_offset(haystack, byte_offset)
-                .unwrap_or(byte_offset);
-
-            char_from = haystack.byte_to_char(byte_offset)?;
+            let byte_offset = haystack.char_to_byte(char_from)?;
+            if let Some(new_byte_offset) = self.fast_update_byte_offset(haystack, byte_offset) {
+                let new_char_from = haystack.byte_to_char(new_byte_offset)?;
+                if new_char_from > char_to {
+                    return None; // no match within offsets
+                }
+                char_from = new_char_from;
+            }
         }
 
         self.run_vm(&mut haystack.iter_between(char_from, char_to), char_from)
@@ -735,7 +737,7 @@ mod tests {
         let mut r = Regex::compile(re).unwrap();
         let mut gb = crate::buffer::GapBuffer::from(s);
         gb.make_contiguous();
-        let m = r.find(&gb).map(|m| m.str_match_text(s));
+        let m = r.find(&gb).map(|m| m.match_text(&s));
         assert_eq!(m.as_deref(), expected);
     }
 
@@ -760,9 +762,7 @@ mod tests {
     fn find_rev_works(re: &str, s: &str, expected: Option<&str>) {
         let mut r = RevRegex::compile(re).unwrap();
         let b = Buffer::new_unnamed(0, s, Default::default());
-        let m = r
-            .find_rev_from(&b, s.len())
-            .map(|m| m.str_match_text(&b.txt.to_string()).to_string());
+        let m = r.find_rev_from(&b, s.len()).map(|m| m.match_text(&b));
 
         assert_eq!(m.as_deref(), expected);
     }
@@ -778,7 +778,10 @@ mod tests {
     #[test]
     fn find_iter_works(re: &str, s: &str, expected: &[&str]) {
         let mut r = Regex::compile(re).unwrap();
-        let matches: Vec<String> = r.find_iter(&s).map(|m| m.str_match_text(s)).collect();
+        let matches: Vec<String> = r
+            .find_iter(&s)
+            .map(|m| m.match_text(&s).into_owned())
+            .collect();
 
         assert_eq!(&matches, expected);
     }
@@ -788,11 +791,11 @@ mod tests {
         let mut r = Regex::compile(".*").unwrap();
         let s = "\nthis is\na multiline\nfile";
         let m1 = r.find(&s).unwrap();
-        assert_eq!(m1.str_match_text(s), "");
+        assert_eq!(m1.match_text(&s), "");
 
         // Skipping the leading newline should cause us to match all of the following line
         let m2 = r.find(&&s[1..]).unwrap();
-        assert_eq!(m2.str_match_text(&s[1..]), "this is");
+        assert_eq!(m2.match_text(&&s[1..]), "this is");
     }
 
     #[test]
@@ -802,10 +805,10 @@ mod tests {
         let s = "this should work 123-456-789 other stuff";
         let m = r.find(&s).unwrap();
 
-        assert_eq!(m.str_match_text(s), "123-456-789");
-        assert_eq!(m.str_submatch_text(1, s).as_deref(), Some("123"));
-        assert_eq!(m.str_submatch_text(2, s).as_deref(), Some("456"));
-        assert_eq!(m.str_submatch_text(3, s).as_deref(), Some("789"));
+        assert_eq!(m.match_text(&s), "123-456-789");
+        assert_eq!(m.submatch_text(1, &s).as_deref(), Some("123"));
+        assert_eq!(m.submatch_text(2, &s).as_deref(), Some("456"));
+        assert_eq!(m.submatch_text(3, &s).as_deref(), Some("789"));
     }
 
     #[test_case("(?<xy>X|Y)", "xy", "X"; "named match on its own")]
@@ -819,7 +822,7 @@ mod tests {
         let m = r.find(&s).unwrap();
 
         assert_eq!(m.named_matches(), vec![name]);
-        assert_eq!(m.str_sub_loc_text_ref_by_name(name, s), Some(expected));
+        assert_eq!(m.submatch_text_by_name(name, &s).as_deref(), Some(expected));
     }
 
     #[test]
@@ -828,7 +831,7 @@ mod tests {
         let s = "this is\na multiline\nfile";
 
         let m = r.find(&s).unwrap();
-        assert_eq!(m.str_match_text(s), "this is");
+        assert_eq!(m.match_text(&s), "this is");
     }
 
     #[test]
@@ -840,10 +843,10 @@ mod tests {
         assert_eq!(s.chars().skip(7).collect::<String>(), "\na multiline\nfile");
 
         let m1 = r.find_from(&s, 7).unwrap();
-        assert_eq!(m1.str_match_text(s), "");
+        assert_eq!(m1.match_text(&s), "");
 
         let m2 = r.find_from(&s, 8).unwrap();
-        assert_eq!(m2.str_match_text(s), "a multiline");
+        assert_eq!(m2.match_text(&s), "a multiline");
     }
 
     #[test]
@@ -856,19 +859,19 @@ mod tests {
         // written this way rather than using collect as if we introduce a bug in the MatchIter
         // impl we can end up with an iterator that gets stuck and never terminates.
         let m1 = it.next().unwrap();
-        assert_eq!(m1.str_match_text(s), "this is");
+        assert_eq!(m1.match_text(&s), "this is");
 
         let m2 = it.next().unwrap();
-        assert_eq!(m2.str_match_text(s), "");
+        assert_eq!(m2.match_text(&s), "");
 
         let m3 = it.next().unwrap();
-        assert_eq!(m3.str_match_text(s), "a multiline");
+        assert_eq!(m3.match_text(&s), "a multiline");
 
         let m4 = it.next().unwrap();
-        assert_eq!(m4.str_match_text(s), "");
+        assert_eq!(m4.match_text(&s), "");
 
         let m5 = it.next().unwrap();
-        assert_eq!(m5.str_match_text(s), "file");
+        assert_eq!(m5.match_text(&s), "file");
         assert_eq!(it.next(), None);
     }
 
@@ -883,8 +886,8 @@ impl Editor {
         let mut r = Regex::compile(re).unwrap();
         let m = r.find(&s).unwrap();
 
-        assert_eq!(m.str_submatch_text(1, s).as_deref(), Some("Editor"));
-        assert_eq!(m.str_match_text(s), "impl Editor {");
+        assert_eq!(m.submatch_text(1, &s).as_deref(), Some("Editor"));
+        assert_eq!(m.match_text(&s), "impl Editor {");
     }
 
     // This is the pathological case that Cox covers in his article which leads

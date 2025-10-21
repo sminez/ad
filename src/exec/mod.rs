@@ -74,13 +74,6 @@ impl From<regex::Error> for Error {
 
 /// Something that can be edited by a Program
 pub trait Edit: Address {
-    /// Extract the content of a previous submatch so it can be used in templating
-    fn submatch(&self, m: &Match, n: usize) -> Option<String> {
-        let (from, to) = m.sub_loc(n)?;
-        // FIXME: this is terrible and needs fixing in Match
-        Some(self.iter_between(from, to).map(|(_, ch)| ch).collect())
-    }
-
     /// Insert a string at the specified index
     fn insert(&mut self, ix: usize, s: &str);
 
@@ -194,25 +187,13 @@ impl Program {
         Ok(Self { initial_dot, exprs })
     }
 
-    /// Execute this program against a given String.
-    pub fn execute_on_string<W>(
-        &mut self,
-        s: impl Into<GapBuffer>,
-        fname: &str,
-        out: &mut W,
-    ) -> Result<Dot, Error>
-    where
-        W: Write,
-    {
-        self.execute(&mut s.into(), fname, out)
-    }
-
     /// Execute this program against a given [Edit].
     pub fn execute<E, W>(&mut self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, Error>
     where
         E: Edit,
         W: Write,
     {
+        ed.try_make_contiguous();
         let initial_dot = ed.map_addr(&mut self.initial_dot);
 
         if self.exprs.is_empty() {
@@ -477,8 +458,8 @@ where
         if !s.contains(var) {
             continue;
         }
-        match ed.submatch(m, n) {
-            Some(sm) => output = output.replace(var, &sm.to_string()),
+        match m.submatch_text(n, ed) {
+            Some(sm) => output = output.replace(var, &sm),
             None => return Err(Error::InvalidSubstitution(n)),
         }
     }

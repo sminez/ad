@@ -36,7 +36,7 @@ fn main() {
     let d_match = Instant::now().duration_since(t1).as_millis();
     println!("match time (ms): {d_match}");
 
-    println!("Submatch $1: {:?}", m.str_submatch_text(1, gb.as_str()));
-    println!("Submatch $2: {:?}", m.str_submatch_text(2, gb.as_str()));
-    println!("Match ($0):  {:?}", m.str_match_text(gb.as_str()));
+    println!("Submatch $1: {:?}", m.submatch_text(1, &gb));
+    println!("Submatch $2: {:?}", m.submatch_text(2, &gb));
+    println!("Match ($0):  {:?}", m.match_text(&gb));
 }

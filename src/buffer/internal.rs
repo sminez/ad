@@ -17,6 +17,7 @@
 //! - <https://coredumped.dev/2023/08/09/text-showdown-gap-buffers-vs-ropes/>
 //! - <https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation>
 use std::{
+    borrow::Cow,
     cell::UnsafeCell,
     cmp::{Ordering, max, min},
     collections::{BTreeMap, HashMap},
@@ -1103,6 +1104,22 @@ impl<'a> Slice<'a> {
         left: &[],
         right: &[],
     };
+
+    pub fn is_contiguous(&self) -> bool {
+        self.left.is_empty() || self.right.is_empty()
+    }
+
+    pub fn into_cow(self) -> Cow<'a, str> {
+        if self.left.is_empty() {
+            // SAFETY: we know that we have valid utf8 data internally
+            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self.right) })
+        } else if self.right.is_empty() {
+            // SAFETY: we know that we have valid utf8 data internally
+            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self.left) })
+        } else {
+            Cow::Owned(self.to_string())
+        }
+    }
 
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {

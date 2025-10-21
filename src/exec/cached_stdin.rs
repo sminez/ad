@@ -5,6 +5,7 @@ use crate::{
     regex::Haystack,
 };
 use std::{
+    borrow::Cow,
     cell::RefCell,
     io::{Stdin, stdin},
 };
@@ -139,8 +140,16 @@ impl Haystack for CachedStdin {
         false
     }
 
+    fn len(&self) -> usize {
+        usize::MAX
+    }
+
     fn substr_from(&self, _byte_offset: usize) -> Option<&str> {
         None
+    }
+
+    fn substr<'a>(&'a self, _byte_from: usize, _byte_to: usize) -> Cow<'a, str> {
+        Cow::Borrowed("")
     }
 
     fn byte_to_char(&self, _byte_idx: usize) -> Option<usize> {

@@ -1,6 +1,6 @@
 use ad_editor::{
     CachedStdin, CliAction, Cmd9p, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer,
-    PlumbingRules, Program, USAGE, VERSION,
+    PlumbingRules, Program, USAGE, VERSION, buffer::GapBuffer,
 };
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
@@ -103,7 +103,8 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
             }
         };
 
-        if let Err(e) = prog.execute_on_string(s, path.to_str().unwrap(), &mut buf) {
+        let mut gb = GapBuffer::from(s);
+        if let Err(e) = prog.execute(&mut gb, path.to_str().unwrap(), &mut buf) {
             eprintln!("error running script: {e:?}");
             exit(1);
         }

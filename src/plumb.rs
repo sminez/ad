@@ -307,11 +307,11 @@ impl Pattern {
 
                 if let Some(m) = re.find(&s.as_str()) {
                     debug!("matched: updating vars");
-                    vars.insert("$0".to_string(), m.str_match_text(s));
+                    vars.insert("$0".to_string(), m.match_text(&s.as_str()).into_owned());
                     for n in 1..10 {
-                        match m.str_submatch_text(n, s) {
+                        match m.submatch_text(n, &s.as_str()) {
                             Some(txt) => {
-                                vars.insert(format!("${n}"), txt);
+                                vars.insert(format!("${n}"), txt.into_owned());
                             }
                             None => return true,
                         }
@@ -436,7 +436,7 @@ impl Pattern {
                     let (from, to) = m.loc();
                     if from <= msg.cur && msg.cur <= to {
                         debug!(%from, %to, "successfully narrowed");
-                        msg.data = m.str_match_text(&msg.data);
+                        msg.data = m.match_text(&msg.data.as_str()).into_owned();
                         msg.cur = 0; // consume the cursor as it is now invalid
                         return true;
                     }
