@@ -8,7 +8,15 @@ use crate::{
 use ad_event::Source;
 use aho_corasick::AhoCorasick;
 use std::{
-    borrow::Cow, cmp::min, fmt::Write as _, io::Write, iter::Peekable, str::Chars, sync::OnceLock,
+    borrow::Cow,
+    cmp::min,
+    fmt::Write as _,
+    io::Write,
+    iter::Peekable,
+    mem,
+    ops::{Deref, DerefMut},
+    str::Chars,
+    sync::{LazyLock, Mutex, OnceLock},
 };
 
 mod addr;
@@ -35,6 +43,11 @@ const TEMPLATE_PATTERNS: [&str; 15] = [
     "$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", FNAME_VAR, ROW_VAR, COL_VAR, "\\n",
     "\\t",
 ];
+
+/// A shared pool of scratch buffers for tracking initial matches for loop-matches and
+/// loop-between-matches instructions.
+static INITIAL_MATCHES_POOL: LazyLock<Mutex<Vec<Vec<Match>>>> =
+    LazyLock::new(|| Mutex::new((0..4).map(|_| Vec::with_capacity(10)).collect::<Vec<_>>()));
 
 /// Errors that can be returned by the exec engine
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,7 +290,7 @@ impl Runner {
             }
 
             Expr::LoopMatches(re) => {
-                let mut initial_matches = Vec::new();
+                let mut initial_matches = InitialMatches::get_from_pool();
                 while let Some(m) = re.find_between(ed, from, to) {
                     // It's possible for the Regex we're using to match a 0-length string which
                     // would cause us to get stuck trying to advance to the next match position.
@@ -300,8 +313,7 @@ impl Runner {
             }
 
             Expr::LoopBetweenMatches(re) => {
-                let mut initial_matches = Vec::new();
-
+                let mut initial_matches = InitialMatches::get_from_pool();
                 while let Some(m) = re.find_between(ed, from, to) {
                     let (new_from, new_to) = m.loc();
                     if from < new_from {
@@ -398,7 +410,7 @@ impl Runner {
     fn apply_matches<E, W>(
         &mut self,
         exprs: &mut [Expr],
-        initial_matches: Vec<Match>,
+        mut initial_matches: InitialMatches,
         ed: &mut E,
         m: &Match,
         pc: usize,
@@ -413,11 +425,11 @@ impl Runner {
         let (from, to) = m.loc();
         let mut dot = Dot::from_char_indices(from, to);
 
-        for mut m in initial_matches.into_iter() {
+        for m in initial_matches.iter_mut() {
             m.apply_offset(offset);
 
             let cur_len = ed.len_chars();
-            dot = self.step(exprs, ed, &m, pc + 1, fname, out)?;
+            dot = self.step(exprs, ed, m, pc + 1, fname, out)?;
             let new_len = ed.len_chars();
             offset += new_len as isize - cur_len as isize;
         }
@@ -537,6 +549,46 @@ fn validate(exprs: &[Expr]) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+/// A reusable scratch buffer for holding initial matches when executing loop-matches and
+/// loop-between-matches instructions.
+/// Automatically released back to the shared pool when dropped.
+struct InitialMatches(Vec<Match>);
+
+impl InitialMatches {
+    fn get_from_pool() -> Self {
+        let mut guard = INITIAL_MATCHES_POOL.lock().unwrap();
+        match guard.pop() {
+            Some(mut v) => {
+                v.clear();
+                Self(v)
+            }
+            None => Self(Vec::with_capacity(10)),
+        }
+    }
+}
+
+impl Deref for InitialMatches {
+    type Target = Vec<Match>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for InitialMatches {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Drop for InitialMatches {
+    fn drop(&mut self) {
+        let mut cache = Vec::new();
+        mem::swap(&mut self.0, &mut cache);
+        INITIAL_MATCHES_POOL.lock().unwrap().push(cache);
+    }
 }
 
 #[cfg(test)]

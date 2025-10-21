@@ -2,7 +2,7 @@ use crate::regex::{
     Haystack,
     vm::{N_SLOTS, Regex},
 };
-use std::{borrow::Cow, rc::Rc};
+use std::{borrow::Cow, sync::Arc};
 
 /// The match location of a Regex against a given input.
 ///
@@ -10,7 +10,7 @@ use std::{borrow::Cow, rc::Rc};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Match {
     pub(super) sub_matches: [usize; N_SLOTS],
-    pub(super) submatch_names: Rc<[String]>,
+    pub(super) submatch_names: Arc<[String]>,
 }
 
 impl Match {
@@ -20,7 +20,7 @@ impl Match {
         sub_matches[1] = to;
         Self {
             sub_matches,
-            submatch_names: Rc::new([]),
+            submatch_names: Arc::new([]),
         }
     }
 
@@ -74,8 +74,6 @@ impl Match {
 
         Some(haystack.substr(byte_from, byte_to))
     }
-
-    // FIXME: this is a terrible way to do this but used for testing at the moment
 
     /// The names of each submatch
     pub fn named_matches(&self) -> Vec<&str> {

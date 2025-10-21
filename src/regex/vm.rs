@@ -15,7 +15,7 @@ use crate::regex::{
     matches::{Match, MatchIter},
 };
 use aho_corasick::AhoCorasick;
-use std::{collections::HashSet, fmt, mem::swap, rc::Rc};
+use std::{collections::HashSet, fmt, mem::swap, sync::Arc};
 
 pub(super) const N_SLOTS: usize = 30;
 
@@ -34,7 +34,7 @@ pub struct Regex {
     /// Fast searcher for the first potential match site
     fast_start: Option<Box<AhoCorasick>>,
     /// Names to be used for extracting named submatches
-    submatch_names: Rc<[String]>,
+    submatch_names: Arc<[String]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
     clist: Box<[Thread]>,
     /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
@@ -120,7 +120,7 @@ impl Regex {
             re: re.to_string(),
             prog,
             fast_start,
-            submatch_names: Rc::from(submatch_names.into_boxed_slice()),
+            submatch_names: Arc::from(submatch_names.into_boxed_slice()),
             clist,
             nlist,
             generation: 0,
