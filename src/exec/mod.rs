@@ -6,7 +6,10 @@ use crate::{
     regex::{self, Match},
 };
 use ad_event::Source;
-use std::{cmp::min, io::Write, iter::Peekable, str::Chars};
+use aho_corasick::AhoCorasick;
+use std::{
+    borrow::Cow, cmp::min, fmt::Write as _, io::Write, iter::Peekable, str::Chars, sync::OnceLock,
+};
 
 mod addr;
 mod cached_stdin;
@@ -26,10 +29,12 @@ const FNAME_VAR: &str = "$FILENAME";
 const ROW_VAR: &str = "$ROW";
 /// Variable usable in templates for injecting the column that the current match starts at
 const COL_VAR: &str = "$COL";
-/// Variable usable in templates for injecting the row that the current match ends at
-const ROW_END_VAR: &str = "$ROW_END";
-/// Variable usable in templates for injecting the column that the current match ends at
-const COL_END_VAR: &str = "$COL_END";
+
+static TEMPLATE_AC: OnceLock<AhoCorasick> = OnceLock::new();
+const TEMPLATE_PATTERNS: [&str; 15] = [
+    "$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", FNAME_VAR, ROW_VAR, COL_VAR, "\\n",
+    "\\t",
+];
 
 /// Errors that can be returned by the exec engine
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -125,6 +130,7 @@ impl Edit for Buffer {
 pub struct Program {
     initial_dot: Addr,
     exprs: Vec<Expr>,
+    runner: Runner,
 }
 
 impl Program {
@@ -179,12 +185,20 @@ impl Program {
         }
 
         if exprs.is_empty() {
-            return Ok(Self { initial_dot, exprs });
+            return Ok(Self::new(initial_dot, exprs));
         }
 
         validate(&exprs)?;
 
-        Ok(Self { initial_dot, exprs })
+        Ok(Self::new(initial_dot, exprs))
+    }
+
+    fn new(initial_dot: Addr, exprs: Vec<Expr>) -> Self {
+        Self {
+            initial_dot,
+            exprs,
+            runner: Runner::new(),
+        }
     }
 
     /// Execute this program against a given [Edit].
@@ -204,7 +218,10 @@ impl Program {
         let initial = &Match::synthetic(from, to.saturating_add(1));
 
         ed.begin_edit_transaction();
-        let (from, to) = self.step(ed, initial, 0, fname, out)?.as_char_indices();
+        let (from, to) = self
+            .runner
+            .step(&mut self.exprs, ed, initial, 0, fname, out)?
+            .as_char_indices();
         ed.end_edit_transaction();
 
         // In the case of running against a lazy stream our initial `to` will be a sential value of
@@ -216,9 +233,27 @@ impl Program {
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Runner {
+    template_buf: GapBuffer,
+    row_buf: String,
+    col_buf: String,
+}
+
+impl Runner {
+    fn new() -> Self {
+        Self {
+            template_buf: GapBuffer::new(),
+            row_buf: String::with_capacity(4),
+            col_buf: String::with_capacity(4),
+        }
+    }
 
     fn step<E, W>(
         &mut self,
+        exprs: &mut [Expr],
         ed: &mut E,
         m: &Match,
         pc: usize,
@@ -231,21 +266,17 @@ impl Program {
     {
         let (mut from, to) = m.loc();
 
-        match self.exprs[pc].clone() {
+        match &mut exprs[pc] {
             Expr::Group(g) => {
                 let mut dot = Dot::from_char_indices(from, to);
-                for exprs in g {
-                    let mut p = Program {
-                        initial_dot: Addr::Explicit(dot),
-                        exprs: exprs.clone(),
-                    };
-                    dot = p.step(ed, m, 0, fname, out)?;
+                for sub_exprs in g.iter_mut() {
+                    dot = self.step(sub_exprs, ed, m, 0, fname, out)?;
                 }
 
                 Ok(dot)
             }
 
-            Expr::LoopMatches(mut re) => {
+            Expr::LoopMatches(re) => {
                 let mut initial_matches = Vec::new();
                 while let Some(m) = re.find_between(ed, from, to) {
                     // It's possible for the Regex we're using to match a 0-length string which
@@ -265,10 +296,10 @@ impl Program {
                     }
                 }
 
-                self.apply_matches(initial_matches, ed, m, pc, fname, out)
+                self.apply_matches(exprs, initial_matches, ed, m, pc, fname, out)
             }
 
-            Expr::LoopBetweenMatches(mut re) => {
+            Expr::LoopBetweenMatches(re) => {
                 let mut initial_matches = Vec::new();
 
                 while let Some(m) = re.find_between(ed, from, to) {
@@ -286,48 +317,57 @@ impl Program {
                     initial_matches.push(Match::synthetic(from, to));
                 }
 
-                self.apply_matches(initial_matches, ed, m, pc, fname, out)
+                self.apply_matches(exprs, initial_matches, ed, m, pc, fname, out)
             }
 
-            Expr::IfContains(mut re) => {
+            Expr::IfContains(re) => {
                 if re.matches_between(ed, from, to) {
-                    self.step(ed, m, pc + 1, fname, out)
+                    self.step(exprs, ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
                 }
             }
 
-            Expr::IfNotContains(mut re) => {
+            Expr::IfNotContains(re) => {
                 if !re.matches_between(ed, from, to) {
-                    self.step(ed, m, pc + 1, fname, out)
+                    self.step(exprs, ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
                 }
             }
 
             Expr::Print(pat) => {
-                let s = template_match(&pat, m, ed, fname)?;
-                write!(out, "{s}").expect("to be able to write");
+                self.template_match(pat, m, ed, fname)?;
+                write!(out, "{}", self.template_buf.as_str()).expect("to be able to write");
                 Ok(Dot::from_char_indices(from, to))
             }
 
             Expr::Insert(pat) => {
-                let s = template_match(&pat, m, ed, fname)?;
-                ed.insert(from, &s);
-                Ok(Dot::from_char_indices(from, to + s.chars().count()))
+                self.template_match(pat, m, ed, fname)?;
+                ed.insert(from, self.template_buf.as_str());
+                Ok(Dot::from_char_indices(
+                    from,
+                    to + self.template_buf.len_chars(),
+                ))
             }
 
             Expr::Append(pat) => {
-                let s = template_match(&pat, m, ed, fname)?;
-                ed.insert(to, &s);
-                Ok(Dot::from_char_indices(from, to + s.chars().count()))
+                self.template_match(pat, m, ed, fname)?;
+                ed.insert(to, self.template_buf.as_str());
+                Ok(Dot::from_char_indices(
+                    from,
+                    to + self.template_buf.len_chars(),
+                ))
             }
 
             Expr::Change(pat) => {
-                let s = template_match(&pat, m, ed, fname)?;
+                self.template_match(pat, m, ed, fname)?;
                 ed.remove(from, to);
-                ed.insert(from, &s);
-                Ok(Dot::from_char_indices(from, from + s.chars().count()))
+                ed.insert(from, self.template_buf.as_str());
+                Ok(Dot::from_char_indices(
+                    from,
+                    from + self.template_buf.len_chars(),
+                ))
             }
 
             Expr::Delete => {
@@ -335,15 +375,15 @@ impl Program {
                 Ok(Dot::from_char_indices(from, from))
             }
 
-            Expr::Sub(mut re, pat) => match re.find_between(ed, from, to) {
+            Expr::Sub(re, pat) => match re.find_between(ed, from, to) {
                 Some(m) => {
                     let (mfrom, mto) = m.loc();
-                    let s = template_match(&pat, &m, ed, fname)?;
+                    self.template_match(pat, &m, ed, fname)?;
                     ed.remove(mfrom, mto);
-                    ed.insert(mfrom, &s);
+                    ed.insert(mfrom, self.template_buf.as_str());
                     Ok(Dot::from_char_indices(
                         from,
-                        to - (mto - mfrom) + s.chars().count(),
+                        to - (mto - mfrom) + self.template_buf.len_chars(),
                     ))
                 }
                 None => Ok(Dot::from_char_indices(from, to)),
@@ -354,8 +394,10 @@ impl Program {
     /// When looping over disjoint matches in the input we need to determine all of the initial
     /// match points before we start making any edits as the edits may alter the semantics of
     /// future matches.
+    #[allow(clippy::too_many_arguments)]
     fn apply_matches<E, W>(
         &mut self,
+        exprs: &mut [Expr],
         initial_matches: Vec<Match>,
         ed: &mut E,
         m: &Match,
@@ -375,12 +417,87 @@ impl Program {
             m.apply_offset(offset);
 
             let cur_len = ed.len_chars();
-            dot = self.step(ed, &m, pc + 1, fname, out)?;
+            dot = self.step(exprs, ed, &m, pc + 1, fname, out)?;
             let new_len = ed.len_chars();
             offset += new_len as isize - cur_len as isize;
         }
 
         Ok(dot)
+    }
+
+    fn template_match<E>(&mut self, s: &str, m: &Match, ed: &E, fname: &str) -> Result<(), Error>
+    where
+        E: Edit,
+    {
+        self.template_buf.clear();
+        self.template_buf.insert_str(0, s);
+
+        let mut matches: Vec<aho_corasick::Match> = TEMPLATE_AC
+            .get_or_init(|| {
+                AhoCorasick::new(TEMPLATE_PATTERNS)
+                    .expect("using auto builder so no errors possible")
+            })
+            .find_iter(s)
+            .collect();
+
+        if matches.is_empty() {
+            return Ok(());
+        }
+
+        // process the matches in reverse order so we don't need to update the match positions as
+        // we alter the contents of the buffer.
+        matches.reverse();
+
+        self.row_buf.clear();
+        self.col_buf.clear();
+        let mut seen_row_col = false;
+
+        for mat in matches {
+            let (from, to) = (mat.start(), mat.end());
+            let pat = mat.pattern().as_u32() as usize;
+            let pattern = TEMPLATE_PATTERNS[pat];
+
+            let new_s = match pattern {
+                "\\n" => Cow::Borrowed("\n"),
+                "\\t" => Cow::Borrowed("\t"),
+                FNAME_VAR => Cow::Borrowed(fname),
+
+                ROW_VAR | COL_VAR => {
+                    if !seen_row_col {
+                        let (i, _) = m.loc();
+                        let row = ed.char_to_line(i).ok_or(Error::InvalidMatchIndices)?;
+                        let col = i - ed.line_to_char(row).ok_or(Error::InvalidMatchIndices)?;
+                        _ = write!(&mut self.row_buf, "{row}");
+                        _ = write!(&mut self.col_buf, "{col}");
+                        seen_row_col = true;
+                    }
+                    if pattern == ROW_VAR {
+                        Cow::Borrowed(self.row_buf.as_str())
+                    } else {
+                        Cow::Borrowed(self.col_buf.as_str())
+                    }
+                }
+
+                _ => {
+                    debug_assert_eq!(
+                        TEMPLATE_PATTERNS[0], "$0",
+                        "submatch patterns must be first"
+                    );
+
+                    match m.submatch_text(pat, ed) {
+                        Some(sm) => sm,
+                        None => return Err(Error::InvalidSubstitution(pat)),
+                    }
+                }
+            };
+
+            let char_from = self.template_buf.byte_to_char(from);
+            let char_to = self.template_buf.byte_to_char(to);
+            self.template_buf.remove_range(char_from, char_to);
+            self.template_buf.insert_str(char_from, new_s.as_ref());
+        }
+
+        Ok(())
     }
 }
 
@@ -422,51 +539,6 @@ fn validate(exprs: &[Expr]) -> Result<(), Error> {
     Ok(())
 }
 
-// FIXME: if a previous sub-match replacement injects a valid var name for a subsequent one
-// then we end up attempting to template THAT in a later iteration of the loop.
-fn template_match<E>(s: &str, m: &Match, ed: &E, fname: &str) -> Result<String, Error>
-where
-    E: Edit,
-{
-    let mut output = if s.contains(FNAME_VAR) {
-        s.replace(FNAME_VAR, fname)
-    } else {
-        s.to_string()
-    };
-
-    // the _END variants are found by this as well
-    if output.contains(ROW_VAR) || output.contains(COL_VAR) {
-        let (from, to) = m.loc();
-        let row = ed.char_to_line(from).ok_or(Error::InvalidMatchIndices)?;
-        let row_end = ed.char_to_line(to).ok_or(Error::InvalidMatchIndices)?;
-        let col = from - ed.line_to_char(row).ok_or(Error::InvalidMatchIndices)?;
-        let col_end = to - ed.line_to_char(row_end).ok_or(Error::InvalidMatchIndices)?;
-
-        // Need to replace the _END variants first so that we don't clobber them
-        output = output
-            .replace(ROW_END_VAR, &row_end.to_string())
-            .replace(ROW_VAR, &row.to_string())
-            .replace(COL_END_VAR, &col_end.to_string())
-            .replace(COL_VAR, &col.to_string());
-    }
-
-    // replace newline and tab escapes with their literal equivalents
-    output = output.replace("\\n", "\n").replace("\\t", "\t");
-
-    let vars = ["$0", "$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9"];
-    for (n, var) in vars.iter().enumerate() {
-        if !s.contains(var) {
-            continue;
-        }
-        match m.submatch_text(n, ed) {
-            Some(sm) => output = output.replace(var, &sm),
-            None => return Err(Error::InvalidSubstitution(n)),
-        }
-    }
-
-    Ok(output)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -484,13 +556,7 @@ mod tests {
     #[test]
     fn parse_program_works(s: &str, expected: Vec<Expr>) {
         let p = Program::try_parse(s).expect("valid input");
-        assert_eq!(
-            p,
-            Program {
-                initial_dot: Addr::full(),
-                exprs: expected
-            }
-        );
+        assert_eq!(p, Program::new(Addr::full(), expected));
     }
 
     #[test_case("", Error::EmptyProgram; "empty program")]
@@ -512,13 +578,18 @@ mod tests {
     #[test_case(vec![LoopBetweenMatches(re("foo")), Append("X".to_string())], "foo Xfoo Xfoo", (8, 10); "loop between change")]
     #[test]
     fn step_works(exprs: Vec<Expr>, expected: &str, expected_dot: (usize, usize)) {
-        let mut prog = Program {
-            initial_dot: Addr::full(),
-            exprs,
-        };
+        let mut prog = Program::new(Addr::full(), exprs);
         let mut b = Buffer::new_unnamed(0, "foo foo foo", Default::default());
         let dot = prog
-            .step(&mut b, &Match::synthetic(0, 11), 0, "test", &mut vec![])
+            .runner
+            .step(
+                &mut prog.exprs,
+                &mut b,
+                &Match::synthetic(0, 11),
+                0,
+                "test",
+                &mut vec![],
+            )
             .unwrap();
 
         assert_eq!(&b.txt.to_string(), expected);
@@ -622,5 +693,31 @@ mod tests {
         let final_content = b.str_contents();
 
         assert_eq!(&final_content, initial_content);
+    }
+
+    #[test_case("$FILENAME\\n\\t", ".", "test.txt\n\t"; "direct replacements")]
+    #[test_case("$ROW", "/", "1"; "row")]
+    #[test_case("$COL", "/p", "5"; "col")]
+    #[test_case("$ROW:$COL", "/p", "1:5"; "row and col")]
+    #[test_case("$0", "/\\w+/", "/some/"; "full match")]
+    #[test_case("$1", "/(\\w+)/", "some"; "first submatch")]
+    #[test_case(
+        "$1$2$3$4$5$6$7$8$9",
+        "(.)(.)(.)(.)(.)(.)(.)(.)(.)",
+        "foo and 1";
+        "all nine submatches"
+    )]
+    #[test]
+    fn template_match_works(s: &str, re: &str, expected: &str) {
+        let mut runner = Runner::new();
+        let mut gb = GapBuffer::from("foo and 123\n/some/path");
+        gb.make_contiguous();
+
+        let mut re = Regex::compile(re).unwrap();
+        let m = re.find(&gb).unwrap();
+
+        runner.template_match(s, &m, &gb, "test.txt").unwrap();
+
+        assert_eq!(runner.template_buf.as_str(), expected);
     }
 }

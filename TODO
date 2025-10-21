@@ -1,5 +1,19 @@
 :: TODO
 
+-- RE rewrite --
+- [ ] have a StreamingHaystack trait?
+- [ ] MASSIVELY speed up methods on Match for extracting strings
+- [ ] track byte and char offsets when matching, not just char offsets
+- [ ] look at bailing early from running the VM to go back to aho-corasick if
+      all threads die?
+  - could be another large speed up but would need to contend with the unanchored
+    matching instructions that wrap all VM programs
+
+-- Exec rewrite --
+- [ ] better name...
+- [ ] use transient scratch for writing expressions
+- [ ] support running a script from a file
+
 -- Misc / Editor features --
 
 - [ ] Add command & Edit history using minibuffer with hidden lines
