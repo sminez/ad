@@ -5,7 +5,7 @@ use ad_editor::{
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
     env, fmt, fs,
-    io::{self, Read, Write},
+    io::{self, Read},
     path::PathBuf,
     process::exit,
 };
@@ -80,11 +80,11 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
             exit(1);
         }
     };
-    let mut buf = vec![];
+    let mut stdout = io::stdout().lock();
 
     if files.is_empty() {
         // Read from stdin and write directly to stdout
-        match prog.execute(&mut CachedStdin::new(), "stdin", &mut io::stdout()) {
+        match prog.execute(&mut CachedStdin::new(), "stdin", &mut stdout) {
             Ok(_) => return,
             Err(e) => {
                 eprintln!("error running script: {e:?}");
@@ -93,7 +93,6 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
         }
     }
 
-    // Buffer output from running over each provided file
     for path in files.iter() {
         let s = match fs::read_to_string(path) {
             Ok(s) => s,
@@ -104,13 +103,11 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
         };
 
         let mut gb = GapBuffer::from(s);
-        if let Err(e) = prog.execute(&mut gb, path.to_str().unwrap(), &mut buf) {
+        if let Err(e) = prog.execute(&mut gb, path.to_str().unwrap(), &mut stdout) {
             eprintln!("error running script: {e:?}");
             exit(1);
         }
     }
-
-    io::stdout().write_all(&buf).unwrap();
 }
 
 fn run_9p(aname: String, action: Cmd9p, path: String) {
