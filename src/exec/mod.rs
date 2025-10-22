@@ -10,8 +10,8 @@ use aho_corasick::AhoCorasick;
 use std::{
     borrow::Cow,
     cmp::min,
-    fmt::Write as _,
-    io::Write,
+    fmt::{self, Write as _},
+    io::{self, Write},
     iter::Peekable,
     mem,
     ops::{Deref, DerefMut},
@@ -58,6 +58,8 @@ pub enum Error {
     EmptyProgram,
     /// Unexpected end of file
     Eof,
+    /// Format error
+    Format,
     /// Invalid match generated (indices out of bounds)
     InvalidMatchIndices,
     /// Invalid regex
@@ -66,6 +68,8 @@ pub enum Error {
     InvalidSubstitution(usize),
     /// Invalid suffix
     InvalidSuffix,
+    /// IO error
+    Io(io::ErrorKind, String),
     /// Missing action
     MissingAction,
     /// Missing delimiter
@@ -80,6 +84,18 @@ pub enum Error {
     UnexpectedCharacter(char),
     /// A 0 was provided as a line or column index
     ZeroIndexedLineOrColumn,
+}
+
+impl From<fmt::Error> for Error {
+    fn from(_: fmt::Error) -> Self {
+        Error::Format
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
+        Error::Io(err.kind(), err.to_string())
+    }
 }
 
 impl From<regex::Error> for Error {
@@ -277,6 +293,7 @@ impl Runner {
     {
         let (mut from, to) = m.loc();
 
+        // FIXME: only need mutability for running regex
         match &mut exprs[pc] {
             Expr::Group(g) => {
                 let mut dot = Dot::from_char_indices(from, to);
@@ -348,7 +365,7 @@ impl Runner {
 
             Expr::Print(pat) => {
                 self.template_match(pat, m, ed, fname)?;
-                write!(out, "{}", self.template_buf.as_str()).expect("to be able to write");
+                write!(out, "{}", self.template_buf.as_str())?;
                 Ok(Dot::from_char_indices(from, to))
             }
 
@@ -405,6 +422,7 @@ impl Runner {
     /// match points before we start making any edits as the edits may alter the semantics of
     /// future matches.
     #[allow(clippy::too_many_arguments)]
+    #[inline(always)]
     fn apply_matches<E, W>(
         &mut self,
         exprs: &mut [Expr],
@@ -426,10 +444,11 @@ impl Runner {
         for m in initial_matches.iter_mut() {
             m.apply_offset(offset);
 
-            let cur_len = ed.len_chars();
+            let cur_len = ed.len_chars() as isize;
             dot = self.step(exprs, ed, m, pc + 1, fname, out)?;
-            let new_len = ed.len_chars();
-            offset += new_len as isize - cur_len as isize;
+            let new_len = ed.len_chars() as isize;
+
+            offset += new_len - cur_len;
         }
 
         Ok(dot)
@@ -477,8 +496,8 @@ impl Runner {
                         let (i, _) = m.loc();
                         let row = ed.char_to_line(i).ok_or(Error::InvalidMatchIndices)?;
                         let col = i - ed.line_to_char(row).ok_or(Error::InvalidMatchIndices)?;
-                        _ = write!(&mut self.row_buf, "{row}");
-                        _ = write!(&mut self.col_buf, "{col}");
+                        write!(&mut self.row_buf, "{row}")?;
+                        write!(&mut self.col_buf, "{col}")?;
                         seen_row_col = true;
                     }
                     if pattern == ROW_VAR {
