@@ -26,7 +26,7 @@ fn burntsushi_inputs(n_alts: usize, n_reps: usize) -> (String, Regex) {
 
 fn burntsushi_pathological_case(n_alts: usize, n_reps: usize) {
     let (s, mut r) = burntsushi_inputs(n_alts, n_reps);
-    assert!(r.matches_str(&s));
+    assert!(r.matches(&s.as_str()));
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
@@ -41,7 +41,7 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     let (s, mut r) = burntsushi_inputs(n_alts, n_reps);
     group.bench_function("without compile", |b| {
-        b.iter(|| assert!(r.matches_str(black_box(&s))))
+        b.iter(|| assert!(r.matches(black_box(&s.as_str()))))
     });
 
     group.finish();

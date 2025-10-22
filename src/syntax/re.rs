@@ -7,7 +7,7 @@
 use crate::{
     buffer::GapBuffer,
     dot::Range,
-    regex::{IndexedChars, Match, Regex},
+    regex::{Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
 
@@ -128,10 +128,9 @@ impl MultiRegex {
 
     pub fn match_gb_from(&mut self, gb: &GapBuffer, ch_from: usize) -> Option<(usize, Match)> {
         let mut leftmost: Option<(usize, Match)> = None;
-        let it = gb.iter_from(ch_from)?;
 
         for (i, re) in self.re.iter_mut().enumerate() {
-            let m = re.match_iter(&mut it.clone(), ch_from);
+            let m = re.find_from(gb, ch_from);
             match (leftmost.as_ref(), m) {
                 (Some((_, prev)), Some(m)) if &m < prev => leftmost = Some((i, m)),
                 (None, Some(m)) => leftmost = Some((i, m)),

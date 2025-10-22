@@ -5,10 +5,11 @@ use crate::{
     config_handle,
     dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
     editor::Action,
-    exec::{Addr, Address, IterBoundedChars},
+    exec::{Addr, Address},
     fsys::InputFilter,
     key::Input,
     lsp::Coords,
+    regex::Haystack,
     syntax::{LineIter, SyntaxState},
     util::normalize_line_endings,
 };
@@ -34,7 +35,7 @@ use edit::{Edit, EditLog, Kind, Txt};
 
 pub use buffers::BufferId;
 pub(crate) use buffers::Buffers;
-pub(crate) use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
+pub use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.

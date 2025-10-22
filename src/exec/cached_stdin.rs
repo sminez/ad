@@ -2,8 +2,10 @@ use crate::{
     buffer::GapBuffer,
     dot::Dot,
     exec::{Edit, addr::Address},
+    regex::Haystack,
 };
 use std::{
+    borrow::Cow,
     cell::RefCell,
     io::{Stdin, stdin},
 };
@@ -128,6 +130,62 @@ impl Edit for CachedStdin {
 
     fn remove(&mut self, from: usize, to: usize) {
         self.gb.borrow_mut().remove_range(from, to)
+    }
+}
+
+impl Haystack for CachedStdin {
+    fn try_make_contiguous(&mut self) {}
+
+    fn is_contiguous(&self) -> bool {
+        false
+    }
+
+    fn len(&self) -> usize {
+        usize::MAX
+    }
+
+    fn substr_from(&self, _byte_offset: usize) -> Option<&str> {
+        None
+    }
+
+    fn substr<'a>(&'a self, _byte_from: usize, _byte_to: usize) -> Cow<'a, str> {
+        Cow::Borrowed("")
+    }
+
+    fn byte_to_char(&self, _byte_idx: usize) -> Option<usize> {
+        None
+    }
+
+    fn char_to_byte(&self, _char_idx: usize) -> Option<usize> {
+        None
+    }
+
+    fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
+        if self.inner.borrow().closed {
+            None
+        } else {
+            Some(CachedStdinIter {
+                inner: self,
+                from: char_from,
+                to: usize::MAX,
+            })
+        }
+    }
+
+    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        CachedStdinIter {
+            inner: self,
+            from,
+            to,
+        }
+    }
+
+    fn rev_iter_between(
+        &self,
+        _char_from: usize,
+        _char_to: usize,
+    ) -> impl Iterator<Item = (usize, char)> {
+        std::iter::empty()
     }
 }
 

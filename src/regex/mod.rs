@@ -7,11 +7,15 @@ use std::{iter::Peekable, str::Chars};
 
 mod ast;
 mod compile;
+mod haystack;
 mod matches;
 mod vm;
 
-pub use matches::{IndexedChars, Match, MatchIter};
-pub use vm::Regex;
+// pub mod re2;
+
+pub use haystack::Haystack;
+pub use matches::{Match, MatchIter};
+pub use vm::{Regex, RevRegex};
 
 /// Errors that can be returned by the regex engine
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,9 +75,9 @@ const ESCAPES: [Option<char>; 256] = init_escapes();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct CharClass {
-    negated: bool,
-    chars: Vec<char>,
-    ranges: Vec<(char, char)>,
+    pub(crate) negated: bool,
+    pub(crate) chars: Vec<char>,
+    pub(crate) ranges: Vec<(char, char)>,
 }
 
 impl CharClass {

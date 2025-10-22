@@ -20,8 +20,7 @@
 use crate::{
     buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot, Range},
-    exec::char_iter::IterBoundedChars,
-    regex::{self, Regex},
+    regex::{self, Haystack, Regex, RevRegex},
     util::parse_num,
 };
 use std::{iter::Peekable, str::Chars};
@@ -158,7 +157,7 @@ pub enum AddrBase {
     /// /re/ or +/re/
     Regex(Regex),
     /// -/re/
-    RegexBack(Regex),
+    RegexBack(RevRegex),
 }
 
 impl From<AddrBase> for SimpleAddr {
@@ -293,7 +292,7 @@ fn parse_delimited_regex(it: &mut Peekable<Chars<'_>>, dir: Dir) -> Result<AddrB
                     Regex::compile(&s).map_err(ParseError::InvalidRegex)?,
                 )),
                 Dir::Bck => Ok(AddrBase::RegexBack(
-                    Regex::compile_reverse(&s).map_err(ParseError::InvalidRegex)?,
+                    RevRegex::compile(&s).map_err(ParseError::InvalidRegex)?,
                 )),
             };
         }
@@ -305,7 +304,7 @@ fn parse_delimited_regex(it: &mut Peekable<Chars<'_>>, dir: Dir) -> Result<AddrB
 }
 
 /// Something that is capable of resolving an Addr to a Dot
-pub trait Address: IterBoundedChars {
+pub trait Address: Haystack + Sized {
     /// This only really makes sense for use with a buffer but is supported
     /// so that don't need to special case running programs against an in-editor
     /// buffer vs stdin or a file read from disk.
@@ -388,15 +387,14 @@ pub trait Address: IterBoundedChars {
 
             Regex(re) => {
                 let from = cur_dot.last_cur().idx;
-                let to = self.max_iter();
-                let m = re.match_iter(&mut self.iter_between(from, to), from)?;
+                let m = re.find_from(self, from)?;
                 let (from, to) = m.loc();
                 Dot::from_char_indices(from, to.saturating_sub(1))
             }
 
             RegexBack(re) => {
                 let from = cur_dot.first_cur().idx;
-                let m = re.match_iter(&mut self.rev_iter_between(from, 0), from)?;
+                let m = re.find_rev_from(self, from)?;
                 let (from, to) = m.loc();
                 Dot::from_char_indices(from, to.saturating_sub(1))
             }
@@ -489,15 +487,15 @@ impl Address for Buffer {
 mod tests {
     use super::*;
     use super::{Addr::*, AddrBase::*};
-    use crate::regex::Regex;
+    use crate::regex::{Regex, RevRegex};
     use simple_test_case::test_case;
 
     fn re(s: &str) -> Regex {
         Regex::compile(s).unwrap()
     }
 
-    fn re_rev(s: &str) -> Regex {
-        Regex::compile_reverse(s).unwrap()
+    fn re_rev(s: &str) -> RevRegex {
+        RevRegex::compile(s).unwrap()
     }
 
     //  Simple
@@ -517,7 +515,7 @@ mod tests {
     #[test_case("3:9", Simple(LineAndColumn(2, 8).into()); "line and column cursor")]
     #[test_case("/foo/", Simple(Regex(re("foo")).into()); "regex")]
     #[test_case("+/baz/", Simple(Regex(re("baz")).into()); "regex explicit forward")]
-    #[test_case("-/bar/", Simple(RegexBack(Regex::compile_reverse("bar").unwrap()).into()); "regex back")]
+    #[test_case("-/bar/", Simple(RegexBack(re_rev("bar")).into()); "regex back")]
     // Simple with suffix
     #[test_case(
         "#5+",

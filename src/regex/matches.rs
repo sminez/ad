@@ -1,10 +1,8 @@
-use super::vm::{N_SLOTS, Regex};
-use crate::buffer::{GapBuffer, IdxChars};
-use std::{
-    iter::{Enumerate, Skip},
-    rc::Rc,
-    str::Chars,
+use crate::regex::{
+    Haystack,
+    vm::{N_SLOTS, Regex},
 };
+use std::{borrow::Cow, sync::Arc};
 
 /// The match location of a Regex against a given input.
 ///
@@ -12,7 +10,7 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Match {
     pub(super) sub_matches: [usize; N_SLOTS],
-    pub(super) submatch_names: Rc<[String]>,
+    pub(super) submatch_names: Arc<[String]>,
 }
 
 impl Match {
@@ -22,7 +20,7 @@ impl Match {
         sub_matches[1] = to;
         Self {
             sub_matches,
-            submatch_names: Rc::new([]),
+            submatch_names: Arc::new([]),
         }
     }
 
@@ -35,37 +33,47 @@ impl Match {
         }
     }
 
-    /// Extract this match from the given string
-    pub fn str_match_text(&self, s: &str) -> String {
-        let (a, b) = self.loc();
-        s.chars().skip(a).take(b - a).collect()
+    /// Extract this match from the given haystack
+    pub fn match_text<'a, H>(&self, haystack: &'a H) -> Cow<'a, str>
+    where
+        H: Haystack,
+    {
+        let (char_from, char_to) = self.loc();
+        let byte_from = haystack.char_to_byte(char_from).unwrap();
+        let byte_to = haystack
+            .char_to_byte(char_to)
+            .unwrap_or_else(|| haystack.len());
+
+        haystack.substr(byte_from, byte_to)
     }
 
-    /// The start and end of this match in terms of byte offsets
-    ///
-    /// use loc for character offsets
-    #[inline]
-    pub fn str_loc_bytes(&self, s: &str) -> (usize, usize) {
-        let (a, b) = self.loc();
-        let mut it = s.char_indices().skip(a);
-        let (first, _) = it.next().unwrap();
-        let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
+    /// Extract the given submatch by index if it exists
+    pub fn submatch_text<'a, H>(&self, n: usize, haystack: &'a H) -> Option<Cow<'a, str>>
+    where
+        H: Haystack,
+    {
+        let (char_from, char_to) = self.sub_loc(n)?;
+        let byte_from = haystack.char_to_byte(char_from).unwrap();
+        let byte_to = haystack
+            .char_to_byte(char_to)
+            .unwrap_or_else(|| haystack.len());
 
-        (first, last)
+        Some(haystack.substr(byte_from, byte_to))
     }
 
-    /// The start and end of the nth submatch in terms of byte offsets
-    #[inline]
-    pub fn str_sub_loc_bytes(&self, n: usize, s: &str) -> Option<(usize, usize)> {
-        let (a, b) = self.sub_loc(n)?;
-        let mut it = s.char_indices().skip(a);
-        let (first, _) = it.next().unwrap();
-        let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
+    /// Extract the given submatch by name if it exists
+    pub fn submatch_text_by_name<'a, H>(&self, name: &str, haystack: &'a H) -> Option<Cow<'a, str>>
+    where
+        H: Haystack,
+    {
+        let (char_from, char_to) = self.sub_loc_by_name(name)?;
+        let byte_from = haystack.char_to_byte(char_from).unwrap();
+        let byte_to = haystack
+            .char_to_byte(char_to)
+            .unwrap_or_else(|| haystack.len());
 
-        Some((first, last))
+        Some(haystack.substr(byte_from, byte_to))
     }
-
-    // FIXME: this is a terrible way to do this but used for testing at the moment
 
     /// The names of each submatch
     pub fn named_matches(&self) -> Vec<&str> {
@@ -79,40 +87,7 @@ impl Match {
         matches
     }
 
-    /// The start and end of a named submatch in terms of byte offsets
-    #[inline]
-    pub fn str_sub_loc_bytes_by_name(&self, name: &str, s: &str) -> Option<(usize, usize)> {
-        let (a, b) = self.sub_loc_by_name(name)?;
-        let mut it = s.char_indices().skip(a);
-        let (first, _) = it.next().unwrap();
-        let (last, _) = it.take(b - a - 1).last().unwrap_or((first, ' '));
-
-        Some((first, last))
-    }
-
-    /// The contents of a named submatch
-    pub fn str_sub_loc_text_ref_by_name<'a>(&self, name: &str, s: &'a str) -> Option<&'a str> {
-        let (first, last) = self.str_sub_loc_bytes_by_name(name, s)?;
-
-        Some(&s[first..=last])
-    }
-
-    /// The full match as applied to s
-    pub fn str_match_text_ref<'a>(&self, s: &'a str) -> &'a str {
-        let (first, last) = self.str_loc_bytes(s);
-
-        &s[first..=last]
-    }
-
-    /// The numbered submatch match as applied to s
-    pub fn str_submatch_text(&self, n: usize, s: &str) -> Option<String> {
-        let (a, b) = self.sub_loc(n)?;
-        Some(s.chars().skip(a).take(b - a).collect())
-    }
-
     /// The start and end of this match in terms of character offsets
-    ///
-    /// use str_loc_bytes for byte offsets
     pub fn loc(&self) -> (usize, usize) {
         let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
 
@@ -149,64 +124,26 @@ impl Match {
     }
 }
 
-pub trait IndexedChars {
-    type I: Iterator<Item = (usize, char)>;
-    fn iter_from(&self, from: usize) -> Option<Self::I>;
-}
-
-impl<'a> IndexedChars for &'a str {
-    type I = Skip<Enumerate<Chars<'a>>>;
-
-    fn iter_from(&self, from: usize) -> Option<Self::I> {
-        // This is not at all efficient but we only really make use of strings in test cases where
-        // the length of the string is small. For the "real" impls using GapBuffers, checking the number
-        // of chars in the buffer is O(1) as we cache it.
-        if from >= self.chars().count() {
-            None
-        } else {
-            Some(self.chars().enumerate().skip(from))
-        }
-    }
-}
-
-impl<'a> IndexedChars for &'a GapBuffer {
-    type I = IdxChars<'a>;
-
-    fn iter_from(&self, from: usize) -> Option<Self::I> {
-        if from >= self.len_chars() {
-            None
-        } else {
-            Some(
-                self.slice(from, self.len_chars())
-                    .indexed_chars(from, false),
-            )
-        }
-    }
-}
-
 /// An iterator over sequential, non overlapping matches of a Regex
 /// against a given input
 #[derive(Debug)]
-pub struct MatchIter<'a, I>
+pub struct MatchIter<'a, H>
 where
-    I: IndexedChars,
+    H: Haystack,
 {
-    pub(super) it: I,
+    pub(super) haystack: &'a H,
     pub(super) r: &'a mut Regex,
     pub(super) from: usize,
 }
 
-impl<I> Iterator for MatchIter<'_, I>
+impl<'a, H> Iterator for MatchIter<'a, H>
 where
-    I: IndexedChars,
+    H: Haystack,
 {
     type Item = Match;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let m = self
-            .r
-            .match_iter(&mut self.it.iter_from(self.from)?, self.from)?;
-
+        let m = self.r.find_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
         if from == self.from {
             self.from += 1;

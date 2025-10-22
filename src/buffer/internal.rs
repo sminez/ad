@@ -17,6 +17,7 @@
 //! - <https://coredumped.dev/2023/08/09/text-showdown-gap-buffers-vs-ropes/>
 //! - <https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation>
 use std::{
+    borrow::Cow,
     cell::UnsafeCell,
     cmp::{Ordering, max, min},
     collections::{BTreeMap, HashMap},
@@ -287,6 +288,11 @@ impl GapBuffer {
         &self.data[self.gap_end..]
     }
 
+    /// Whether or not the full data within the buffer is contiguous (all on one side of the gap).
+    pub fn is_contiguous(&self) -> bool {
+        self.gap_start == 0 || self.gap_end == self.cap
+    }
+
     /// The contents of the buffer as a single `&str`.
     ///
     /// This method requires a mutable reference as we need to move the gap in order to ensure that
@@ -297,6 +303,15 @@ impl GapBuffer {
         // SAFETY: we know we have valid utf-8 data internally and make_contiguous moves the gap so
         // that `raw` contains all of the live data within the buffer.
         unsafe { std::str::from_utf8_unchecked(raw) }
+    }
+
+    /// A contiguous substring of the buffer from the give byte offset.
+    ///
+    /// # Safety
+    /// You must call [GapBuffer::make_contiguous] before calling this method.
+    pub unsafe fn substr_from(&self, byte_offset: usize) -> &str {
+        // SAFETY: See above
+        unsafe { std::str::from_utf8_unchecked(&self.data[self.gap_end + byte_offset..]) }
     }
 
     /// Assume that the gap is at 0 and return the full contents of the inner buffer as a slice of
@@ -896,6 +911,50 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
+    /// Convert a logical byte offset into a character offset within the buffer.
+    ///
+    /// This is primarily used to create substrings via the [GapBuffer::substr_from] method when
+    /// running regular expressions over a gap buffer.
+    ///
+    /// This is a simplified version of the equivalent logic in offset_char_to_raw_byte without the
+    /// cache and fast search on single line buffers. This is not typically in the hot path for
+    /// general editor functionality so we don't mind being a little slower in order to keep the
+    /// logic easier to reason about
+    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
+        let mut to = usize::MAX;
+        let raw_byte_idx = self.byte_to_raw_byte(byte_idx);
+        let (mut raw_byte_offset, mut char_offset) = (0, 0);
+
+        // Determine which line the character lies in based on the byte index, skipping all
+        // lines that are before the byte offset we were given.
+        for (&b, &c) in self.line_endings.iter() {
+            match b.cmp(&raw_byte_idx) {
+                Ordering::Less => (raw_byte_offset, char_offset) = (b, c),
+                Ordering::Equal => {
+                    return c;
+                }
+                Ordering::Greater => {
+                    to = b;
+                    break;
+                }
+            }
+        }
+
+        let slice = Slice::from_raw_offsets(raw_byte_offset, to, self);
+        let mut byte_cur = self.raw_byte_to_byte(raw_byte_offset);
+        let mut cur = char_offset;
+
+        for ch in slice.chars() {
+            if byte_cur == byte_idx {
+                break;
+            }
+            byte_cur += ch.len_utf8();
+            cur += 1;
+        }
+
+        cur
+    }
+
     /// Convert a character offset within the logical buffer to a byte offset
     /// within the logical buffer. This is used to account for multi-byte characters
     /// within the buffer and is treated as a String-like index but it does not
@@ -1045,6 +1104,22 @@ impl<'a> Slice<'a> {
         left: &[],
         right: &[],
     };
+
+    pub fn is_contiguous(&self) -> bool {
+        self.left.is_empty() || self.right.is_empty()
+    }
+
+    pub fn into_cow(self) -> Cow<'a, str> {
+        if self.left.is_empty() {
+            // SAFETY: we know that we have valid utf8 data internally
+            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self.right) })
+        } else if self.right.is_empty() {
+            // SAFETY: we know that we have valid utf8 data internally
+            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self.left) })
+        } else {
+            Cow::Owned(self.to_string())
+        }
+    }
 
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
@@ -1582,6 +1657,25 @@ mod tests {
         // SAFETY: safe if the test is passing
         let ch = unsafe { decode_char_at(byte_idx, &gb.data) };
         assert_eq!(ch, expected_ch);
+    }
+
+    #[test_case("hello, world! this is the last line"; "ascii no newline")]
+    #[test_case("hello, world!\nthis is the last line"; "ascii single newline")]
+    #[test_case("foo│foo│foo"; "mixed width no newlines")]
+    #[test_case("hello, 世界!\nhow are you?"; "mixed width single newline")]
+    #[test]
+    fn byte_to_char_works(s: &str) {
+        let mut gb = GapBuffer::from(s);
+
+        for pos in 0..gb.len_chars() - 1 {
+            gb.move_gap_to(gb.char_to_byte(pos));
+            gb.shred_gap();
+
+            for (ch_idx, (byte_idx, _ch)) in s.char_indices().enumerate() {
+                let idx = gb.byte_to_char(byte_idx);
+                assert_eq!(idx, ch_idx, "gap@{pos}");
+            }
+        }
     }
 
     #[test_case(0, 0, "hello, world!\n"; "first line cur at BOF")]

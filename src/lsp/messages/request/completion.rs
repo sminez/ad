@@ -3,12 +3,12 @@ use crate::{
     die,
     dot::{Cur, Dot, Range},
     editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection},
-    exec::IterBoundedChars,
     lsp::{
         LspManager, Pos, PositionEncoding, PreparedMessage, Req,
         capabilities::Coords,
         messages::{EditAction, edit_actions_as_editor_actions, request::LspRequest, txtdoc_pos},
     },
+    regex::Haystack,
 };
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionParams, CompletionResponse, CompletionTextEdit,

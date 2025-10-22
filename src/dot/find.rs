@@ -4,7 +4,7 @@
 use crate::{
     buffer::Buffer,
     dot::{Cur, Dot, Range},
-    exec::IterBoundedChars,
+    regex::Haystack,
 };
 
 /// A Find is able to locate its next occurrence within an indexed character stream and return
