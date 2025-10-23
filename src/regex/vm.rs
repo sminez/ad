@@ -512,8 +512,13 @@ impl Regex {
 
     #[inline]
     fn handle_save(&mut self, t: Thread, s: usize, sp: usize, ch: char, initial: bool, rev: bool) {
+        // If we are saving our initial position from a forward match then we are looking at the
+        // correct character, otherwise the Save op is being processed at the character before the
+        // one we need to save.
+        let inc_position = !initial && !rev;
+
         if (!rev && s.is_multiple_of(2)) || (rev && !s.is_multiple_of(2)) {
-            let sm = self.sm_update(t.sm, s, sp, initial, rev);
+            let sm = self.sm_update(t.sm, s, sp, inc_position);
             let th = match t.assertion {
                 Some(a) => assert_thread(t.pc + 1, sm, a),
                 None => thread(t.pc + 1, sm),
@@ -523,7 +528,7 @@ impl Regex {
             match t.assertion {
                 Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
                 _ => {
-                    let sm = self.sm_update(t.sm, s, sp, initial, rev);
+                    let sm = self.sm_update(t.sm, s, sp, inc_position);
                     self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
                 }
             }
@@ -543,7 +548,7 @@ impl Regex {
     }
 
     #[inline]
-    fn sm_update(&mut self, i: usize, s: usize, sp: usize, initial: bool, reverse: bool) -> usize {
+    fn sm_update(&mut self, i: usize, s: usize, sp: usize, inc_position: bool) -> usize {
         // We don't hard error on compiling a regex with more than out max submatches
         // but we don't track anything past the last one
         if !self.track_submatches || s >= N_SLOTS {
@@ -560,14 +565,8 @@ impl Regex {
             j
         };
 
-        // If we are saving our initial position then we are looking at the correct
-        // character, otherwise the Save op is being processed at the character
-        // before the one we need to save.
-        let mut val = if !initial { sp + 1 } else { sp };
-        if reverse && !initial {
-            val = val.saturating_sub(1);
-        }
-
+        // see comment in handle_save above
+        let val = if inc_position { sp + 1 } else { sp };
         self.sms[i].inner[s] = val;
 
         i
