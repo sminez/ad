@@ -271,7 +271,7 @@ impl Regex {
         // patterns we check for in order to constrain the search space. Otherwise we know that any
         // potential match cant start before the start of the prefix that was found so we update
         // our byte_offset to there before running the VM.
-        if let Some(m) = ac.find(haystack.substr_from(byte_offset)?) {
+        if let Some(m) = ac.find(haystack.substr_from(byte_offset)?.as_ref()) {
             // m.start is based on the substr not the full haystack so we need to add the original
             // offset to get the correct value.
             byte_offset += m.start();

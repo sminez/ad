@@ -13,7 +13,7 @@ pub trait Haystack {
     fn try_make_contiguous(&mut self);
     fn is_contiguous(&self) -> bool;
     fn len(&self) -> usize;
-    fn substr_from(&self, byte_offset: usize) -> Option<&str>;
+    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>>;
     fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str>;
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize>;
@@ -40,13 +40,13 @@ impl Haystack for &str {
         str::len(self)
     }
 
-    fn substr_from(&self, byte_offset: usize) -> Option<&str> {
+    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
         if byte_offset > self.len() {
             None
         } else {
             let raw = &self.as_bytes()[byte_offset..];
             // SAFETY: assumes a valid byte offset
-            Some(unsafe { std::str::from_utf8_unchecked(raw) })
+            Some(Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(raw) }))
         }
     }
 
@@ -113,12 +113,12 @@ impl Haystack for GapBuffer {
         self.len()
     }
 
-    fn substr_from(&self, byte_offset: usize) -> Option<&str> {
+    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
         if byte_offset > self.len() {
             None
         } else {
             // SAFETY: assumes make_contiguous was called first
-            Some(unsafe { self.substr_from(byte_offset) })
+            Some(Cow::Borrowed(unsafe { self.substr_from(byte_offset) }))
         }
     }
 
@@ -184,12 +184,12 @@ impl Haystack for Buffer {
         self.txt.len()
     }
 
-    fn substr_from(&self, byte_offset: usize) -> Option<&str> {
+    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
         if byte_offset > self.txt.len() {
             None
         } else {
             // SAFETY: assumes make_contiguous was called first
-            Some(unsafe { self.txt.substr_from(byte_offset) })
+            Some(Cow::Borrowed(unsafe { self.txt.substr_from(byte_offset) }))
         }
     }
 

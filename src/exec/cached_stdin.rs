@@ -144,20 +144,26 @@ impl Haystack for CachedStdin {
         usize::MAX
     }
 
-    fn substr_from(&self, _byte_offset: usize) -> Option<&str> {
-        None
+    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
+        let gb = self.gb.borrow();
+        let s = Haystack::substr_from(&*gb, byte_offset)?.into_owned();
+
+        Some(Cow::Owned(s))
     }
 
-    fn substr<'a>(&'a self, _byte_from: usize, _byte_to: usize) -> Cow<'a, str> {
-        Cow::Borrowed("")
+    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
+        let gb = self.gb.borrow();
+        let s = gb.substr(byte_from, byte_to).into_owned();
+
+        Cow::Owned(s)
     }
 
-    fn byte_to_char(&self, _byte_idx: usize) -> Option<usize> {
-        None
+    fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
+        Haystack::byte_to_char(&*self.gb.borrow(), byte_idx)
     }
 
-    fn char_to_byte(&self, _char_idx: usize) -> Option<usize> {
-        None
+    fn char_to_byte(&self, char_idx: usize) -> Option<usize> {
+        Haystack::char_to_byte(&*self.gb.borrow(), char_idx)
     }
 
     fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
