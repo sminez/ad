@@ -342,16 +342,6 @@ impl Regex {
         self.run_vm(&mut haystack.iter_between(char_from, char_to), char_from)
     }
 
-    /// Attempt to match this Regex against an arbitrary iterator input, returning the
-    /// position of the match and all submatches if successful.
-    pub fn match_iter<I>(&mut self, input: &mut I, sp: usize) -> Option<Match>
-    where
-        I: Iterator<Item = (usize, char)>,
-    {
-        self.track_submatches = true;
-        self.run_vm(input, sp)
-    }
-
     /// This is the main VM implementation that is used by all other matching methods on Regex.
     ///
     /// The `track_submatches` flag is used to early return a dummy Match as soon as we
