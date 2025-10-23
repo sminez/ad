@@ -264,6 +264,7 @@ impl Program {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct Runner {
+    ac_buf: Vec<aho_corasick::Match>,
     template_buf: GapBuffer,
     row_buf: String,
     col_buf: String,
@@ -272,6 +273,7 @@ struct Runner {
 impl Runner {
     fn new() -> Self {
         Self {
+            ac_buf: Vec::with_capacity(10),
             template_buf: GapBuffer::new(),
             row_buf: String::with_capacity(4),
             col_buf: String::with_capacity(4),
@@ -458,30 +460,30 @@ impl Runner {
     where
         E: Edit,
     {
+        self.ac_buf.clear();
         self.template_buf.clear();
         self.template_buf.insert_str(0, s);
 
-        let mut matches: Vec<aho_corasick::Match> = TEMPLATE_AC
-            .get_or_init(|| {
-                AhoCorasick::new(TEMPLATE_PATTERNS)
-                    .expect("using auto builder so no errors possible")
-            })
-            .find_iter(s)
-            .collect();
+        self.ac_buf.extend(
+            TEMPLATE_AC
+                .get_or_init(|| {
+                    AhoCorasick::new(TEMPLATE_PATTERNS)
+                        .expect("using auto builder so no errors possible")
+                })
+                .find_iter(s),
+        );
 
-        if matches.is_empty() {
+        if self.ac_buf.is_empty() {
             return Ok(());
         }
-
-        // process the matches in reverse order so we don't need to update the match positions as
-        // we alter the contents of the buffer.
-        matches.reverse();
 
         self.row_buf.clear();
         self.col_buf.clear();
         let mut seen_row_col = false;
 
-        for mat in matches {
+        // process the matches in reverse order so we don't need to update the match positions as
+        // we alter the contents of the buffer.
+        for mat in self.ac_buf.iter().rev() {
             let (from, to) = (mat.start(), mat.end());
             let pat = mat.pattern().as_u32() as usize;
             let pattern = TEMPLATE_PATTERNS[pat];
