@@ -128,6 +128,9 @@ lsp.command = "bash-language-server"
 lsp.args = ["start"]
 lsp.roots = [".git"]
 
+[filetypes.c]
+extensions = ["c", "h"]
+
 [filetypes.dart]
 extensions = ["dart"]
 lsp.command = "dart"
