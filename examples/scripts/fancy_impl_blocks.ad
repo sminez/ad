@@ -1,37 +1,34 @@
+#!/usr/bin/env -S ad -f
 # This version of the impl block script is conditionally extracting the
 # return type from functions that have one using nested expression groups
 # and guards.
-x/^(?:impl<.*?>|impl).*? (\w+)@*?^\}/
-# Skip anything that looks like "impl Foo for Bar {..."
-v/^(?:impl<.*?>|impl).*? for @*?\{/
-{
-# We print the impl block and file name as before...
-    p/\nimpl $1 ($FILENAME:$ROW:$COL)\n/;
-# ...but this time we loop over the full function declarations first
-# without extracting anything.
-    x/fn@*?\{/
-# Now we run a group of expressions, each with non-overlapping guards
-# to handle the two cases that we care about:
-    {
-# In the case where there is a '->' (used as a proxy for "there is a
-# return type") we extract both the function name and the return
-# type for printing, calling out if the function mutates self.
-        g/->/
-        x/fn (\w+)@*?-> (.*?) \{/
-        {
-            g/&('. )?mut self/ p/  mut $1 -> $2\n/;
-            v/&('. )?mut self/ p/      $1 -> $2\n/;
-        };
 
-# In the case where there is not a '->' ("there is not a return type")
-# we just extract the function name and append unit so that we have
-# a return type for each function, again calling out if the function
-# mutates self.
-        v/->/
-        x/fn (\w+)@*\{/
-        {
-            g/&('. )?mut self/ p/  mut $1 -> ()\n/;
-            v/&('. )?mut self/ p/      $1 -> ()\n/;
-        };
+# Extract all impl blocks, skipping anything that looks like "impl Foo for Bar..."
+x/^impl(?:<.*?>)?.*? (\w+)@*?^\}/
+v/^impl(?:<.*?>)?.*? for/ {
+  # We print the impl block and file name as before...
+  p/\nimpl $1 ($FILENAME:$ROW:$COL)\n/;
+  # ...but this time we loop over the full function declarations first
+  # without extracting anything.
+  # Now we run a group of expressions, each with non-overlapping guards
+  # to handle the two cases that we care about:
+  x/fn@*?\{/ {
+    # In the case where there is a '->' (used as a proxy for "there is a
+    # return type") we extract both the function name and the return
+    # type for printing, calling out if the function mutates self.
+    x/fn (\w+)@*?-> (.*?)\w*\{/ {
+      g/&('. )?mut self/ p/  mut $1 -> $2\n/;
+      v/&('. )?mut self/ p/      $1 -> $2\n/;
     };
+
+    # In the case where there is not a '->' ("there is not a return type")
+    # we just extract the function name and append unit so that we have
+    # a return type for each function, again calling out if the function
+    # mutates self.
+    v/->/
+    x/fn (\w+)@*\{/ {
+      g/&('. )?mut self/ p/  mut $1 -> ()\n/;
+      v/&('. )?mut self/ p/      $1 -> ()\n/;
+    };
+  };
 }
