@@ -121,6 +121,10 @@ label = { fg = "#E6C384" }
 
 # Filetype configuration
 
+[filetypes.awk]
+extensions = ["awk"]
+first_lines = ["#!/usr/bin/awk -f", "#!/usr/bin/env -S awk -f"]
+
 [filetypes.bash]
 extensions = ["sh", "bash"]
 first_lines = ["#!/usr/bin/bash", "#!/usr/bin/sh", "#!/usr/bin/env bash", "#!/usr/bin/env sh"]
