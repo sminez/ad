@@ -14,23 +14,28 @@ where
     K: fmt::Debug + fmt::Display,
 {
     pub fn new(kind: impl Into<K>, source: &str, span: Span) -> Self {
+        let source = source[span.as_range()].to_string();
+
         Self {
             kind: kind.into(),
-            source: source.to_string(),
+            source,
             span,
         }
     }
 }
 
-impl<K> error::Error for Error<K> 
-where K: fmt::Debug + fmt::Display {}
+impl<K> error::Error for Error<K> where K: fmt::Debug + fmt::Display {}
 
 impl<K> fmt::Display for Error<K>
 where
     K: fmt::Debug + fmt::Display,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse error ({:?}): {}", self.span, self.kind)
+        write!(
+            f,
+            "parse error ({:?}): {} {:?}",
+            self.span, self.kind, self.source
+        )
     }
 }
 
@@ -83,6 +88,10 @@ impl Span {
     pub fn with_end(self, pos: Position) -> Span {
         Span { end: pos, ..self }
     }
+
+    pub fn as_range(&self) -> std::ops::Range<usize> {
+        self.start.offset..self.end.offset
+    }
 }
 
 #[derive(Debug)]
@@ -101,6 +110,10 @@ impl<'a> ParseInput<'a> {
 
     pub fn text(&self) -> &str {
         self.input
+    }
+
+    pub fn span_text(&self, span: &Span) -> &str {
+        &self.input[span.as_range()]
     }
 
     pub fn reset(&self) {
@@ -220,7 +233,7 @@ impl<'a> ParseInput<'a> {
     /// If the substring starting at the current parser position has the given
     /// prefix then advance to the character after the prefix and return true.
     /// Otherwise, return false.
-    fn try_consume(&self, prefix: &str) -> bool {
+    pub fn try_consume(&self, prefix: &str) -> bool {
         if self.remaining().starts_with(prefix) {
             for _ in 0..prefix.chars().count() {
                 self.advance();

@@ -1,4 +1,11 @@
-//! Sam style language for running edit commands using structural regular expressions
+//! A Sam style language for running edit commands using structural regular expressions.
+//!
+//! The language used here is inspired by the one found in the plan9 Sam text editor but
+//! it is not a 1-1 re-implementation of that language.
+//!
+//! <https://doc.cat-v.org/plan_9/4th_edition/papers/sam/>
+//! <https://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf>
+//! <http://sam.cat-v.org/cheatsheet/>
 use crate::{
     buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot},
@@ -22,6 +29,7 @@ use std::{
 mod addr;
 mod cached_stdin;
 mod expr;
+mod parse;
 
 use addr::ParseError;
 pub(crate) use addr::{Addr, AddrBase, Address};
