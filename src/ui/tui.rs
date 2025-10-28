@@ -189,13 +189,16 @@ impl<W: Write> UserInterface for GenericTui<W> {
             restore_terminal_state(&mut stdout);
             _ = stdout.flush();
 
+            // Force capturing a backtrace for easier debugging
+            let bt = std::backtrace::Backtrace::force_capture();
+
             // Restoring the terminal state to move us off of the alternate screen
             // can race with our attempt to print the panic info so given that we
             // are already in a fatal situation, sleeping briefly to ensure that
             // the cause of the panic is visible before we exit isn't _too_ bad.
             std::thread::sleep(std::time::Duration::from_millis(300));
-            eprintln!("Fatal error:\n{panic_info}");
-            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}"));
+            eprintln!("Fatal error:\n{panic_info}\n{bt}");
+            _ = std::fs::write("/tmp/ad.panic", format!("{panic_info}\n{bt}"));
         }));
 
         enable_mouse_support(&mut self.stdout);
