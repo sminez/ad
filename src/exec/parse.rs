@@ -204,15 +204,6 @@ impl<'a> Parser<'a> {
         self.input.span()
     }
 
-    /// Create a span covering the current character.
-    fn span_char(&self) -> Span {
-        self.input.span_char()
-    }
-
-    fn error_at(&self, span: Span, kind: impl Into<String>) -> Error {
-        Error::new(kind, self.input.text(), span)
-    }
-
     fn error(&self, kind: impl Into<String>) -> Error {
         Error::new(kind, self.input.text(), self.input.span())
     }

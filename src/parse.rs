@@ -129,6 +129,14 @@ impl<'a> ParseInput<'a> {
         self.char_at(self.offset())
     }
 
+    pub fn try_char(&self) -> Option<char> {
+        if self.at_eof() {
+            None
+        } else {
+            Some(self.char_at(self.offset()))
+        }
+    }
+
     /// The remaining text following the current parser position
     pub fn remaining(&self) -> &str {
         &self.input[self.offset()..]
@@ -265,11 +273,11 @@ mod tests {
         let p = ParseInput::new("bar");
 
         assert_eq!(p.char(), 'b');
-        assert_eq!(p.advance(), true);
+        assert!(p.advance());
         assert_eq!(p.char(), 'a');
-        assert_eq!(p.advance(), true);
+        assert!(p.advance());
         assert_eq!(p.char(), 'r');
-        assert_eq!(p.advance(), false);
+        assert!(!p.advance());
     }
 
     #[test_case(' ', Some("this"); "target found")]
