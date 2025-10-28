@@ -60,7 +60,7 @@ impl Ast {
             Ast::Parallel(s) | Ast::Series(s) => &s.span,
             Ast::Guard(g) | Ast::InvGuard(g) => &g.span,
             Ast::Insert(t) | Ast::Append(t) | Ast::Change(t) | Ast::Print(t) => &t.span,
-            Ast::Delete(s) | Ast::Comment(s) => &s,
+            Ast::Delete(s) | Ast::Comment(s) => s,
         }
     }
 }
@@ -69,7 +69,7 @@ impl Ast {
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct SetAddr {
     pub span: Span,
-    pub addr: Addr,
+    pub addr: Box<Addr>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -189,7 +189,17 @@ impl<'a> Parser<'a> {
             ';' => return Err(self.error("unexpected ';' in input")),
             '}' => return Err(self.error("unexpected '}' in input")),
 
-            ch => todo!("parse addr ch={ch:?} @ {:?}", self.span()),
+            // Default to trying to parse an Addr
+            _ => {
+                let span = self.span();
+                Ast::SetAddr(SetAddr {
+                    span: span.with_end(self.input.pos()),
+                    addr: Box::new(
+                        Addr::parse_from_input(&self.input)
+                            .map_err(|e| self.error(e.to_string()))?,
+                    ),
+                })
+            }
         };
 
         Ok(ast)

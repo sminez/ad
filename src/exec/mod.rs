@@ -29,6 +29,7 @@ use std::{
 
 mod addr;
 mod cached_stdin;
+mod compile;
 mod expr;
 mod parse;
 
