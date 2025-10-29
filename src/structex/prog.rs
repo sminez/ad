@@ -2,11 +2,11 @@
 use crate::{
     buffer::GapBuffer,
     dot::Dot,
+    regex::{Match, Regex},
     structex::{
         Addr, Edit, Error,
         compile::{Action, ActionKind, Compiler, Extract, Guard, Inst},
     },
-    regex::{Match, Regex},
 };
 use aho_corasick::AhoCorasick;
 use std::{

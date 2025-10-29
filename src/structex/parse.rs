@@ -1,7 +1,7 @@
 //! Parsing for the ad-exec language
 use crate::{
-    structex::addr::Addr,
     parse::{self, ParseInput, Span},
+    structex::addr::Addr,
 };
 
 pub type Error = parse::Error<String>;
@@ -27,7 +27,7 @@ pub(super) enum Ast {
     /// If the current dot matches the given regex run the given
     /// nodes in parallel over dot.
     Guard(Guard),
-    /// If the current dot doesn't matche the given regex run the given
+    /// If the current dot doesn't match the given regex run the given
     /// nodes in parallel over dot.
     InvGuard(Guard),
 
@@ -463,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_extract_retuns_correct_span() {
+    fn parse_extract_returns_correct_span() {
         let p = Parser::new("x/foo/ c/bar/ a/baz/  # comment");
         let extract = p.parse_extract(false).unwrap();
         let substr = p.input.span_text(&extract.span);
@@ -472,7 +472,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_guard_retuns_correct_span() {
+    fn parse_guard_returns_correct_span() {
         let p = Parser::new("g/foo/ c/bar/   ");
         let guard = p.parse_guard(false).unwrap();
         let substr = p.input.span_text(&guard.span);
@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_group_retuns_correct_span() {
+    fn parse_group_returns_correct_span() {
         let p = Parser::new("  { x/foo/ c/bar/;\nx/bar/ c/foo/; }    ");
         p.input.consume_whitespace();
         let seq = p.parse_group().unwrap();

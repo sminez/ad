@@ -1,8 +1,8 @@
 use crate::{
     buffer::GapBuffer,
     dot::Dot,
-    structex::{Edit, addr::Address},
     regex::Haystack,
+    structex::{Edit, addr::Address},
 };
 use std::{
     borrow::Cow,
