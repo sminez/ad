@@ -87,6 +87,8 @@ pub enum Error {
     MissingAction,
     /// Missing delimiter
     MissingDelimiter(&'static str),
+    /// Overlapping matches
+    OverlappingMatches(usize, usize, String),
     /// Unclosed delimiter
     UnclosedDelimiter(&'static str, char),
     /// Unclosed expression group

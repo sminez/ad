@@ -91,7 +91,7 @@ impl Program {
         let (from, to) = ed.current_dot().as_char_indices();
         let mut m = Match::synthetic(from, to.saturating_add(1));
 
-        if let Some(new) = runner.execute_instruction(self, &self.inst, &m, ed) {
+        if let Some(new) = runner.execute_instruction(self, &self.inst, &m, ed)? {
             m = new;
         }
 
@@ -115,7 +115,7 @@ impl Program {
 /// Automatically released back to a shared pool when dropped.
 #[derive(Debug, Clone)]
 struct Runner {
-    actions: BTreeMap<Match, Vec<Action>>,
+    actions: BTreeMap<Match, Action>,
     ac_buf: Vec<aho_corasick::Match>,
     template_buf: GapBuffer,
     row_buf: String,
@@ -147,7 +147,7 @@ impl Runner {
         inst: &Inst,
         m: &Match,
         ed: &E,
-    ) -> Option<Match>
+    ) -> Result<Option<Match>, Error>
     where
         E: Edit,
     {
@@ -162,14 +162,21 @@ impl Runner {
                 let mut addr = prog.addrs[*i].borrow_mut();
                 let (from, to) = ed.map_addr(&mut addr).as_char_indices();
 
-                Some(Match::synthetic(from, to))
+                Ok(Some(Match::synthetic(from, to)))
             }
 
             // Actions end the chain
-            Inst::Action(a) => {
-                self.actions.entry(m.clone()).or_default().push(*a);
-                None
-            }
+            Inst::Action(a) => match self.actions.insert(m.clone(), *a) {
+                Some(a2) => {
+                    let (row, col) = m.loc();
+                    Err(Error::OverlappingMatches(
+                        row,
+                        col,
+                        format!("overlapping actions: {a2:?} {a:?}"),
+                    ))
+                }
+                None => Ok(None),
+            },
         }
     }
 
@@ -181,15 +188,18 @@ impl Runner {
         insts: &[Inst],
         mut m: Match,
         ed: &E,
-    ) -> Option<Match>
+    ) -> Result<Option<Match>, Error>
     where
         E: Edit,
     {
         for inst in insts.iter() {
-            m = self.execute_instruction(prog, inst, &m, ed)?;
+            m = match self.execute_instruction(prog, inst, &m, ed)? {
+                Some(m) => m,
+                None => break,
+            };
         }
 
-        Some(m)
+        Ok(Some(m))
     }
 
     /// Run each instruction against the original match, returning the original match
@@ -199,15 +209,15 @@ impl Runner {
         insts: &[Inst],
         m: Match,
         ed: &E,
-    ) -> Option<Match>
+    ) -> Result<Option<Match>, Error>
     where
         E: Edit,
     {
         for inst in insts.iter() {
-            self.execute_instruction(prog, inst, &m, ed);
+            self.execute_instruction(prog, inst, &m, ed)?;
         }
 
-        Some(m)
+        Ok(Some(m))
     }
 
     fn execute_extract<E>(
@@ -216,7 +226,7 @@ impl Runner {
         ext: &Extract,
         m: Match,
         ed: &E,
-    ) -> Option<Match>
+    ) -> Result<Option<Match>, Error>
     where
         E: Edit,
     {
@@ -235,7 +245,7 @@ impl Runner {
             }
             from = new_from;
 
-            if let Some(new) = self.execute_series(prog, &ext.per_match, m, ed) {
+            if let Some(new) = self.execute_series(prog, &ext.per_match, m, ed)? {
                 last = Some(new);
             }
 
@@ -244,7 +254,7 @@ impl Runner {
             }
         }
 
-        last
+        Ok(last)
     }
 
     fn execute_filter<E>(
@@ -253,7 +263,7 @@ impl Runner {
         ext: &Extract,
         m: Match,
         ed: &E,
-    ) -> Option<Match>
+    ) -> Result<Option<Match>, Error>
     where
         E: Edit,
     {
@@ -265,7 +275,7 @@ impl Runner {
             let (new_from, new_to) = m.loc();
             if from < new_from {
                 let m = Match::synthetic(from, new_from);
-                if let Some(new) = self.execute_series(prog, &ext.per_match, m, ed) {
+                if let Some(new) = self.execute_series(prog, &ext.per_match, m, ed)? {
                     last = Some(new);
                 }
             }
@@ -278,15 +288,21 @@ impl Runner {
 
         if from < to {
             let m = Match::synthetic(from, to);
-            if let Some(new) = self.execute_series(prog, &ext.per_match, m, ed) {
+            if let Some(new) = self.execute_series(prog, &ext.per_match, m, ed)? {
                 last = Some(new);
             }
         }
 
-        last
+        Ok(last)
     }
 
-    fn execute_guard<E>(&mut self, prog: &Program, g: &Guard, m: Match, ed: &E) -> Option<Match>
+    fn execute_guard<E>(
+        &mut self,
+        prog: &Program,
+        g: &Guard,
+        m: Match,
+        ed: &E,
+    ) -> Result<Option<Match>, Error>
     where
         E: Edit,
     {
@@ -299,7 +315,7 @@ impl Runner {
         } else if !matching && !g.if_not_matching.is_empty() {
             self.execute_series(prog, &g.if_not_matching, m.clone(), ed)
         } else {
-            None
+            Ok(None)
         }
     }
 
@@ -320,15 +336,13 @@ impl Runner {
         let mut dot = Dot::from_char_indices(from, to);
         let actions = mem::take(&mut self.actions);
 
-        for (mut m, actions) in actions.into_iter() {
+        for (mut m, action) in actions.into_iter() {
             m.apply_offset(offset);
 
-            for action in actions.iter() {
-                let cur_len = ed.len_chars() as isize;
-                dot = self.apply_action(prog, action, &m, fname, ed, out)?;
-                let new_len = ed.len_chars() as isize;
-                offset += new_len - cur_len;
-            }
+            let cur_len = ed.len_chars() as isize;
+            dot = self.apply_action(prog, &action, &m, fname, ed, out)?;
+            let new_len = ed.len_chars() as isize;
+            offset += new_len - cur_len;
         }
 
         Ok(dot.as_char_indices())
