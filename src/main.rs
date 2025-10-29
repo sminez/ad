@@ -73,7 +73,7 @@ fn log_level_from_env() -> LevelFilter {
 }
 
 fn run_script(script: &str, files: Vec<PathBuf>) {
-    let mut prog = match Program::try_parse(script) {
+    let prog = match Program::compile(script) {
         Ok(prog) => prog,
         Err(e) => {
             eprintln!("error parsing script: {e:?}");

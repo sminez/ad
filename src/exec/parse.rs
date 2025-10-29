@@ -122,6 +122,7 @@ impl<'a> Parser<'a> {
             if !node.is_comment() {
                 seq.nodes.push(node);
             }
+            self.input.consume_whitespace();
         }
 
         match seq.nodes.len() {

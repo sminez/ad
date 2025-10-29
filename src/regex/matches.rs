@@ -26,7 +26,7 @@ impl Match {
 
     pub(crate) fn apply_offset(&mut self, offset: isize) {
         for i in 0..N_SLOTS {
-            if i > 0 && self.sub_matches[i] == 0 {
+            if self.sub_matches[i] == 0 {
                 continue;
             }
             self.sub_matches[i] = (self.sub_matches[i] as isize + offset) as usize;

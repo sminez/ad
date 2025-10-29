@@ -760,7 +760,7 @@ where
 
     pub(super) fn execute_edit_command(&mut self, cmd: &str) {
         debug!(%cmd, "executing edit command");
-        let mut prog = match Program::try_parse(cmd) {
+        let prog = match Program::compile(cmd) {
             Ok(prog) => prog,
             Err(error) => {
                 warn!(?error, "invalid edit command");

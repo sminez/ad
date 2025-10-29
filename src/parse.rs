@@ -147,7 +147,7 @@ impl<'a> ParseInput<'a> {
         self.input[i..]
             .chars()
             .next()
-            .unwrap_or_else(|| panic!("expected char at offset {i}"))
+            .unwrap_or_else(|| panic!("expected char at offset {i} {:?}", self.pos()))
     }
 
     /// The current position of the parser within the input text

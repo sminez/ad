@@ -22,7 +22,7 @@ const GAP_BUFFER: &str = include_str!("../../src/buffer/internal.rs");
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("Structural regex");
 
-    let mut prog = Program::try_parse(SCRIPT).expect("valid test script");
+    let prog = Program::compile(SCRIPT).expect("valid test script");
     let mut w = StdoutSink(Vec::with_capacity(10 * 1024));
 
     for (name, s) in [("ziplist", ZIPLIST), ("internal", GAP_BUFFER)] {

@@ -277,33 +277,3 @@ impl Compiler {
         instructions.push(Inst::Action(Action { kind, template }));
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const PROG: &str = r#"
-x/^impl(?:<.*?>)?.*? (\w+)@*?^\}/
-v/^impl(?:<.*?>)?.*? for/ {
-  p/\nimpl $1 ($FILENAME:$ROW:$COL)\n/;
-  x/fn@*?\{/ {
-    g/->/
-    x/fn (\w+)@*?-> (.*?)\w*\{/ {
-      g/&('. )?mut self/ p/  mut $1 -> $2\n/;
-      v/&('. )?mut self/ p/      $1 -> $2\n/;
-    };
-
-    v/->/
-    x/fn (\w+)@*\{/ {
-      g/&('. )?mut self/ p/  mut $1 -> ()\n/;
-      v/&('. )?mut self/ p/      $1 -> ()\n/;
-    };
-  };
-}"#;
-
-    #[test]
-    fn compile_works() {
-        let instructions = Compiler::default().compile(PROG).unwrap();
-        panic!("{instructions:?}");
-    }
-}

@@ -34,6 +34,8 @@ mod expr;
 mod parse;
 mod prog;
 
+pub use prog::Program;
+
 use addr::ErrorKind;
 pub(crate) use addr::{Addr, AddrBase, Address};
 pub use cached_stdin::{CachedStdin, CachedStdinIter};
@@ -165,13 +167,13 @@ impl Edit for Buffer {
 
 /// A parsed and compiled program that can be executed against an input
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Program {
+pub struct Prog {
     initial_dot: Addr,
     exprs: Vec<Expr>,
     runner: Runner,
 }
 
-impl Program {
+impl Prog {
     /// Attempt to parse a given program input
     pub fn try_parse(s: &str) -> Result<Self, Error> {
         let mut exprs = vec![];
@@ -641,15 +643,15 @@ mod tests {
     #[test_case(", x/^.*$/ g/emacs/ d", vec![LoopMatches(re("^.*$")), IfContains(re("emacs")), Delete]; "loop filter")]
     #[test]
     fn parse_program_works(s: &str, expected: Vec<Expr>) {
-        let p = Program::try_parse(s).expect("valid input");
-        assert_eq!(p, Program::new(Addr::full(), expected));
+        let p = Prog::try_parse(s).expect("valid input");
+        assert_eq!(p, Prog::new(Addr::full(), expected));
     }
 
     #[test_case("", Error::EmptyProgram; "empty program")]
     #[test_case(", x/.*/", Error::MissingAction; "missing action")]
     #[test]
     fn parse_program_errors_correctly(s: &str, expected: Error) {
-        let res = Program::try_parse(s);
+        let res = Prog::try_parse(s);
         assert_eq!(res, Err(expected));
     }
 
@@ -664,7 +666,7 @@ mod tests {
     #[test_case(vec![LoopBetweenMatches(re("foo")), Append("X".to_string())], "foo Xfoo Xfoo", (8, 10); "loop between change")]
     #[test]
     fn step_works(exprs: Vec<Expr>, expected: &str, expected_dot: (usize, usize)) {
-        let mut prog = Program::new(Addr::full(), exprs);
+        let mut prog = Prog::new(Addr::full(), exprs);
         let mut b = Buffer::new_unnamed(0, "foo foo foo", Default::default());
         let dot = prog
             .runner
@@ -687,7 +689,7 @@ mod tests {
     #[test_case(", x/(t.)/ a/$1/", "ththis is a tetest t strtring"; "x a")]
     #[test]
     fn substitution_of_submatches_works(s: &str, expected: &str) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let mut prog = Prog::try_parse(s).unwrap();
 
         let mut b = Buffer::new_unnamed(0, "this is a test string", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
@@ -696,7 +698,7 @@ mod tests {
 
     #[test]
     fn loop_between_generates_the_correct_blocks() {
-        let mut prog = Program::try_parse(", y/ / p/>$0<\n/").unwrap();
+        let mut prog = Prog::try_parse(", y/ / p/>$0<\n/").unwrap();
         let mut b = Buffer::new_unnamed(0, "this and that", Default::default());
         let mut output = Vec::new();
         let dot = prog.execute(&mut b, "test", &mut output).unwrap();
@@ -732,7 +734,7 @@ mod tests {
     #[test_case(0, ", x/oo/ s/.*/X/g", "fX│fX│fX"; "nested loop x sub all dot star")]
     #[test]
     fn execute_produces_the_correct_string(idx: usize, s: &str, expected: &str) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let mut prog = Prog::try_parse(s).unwrap();
         let mut b = Buffer::new_unnamed(0, "foo│foo│foo", Default::default());
         b.dot = Cur::new(idx).into();
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
@@ -742,7 +744,7 @@ mod tests {
 
     #[test]
     fn multiline_file_dot_star_works() {
-        let mut prog = Program::try_parse(", x/.*/ c/foo/").unwrap();
+        let mut prog = Prog::try_parse(", x/.*/ c/foo/").unwrap();
         let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
@@ -752,7 +754,7 @@ mod tests {
 
     #[test]
     fn multiline_file_dot_plus_works() {
-        let mut prog = Program::try_parse(", x/.+/ c/foo/").unwrap();
+        let mut prog = Prog::try_parse(", x/.+/ c/foo/").unwrap();
         let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
@@ -770,7 +772,7 @@ mod tests {
     #[test_case(", x/\\b\\w+\\b/ i/buffalo/"; "insert before each word")]
     #[test]
     fn buffer_execute_undo_all_is_a_noop(s: &str) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let mut prog = Prog::try_parse(s).unwrap();
         let initial_content = "this is a line\nand another\n- [ ] something to do\n";
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 

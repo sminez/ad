@@ -3,18 +3,19 @@ use crate::{
     buffer::GapBuffer,
     dot::Dot,
     exec::{
-        Addr, Edit,
+        Addr, Edit, Error,
         compile::{Action, ActionKind, Compiler, Extract, Guard, Inst},
     },
     regex::{Match, Regex},
 };
 use aho_corasick::AhoCorasick;
 use std::{
+    borrow::Cow,
     cell::RefCell,
     cmp::min,
     collections::BTreeMap,
-    fmt::{self, Write as _},
-    io::{self, Write},
+    fmt::Write as _,
+    io::Write,
     mem,
     ops::{Deref, DerefMut},
     sync::{LazyLock, Mutex, OnceLock},
@@ -38,17 +39,17 @@ const TEMPLATE_PATTERNS: [&str; 15] = [
 static RUNNER_POOL: LazyLock<Mutex<Vec<Runner>>> =
     LazyLock::new(|| Mutex::new((0..4).map(|_| Runner::new()).collect()));
 
-/// An exec [Prog] uses structural regular expressions to identify a set of edit points within a
+/// An exec [Program] uses structural regular expressions to identify a set of edit points within a
 /// buffer which are then executed in parallel.
 #[derive(Debug)]
-pub struct Prog {
+pub struct Program {
     inst: Inst,
     addrs: Vec<RefCell<Addr>>,
     re: Vec<RefCell<Regex>>,
     templates: Vec<String>,
 }
 
-impl Prog {
+impl Program {
     pub fn compile(s: &str) -> Result<Self, String> {
         let mut c = Compiler::default();
         let inst = c.compile(s)?;
@@ -77,7 +78,7 @@ impl Prog {
         })
     }
 
-    pub fn execute<E, W>(&self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, String>
+    pub fn execute<E, W>(&self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, Error>
     where
         E: Edit,
         W: Write,
@@ -95,7 +96,7 @@ impl Prog {
         }
 
         ed.begin_edit_transaction();
-        let (from, to) = runner.apply_actions(fname, self, m, ed, out);
+        let (from, to) = runner.apply_actions(fname, self, m, ed, out)?;
         ed.end_edit_transaction();
 
         // In the case of running against a lazy stream our initial `to` will be a sential value of
@@ -142,7 +143,7 @@ impl Runner {
 
     fn execute_instruction<E>(
         &mut self,
-        prog: &Prog,
+        prog: &Program,
         inst: &Inst,
         m: &Match,
         ed: &E,
@@ -176,7 +177,7 @@ impl Runner {
     /// Returns the final match position
     fn execute_series<E>(
         &mut self,
-        prog: &Prog,
+        prog: &Program,
         insts: &[Inst],
         mut m: Match,
         ed: &E,
@@ -194,7 +195,7 @@ impl Runner {
     /// Run each instruction against the original match, returning the original match
     fn execute_parallel<E>(
         &mut self,
-        prog: &Prog,
+        prog: &Program,
         insts: &[Inst],
         m: Match,
         ed: &E,
@@ -209,7 +210,13 @@ impl Runner {
         Some(m)
     }
 
-    fn execute_extract<E>(&mut self, prog: &Prog, ext: &Extract, m: Match, ed: &E) -> Option<Match>
+    fn execute_extract<E>(
+        &mut self,
+        prog: &Program,
+        ext: &Extract,
+        m: Match,
+        ed: &E,
+    ) -> Option<Match>
     where
         E: Edit,
     {
@@ -240,7 +247,13 @@ impl Runner {
         last
     }
 
-    fn execute_filter<E>(&mut self, prog: &Prog, ext: &Extract, m: Match, ed: &E) -> Option<Match>
+    fn execute_filter<E>(
+        &mut self,
+        prog: &Program,
+        ext: &Extract,
+        m: Match,
+        ed: &E,
+    ) -> Option<Match>
     where
         E: Edit,
     {
@@ -273,7 +286,7 @@ impl Runner {
         last
     }
 
-    fn execute_guard<E>(&mut self, prog: &Prog, g: &Guard, m: Match, ed: &E) -> Option<Match>
+    fn execute_guard<E>(&mut self, prog: &Program, g: &Guard, m: Match, ed: &E) -> Option<Match>
     where
         E: Edit,
     {
@@ -293,16 +306,160 @@ impl Runner {
     fn apply_actions<E, W>(
         &mut self,
         fname: &str,
-        prog: &Prog,
-        mut m: Match,
+        prog: &Program,
+        m: Match,
         ed: &mut E,
         out: &mut W,
-    ) -> (usize, usize)
+    ) -> Result<(usize, usize), Error>
     where
         E: Edit,
         W: Write,
     {
-        todo!()
+        let mut offset: isize = 0;
+        let (from, to) = m.loc();
+        let mut dot = Dot::from_char_indices(from, to);
+        let actions = mem::take(&mut self.actions);
+
+        for (mut m, actions) in actions.into_iter() {
+            m.apply_offset(offset);
+
+            for action in actions.iter() {
+                let cur_len = ed.len_chars() as isize;
+                dot = self.apply_action(prog, action, &m, fname, ed, out)?;
+                let new_len = ed.len_chars() as isize;
+                offset += new_len - cur_len;
+            }
+        }
+
+        Ok(dot.as_char_indices())
+    }
+
+    fn apply_action<E, W>(
+        &mut self,
+        prog: &Program,
+        action: &Action,
+        m: &Match,
+        fname: &str,
+        ed: &mut E,
+        out: &mut W,
+    ) -> Result<Dot, Error>
+    where
+        E: Edit,
+        W: Write,
+    {
+        let (from, to) = m.loc();
+        let (from, to) = match action.kind {
+            ActionKind::Print => {
+                let pat = &prog.templates[action.template];
+                self.template_match(pat, m, ed, fname)?;
+                write!(out, "{}", self.template_buf.as_str())?;
+                (from, to)
+            }
+
+            ActionKind::Insert => {
+                let pat = &prog.templates[action.template];
+                self.template_match(pat, m, ed, fname)?;
+                ed.insert(from, self.template_buf.as_str());
+                (from, to + self.template_buf.len_chars())
+            }
+
+            ActionKind::Append => {
+                let pat = &prog.templates[action.template];
+                self.template_match(pat, m, ed, fname)?;
+                ed.insert(to, self.template_buf.as_str());
+                (from, to + self.template_buf.len_chars())
+            }
+
+            ActionKind::Change => {
+                let pat = &prog.templates[action.template];
+                self.template_match(pat, m, ed, fname)?;
+                ed.remove(from, to);
+                ed.insert(from, self.template_buf.as_str());
+                (from, from + self.template_buf.len_chars())
+            }
+
+            ActionKind::Delete => {
+                ed.remove(from, to);
+                (from, from)
+            }
+        };
+
+        Ok(Dot::from_char_indices(from, to))
+    }
+
+    fn template_match<E>(&mut self, s: &str, m: &Match, ed: &E, fname: &str) -> Result<(), Error>
+    where
+        E: Edit,
+    {
+        self.ac_buf.clear();
+        self.template_buf.clear();
+        self.template_buf.insert_str(0, s);
+
+        self.ac_buf.extend(
+            TEMPLATE_AC
+                .get_or_init(|| {
+                    AhoCorasick::new(TEMPLATE_PATTERNS)
+                        .expect("using auto builder so no errors possible")
+                })
+                .find_iter(s),
+        );
+
+        if self.ac_buf.is_empty() {
+            return Ok(());
+        }
+
+        self.row_buf.clear();
+        self.col_buf.clear();
+        let mut seen_row_col = false;
+
+        // process the matches in reverse order so we don't need to update the match positions as
+        // we alter the contents of the buffer.
+        for mat in self.ac_buf.iter().rev() {
+            let (from, to) = (mat.start(), mat.end());
+            let pat = mat.pattern().as_u32() as usize;
+            let pattern = TEMPLATE_PATTERNS[pat];
+
+            let new_s = match pattern {
+                "\\n" => Cow::Borrowed("\n"),
+                "\\t" => Cow::Borrowed("\t"),
+                FNAME_VAR => Cow::Borrowed(fname),
+
+                ROW_VAR | COL_VAR => {
+                    if !seen_row_col {
+                        let (i, _) = m.loc();
+                        let row = ed.char_to_line(i).ok_or(Error::InvalidMatchIndices)?;
+                        let col = i - ed.line_to_char(row).ok_or(Error::InvalidMatchIndices)?;
+                        write!(&mut self.row_buf, "{row}")?;
+                        write!(&mut self.col_buf, "{col}")?;
+                        seen_row_col = true;
+                    }
+                    if pattern == ROW_VAR {
+                        Cow::Borrowed(self.row_buf.as_str())
+                    } else {
+                        Cow::Borrowed(self.col_buf.as_str())
+                    }
+                }
+
+                _ => {
+                    debug_assert_eq!(
+                        TEMPLATE_PATTERNS[0], "$0",
+                        "submatch patterns must be first"
+                    );
+
+                    match m.submatch_text(pat, ed) {
+                        Some(sm) => sm,
+                        None => return Err(Error::InvalidSubstitution(pat)),
+                    }
+                }
+            };
+
+            let char_from = self.template_buf.byte_to_char(from);
+            let char_to = self.template_buf.byte_to_char(to);
+            self.template_buf.remove_range(char_from, char_to);
+            self.template_buf.insert_str(char_from, new_s.as_ref());
+        }
+
+        Ok(())
     }
 }
 
@@ -338,46 +495,5 @@ impl Drop for RunnerHandle {
         let mut inner = None;
         mem::swap(&mut self.0, &mut inner);
         RUNNER_POOL.lock().unwrap().push(inner.unwrap());
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const PROG: &str = r#"
-x/^impl(?:<.*?>)?.*? (\w+)@*?^\}/
-v/^impl(?:<.*?>)?.*? for/ {
-  p/\nimpl $1 ($FILENAME:$ROW:$COL)\n/;
-  x/fn@*?\{/ {
-    g/->/
-    x/fn (\w+)@*?-> (.*?)\w*\{/ {
-      g/&('. )?mut self/ p/  mut $1 -> $2\n/;
-      v/&('. )?mut self/ p/      $1 -> $2\n/;
-    };
-
-    v/->/
-    x/fn (\w+)@*\{/ {
-      g/&('. )?mut self/ p/  mut $1 -> ()\n/;
-      v/&('. )?mut self/ p/      $1 -> ()\n/;
-    };
-  };
-}"#;
-
-    #[test]
-    fn execute_build_the_correct_actions() {
-        use crate::{exec::Address, regex::Haystack};
-
-        let prog = Prog::compile(PROG).unwrap();
-        let mut runner = RunnerHandle::get_from_pool();
-
-        let mut gb = GapBuffer::from(include_str!("../buffer/internal.rs"));
-        gb.try_make_contiguous();
-
-        let (from, to) = gb.current_dot().as_char_indices();
-        let m = Match::synthetic(from, to.saturating_add(1));
-        runner.execute_instruction(&prog, &prog.inst, &m, &gb);
-
-        panic!("{:#?}", runner.actions);
     }
 }
