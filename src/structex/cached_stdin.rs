@@ -1,7 +1,7 @@
 use crate::{
     buffer::GapBuffer,
     dot::Dot,
-    exec::{Edit, addr::Address},
+    structex::{Edit, addr::Address},
     regex::Haystack,
 };
 use std::{

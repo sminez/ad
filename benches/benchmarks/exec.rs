@@ -1,7 +1,7 @@
 //! Benchmarking for the structural regular expression engine
 use ad_editor::{
     buffer::{Buffer, GapBuffer},
-    exec::Program,
+    structex::Program,
 };
 use criterion::{Criterion, criterion_group};
 use std::{

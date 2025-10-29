@@ -5,11 +5,11 @@ use crate::{
     config_handle,
     dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
     editor::Action,
-    exec::{Addr, Address},
     fsys::InputFilter,
     key::Input,
     lsp::Coords,
     regex::Haystack,
+    structex::{Addr, Address},
     syntax::{LineIter, SyntaxState},
     util::normalize_line_endings,
 };

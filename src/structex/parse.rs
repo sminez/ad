@@ -1,6 +1,6 @@
 //! Parsing for the ad-exec language
 use crate::{
-    exec::addr::Addr,
+    structex::addr::Addr,
     parse::{self, ParseInput, Span},
 };
 

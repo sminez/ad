@@ -24,7 +24,6 @@ pub mod cli;
 pub mod config;
 pub mod dot;
 pub mod editor;
-pub mod exec;
 pub mod fsys;
 pub mod input;
 pub mod key;
@@ -34,6 +33,7 @@ pub mod mode;
 pub mod parse;
 pub mod plumb;
 pub mod regex;
+pub mod structex;
 pub mod syntax;
 pub mod system;
 pub mod term;
@@ -45,9 +45,9 @@ pub mod ziplist;
 pub use cli::{CliAction, Cmd9p, USAGE};
 pub use config::Config;
 pub use editor::{Editor, EditorMode};
-pub use exec::{CachedStdin, Edit, Program};
 pub use log::LogBuffer;
 pub use plumb::PlumbingRules;
+pub use structex::{CachedStdin, Edit, Program};
 
 use term::{disable_alternate_screen, disable_bracketed_paste, disable_mouse_support, set_termios};
 

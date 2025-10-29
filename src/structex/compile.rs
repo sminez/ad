@@ -1,5 +1,5 @@
 //! Compiling of [Ast] nodes into a complete [Prog];
-use crate::exec::{
+use crate::structex::{
     Addr,
     parse::{self, Ast, Parser, Sequence, SetAddr, Template},
 };

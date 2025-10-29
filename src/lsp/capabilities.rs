@@ -1,8 +1,8 @@
 //! Capability based logic
 use crate::{
     buffer::Buffer,
-    exec::{Addr, AddrBase},
     lsp::Pos,
+    structex::{Addr, AddrBase},
 };
 use lsp_types::{InitializeResult, Location, Position, PositionEncodingKind, ServerCapabilities};
 use tracing::warn;

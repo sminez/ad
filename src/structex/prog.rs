@@ -2,7 +2,7 @@
 use crate::{
     buffer::GapBuffer,
     dot::Dot,
-    exec::{
+    structex::{
         Addr, Edit, Error,
         compile::{Action, ActionKind, Compiler, Extract, Guard, Inst},
     },
