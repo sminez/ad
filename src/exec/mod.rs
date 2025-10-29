@@ -32,6 +32,7 @@ mod cached_stdin;
 mod compile;
 mod expr;
 mod parse;
+mod prog;
 
 use addr::ErrorKind;
 pub(crate) use addr::{Addr, AddrBase, Address};

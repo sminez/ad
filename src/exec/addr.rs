@@ -493,7 +493,7 @@ pub trait Address: Haystack + Sized {
 
 impl Address for GapBuffer {
     fn current_dot(&self) -> Dot {
-        Dot::default()
+        Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
     }
 
     fn len_chars(&self) -> usize {

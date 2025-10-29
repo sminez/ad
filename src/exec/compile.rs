@@ -1,40 +1,21 @@
 //! Compiling of [Ast] nodes into a complete [Prog];
-use crate::{
-    exec::{
-        Addr,
-        parse::{self, Ast, Parser, Sequence, SetAddr, Template},
-    },
-    regex::Regex,
+use crate::exec::{
+    Addr,
+    parse::{self, Ast, Parser, Sequence, SetAddr, Template},
 };
-use std::cell::RefCell;
-
-/// An exec [Prog] uses structural regular expressions to identify a set of edit points within a
-/// buffer which are then executed in parallel.
-#[derive(Debug)]
-pub struct Prog {
-    instructions: Vec<Inst>,
-    addrs: Vec<Addr>,
-    re: RefCell<Vec<Regex>>,
-    templates: Vec<String>,
-}
-
-impl Prog {
-    pub fn compile(s: &str) -> Result<Self, String> {
-        Compiler::default().compile(s)
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Inst {
+pub(super) enum Inst {
     /// Set the current dot to addr
     SetAddr(usize),
     /// Run all instructions in order over the current dot
     Series(Vec<Inst>),
     /// Run all branches in parallel over the current dot
     Parallel(Vec<Inst>),
-    /// For each match of the regex in dot, det dot and run per_match. Between each match, run
-    /// between_matches
+    /// For each match of the regex in dot, set dot and run each instruction.
     Extract(Extract),
+    /// Between each match of the regex in dot, set dot and run each instruction.
+    Filter(Extract),
     /// If re matches, run if_matching for the current dot otherwise run if_not_matching
     Guard(Guard),
     /// An action to store against the current match
@@ -42,7 +23,7 @@ enum Inst {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ActionKind {
+pub(super) enum ActionKind {
     Insert,
     Append,
     Change,
@@ -51,16 +32,16 @@ enum ActionKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Action {
-    kind: ActionKind,
-    template: usize,
+pub(super) struct Action {
+    pub kind: ActionKind,
+    pub template: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Guard {
-    re: usize,
-    if_matching: Vec<Inst>,
-    if_not_matching: Vec<Inst>,
+pub(super) struct Guard {
+    pub re: usize,
+    pub if_matching: Vec<Inst>,
+    pub if_not_matching: Vec<Inst>,
 }
 
 impl Guard {
@@ -95,68 +76,61 @@ impl Guard {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Extract {
-    re: usize,
-    per_match: Vec<Inst>,
-    between_matches: Vec<Inst>,
+pub(super) struct Extract {
+    pub re: usize,
+    pub per_match: Vec<Inst>,
+    // pub between_matches: Vec<Inst>,
 }
 
-impl Extract {
-    /// Try to merge this Extract into an existing branch if possible.
-    ///
-    /// Returns None if merging was successful or Some(self) if not.
-    fn try_merge(self, branches: &mut [Inst]) -> Option<Self> {
-        for branch in branches.iter_mut() {
-            match branch {
-                Inst::Extract(e) if self.re == e.re => match (
-                    e.per_match.is_empty(),
-                    e.between_matches.is_empty(),
-                    self.per_match.is_empty(),
-                    self.between_matches.is_empty(),
-                ) {
-                    (true, false, false, true) => {
-                        e.per_match = self.per_match;
-                        return None;
-                    }
-                    (false, true, true, false) => {
-                        e.between_matches = self.between_matches;
-                        return None;
-                    }
-                    _ => (),
-                },
-                _ => (),
-            }
-        }
+// impl Extract {
+//     /// Try to merge this Extract into an existing branch if possible.
+//     ///
+//     /// Returns None if merging was successful or Some(self) if not.
+//     fn try_merge(self, branches: &mut [Inst]) -> Option<Self> {
+//         for branch in branches.iter_mut() {
+//             match branch {
+//                 Inst::Extract(e) if self.re == e.re => match (
+//                     e.per_match.is_empty(),
+//                     e.between_matches.is_empty(),
+//                     self.per_match.is_empty(),
+//                     self.between_matches.is_empty(),
+//                 ) {
+//                     (true, false, false, true) => {
+//                         e.per_match = self.per_match;
+//                         return None;
+//                     }
+//                     (false, true, true, false) => {
+//                         e.between_matches = self.between_matches;
+//                         return None;
+//                     }
+//                     _ => (),
+//                 },
+//                 _ => (),
+//             }
+//         }
 
-        Some(self)
-    }
-}
+//         Some(self)
+//     }
+// }
 
 #[derive(Debug, Default)]
-struct Compiler {
-    addrs: Vec<Addr>,
-    re: Vec<String>,
-    templates: Vec<String>,
+pub(super) struct Compiler {
+    pub(super) addrs: Vec<Addr>,
+    pub(super) re: Vec<String>,
+    pub(super) templates: Vec<String>,
 }
 
 impl Compiler {
-    pub fn compile(mut self, s: &str) -> Result<Prog, String> {
+    pub fn compile(&mut self, s: &str) -> Result<Inst, String> {
         let ast = Parser::new(s).parse().map_err(|e| e.to_string())?;
         let mut instructions = Vec::new();
         self.add_instructions_for(ast, &mut instructions);
 
-        let re = self
-            .re
-            .into_iter()
-            .map(|re| Regex::compile(re).map_err(|e| e.to_string()))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        Ok(Prog {
-            instructions,
-            addrs: self.addrs,
-            re: RefCell::new(re),
-            templates: self.templates,
-        })
+        if instructions.len() == 1 {
+            Ok(instructions.remove(0))
+        } else {
+            Ok(Inst::Series(instructions))
+        }
     }
 
     fn add_instructions_for(&mut self, ast: Ast, instructions: &mut Vec<Inst>) {
@@ -230,22 +204,16 @@ impl Compiler {
         instructions: &mut Vec<Inst>,
     ) {
         let re = self.push_re(ext.re);
-        let mut branch = Vec::new();
+        let mut per_match = Vec::new();
         for node in ext.nodes {
-            self.add_instructions_for(node, &mut branch);
+            self.add_instructions_for(node, &mut per_match);
         }
 
-        let (per_match, between_matches) = if between {
-            (Vec::new(), branch)
+        if between {
+            instructions.push(Inst::Filter(Extract { re, per_match }));
         } else {
-            (branch, Vec::new())
-        };
-
-        instructions.push(Inst::Extract(Extract {
-            re,
-            per_match,
-            between_matches,
-        }));
+            instructions.push(Inst::Extract(Extract { re, per_match }));
+        }
     }
 
     fn add_for_group(&mut self, nodes: Vec<Ast>, instructions: &mut Vec<Inst>) {
@@ -267,12 +235,11 @@ impl Compiler {
                     }
                 }
 
-                Inst::Extract(e) => {
-                    if let Some(e) = e.try_merge(&mut branches) {
-                        branches.push(Inst::Extract(e));
-                    }
-                }
-
+                // Inst::Extract(e) => {
+                //     if let Some(e) = e.try_merge(&mut branches) {
+                //         branches.push(Inst::Extract(e));
+                //     }
+                // }
                 inst => branches.push(inst),
             }
         }
@@ -336,6 +303,7 @@ v/^impl(?:<.*?>)?.*? for/ {
 
     #[test]
     fn compile_works() {
-        let prog = Prog::compile(PROG).unwrap();
+        let instructions = Compiler::default().compile(PROG).unwrap();
+        panic!("{instructions:?}");
     }
 }
