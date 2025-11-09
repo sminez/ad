@@ -1,11 +1,11 @@
 use ad_editor::{
-    CachedStdin, CliAction, Cmd9p, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer,
-    PlumbingRules, Program, USAGE, VERSION, buffer::GapBuffer,
+    CliAction, Cmd9p, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer, PlumbingRules,
+    Program, USAGE, VERSION, buffer::GapBuffer, regex::CachingStream,
 };
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
     env, fmt, fs,
-    io::{self, Read},
+    io::{self, Read, stdin},
     path::PathBuf,
     process::exit,
 };
@@ -84,7 +84,7 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
 
     if files.is_empty() {
         // Read from stdin and write directly to stdout
-        match prog.execute(&mut CachedStdin::new(), "stdin", &mut stdout) {
+        match prog.execute(&mut CachingStream::new(stdin()), "stdin", &mut stdout) {
             Ok(_) => return,
             Err(e) => {
                 eprintln!("error running script: {e:?}");

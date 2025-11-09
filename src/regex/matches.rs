@@ -24,15 +24,6 @@ impl Match {
         }
     }
 
-    pub(crate) fn apply_offset(&mut self, offset: isize) {
-        for i in 0..N_SLOTS {
-            if i > 0 && self.sub_matches[i] == 0 {
-                continue;
-            }
-            self.sub_matches[i] = (self.sub_matches[i] as isize + offset) as usize;
-        }
-    }
-
     /// Extract this match from the given haystack
     pub fn match_text<'a, H>(&self, haystack: &'a H) -> Cow<'a, str>
     where

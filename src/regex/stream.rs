@@ -1,4 +1,4 @@
-use crate::{buffer::GapBuffer, regex::Haystack};
+use crate::{Edit, buffer::GapBuffer, dot::Dot, exec::Address, regex::Haystack};
 use std::{
     borrow::Cow,
     cell::RefCell,
@@ -118,6 +118,78 @@ where
     }
 }
 
+impl<R> Edit for CachingStream<R>
+where
+    R: Read,
+{
+    fn insert(&mut self, ix: usize, s: &str) {
+        self.inner.borrow_mut().gb.insert(ix, s);
+    }
+
+    fn remove(&mut self, from: usize, to: usize) {
+        self.inner.borrow_mut().gb.remove_range(from, to);
+    }
+}
+
+impl<R> Address for CachingStream<R>
+where
+    R: Read,
+{
+    fn current_dot(&self) -> Dot {
+        Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
+    }
+
+    fn len_bytes(&self) -> usize {
+        self.inner.borrow().gb.len()
+    }
+
+    fn len_chars(&self) -> usize {
+        self.inner.borrow().gb.len_chars()
+    }
+
+    fn max_iter(&self) -> usize {
+        if self.is_closed() {
+            self.inner.borrow().gb.len_chars()
+        } else {
+            usize::MAX
+        }
+    }
+
+    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+        let cur_len = self.inner.borrow().gb.len_lines();
+
+        if line_idx > cur_len {
+            for _ in cur_len..=line_idx {
+                self.try_read_next_line();
+                if self.is_closed() {
+                    break;
+                }
+            }
+        }
+
+        self.inner.borrow().gb.try_line_to_char(line_idx)
+    }
+
+    fn char_to_line(&self, char_idx: usize) -> Option<usize> {
+        self.inner.borrow().gb.try_char_to_line(char_idx)
+    }
+
+    fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
+        let gb = &self.inner.borrow().gb;
+        let line_idx = gb.try_char_to_line(char_idx)?;
+        match gb.try_line_to_char(line_idx + 1) {
+            None => Some(gb.len_chars() - 1),
+            Some(idx) => Some(idx),
+        }
+    }
+
+    fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
+        let gb = &self.inner.borrow().gb;
+        let line_idx = gb.try_char_to_line(char_idx)?;
+        Some(gb.line_to_char(line_idx))
+    }
+}
+
 #[derive(Debug)]
 struct Inner<R>
 where
@@ -166,6 +238,29 @@ where
 }
 
 #[derive(Debug)]
+pub struct StreamSlice<'a, R>
+where
+    R: Read,
+{
+    inner: &'a RefCell<Inner<R>>,
+    from: usize,
+    to: usize,
+}
+
+impl<'a, R> StreamSlice<'a, R>
+where
+    R: Read,
+{
+    pub fn len(&self) -> usize {
+        self.to - self.from
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+#[derive(Debug)]
 pub struct CachingStreamIter<'a, R>
 where
     R: Read,
@@ -198,6 +293,96 @@ where
                 None if self.inner.is_closed() => return None,
                 None => self.inner.try_read_next_line(),
             }
+        }
+    }
+}
+
+mod impl_structex {
+    use super::*;
+    use crate::regex::Regex;
+    use std::{
+        io::{self, Read},
+        ops::Range,
+    };
+    use structex::re::{Haystack, RawCaptures, Sliceable, Writable};
+
+    impl<R> Haystack<Regex> for &CachingStream<R>
+    where
+        R: Read,
+    {
+        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+            re.matches_between(*self, from, to)
+        }
+
+        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+            let m = re.find_between(*self, from, to)?;
+
+            Some(RawCaptures::new(m.iter_locs()))
+        }
+    }
+
+    impl<R> Sliceable for &CachingStream<R>
+    where
+        R: Read,
+    {
+        type Slice<'h>
+            = StreamSlice<'h, R>
+        where
+            Self: 'h;
+
+        fn char_at(&self, byte_offset: usize) -> Option<char> {
+            self.get_char_at(byte_offset)
+        }
+
+        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
+            StreamSlice {
+                inner: &self.inner,
+                from: range.start,
+                to: range.end,
+            }
+        }
+
+        fn max_len(&self) -> usize {
+            usize::MAX
+        }
+    }
+
+    impl<R> Writable for &CachingStream<R>
+    where
+        R: Read,
+    {
+        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
+        where
+            W: std::io::Write,
+        {
+            let inner = self.inner.borrow();
+            let (l, r) = inner.gb.as_byte_slices();
+            w.write_all(l)?;
+            w.write_all(r)?;
+
+            Ok(l.len() + r.len())
+        }
+    }
+
+    impl<'h, R> Writable for StreamSlice<'h, R>
+    where
+        R: Read,
+    {
+        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
+        where
+            W: std::io::Write,
+        {
+            let inner = self.inner.borrow();
+            let s = inner.gb.slice_from_byte_offsets(
+                self.from - inner.cleared_bytes,
+                self.to - inner.cleared_bytes,
+            );
+            let (l, r) = s.as_slices();
+
+            w.write_all(l)?;
+            w.write_all(r)?;
+
+            Ok(l.len() + r.len())
         }
     }
 }

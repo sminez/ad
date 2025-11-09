@@ -45,7 +45,7 @@ pub mod ziplist;
 pub use cli::{CliAction, Cmd9p, USAGE};
 pub use config::Config;
 pub use editor::{Editor, EditorMode};
-pub use exec::{CachedStdin, Edit, Program};
+pub use exec::{Edit, Program};
 pub use log::LogBuffer;
 pub use plumb::PlumbingRules;
 

@@ -1171,11 +1171,48 @@ impl<'a> Slice<'a> {
         }
     }
 
+    pub fn subslice_from_byte_offsets(&self, from: usize, to: usize) -> Slice<'_> {
+        if from == to {
+            return Slice::NULL;
+        }
+
+        let to = min(to, self.len());
+        let logical_from = self.from + from;
+
+        if to <= self.left.len() {
+            Slice {
+                from: logical_from,
+                left: &self.left[from..to],
+                right: &[],
+            }
+        } else if from >= self.left.len() {
+            Slice {
+                from: logical_from,
+                left: &[],
+                right: &self.right[from..to],
+            }
+        } else {
+            Slice {
+                from: logical_from,
+                left: &self.left[from..],
+                right: &self.right[..to],
+            }
+        }
+    }
+
     /// The number of utf-8 characters within this slice.
     ///
     /// Calculating involves parsing the entire slice as utf-8.
     pub fn len_utf8(&self) -> usize {
         self.chars().count()
+    }
+
+    pub fn len(&self) -> usize {
+        self.left.len() + self.right.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// The two sides of this slice as &str references

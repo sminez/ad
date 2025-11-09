@@ -18,6 +18,7 @@ dependencies = [
  "serde_json",
  "simple_test_case",
  "simple_txtar",
+ "structex",
  "toml",
  "tracing",
  "tracing-subscriber",
@@ -765,6 +766,10 @@ name = "streaming-iterator"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
+
+[[package]]
+name = "structex"
+version = "0.2.0"
 
 [[package]]
 name = "subprocess"
