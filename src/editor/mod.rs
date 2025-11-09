@@ -464,7 +464,7 @@ where
             }),
 
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
+                if let Ok(mut expr) = Addr::parse(s.trim_end()) {
                     b.dot = b.map_addr(&mut expr);
                 };
             }),
@@ -472,7 +472,7 @@ where
                 b.handle_action(Action::InsertString { s }, Source::Fsys);
             }),
             SetBufferXAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(mut expr) = Addr::parse(&mut s.trim_end().chars().peekable()) {
+                if let Ok(mut expr) = Addr::parse(s.trim_end()) {
                     b.xdot = b.map_addr(&mut expr);
                 };
             }),

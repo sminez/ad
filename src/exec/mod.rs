@@ -3,6 +3,7 @@ use crate::{
     buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot},
     editor::Action,
+    parse::ParseInput,
     regex::{self, Match},
 };
 use ad_event::Source;
@@ -23,7 +24,7 @@ mod addr;
 mod cached_stdin;
 mod expr;
 
-use addr::ParseError;
+use addr::ErrorKind;
 pub(crate) use addr::{Addr, AddrBase, Address};
 pub use cached_stdin::{CachedStdin, CachedStdinIter};
 use expr::{Expr, ParseOutput};
@@ -164,32 +165,36 @@ impl Program {
     /// Attempt to parse a given program input
     pub fn try_parse(s: &str) -> Result<Self, Error> {
         let mut exprs = vec![];
-        let mut it = s.trim().chars().peekable();
+        let s = s.trim();
 
-        if it.peek().is_none() {
+        if s.is_empty() {
             return Err(Error::EmptyProgram);
         }
 
-        let initial_dot = match Addr::parse(&mut it) {
+        let input = ParseInput::new(s);
+        let initial_dot = match Addr::parse_from_input(&input) {
             Ok(dot_expr) => dot_expr,
 
             // If the start of input is not an address we default to Full and attempt to parse the
             // rest of the program. We need to reconstruct the iterator here as we may have
             // advanced through the string while we attempt to parse the initial address.
-            Err(ParseError::NotAnAddress) => {
-                it = s.trim().chars().peekable();
-                Addr::full()
-            }
-
-            Err(ParseError::InvalidRegex(e)) => return Err(Error::InvalidRegex(e)),
-            Err(ParseError::UnclosedDelimiter) => {
-                return Err(Error::UnclosedDelimiter("dot expr regex", '/'));
-            }
-            Err(ParseError::UnexpectedCharacter(c)) => return Err(Error::UnexpectedCharacter(c)),
-            Err(ParseError::InvalidSuffix) => return Err(Error::InvalidSuffix),
-            Err(ParseError::ZeroIndexedLineOrColumn) => return Err(Error::ZeroIndexedLineOrColumn),
+            Err(e) => match e.kind {
+                ErrorKind::NotAnAddress => Addr::full(),
+                ErrorKind::InvalidRegex(e) => return Err(Error::InvalidRegex(e)),
+                ErrorKind::UnclosedDelimiter => {
+                    return Err(Error::UnclosedDelimiter("dot expr regex", '/'));
+                }
+                ErrorKind::UnexpectedCharacter(c) => {
+                    return Err(Error::UnexpectedCharacter(c));
+                }
+                ErrorKind::InvalidSuffix => return Err(Error::InvalidSuffix),
+                ErrorKind::ZeroIndexedLineOrColumn => {
+                    return Err(Error::ZeroIndexedLineOrColumn);
+                }
+            },
         };
 
+        let mut it = input.remaining().chars().peekable();
         consume_whitespace(&mut it);
 
         loop {

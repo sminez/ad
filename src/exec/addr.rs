@@ -20,19 +20,34 @@
 use crate::{
     buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot, Range},
+    parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
-    util::parse_num,
 };
-use std::{iter::Peekable, str::Chars};
+use std::fmt;
+
+pub type Error = parse::Error<ErrorKind>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ParseError {
+pub enum ErrorKind {
     InvalidRegex(regex::Error),
     InvalidSuffix,
     NotAnAddress,
     UnclosedDelimiter,
     UnexpectedCharacter(char),
     ZeroIndexedLineOrColumn,
+}
+
+impl fmt::Display for ErrorKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRegex(err) => write!(f, "invalid regular expression: {err}"),
+            Self::InvalidSuffix => write!(f, "invalid suffix"),
+            Self::NotAnAddress => write!(f, "not an address"),
+            Self::UnclosedDelimiter => write!(f, "unclosed delimiter"),
+            Self::UnexpectedCharacter(c) => write!(f, "unexpected character {c:?}"),
+            Self::ZeroIndexedLineOrColumn => write!(f, "zero indexed line or column"),
+        }
+    }
 }
 
 /// An Addr can be evaluated by a Buffer to produce a valid Dot for using in future editing
@@ -70,35 +85,14 @@ impl Addr {
         Addr::Compound(AddrBase::Bof.into(), AddrBase::Eof.into())
     }
 
-    /// Attempt to parse a valid dot expression from a character stream
-    pub fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
-        let start = match SimpleAddr::parse(it) {
-            Ok(exp) => Some(exp),
-            // If the following char is a ',' we substitute BOF for a missing start
-            Err(ParseError::NotAnAddress) => None,
-            Err(e) => return Err(e),
-        };
+    /// Attempt to parse a valid dot expression from a string
+    pub fn parse(s: &str) -> Result<Self, Error> {
+        Parser::new(&ParseInput::new(s)).parse()
+    }
 
-        match it.peek() {
-            // If we didn't have an starting addr then this expression is invalid, otherwise
-            // we just have 'start' as a simple addr
-            Some(' ') | None => Ok(Addr::Simple(start.ok_or(ParseError::NotAnAddress)?)),
-
-            // Compound addrs default their first element to Bof and last to Eof
-            Some(',') => {
-                it.next();
-                let start = start.unwrap_or(AddrBase::Bof.into());
-                let end = match SimpleAddr::parse(it) {
-                    Ok(exp) => exp,
-                    Err(ParseError::NotAnAddress) => AddrBase::Eof.into(),
-                    Err(e) => return Err(e),
-                };
-
-                Ok(Addr::Compound(start, end))
-            }
-
-            _ => Err(ParseError::NotAnAddress),
-        }
+    /// Attempt to parse a valid dot expression from an existing [ParseInput].
+    pub(crate) fn parse_from_input(input: &ParseInput<'_>) -> Result<Self, Error> {
+        Parser::new(input).parse()
     }
 }
 
@@ -106,23 +100,6 @@ impl Addr {
 pub struct SimpleAddr {
     base: AddrBase,
     suffixes: Vec<AddrBase>, // restricted to variants that return true for is_valid_suffix
-}
-
-impl SimpleAddr {
-    fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
-        let base = AddrBase::parse(it)?;
-        let mut suffixes = Vec::new();
-
-        while let Some('-' | '+') = it.peek() {
-            let a = AddrBase::parse(it)?;
-            if !a.is_valid_suffix() {
-                return Err(ParseError::InvalidSuffix);
-            }
-            suffixes.push(a);
-        }
-
-        Ok(Self { base, suffixes })
-    }
 }
 
 /// Primitives for building out addresses.
@@ -182,125 +159,218 @@ impl AddrBase {
             Bol | Eol | CurrentLine | RelativeLine(_) | RelativeChar(_) | Regex(_) | RegexBack(_)
         )
     }
+}
 
-    pub(crate) fn parse(it: &mut Peekable<Chars<'_>>) -> Result<Self, ParseError> {
-        let dir = match it.peek() {
-            Some('-') => {
-                it.next();
+/// This is a slightly odd setup but we take a reference to a [ParseInput] in order to support
+/// being run with an existing input when parsing addresses as part of an exec script.
+#[derive(Debug)]
+struct Parser<'a> {
+    input: &'a ParseInput<'a>,
+}
+
+impl<'a> Parser<'a> {
+    fn new(input: &'a ParseInput<'a>) -> Self {
+        Self { input }
+    }
+
+    /// Attempt to parse a full address out of the input in the form [from],[to].
+    ///
+    /// Must be called without leading whitespace.
+    fn parse(&self) -> Result<Addr, Error> {
+        let start = match self.parse_simple() {
+            Ok(addr) => Some(addr),
+            Err(e) if e.kind == ErrorKind::NotAnAddress => None,
+            Err(e) => return Err(e),
+        };
+
+        if self.input.at_eof() || self.input.char() == ' ' {
+            // If we didn't have an starting addr then this expression is invalid, otherwise
+            // we just have 'start' as a simple addr
+            Ok(Addr::Simple(
+                start.ok_or_else(|| self.error(ErrorKind::NotAnAddress))?,
+            ))
+        } else if self.input.char() == ',' {
+            // Compound addrs default their first element to Bof and last to Eof
+            self.input.advance(); // consume the ','
+            let start = start.unwrap_or(AddrBase::Bof.into());
+            let end = match self.parse_simple() {
+                Ok(addr) => addr,
+                Err(e) if e.kind == ErrorKind::NotAnAddress => AddrBase::Eof.into(),
+                Err(e) => return Err(e),
+            };
+
+            Ok(Addr::Compound(start, end))
+        } else {
+            Err(self.error(ErrorKind::NotAnAddress))
+        }
+    }
+
+    fn error(&self, kind: ErrorKind) -> Error {
+        Error::new(kind, self.input.text(), self.input.span())
+    }
+
+    fn parse_simple(&self) -> Result<SimpleAddr, Error> {
+        let base = self.parse_base()?;
+        let mut suffixes = Vec::new();
+
+        while !self.input.at_eof() {
+            if !"-+".contains(self.input.char()) {
+                break;
+            }
+            let addr = self.parse_base()?;
+            if !addr.is_valid_suffix() {
+                return Err(self.error(ErrorKind::InvalidSuffix));
+            }
+            suffixes.push(addr);
+        }
+
+        Ok(SimpleAddr { base, suffixes })
+    }
+
+    fn parse_base(&self) -> Result<AddrBase, Error> {
+        if self.input.at_eof() {
+            return Err(self.error(ErrorKind::NotAnAddress));
+        }
+
+        let dir = match self.input.char() {
+            '-' => {
+                self.input.advance();
+                if self.input.at_eof() {
+                    return Ok(AddrBase::Bol);
+                }
                 Some(Dir::Bck)
             }
-            Some('+') => {
-                it.next();
+
+            '+' => {
+                self.input.advance();
+                if self.input.at_eof() {
+                    return Ok(AddrBase::Eol);
+                }
                 Some(Dir::Fwd)
             }
+
             _ => None,
         };
 
-        match (it.peek(), dir) {
-            (Some('.' | '0' | '$'), Some(_)) => Err(ParseError::NotAnAddress),
+        match (self.input.char(), dir) {
+            ('.' | '0' | '$', Some(_)) => Err(self.error(ErrorKind::NotAnAddress)),
 
-            (Some('-'), Some(Dir::Fwd)) | (Some('+'), Some(Dir::Bck)) => {
-                it.next();
-                Ok(Self::CurrentLine)
+            ('-', Some(Dir::Fwd)) | ('+', Some(Dir::Bck)) => {
+                self.input.advance();
+                Ok(AddrBase::CurrentLine)
             }
 
-            (Some('.'), None) => {
-                it.next();
-                Ok(Self::Current)
+            ('.', None) => {
+                self.input.advance();
+                Ok(AddrBase::Current)
             }
 
-            (Some('0'), None) => {
-                it.next();
-                Ok(Self::Bof)
+            ('0', None) => {
+                self.input.advance();
+                Ok(AddrBase::Bof)
             }
 
-            (Some('$'), None) => {
-                it.next();
-                Ok(Self::Eof)
+            ('$', None) => {
+                self.input.advance();
+                Ok(AddrBase::Eof)
             }
 
-            (Some('#'), dir) => {
-                it.next();
-                let ix = match it.peek() {
-                    Some(&c) if c.is_ascii_digit() => {
-                        it.next();
-                        parse_num(c, it)
-                    }
-                    _ => return Err(ParseError::NotAnAddress),
-                };
+            ('#', dir) => {
+                self.input.advance();
+                if !self.input.char().is_ascii_digit() {
+                    return Err(self.error(ErrorKind::NotAnAddress));
+                }
 
+                let ix = self.parse_num();
                 match dir {
-                    None => Ok(Self::Char(ix)),
-                    Some(Dir::Fwd) => Ok(Self::RelativeChar(ix as isize)),
-                    Some(Dir::Bck) => Ok(Self::RelativeChar(-(ix as isize))),
+                    None => Ok(AddrBase::Char(ix)),
+                    Some(Dir::Fwd) => Ok(AddrBase::RelativeChar(ix as isize)),
+                    Some(Dir::Bck) => Ok(AddrBase::RelativeChar(-(ix as isize))),
                 }
             }
 
-            (Some(&c), dir) if c.is_ascii_digit() => {
-                it.next();
-                let line = parse_num(c, it);
+            (c, dir) if c.is_ascii_digit() => {
+                let line = self.parse_num();
                 if line == 0 {
-                    return Err(ParseError::ZeroIndexedLineOrColumn);
+                    return Err(self.error(ErrorKind::ZeroIndexedLineOrColumn));
                 }
 
-                match (it.peek(), dir) {
-                    (Some(':'), Some(_)) => Err(ParseError::NotAnAddress),
+                match (self.input.try_char(), dir) {
+                    (Some(':'), Some(_)) => Err(self.error(ErrorKind::NotAnAddress)),
 
                     (Some(':'), None) => {
-                        it.next();
-                        match it.next() {
-                            Some(c) if c.is_ascii_digit() => {
-                                let col = parse_num(c, it);
-                                if col == 0 {
-                                    return Err(ParseError::ZeroIndexedLineOrColumn);
-                                }
-
-                                Ok(Self::LineAndColumn(line - 1, col - 1))
+                        self.input.advance();
+                        if self.input.at_eof() {
+                            Err(self.error(ErrorKind::NotAnAddress))
+                        } else if !self.input.char().is_ascii_digit() {
+                            Err(self.error(ErrorKind::UnexpectedCharacter(self.input.char())))
+                        } else {
+                            match self.parse_num() {
+                                0 => Err(self.error(ErrorKind::ZeroIndexedLineOrColumn)),
+                                col => Ok(AddrBase::LineAndColumn(line - 1, col - 1)),
                             }
-                            Some(c) => Err(ParseError::UnexpectedCharacter(c)),
-                            None => Err(ParseError::NotAnAddress),
                         }
                     }
 
-                    (_, None) => Ok(Self::Line(line - 1)),
-                    (_, Some(Dir::Fwd)) => Ok(Self::RelativeLine(line as isize)),
-                    (_, Some(Dir::Bck)) => Ok(Self::RelativeLine(-(line as isize))),
+                    (_, None) => Ok(AddrBase::Line(line - 1)),
+                    (_, Some(Dir::Fwd)) => Ok(AddrBase::RelativeLine(line as isize)),
+                    (_, Some(Dir::Bck)) => Ok(AddrBase::RelativeLine(-(line as isize))),
                 }
             }
 
-            (Some('/'), dir) => {
-                it.next();
-                parse_delimited_regex(it, dir.unwrap_or(Dir::Fwd))
+            ('/', dir) => self.parse_delimited_regex(dir.unwrap_or(Dir::Fwd)),
+
+            (_, Some(Dir::Fwd)) => Ok(AddrBase::Eol),
+            (_, Some(Dir::Bck)) => Ok(AddrBase::Bol),
+
+            _ => Err(self.error(ErrorKind::NotAnAddress)),
+        }
+    }
+
+    fn parse_num(&self) -> usize {
+        assert!(self.input.char().is_ascii_digit());
+        let mut s = self.input.char().to_string();
+        self.input.advance();
+
+        loop {
+            if self.input.at_eof() || !self.input.char().is_ascii_digit() {
+                break;
+            }
+            s.push(self.input.char());
+            self.input.advance();
+        }
+
+        s.parse().unwrap()
+    }
+
+    fn parse_delimited_regex(&self, dir: Dir) -> Result<AddrBase, Error> {
+        assert_eq!(self.input.char(), '/');
+        let mut s = String::new();
+        let mut prev = '/';
+        self.input.advance(); // consume the '/'
+
+        while !self.input.at_eof() {
+            let ch = self.input.char();
+            if ch == '/' && prev != '\\' {
+                self.input.advance(); // consume the '/'
+                return match dir {
+                    Dir::Fwd => Ok(AddrBase::Regex(
+                        Regex::compile(&s).map_err(|e| self.error(ErrorKind::InvalidRegex(e)))?,
+                    )),
+                    Dir::Bck => Ok(AddrBase::RegexBack(
+                        RevRegex::compile(&s)
+                            .map_err(|e| self.error(ErrorKind::InvalidRegex(e)))?,
+                    )),
+                };
             }
 
-            (_, Some(Dir::Fwd)) => Ok(Self::Eol),
-            (_, Some(Dir::Bck)) => Ok(Self::Bol),
-
-            _ => Err(ParseError::NotAnAddress),
+            self.input.advance();
+            s.push(ch);
+            prev = ch;
         }
+
+        Err(self.error(ErrorKind::UnclosedDelimiter))
     }
-}
-
-fn parse_delimited_regex(it: &mut Peekable<Chars<'_>>, dir: Dir) -> Result<AddrBase, ParseError> {
-    let mut s = String::new();
-    let mut prev = '/';
-
-    for ch in it {
-        if ch == '/' && prev != '\\' {
-            return match dir {
-                Dir::Fwd => Ok(AddrBase::Regex(
-                    Regex::compile(&s).map_err(ParseError::InvalidRegex)?,
-                )),
-                Dir::Bck => Ok(AddrBase::RegexBack(
-                    RevRegex::compile(&s).map_err(ParseError::InvalidRegex)?,
-                )),
-            };
-        }
-        s.push(ch);
-        prev = ch;
-    }
-
-    Err(ParseError::UnclosedDelimiter)
 }
 
 /// Something that is capable of resolving an Addr to a Dot
@@ -430,7 +500,7 @@ pub trait Address: Haystack + Sized {
 
 impl Address for GapBuffer {
     fn current_dot(&self) -> Dot {
-        Dot::default()
+        Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
     }
 
     fn len_bytes(&self) -> usize {
@@ -570,7 +640,7 @@ mod tests {
     )]
     #[test]
     fn parse_works(s: &str, expected: Addr) {
-        let addr = Addr::parse(&mut s.chars().peekable()).expect("valid input");
+        let addr = Addr::parse(s).expect("valid input");
         assert_eq!(addr, expected);
     }
 
@@ -593,7 +663,7 @@ mod tests {
         );
         b.dot = Cur::new(16).into();
 
-        let mut addr = Addr::parse(&mut s.chars().peekable()).expect("valid addr");
+        let mut addr = Addr::parse(s).expect("valid addr");
         b.dot = b.map_addr(&mut addr);
 
         assert_eq!(b.dot, expected, ">{}<", b.dot_contents());
