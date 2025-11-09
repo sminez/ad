@@ -241,13 +241,17 @@ impl Program {
             return Ok(initial_dot);
         }
 
-        let (from, to) = initial_dot.as_char_indices();
-        let initial = &Match::synthetic(from, to.saturating_add(1));
+        let (char_from, char_to) = initial_dot.as_char_indices();
+        let byte_from = ed.char_to_byte(char_from).unwrap();
+        let byte_to = ed
+            .char_to_byte(char_to.saturating_add(1))
+            .unwrap_or_else(|| ed.len_bytes());
+        let initial = &Match::synthetic(byte_from, byte_to);
 
         ed.begin_edit_transaction();
         let (from, to) = self
             .runner
-            .step(&mut self.exprs, ed, initial, 0, fname, out)?
+            .step(&self.exprs, ed, initial, 0, fname, out)?
             .as_char_indices();
         ed.end_edit_transaction();
 
@@ -282,7 +286,7 @@ impl Runner {
 
     fn step<E, W>(
         &mut self,
-        exprs: &mut [Expr],
+        exprs: &[Expr],
         ed: &mut E,
         m: &Match,
         pc: usize,
@@ -293,13 +297,14 @@ impl Runner {
         E: Edit,
         W: Write,
     {
-        let (mut from, to) = m.loc();
+        let (mut byte_from, byte_to) = m.loc();
+        let mut from = ed.byte_to_char(byte_from).unwrap();
+        let to = ed.byte_to_char(byte_to).unwrap_or_else(|| ed.max_iter());
 
-        // FIXME: only need mutability for running regex
-        match &mut exprs[pc] {
+        match &exprs[pc] {
             Expr::Group(g) => {
                 let mut dot = Dot::from_char_indices(from, to);
-                for sub_exprs in g.iter_mut() {
+                for sub_exprs in g.iter() {
                     dot = self.step(sub_exprs, ed, m, 0, fname, out)?;
                 }
 
@@ -308,49 +313,55 @@ impl Runner {
 
             Expr::LoopMatches(re) => {
                 let mut initial_matches = InitialMatches::get_from_pool();
-                while let Some(m) = re.find_between(ed, from, to) {
+                while let Some(m) = re.find_between(ed, byte_from, byte_to) {
                     // It's possible for the Regex we're using to match a 0-length string which
                     // would cause us to get stuck trying to advance to the next match position.
                     // If this happens we advance from by a character to ensure that we search
                     // further in the input.
-                    let mut new_from = m.loc().1;
-                    if new_from == from {
-                        new_from += 1;
+                    let (_, new_byte_from) = m.loc();
+                    if new_byte_from == byte_from {
+                        byte_from = ed.char_to_byte(from + 1).unwrap();
+                        from += 1;
+                    } else {
+                        byte_from = new_byte_from;
+                        from = ed.byte_to_char(byte_from).unwrap();
                     }
-                    from = new_from;
 
                     initial_matches.push(m);
 
-                    if from >= to || from >= ed.max_iter() {
+                    if byte_from >= byte_to || from >= ed.max_iter() {
                         break;
                     }
                 }
 
-                self.apply_matches(exprs, initial_matches, ed, m, pc, fname, out)
+                self.apply_matches(exprs, initial_matches, ed, pc, fname, out)
             }
 
             Expr::LoopBetweenMatches(re) => {
                 let mut initial_matches = InitialMatches::get_from_pool();
-                while let Some(m) = re.find_between(ed, from, to) {
-                    let (new_from, new_to) = m.loc();
-                    if from < new_from {
-                        initial_matches.push(Match::synthetic(from, new_from));
+                while let Some(m) = re.find_between(ed, byte_from, byte_to) {
+                    let (new_byte_from, new_byte_to) = m.loc();
+
+                    if byte_from < new_byte_from {
+                        initial_matches.push(Match::synthetic(byte_from, new_byte_from));
                     }
-                    from = new_to;
-                    if from > to || from >= ed.max_iter() {
+                    byte_from = new_byte_to;
+                    from = ed.byte_to_char(byte_from).unwrap();
+
+                    if byte_from > byte_to || from >= ed.max_iter() {
                         break;
                     }
                 }
 
-                if from < to {
-                    initial_matches.push(Match::synthetic(from, to));
+                if byte_from < byte_to {
+                    initial_matches.push(Match::synthetic(byte_from, byte_to));
                 }
 
-                self.apply_matches(exprs, initial_matches, ed, m, pc, fname, out)
+                self.apply_matches(exprs, initial_matches, ed, pc, fname, out)
             }
 
             Expr::IfContains(re) => {
-                if re.matches_between(ed, from, to) {
+                if re.matches_between(ed, byte_from, byte_to) {
                     self.step(exprs, ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
@@ -358,7 +369,7 @@ impl Runner {
             }
 
             Expr::IfNotContains(re) => {
-                if !re.matches_between(ed, from, to) {
+                if !re.matches_between(ed, byte_from, byte_to) {
                     self.step(exprs, ed, m, pc + 1, fname, out)
                 } else {
                     Ok(Dot::from_char_indices(from, to))
@@ -368,12 +379,14 @@ impl Runner {
             Expr::Print(pat) => {
                 self.template_match(pat, m, ed, fname)?;
                 write!(out, "{}", self.template_buf.as_str())?;
+
                 Ok(Dot::from_char_indices(from, to))
             }
 
             Expr::Insert(pat) => {
                 self.template_match(pat, m, ed, fname)?;
                 ed.insert(from, self.template_buf.as_str());
+
                 Ok(Dot::from_char_indices(
                     from,
                     to + self.template_buf.len_chars(),
@@ -383,6 +396,7 @@ impl Runner {
             Expr::Append(pat) => {
                 self.template_match(pat, m, ed, fname)?;
                 ed.insert(to, self.template_buf.as_str());
+
                 Ok(Dot::from_char_indices(
                     from,
                     to + self.template_buf.len_chars(),
@@ -393,6 +407,7 @@ impl Runner {
                 self.template_match(pat, m, ed, fname)?;
                 ed.remove(from, to);
                 ed.insert(from, self.template_buf.as_str());
+
                 Ok(Dot::from_char_indices(
                     from,
                     from + self.template_buf.len_chars(),
@@ -401,12 +416,16 @@ impl Runner {
 
             Expr::Delete => {
                 ed.remove(from, to);
+
                 Ok(Dot::from_char_indices(from, from))
             }
 
-            Expr::Sub(re, pat) => match re.find_between(ed, from, to) {
+            Expr::Sub(re, pat) => match re.find_between(ed, byte_from, byte_to) {
                 Some(m) => {
-                    let (mfrom, mto) = m.loc();
+                    let (byte_mfrom, byte_mto) = m.loc();
+                    let mfrom = ed.byte_to_char(byte_mfrom).unwrap();
+                    let mto = ed.byte_to_char(byte_mto).unwrap();
+
                     self.template_match(pat, &m, ed, fname)?;
                     ed.remove(mfrom, mto);
                     ed.insert(mfrom, self.template_buf.as_str());
@@ -423,14 +442,12 @@ impl Runner {
     /// When looping over disjoint matches in the input we need to determine all of the initial
     /// match points before we start making any edits as the edits may alter the semantics of
     /// future matches.
-    #[allow(clippy::too_many_arguments)]
     #[inline(always)]
     fn apply_matches<E, W>(
         &mut self,
-        exprs: &mut [Expr],
+        exprs: &[Expr],
         mut initial_matches: InitialMatches,
         ed: &mut E,
-        m: &Match,
         pc: usize,
         fname: &str,
         out: &mut W,
@@ -440,15 +457,14 @@ impl Runner {
         W: Write,
     {
         let mut offset: isize = 0;
-        let (from, to) = m.loc();
-        let mut dot = Dot::from_char_indices(from, to);
+        let mut dot = Dot::default();
 
         for m in initial_matches.iter_mut() {
             m.apply_offset(offset);
 
-            let cur_len = ed.len_chars() as isize;
+            let cur_len = ed.len_bytes() as isize;
             dot = self.step(exprs, ed, m, pc + 1, fname, out)?;
-            let new_len = ed.len_chars() as isize;
+            let new_len = ed.len_bytes() as isize;
 
             offset += new_len - cur_len;
         }
@@ -495,7 +511,8 @@ impl Runner {
 
                 ROW_VAR | COL_VAR => {
                     if !seen_row_col {
-                        let (i, _) = m.loc();
+                        let (byte_from, _) = m.loc();
+                        let i = ed.byte_to_char(byte_from).unwrap();
                         let row = ed.char_to_line(i).ok_or(Error::InvalidMatchIndices)?;
                         let col = i - ed.line_to_char(row).ok_or(Error::InvalidMatchIndices)?;
                         write!(&mut self.row_buf, "{row}")?;
@@ -654,7 +671,7 @@ mod tests {
         let dot = prog
             .runner
             .step(
-                &mut prog.exprs,
+                &prog.exprs,
                 &mut b,
                 &Match::synthetic(0, 11),
                 0,
@@ -703,9 +720,9 @@ mod tests {
     #[test_case(0, ", x/foo/ d", "││"; "x delete")]
     #[test_case(0, ", x/foo/ s/o/X/", "fXo│fXo│fXo"; "x substitute")]
     #[test_case(0, ", y/foo/ p/>$0</", "foo│foo│foo"; "y print")]
-    #[test_case(0, ", y/foo/ i/X/", "fooX│fooX│fooX"; "y insert")]
-    #[test_case(0, ", y/foo/ a/X/", "foo│Xfoo│XfooX"; "y append")]
-    #[test_case(0, ", y/foo/ c/X/", "fooXfooXfooX"; "y change")]
+    #[test_case(0, ", y/foo/ i/X/", "fooX│fooX│foo"; "y insert")]
+    #[test_case(0, ", y/foo/ a/X/", "foo│Xfoo│Xfoo"; "y append")]
+    #[test_case(0, ", y/foo/ c/X/", "fooXfooXfoo"; "y change")]
     #[test_case(0, ", y/foo/ d", "foofoofoo"; "y delete")]
     #[test_case(0, ", y/│/ d", "││"; "y delete 2")]
     #[test_case(0, ", s/oo/X/", "fX│foo│foo"; "sub single")]
@@ -784,7 +801,7 @@ mod tests {
         let mut gb = GapBuffer::from("foo and 123\n/some/path");
         gb.make_contiguous();
 
-        let mut re = Regex::compile(re).unwrap();
+        let re = Regex::compile(re).unwrap();
         let m = re.find(&gb).unwrap();
 
         runner.template_match(s, &m, &gb, "test.txt").unwrap();

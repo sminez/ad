@@ -76,6 +76,10 @@ impl Address for CachedStdin {
         Dot::from_char_indices(0, usize::MAX)
     }
 
+    fn len_bytes(&self) -> usize {
+        self.gb.borrow().len()
+    }
+
     fn len_chars(&self) -> usize {
         self.gb.borrow().len_chars()
     }

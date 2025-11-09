@@ -18,7 +18,7 @@ fn inputs(n: usize) -> (GapBuffer, Regex) {
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("RE_FAST");
 
-    let (gb, mut r) = inputs(100);
+    let (gb, r) = inputs(100);
     group.bench_function("leading 100 normal", |b| {
         b.iter(|| assert!(r.matches(black_box(&gb))))
     });
@@ -26,7 +26,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| assert!(r.matches(black_box(&gb))))
     });
 
-    let (gb, mut r) = inputs(1000);
+    let (gb, r) = inputs(1000);
     group.bench_function("leading 1000 fast", |b| {
         b.iter(|| assert!(r.matches(black_box(&gb))))
     });

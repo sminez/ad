@@ -15,7 +15,12 @@ use crate::regex::{
     matches::{Match, MatchIter},
 };
 use aho_corasick::AhoCorasick;
-use std::{collections::HashSet, fmt, mem::swap, sync::Arc};
+use std::{
+    collections::HashSet,
+    fmt,
+    mem::swap,
+    sync::{Arc, Mutex},
+};
 
 pub(super) const N_SLOTS: usize = 30;
 
@@ -25,39 +30,25 @@ pub(super) const N_SLOTS: usize = 30;
 /// optimisations and runs reasonably quickly. It is not at all designed to
 /// be robust against malicious input and it does not attempt to support
 /// full PCRE syntax or functionality.
-#[derive(Clone)]
 pub struct Regex {
-    /// The original text of the regex
-    re: String,
-    /// The compiled instructions for running the VM
-    prog: Prog,
-    /// Fast searcher for the first potential match site
-    fast_start: Option<Box<AhoCorasick>>,
-    /// Names to be used for extracting named submatches
-    submatch_names: Arc<[String]>,
-    /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
-    clist: Box<[Thread]>,
-    /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
-    nlist: Box<[Thread]>,
-    /// Pre-allocated SubMatch positions referenced by threads
-    sms: Box<[SubMatches]>,
-    /// Available indices into self.sms for storing SubMatch positions for new threads
-    free_sms: Vec<usize>,
-    track_submatches: bool,
-    /// Monotonically increasing index used to dedup Threads
-    /// Will overflow at some point if a given regex is used a VERY large number of times
-    generation: usize,
-    /// Index into the current Thread list
-    p: usize,
-    /// Previous character from the input
-    prev: Option<char>,
-    /// Next character in the input after the one currently being processed
-    next: Option<char>,
+    re: Arc<str>,
+    inner: Mutex<RegexInner>,
+}
+
+impl Clone for Regex {
+    fn clone(&self) -> Self {
+        let inner = self.inner.lock().unwrap().clone();
+
+        Self {
+            re: self.re.clone(),
+            inner: Mutex::new(inner),
+        }
+    }
 }
 
 impl PartialEq for Regex {
     fn eq(&self, other: &Self) -> bool {
-        self.prog == other.prog
+        self.re == other.re
     }
 }
 
@@ -86,15 +77,23 @@ impl Regex {
         let lits = ast.leading_literals();
         let CompiledOps {
             ops,
+            n_submatches,
             submatch_names,
         } = compile_ast(ast, false);
 
-        Ok(Self::new(re.as_ref(), ops, submatch_names, lits))
+        Ok(Self::new(
+            re.as_ref(),
+            ops,
+            n_submatches,
+            submatch_names,
+            lits,
+        ))
     }
 
     fn new(
         re: &str,
         ops: Vec<Op>,
+        n_submatches: usize,
         submatch_names: Vec<String>,
         leading_lits: HashSet<String>,
     ) -> Self {
@@ -117,51 +116,57 @@ impl Regex {
         };
 
         Self {
-            re: re.to_string(),
-            prog,
-            fast_start,
-            submatch_names: Arc::from(submatch_names.into_boxed_slice()),
-            clist,
-            nlist,
-            generation: 0,
-            p: 0,
-            prev: None,
-            next: None,
-
-            sms,
-            free_sms,
-            track_submatches: true,
+            re: Arc::from(re),
+            inner: Mutex::new(RegexInner {
+                prog,
+                fast_start,
+                n_submatches,
+                submatch_names: Arc::from(submatch_names.into_boxed_slice()),
+                clist,
+                nlist,
+                generation: 0,
+                p: 0,
+                prev: None,
+                next: None,
+                sms,
+                free_sms,
+                track_submatches: true,
+            }),
         }
     }
 
     /// Determine whether or not this Regex matches the [Haystack] without searching for the
     /// leftmost-longest match and associated submatch boundaries.
-    pub fn matches<H>(&mut self, haystack: &H) -> bool
+    pub fn matches<H>(&self, haystack: &H) -> bool
     where
         H: Haystack,
     {
-        self.track_submatches = false;
-        self.match_from_byte_offset(haystack, 0).is_some()
+        let mut inner = self.inner.lock().unwrap();
+        inner.track_submatches = false;
+        inner.match_from_byte_offset(haystack, 0).is_some()
     }
 
     /// Determine whether or not this Regex matches the [Haystack] from the given offset without
     /// searching for the leftmost-longest match and associated submatch boundaries.
-    pub fn matches_from<H>(&mut self, haystack: &H, char_offset: usize) -> bool
+    pub fn matches_from<H>(&self, haystack: &H, offset: usize) -> bool
     where
         H: Haystack,
     {
-        self.track_submatches = false;
-        self.match_from_char_offset(haystack, char_offset).is_some()
+        let mut inner = self.inner.lock().unwrap();
+        inner.track_submatches = false;
+        inner.match_from_byte_offset(haystack, offset).is_some()
     }
 
     /// Determine whether or not this Regex matches the [Haystack] between the given offsets
     /// without searching for the leftmost-longest match and associated submatch boundaries.
-    pub fn matches_between<H>(&mut self, haystack: &H, char_from: usize, char_to: usize) -> bool
+    pub fn matches_between<H>(&self, haystack: &H, from: usize, to: usize) -> bool
     where
         H: Haystack,
     {
-        self.track_submatches = false;
-        self.match_between_char_offsets(haystack, char_from, char_to)
+        let mut inner = self.inner.lock().unwrap();
+        inner.track_submatches = false;
+        inner
+            .match_between_byte_offsets(haystack, from, to)
             .is_some()
     }
 
@@ -170,57 +175,52 @@ impl Regex {
     ///
     /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
     /// in order to speed up searching whenever this is possible.
-    pub fn find<H>(&mut self, haystack: &H) -> Option<Match>
+    pub fn find<H>(&self, haystack: &H) -> Option<Match>
     where
         H: Haystack,
     {
-        self.track_submatches = true;
-        self.match_from_byte_offset(haystack, 0)
+        let mut inner = self.inner.lock().unwrap();
+        inner.track_submatches = true;
+        inner.match_from_byte_offset(haystack, 0)
     }
 
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
-    /// the provided character offset rather than the beginning of the haystack, returning
+    /// the provided byte offset rather than the beginning of the haystack, returning
     /// the match position along with all submatches.
     ///
     /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
     /// in order to speed up searching whenever this is possible.
-    pub fn find_from<H>(&mut self, haystack: &H, char_offset: usize) -> Option<Match>
+    pub fn find_from<H>(&self, haystack: &H, offset: usize) -> Option<Match>
     where
         H: Haystack,
     {
-        self.track_submatches = true;
-        self.match_from_char_offset(haystack, char_offset)
+        let mut inner = self.inner.lock().unwrap();
+        inner.track_submatches = true;
+        inner.match_from_byte_offset(haystack, offset)
     }
 
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
-    /// the provided character offset rather than the beginning of the haystack, and ending before
+    /// the provided byte offset rather than the beginning of the haystack, and ending before
     /// the provided `char_to`, returning the match position along with all submatches.
     ///
     /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
     /// in order to speed up searching whenever this is possible.
-    pub fn find_between<H>(
-        &mut self,
-        haystack: &H,
-        char_from: usize,
-        char_to: usize,
-    ) -> Option<Match>
+    pub fn find_between<H>(&self, haystack: &H, from: usize, to: usize) -> Option<Match>
     where
         H: Haystack,
     {
-        self.track_submatches = true;
-        self.match_between_char_offsets(haystack, char_from, char_to)
+        let mut inner = self.inner.lock().unwrap();
+        inner.track_submatches = true;
+        inner.match_between_byte_offsets(haystack, from, to)
     }
 
-    /// Returns an iterator that yields successive non-overlapping matches in the given [Haystack].
-    /// The iterator yields values of type [Match].
-    ///
     /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
     /// in order to speed up searching whenever this is possible.
     pub fn find_iter<'a, H>(&'a mut self, haystack: &'a H) -> MatchIter<'a, H>
     where
         H: Haystack,
     {
-        self.track_submatches = true;
+        self.inner.lock().unwrap().track_submatches = true;
 
         MatchIter {
             haystack,
@@ -228,30 +228,79 @@ impl Regex {
             from: 0,
         }
     }
+}
 
-    /// Returns an iterator that yields successive non-overlapping matches in the given [Haystack]
-    /// starting from the provided `from` character offset rather than the beginning of the
-    /// haystack. The iterator yields values of type [Match].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevRegex(Regex);
+
+impl RevRegex {
+    /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
+    /// This is used for searching backwards through an input stream.
     ///
-    /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
-    /// in order to speed up searching whenever this is possible.
-    pub fn find_iter_from<'a, H>(
-        &'a mut self,
-        haystack: &'a H,
-        char_offset: usize,
-    ) -> MatchIter<'a, H>
+    /// This method handles pre-allocation of the memory required for running the VM so
+    /// that the allocation cost is paid once up front rather than on each use of the Regex.
+    pub fn compile(re: impl AsRef<str>) -> Result<Self, Error> {
+        let mut ast = parse(re.as_ref())?;
+        ast.optimise();
+        let CompiledOps {
+            ops,
+            n_submatches,
+            submatch_names,
+        } = compile_ast(ast, true);
+
+        Ok(Self(Regex::new(
+            re.as_ref(),
+            ops,
+            n_submatches,
+            submatch_names,
+            HashSet::new(),
+        )))
+    }
+
+    /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
+    /// the provided `from` bytes offset rather than the beginning of the haystack, returning the
+    /// match position along with all submatches.
+    pub fn find_rev_from<H>(&self, haystack: &H, offset: usize) -> Option<Match>
     where
         H: Haystack,
     {
-        self.track_submatches = true;
-
-        MatchIter {
-            haystack,
-            r: self,
-            from: char_offset,
-        }
+        let mut inner = self.0.inner.lock().unwrap();
+        inner.track_submatches = true;
+        inner.run_vm(&mut haystack.rev_iter_between(0, offset), offset)
     }
+}
 
+#[derive(Clone)]
+struct RegexInner {
+    /// The compiled instructions for running the VM
+    prog: Prog,
+    /// Fast searcher for the first potential match site
+    fast_start: Option<Box<AhoCorasick>>,
+    /// The number of submatches present in the pattern
+    n_submatches: usize,
+    /// Names to be used for extracting named submatches
+    submatch_names: Arc<[String]>,
+    /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
+    clist: Box<[Thread]>,
+    /// Pre-allocated Thread list in priority order to handle leftmost-longest semantics
+    nlist: Box<[Thread]>,
+    /// Pre-allocated SubMatch positions referenced by threads
+    sms: Box<[SubMatches]>,
+    /// Available indices into self.sms for storing SubMatch positions for new threads
+    free_sms: Vec<usize>,
+    track_submatches: bool,
+    /// Monotonically increasing index used to dedup Threads
+    /// Will overflow at some point if a given regex is used a VERY large number of times
+    generation: usize,
+    /// Index into the current Thread list
+    p: usize,
+    /// Previous character from the input
+    prev: Option<char>,
+    /// Next character in the input after the one currently being processed
+    next: Option<char>,
+}
+
+impl RegexInner {
     /// If we have leading literals then it is possible to try to find the start of a potential
     /// match more quickly using aho-corasick.
     ///
@@ -284,62 +333,38 @@ impl Regex {
     /// passing off to [Regex::run_vm].
     ///
     /// Callers need to set `self.track_submatches` prior to calling this method.
-    fn match_from_byte_offset<H>(&mut self, haystack: &H, mut byte_offset: usize) -> Option<Match>
+    fn match_from_byte_offset<H>(&mut self, haystack: &H, mut offset: usize) -> Option<Match>
     where
         H: Haystack,
     {
         if haystack.is_contiguous() {
-            byte_offset = self
-                .fast_update_byte_offset(haystack, byte_offset)
-                .unwrap_or(byte_offset);
-
-            let s = haystack.substr_from(byte_offset)?;
-            let sp = haystack.byte_to_char(byte_offset)?;
-
-            self.run_vm(&mut s.chars().enumerate().map(|(i, s)| (i + sp, s)), sp)
-        } else {
-            let char_offset = haystack.byte_to_char(byte_offset)?;
-            self.run_vm(&mut haystack.iter_from(char_offset)?, char_offset)
+            offset = self
+                .fast_update_byte_offset(haystack, offset)
+                .unwrap_or(offset);
         }
+
+        self.run_vm(&mut haystack.iter_from(offset)?, offset)
     }
 
-    /// If the given [Haystack] supports accelerated searching then it is handled here before
-    /// passing off to [Regex::_match_iter].
-    ///
-    /// Callers need to set `self.track_submatches` prior to calling this method.
-    fn match_from_char_offset<H>(&mut self, haystack: &H, char_offset: usize) -> Option<Match>
-    where
-        H: Haystack,
-    {
-        if haystack.is_contiguous() {
-            let byte_offset = haystack.char_to_byte(char_offset)?;
-            self.match_from_byte_offset(haystack, byte_offset)
-        } else {
-            self.run_vm(&mut haystack.iter_from(char_offset)?, char_offset)
-        }
-    }
-
-    fn match_between_char_offsets<H>(
+    fn match_between_byte_offsets<H>(
         &mut self,
         haystack: &H,
-        mut char_from: usize,
-        char_to: usize,
+        mut from: usize,
+        to: usize,
     ) -> Option<Match>
     where
         H: Haystack,
     {
-        if haystack.is_contiguous() {
-            let byte_offset = haystack.char_to_byte(char_from)?;
-            if let Some(new_byte_offset) = self.fast_update_byte_offset(haystack, byte_offset) {
-                let new_char_from = haystack.byte_to_char(new_byte_offset)?;
-                if new_char_from > char_to {
-                    return None; // no match within offsets
-                }
-                char_from = new_char_from;
+        if haystack.is_contiguous()
+            && let Some(new_from) = self.fast_update_byte_offset(haystack, from)
+        {
+            if new_from > to {
+                return None; // no match within offsets
             }
+            from = new_from;
         }
 
-        self.run_vm(&mut haystack.iter_between(char_from, char_to), char_from)
+        self.run_vm(&mut haystack.iter_between(from, to), from)
     }
 
     /// This is the main VM implementation that is used by all other matching methods on Regex.
@@ -434,6 +459,7 @@ impl Regex {
         }
 
         Some(Match {
+            n_submatches: self.n_submatches,
             sub_matches,
             submatch_names: self.submatch_names.clone(),
         })
@@ -505,10 +531,10 @@ impl Regex {
         // If we are saving our initial position from a forward match then we are looking at the
         // correct character, otherwise the Save op is being processed at the character before the
         // one we need to save.
-        let inc_position = !initial && !rev;
+        let inc_bytes = if !initial && !rev { ch.len_utf8() } else { 0 };
 
         if (!rev && s.is_multiple_of(2)) || (rev && !s.is_multiple_of(2)) {
-            let sm = self.sm_update(t.sm, s, sp, inc_position);
+            let sm = self.sm_update(t.sm, s, sp + inc_bytes);
             let th = match t.assertion {
                 Some(a) => assert_thread(t.pc + 1, sm, a),
                 None => thread(t.pc + 1, sm),
@@ -518,7 +544,7 @@ impl Regex {
             match t.assertion {
                 Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
                 _ => {
-                    let sm = self.sm_update(t.sm, s, sp, inc_position);
+                    let sm = self.sm_update(t.sm, s, sp + inc_bytes);
                     self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
                 }
             }
@@ -538,7 +564,7 @@ impl Regex {
     }
 
     #[inline]
-    fn sm_update(&mut self, i: usize, s: usize, sp: usize, inc_position: bool) -> usize {
+    fn sm_update(&mut self, i: usize, s: usize, sp: usize) -> usize {
         // We don't hard error on compiling a regex with more than out max submatches
         // but we don't track anything past the last one
         if !self.track_submatches || s >= N_SLOTS {
@@ -555,52 +581,9 @@ impl Regex {
             j
         };
 
-        // see comment in handle_save above
-        let val = if inc_position { sp + 1 } else { sp };
-        self.sms[i].inner[s] = val;
+        self.sms[i].inner[s] = sp;
 
         i
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RevRegex(Regex);
-
-impl RevRegex {
-    /// Attempt to compile the given regular expression into its reversed optimised VM opcode form.
-    /// This is used for searching backwards through an input stream.
-    ///
-    /// This method handles pre-allocation of the memory required for running the VM so
-    /// that the allocation cost is paid once up front rather than on each use of the Regex.
-    pub fn compile(re: impl AsRef<str>) -> Result<Self, Error> {
-        let mut ast = parse(re.as_ref())?;
-        ast.optimise();
-        let CompiledOps {
-            ops,
-            submatch_names,
-        } = compile_ast(ast, true);
-
-        Ok(Self(Regex::new(
-            re.as_ref(),
-            ops,
-            submatch_names,
-            HashSet::new(),
-        )))
-    }
-
-    /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
-    /// the provided `from` character offset rather than the beginning of the haystack, returning
-    /// the match position along with all submatches.
-    ///
-    /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
-    /// in order to speed up searching whenever this is possible.
-    pub fn find_rev_from<H>(&mut self, haystack: &H, char_offset: usize) -> Option<Match>
-    where
-        H: Haystack,
-    {
-        self.0.track_submatches = true;
-        self.0
-            .run_vm(&mut haystack.rev_iter_between(char_offset, 0), char_offset)
     }
 }
 
@@ -700,6 +683,7 @@ mod tests {
     #[test_case("foo$", "a line that ends with foo", Some("foo"); "BOL holding")]
     #[test_case("foo$", "a line that ends with foo\nnow bar", Some("foo"); "BOL holding before newline")]
     #[test_case("foo$", "a line with foo in the middle", None; "BOL not holding")]
+    #[test_case("foo", "│foo", Some("foo"); "after a multibyte char")]
     #[test_case("a{3}", "aaa", Some("aaa"); "counted repetition")]
     #[test_case("a{3}", "aa", None; "counted repetition non matching")]
     #[test_case("a{3,}", "aaaaaa", Some("aaaaaa"); "counted repetition at least")]
@@ -723,10 +707,8 @@ mod tests {
     // typos:on
     #[test]
     fn find_works(re: &str, s: &str, expected: Option<&str>) {
-        let mut r = Regex::compile(re).unwrap();
-        let mut gb = crate::buffer::GapBuffer::from(s);
-        gb.make_contiguous();
-        let m = r.find(&gb).map(|m| m.match_text(&s));
+        let r = Regex::compile(re).unwrap();
+        let m = r.find(&s).map(|m| m.match_text(&s));
         assert_eq!(m.as_deref(), expected);
     }
 
@@ -749,7 +731,7 @@ mod tests {
     )]
     #[test]
     fn find_rev_works(re: &str, s: &str, expected: Option<&str>) {
-        let mut r = RevRegex::compile(re).unwrap();
+        let r = RevRegex::compile(re).unwrap();
         let b = Buffer::new_unnamed(0, s, Default::default());
         let m = r.find_rev_from(&b, s.len()).map(|m| m.match_text(&b));
 
@@ -777,7 +759,7 @@ mod tests {
 
     #[test]
     fn dot_star_works() {
-        let mut r = Regex::compile(".*").unwrap();
+        let r = Regex::compile(".*").unwrap();
         let s = "\nthis is\na multiline\nfile";
         let m1 = r.find(&s).unwrap();
         assert_eq!(m1.match_text(&s), "");
@@ -790,7 +772,7 @@ mod tests {
     #[test]
     fn match_extraction_works() {
         let re = "([0-9]+)-([0-9]+)-([0-9]+)";
-        let mut r = Regex::compile(re).unwrap();
+        let r = Regex::compile(re).unwrap();
         let s = "this should work 123-456-789 other stuff";
         let m = r.find(&s).unwrap();
 
@@ -806,7 +788,7 @@ mod tests {
     #[test_case("(e| )(?<xy>X|Y)(a|b)", "xy", "X"; "named match inbetween unnamed")]
     #[test]
     fn named_submatch_works(re: &str, name: &str, expected: &str) {
-        let mut r = Regex::compile(re).unwrap();
+        let r = Regex::compile(re).unwrap();
         let s = "text before Xanadu";
         let m = r.find(&s).unwrap();
 
@@ -816,7 +798,7 @@ mod tests {
 
     #[test]
     fn multiline_input_match_dot_star_works() {
-        let mut r = Regex::compile(".*").unwrap();
+        let r = Regex::compile(".*").unwrap();
         let s = "this is\na multiline\nfile";
 
         let m = r.find(&s).unwrap();
@@ -825,7 +807,7 @@ mod tests {
 
     #[test]
     fn multiline_input_find_from_dot_star_works_with_non_zero_initial_sp() {
-        let mut r = Regex::compile(".*").unwrap();
+        let r = Regex::compile(".*").unwrap();
         let s = "this is\na multiline\nfile";
 
         // Just to convince me that the offsets here are exactly as I am expecting
@@ -872,7 +854,7 @@ impl Editor {
 ";
 
         let re = r"impl (\w+) \{";
-        let mut r = Regex::compile(re).unwrap();
+        let r = Regex::compile(re).unwrap();
         let m = r.find(&s).unwrap();
 
         assert_eq!(m.submatch_text(1, &s).as_deref(), Some("Editor"));
@@ -887,7 +869,7 @@ impl Editor {
         let mut re = "a?".repeat(100);
         re.push_str(&s);
 
-        let mut r = Regex::compile(&re).unwrap();
+        let r = Regex::compile(&re).unwrap();
         assert!(r.find(&s.as_str()).is_some());
     }
 
@@ -897,7 +879,7 @@ impl Editor {
     fn repeated_match_works() {
         let re = "a(bb)+a";
 
-        let mut r = Regex::compile(re).unwrap();
+        let r = Regex::compile(re).unwrap();
         for _ in 0..10 {
             assert!(r.find(&"abbbba").is_some());
             assert!(r.find(&"foo").is_none());

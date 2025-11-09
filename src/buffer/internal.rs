@@ -1207,6 +1207,14 @@ impl<'a> Slice<'a> {
         Chars { s: self, cur: 0 }
     }
 
+    /// Iterate over the characters in this slice in reverse
+    pub fn rev_chars(self) -> RevChars<'a> {
+        RevChars {
+            s: self,
+            cur: self.left.len() + self.right.len(),
+        }
+    }
+
     /// Iterate over the characters in this slice with their corresponding character indices
     pub fn indexed_chars(self, from: usize, rev: bool) -> IdxChars<'a> {
         let (cur, idx) = if rev {
@@ -1307,8 +1315,31 @@ impl Iterator for Chars<'_> {
         let (cur, data) = self.s.cur_and_data(self.cur);
         // SAFETY: we know we are in bounds and that we contain valid utf-8 data
         let ch = unsafe { decode_char_at(cur, data) };
-        let len = ch.len_utf8();
-        self.cur += len;
+        self.cur += ch.len_utf8();
+
+        Some(ch)
+    }
+}
+
+/// An iterator of characters from a [Slice]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct RevChars<'a> {
+    s: Slice<'a>,
+    cur: usize,
+}
+
+impl Iterator for RevChars<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur == 0 {
+            return None;
+        }
+
+        let (cur, data) = self.s.cur_and_data(self.cur - 1);
+        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
+        let ch = unsafe { decode_char_ending_at(cur, data) };
+        self.cur -= ch.len_utf8();
 
         Some(ch)
     }

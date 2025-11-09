@@ -3,18 +3,18 @@
 //!
 //! Thompson's original paper on writing a regex engine can be found here:
 //!   <https://dl.acm.org/doi/pdf/10.1145/363347.363387>
-use std::{iter::Peekable, str::Chars};
+use std::{fmt, iter::Peekable, str::Chars};
 
 mod ast;
 mod compile;
 mod haystack;
 mod matches;
+mod stream;
 mod vm;
 
-// pub mod re2;
-
 pub use haystack::Haystack;
-pub use matches::{Match, MatchIter};
+pub use matches::Match;
+pub use stream::{CachingStream, CachingStreamIter};
 pub use vm::{Regex, RevRegex};
 
 /// Errors that can be returned by the regex engine
@@ -32,16 +32,33 @@ pub enum Error {
     InvalidRepetition,
     /// The provided regex is too long
     ReTooLong,
-    /// Too many parens in the provided regex
-    TooManyParens,
     /// Alternation without a right hand side
     UnbalancedAlt,
     /// Unbalanced parens
     UnbalancedParens,
-    /// Group name without a closing paren
+    /// Group name without a closing '<'
     UnclosedGroupName(String),
     /// Invalid group qualifier following (?...)
     UnknownGroupQualifier(char),
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyParens => write!(f, "empty parens"),
+            Self::EmptyRegex => write!(f, "empty regular expression"),
+            Self::InvalidClass => write!(f, "invalid class"),
+            Self::InvalidEscape(c) => write!(f, "invalid escaped character {c:?}"),
+            Self::InvalidRepetition => write!(f, "invalid repetition"),
+            Self::ReTooLong => write!(f, "regex too long"),
+            Self::UnbalancedAlt => write!(f, "alternation had no right hand side"),
+            Self::UnbalancedParens => write!(f, "unbalanced parens"),
+            Self::UnclosedGroupName(s) => write!(f, "unclosed group name {s:?}"),
+            Self::UnknownGroupQualifier(c) => write!(f, "unknown group qualifier {c:?}"),
+        }
+    }
 }
 
 /// Helper for converting characters to 0 based inicies for looking things up in caches.

@@ -309,6 +309,7 @@ pub trait Address: Haystack + Sized {
     /// so that don't need to special case running programs against an in-editor
     /// buffer vs stdin or a file read from disk.
     fn current_dot(&self) -> Dot;
+    fn len_bytes(&self) -> usize;
     fn len_chars(&self) -> usize;
     fn line_to_char(&self, line_idx: usize) -> Option<usize>;
     fn char_to_line(&self, char_idx: usize) -> Option<usize>;
@@ -388,14 +389,20 @@ pub trait Address: Haystack + Sized {
             Regex(re) => {
                 let from = cur_dot.last_cur().idx;
                 let m = re.find_from(self, from)?;
-                let (from, to) = m.loc();
+                let (byte_from, byte_to) = m.loc();
+                let from = self.byte_to_char(byte_from).unwrap();
+                let to = self.byte_to_char(byte_to).unwrap();
+
                 Dot::from_char_indices(from, to.saturating_sub(1))
             }
 
             RegexBack(re) => {
                 let from = cur_dot.first_cur().idx;
                 let m = re.find_rev_from(self, from)?;
-                let (from, to) = m.loc();
+                let (byte_from, byte_to) = m.loc();
+                let from = self.byte_to_char(byte_from).unwrap();
+                let to = self.byte_to_char(byte_to).unwrap();
+
                 Dot::from_char_indices(from, to.saturating_sub(1))
             }
         };
@@ -424,6 +431,10 @@ pub trait Address: Haystack + Sized {
 impl Address for GapBuffer {
     fn current_dot(&self) -> Dot {
         Dot::default()
+    }
+
+    fn len_bytes(&self) -> usize {
+        self.len()
     }
 
     fn len_chars(&self) -> usize {
@@ -455,6 +466,10 @@ impl Address for GapBuffer {
 impl Address for Buffer {
     fn current_dot(&self) -> Dot {
         self.dot
+    }
+
+    fn len_bytes(&self) -> usize {
+        self.txt.len()
     }
 
     fn len_chars(&self) -> usize {

@@ -18,7 +18,7 @@ fn rsc_inputs(n: usize) -> (String, Regex) {
 }
 
 fn rsc_pathological_case(n: usize) {
-    let (s, mut r) = rsc_inputs(n);
+    let (s, r) = rsc_inputs(n);
     assert!(r.matches(&s.as_str()));
 }
 
@@ -29,7 +29,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         b.iter(|| rsc_pathological_case(black_box(100)))
     });
 
-    let (s, mut r) = rsc_inputs(100);
+    let (s, r) = rsc_inputs(100);
     group.bench_function("without compile", |b| {
         b.iter(|| assert!(r.matches(black_box(&s.as_str()))))
     });

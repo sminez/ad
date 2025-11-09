@@ -9,7 +9,6 @@ use crate::{
     fsys::InputFilter,
     key::Input,
     lsp::Coords,
-    regex::Haystack,
     syntax::{LineIter, SyntaxState},
     util::normalize_line_endings,
 };
@@ -650,6 +649,34 @@ impl Buffer {
         }
     }
 
+    /// Iterate between two character offsets.
+    ///
+    /// This is distinct from the iter_between method on an Regex haystack which is in terms of
+    /// bytes.
+    pub(crate) fn iter_between_chars(
+        &self,
+        char_from: usize,
+        char_to: usize,
+    ) -> impl Iterator<Item = (usize, char)> {
+        self.txt
+            .slice(char_from, char_to)
+            .indexed_chars(char_from, false)
+    }
+
+    /// Iterate between two character offsets in reverse.
+    ///
+    /// This is distinct from the rev_iter_between method on an Regex haystack which is in terms of
+    /// bytes.
+    pub(crate) fn rev_iter_between_chars(
+        &self,
+        char_from: usize,
+        char_to: usize,
+    ) -> impl Iterator<Item = (usize, char)> {
+        self.txt
+            .slice(char_to, char_from)
+            .indexed_chars(char_to, true)
+    }
+
     /// Attempt to expand from the given cursor position so long as either the previous or next
     /// character in the buffer is a known delimiter.
     pub(crate) fn try_expand_delimited(&mut self) {
@@ -700,14 +727,14 @@ impl Buffer {
 
         // Expand until we hit non-alphanumeric characters on each sides
         let (mut from, mut to) = (current_index, current_index);
-        for (i, ch) in self.iter_between(current_index, self.txt.len_chars()) {
+        for (i, ch) in self.iter_between_chars(current_index, self.txt.len_chars()) {
             if !(ch == '_' || ch.is_alphanumeric()) {
                 break;
             }
             to = i;
         }
 
-        for (i, ch) in self.rev_iter_between(current_index, 0) {
+        for (i, ch) in self.rev_iter_between_chars(current_index, 0) {
             if !(ch == '_' || ch.is_alphanumeric()) {
                 break;
             }
@@ -739,7 +766,7 @@ impl Buffer {
 
         // Start by expanding to cover things that are candidates for being file names (optionally
         // with a following address) or URLs
-        for (i, ch) in self.iter_between(current_index, self.txt.len_chars()) {
+        for (i, ch) in self.iter_between_chars(current_index, self.txt.len_chars()) {
             if !is_file_char(ch) {
                 break;
             }
@@ -750,7 +777,7 @@ impl Buffer {
             to = i;
         }
 
-        for (i, ch) in self.rev_iter_between(current_index, 0) {
+        for (i, ch) in self.rev_iter_between_chars(current_index, 0) {
             if !(is_file_char(ch) || is_url_char(ch) || is_addr_char(ch)) {
                 break;
             }
@@ -763,7 +790,7 @@ impl Buffer {
         // Now grab the address if we had a trailing colon
         if let Some(ix) = colon {
             to = ix;
-            for (_, ch) in self.iter_between(ix + 1, self.txt.len_chars()) {
+            for (_, ch) in self.iter_between_chars(ix + 1, self.txt.len_chars()) {
                 if ch.is_whitespace() || "()[]{}<>;".contains(ch) {
                     break;
                 }
@@ -776,7 +803,7 @@ impl Buffer {
         // If dot looks like a URL then expand until whitespace and strip trailing punctuation
         if dot_content.starts_with(HTTP) || dot_content.starts_with(HTTPS) {
             if to < self.txt.len_chars() {
-                for (_, ch) in self.iter_between(to + 1, self.txt.len_chars()) {
+                for (_, ch) in self.iter_between_chars(to + 1, self.txt.len_chars()) {
                     if ch.is_whitespace() || "()[]{}<>;".contains(ch) {
                         break;
                     }
