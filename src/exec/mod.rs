@@ -8,12 +8,16 @@ use crate::{
 };
 use ad_event::Source;
 use std::{
+    cell::RefCell,
     cmp::min,
     collections::BTreeMap,
     fmt,
     io::{self, Write},
 };
-use structex::{Structex, StructexBuilder, template::Template};
+use structex::{
+    Structex, StructexBuilder,
+    template::{Context, Template},
+};
 
 mod addr;
 
@@ -134,14 +138,14 @@ impl Program {
         let s = s.trim();
 
         let input = ParseInput::new(s);
-        let initial_dot = match Addr::parse_from_input(&input) {
-            Ok(dot_expr) => dot_expr,
+        let (initial_dot, remaining_input) = match Addr::parse_from_input(&input) {
+            Ok(dot_expr) => (dot_expr, input.remaining()),
 
             // If the start of input is not an address we default to Full and attempt to parse the
             // rest of the program. We need to reconstruct the iterator here as we may have
             // advanced through the string while we attempt to parse the initial address.
             Err(e) => match e.kind {
-                ErrorKind::NotAnAddress => Addr::full(),
+                ErrorKind::NotAnAddress => (Addr::full(), s),
                 ErrorKind::InvalidRegex(e) => return Err(Error::InvalidRegex(e)),
                 ErrorKind::UnclosedDelimiter => {
                     return Err(Error::UnclosedDelimiter("dot expr regex", '/'));
@@ -156,7 +160,7 @@ impl Program {
             },
         };
 
-        let se: Option<Structex<Regex>> = match StructexBuilder::new(input.remaining())
+        let se: Option<Structex<Regex>> = match StructexBuilder::new(remaining_input)
             .with_allowed_argless_tags("d")
             .with_allowed_single_arg_tags("acip") // typos:ignore
             .allow_top_level_actions()
@@ -188,7 +192,7 @@ impl Program {
     }
 
     /// Execute this program against a given [Edit].
-    pub fn execute<E, W>(&mut self, ed: &mut E, _fname: &str, out: &mut W) -> Result<Dot, Error>
+    pub fn execute<E, W>(&mut self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, Error>
     where
         E: Edit,
         W: Write,
@@ -208,15 +212,23 @@ impl Program {
         let initial = ed.substr(byte_from, byte_to);
 
         let mut edit_actions = Vec::new();
+        let mut ctx = Ctx {
+            fname,
+            byte_from: 0,
+            ed,
+            row_col: RefCell::new(None),
+        };
 
         for caps in se.iter_tagged_captures(initial.as_ref()) {
             let action = caps.action.as_ref().unwrap();
             let id = action.id();
+            ctx.byte_from = caps.from();
+            ctx.row_col.borrow_mut().take();
 
             match action.tag() {
                 'p' => {
                     // Handle print actions immediately
-                    self.templates[&id].render_to(out, &caps)?;
+                    self.templates[&id].render_with_context_to(out, &caps, &ctx)?;
                 }
 
                 'd' => edit_actions.push(EditAction::Remove(caps.from(), caps.to())),
@@ -224,20 +236,20 @@ impl Program {
                     // order flipped as we reverse before running
                     edit_actions.push(EditAction::Insert(
                         caps.from(),
-                        self.templates[&id].render(&caps)?,
+                        self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                     edit_actions.push(EditAction::Remove(caps.from(), caps.to()));
                 }
                 'i' => {
                     edit_actions.push(EditAction::Insert(
                         caps.from(),
-                        self.templates[&id].render(&caps)?,
+                        self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
                 'a' => {
                     edit_actions.push(EditAction::Insert(
                         caps.to(),
-                        self.templates[&id].render(&caps)?,
+                        self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
 
@@ -277,6 +289,71 @@ impl Program {
 enum EditAction {
     Insert(usize, String),
     Remove(usize, usize),
+}
+
+struct Ctx<'a, E>
+where
+    E: Edit,
+{
+    fname: &'a str,
+    byte_from: usize,
+    ed: &'a E,
+    row_col: RefCell<Option<(String, String)>>,
+}
+
+impl<'a, E> Ctx<'a, E>
+where
+    E: Edit,
+{
+    fn ensure_row_col(&self) {
+        if self.row_col.borrow().is_some() {
+            return;
+        }
+
+        let row = self.ed.char_to_line(self.byte_from).unwrap();
+        let col = self.byte_from - self.ed.line_to_char(row).unwrap();
+
+        *self.row_col.borrow_mut() = Some((row.to_string(), col.to_string()));
+    }
+}
+
+impl<'a, E> Context for Ctx<'a, E>
+where
+    E: Edit,
+{
+    fn render_var<W>(&self, var: &str, w: &mut W) -> io::Result<usize>
+    where
+        W: Write,
+    {
+        match var {
+            "FILENAME" => {
+                w.write_all(self.fname.as_bytes())?;
+                Ok(self.fname.len())
+            }
+
+            "ROW" => {
+                self.ensure_row_col();
+                let rc = self.row_col.borrow();
+                let row = &rc.as_ref().unwrap().0;
+                w.write_all(row.as_bytes())?;
+                Ok(row.len())
+            }
+
+            "COL" => {
+                self.ensure_row_col();
+                let rc = self.row_col.borrow();
+                let col = &rc.as_ref().unwrap().1;
+                w.write_all(col.as_bytes())?;
+                Ok(col.len())
+            }
+
+            _ => {
+                let s = format!("{{{var}}}");
+                w.write_all(s.as_bytes())?;
+                Ok(s.len())
+            }
+        }
+    }
 }
 
 #[cfg(test)]
