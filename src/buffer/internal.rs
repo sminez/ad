@@ -456,6 +456,28 @@ impl GapBuffer {
         }
     }
 
+    /// The character at the specified byte index.
+    ///
+    /// # Panics
+    /// This method will panic if the given byte index is out of bounds
+    #[inline]
+    pub fn char_at(&self, byte_idx: usize) -> char {
+        let byte_idx = self.byte_to_raw_byte(byte_idx);
+
+        // SAFETY: we know that we have valid utf8 data internally
+        unsafe { decode_char_at(byte_idx, &self.data) }
+    }
+
+    /// The character at the specified byte index.
+    #[inline]
+    pub fn get_char_at(&self, byte_idx: usize) -> Option<char> {
+        if byte_idx < self.len() {
+            Some(self.char_at(byte_idx))
+        } else {
+            None
+        }
+    }
+
     #[inline]
     fn char_len(&self, byte_idx: usize) -> usize {
         // SAFETY: we know that we have valid utf8 data internally
@@ -1093,6 +1115,7 @@ impl GapBuffer {
 /// Slices will become invalidated if the gap is moved from the position they were created with
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Slice<'a> {
+    /// The logical byte offset that this slice was taken from
     from: usize,
     left: &'a [u8],
     right: &'a [u8],
@@ -1107,6 +1130,11 @@ impl<'a> Slice<'a> {
 
     pub fn is_contiguous(&self) -> bool {
         self.left.is_empty() || self.right.is_empty()
+    }
+
+    /// The logical byte offset that this slice was taken from.
+    pub fn from(&self) -> usize {
+        self.from
     }
 
     pub fn into_cow(self) -> Cow<'a, str> {
@@ -1124,10 +1152,11 @@ impl<'a> Slice<'a> {
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
         let to = min(to, gb.data.len());
+        let logical_from = gb.raw_byte_to_byte(from);
 
         if to <= gb.gap_start || from >= gb.gap_end {
             return Slice {
-                from,
+                from: logical_from,
                 left: &gb.data[from..to],
                 right: &[],
             };
@@ -1136,7 +1165,7 @@ impl<'a> Slice<'a> {
         debug_assert!(from <= gb.gap_start, "line offset sits in gap");
 
         Slice {
-            from,
+            from: logical_from,
             left: &gb.data[from..gb.gap_start],
             right: &gb.data[gb.gap_end..to],
         }
@@ -1158,6 +1187,11 @@ impl<'a> Slice<'a> {
                 std::str::from_utf8_unchecked(self.right),
             )
         }
+    }
+
+    /// The two sides of this slice as &[u8] slices
+    pub fn as_slices(&self) -> (&[u8], &[u8]) {
+        (self.left, self.right)
     }
 
     /// Iterate over the contiguous &[u8] regions within this slice
