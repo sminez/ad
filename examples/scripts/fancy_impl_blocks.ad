@@ -7,7 +7,7 @@
 x/^impl(?:<.*?>)?.*? (\w+)@*?^\}/
 v/^impl(?:<.*?>)?.*? for/ {
   # We print the impl block and file name as before...
-  p/\nimpl $1 ($FILENAME:$ROW:$COL)\n/;
+  p/\nimpl {1} ({FILENAME}:{ROW}:{COL})\n/;
   # ...but this time we loop over the full function declarations first
   # without extracting anything.
   # Now we run a group of expressions, each with non-overlapping guards
@@ -17,8 +17,8 @@ v/^impl(?:<.*?>)?.*? for/ {
     # return type") we extract both the function name and the return
     # type for printing, calling out if the function mutates self.
     x/fn (\w+)@*?-> (.*?)\w*\{/ {
-      g/&('. )?mut self/ p/  mut $1 -> $2\n/;
-      v/&('. )?mut self/ p/      $1 -> $2\n/;
+      g/&('. )?mut self/ p/  mut {1} -> {2}\n/;
+      v/&('. )?mut self/ p/      {1} -> {2}\n/;
     };
 
     # In the case where there is not a '->' ("there is not a return type")
@@ -27,8 +27,8 @@ v/^impl(?:<.*?>)?.*? for/ {
     # mutates self.
     v/->/
     x/fn (\w+)@*\{/ {
-      g/&('. )?mut self/ p/  mut $1 -> ()\n/;
-      v/&('. )?mut self/ p/      $1 -> ()\n/;
+      g/&('. )?mut self/ p/  mut {1} -> ()\n/;
+      v/&('. )?mut self/ p/      {1} -> ()\n/;
     };
   };
 }

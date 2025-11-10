@@ -194,6 +194,7 @@ struct SmDetails {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct CompiledOps {
     pub(super) ops: Vec<Op>,
+    pub(super) n_submatches: usize,
     pub(super) submatch_names: Vec<String>,
 }
 
@@ -237,6 +238,7 @@ pub(super) fn compile_ast(mut ast: Ast, reverse: bool) -> CompiledOps {
 
     CompiledOps {
         ops: full,
+        n_submatches: saves.n,
         submatch_names: saves.names,
     }
 }

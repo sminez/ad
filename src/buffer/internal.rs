@@ -456,6 +456,28 @@ impl GapBuffer {
         }
     }
 
+    /// The character at the specified byte index.
+    ///
+    /// # Panics
+    /// This method will panic if the given byte index is out of bounds
+    #[inline]
+    pub fn char_at(&self, byte_idx: usize) -> char {
+        let byte_idx = self.byte_to_raw_byte(byte_idx);
+
+        // SAFETY: we know that we have valid utf8 data internally
+        unsafe { decode_char_at(byte_idx, &self.data) }
+    }
+
+    /// The character at the specified byte index.
+    #[inline]
+    pub fn get_char_at(&self, byte_idx: usize) -> Option<char> {
+        if byte_idx < self.len() {
+            Some(self.char_at(byte_idx))
+        } else {
+            None
+        }
+    }
+
     #[inline]
     fn char_len(&self, byte_idx: usize) -> usize {
         // SAFETY: we know that we have valid utf8 data internally
@@ -1093,6 +1115,7 @@ impl GapBuffer {
 /// Slices will become invalidated if the gap is moved from the position they were created with
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Slice<'a> {
+    /// The logical byte offset that this slice was taken from
     from: usize,
     left: &'a [u8],
     right: &'a [u8],
@@ -1107,6 +1130,11 @@ impl<'a> Slice<'a> {
 
     pub fn is_contiguous(&self) -> bool {
         self.left.is_empty() || self.right.is_empty()
+    }
+
+    /// The logical byte offset that this slice was taken from.
+    pub fn from(&self) -> usize {
+        self.from
     }
 
     pub fn into_cow(self) -> Cow<'a, str> {
@@ -1124,10 +1152,11 @@ impl<'a> Slice<'a> {
     #[inline]
     fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
         let to = min(to, gb.data.len());
+        let logical_from = gb.raw_byte_to_byte(from);
 
         if to <= gb.gap_start || from >= gb.gap_end {
             return Slice {
-                from,
+                from: logical_from,
                 left: &gb.data[from..to],
                 right: &[],
             };
@@ -1136,9 +1165,38 @@ impl<'a> Slice<'a> {
         debug_assert!(from <= gb.gap_start, "line offset sits in gap");
 
         Slice {
-            from,
+            from: logical_from,
             left: &gb.data[from..gb.gap_start],
             right: &gb.data[gb.gap_end..to],
+        }
+    }
+
+    pub fn subslice_from_byte_offsets(&self, from: usize, to: usize) -> Slice<'_> {
+        if from == to {
+            return Slice::NULL;
+        }
+
+        let to = min(to, self.len());
+        let logical_from = self.from + from;
+
+        if to <= self.left.len() {
+            Slice {
+                from: logical_from,
+                left: &self.left[from..to],
+                right: &[],
+            }
+        } else if from >= self.left.len() {
+            Slice {
+                from: logical_from,
+                left: &[],
+                right: &self.right[from..to],
+            }
+        } else {
+            Slice {
+                from: logical_from,
+                left: &self.left[from..],
+                right: &self.right[..to],
+            }
         }
     }
 
@@ -1147,6 +1205,14 @@ impl<'a> Slice<'a> {
     /// Calculating involves parsing the entire slice as utf-8.
     pub fn len_utf8(&self) -> usize {
         self.chars().count()
+    }
+
+    pub fn len(&self) -> usize {
+        self.left.len() + self.right.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// The two sides of this slice as &str references
@@ -1160,6 +1226,11 @@ impl<'a> Slice<'a> {
         }
     }
 
+    /// The two sides of this slice as &[u8] slices
+    pub fn as_slices(&self) -> (&[u8], &[u8]) {
+        (self.left, self.right)
+    }
+
     /// Iterate over the contiguous &[u8] regions within this slice
     pub fn slice_iter(self) -> SliceIter<'a> {
         SliceIter {
@@ -1171,6 +1242,14 @@ impl<'a> Slice<'a> {
     /// Iterate over the characters in this slice
     pub fn chars(self) -> Chars<'a> {
         Chars { s: self, cur: 0 }
+    }
+
+    /// Iterate over the characters in this slice in reverse
+    pub fn rev_chars(self) -> RevChars<'a> {
+        RevChars {
+            s: self,
+            cur: self.left.len() + self.right.len(),
+        }
     }
 
     /// Iterate over the characters in this slice with their corresponding character indices
@@ -1273,8 +1352,31 @@ impl Iterator for Chars<'_> {
         let (cur, data) = self.s.cur_and_data(self.cur);
         // SAFETY: we know we are in bounds and that we contain valid utf-8 data
         let ch = unsafe { decode_char_at(cur, data) };
-        let len = ch.len_utf8();
-        self.cur += len;
+        self.cur += ch.len_utf8();
+
+        Some(ch)
+    }
+}
+
+/// An iterator of characters from a [Slice]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub struct RevChars<'a> {
+    s: Slice<'a>,
+    cur: usize,
+}
+
+impl Iterator for RevChars<'_> {
+    type Item = char;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.cur == 0 {
+            return None;
+        }
+
+        let (cur, data) = self.s.cur_and_data(self.cur - 1);
+        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
+        let ch = unsafe { decode_char_ending_at(cur, data) };
+        self.cur -= ch.len_utf8();
 
         Some(ch)
     }

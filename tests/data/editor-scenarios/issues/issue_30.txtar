@@ -6,10 +6,10 @@ position resulted in malformed buffer content.
 -- config --
 path: tests/data/config/without-fsys.toml
 -- file-help.txt --
-Edit 6,32 x/.*\n/ y/\s+-- / x/(.+)/ c/"$1"/
-Edit 6,32 x/"(.+)"\s+--/ c/vec!["$1"],/
-Edit 6,32 x/"(.+) \| (.+)"/ c/"$1", "$2"/
-Edit 6,32 x/(.+)\n/ c/($1),\n/
+Edit 6,32 x/.*\n/ y/\s+-- / x/(.+)/ c/"{1}"/
+Edit 6,32 x/"(.+)"\s+--/ c/vec!["{1}"],/
+Edit 6,32 x/"(.+) \| (.+)"/ c/"{1}", "{2}"/
+Edit 6,32 x/(.+)\n/ c/({1}),\n/
 
 b | buffer            -- switch to the buffer with the given ID ('buffer 5')
 bn | buffer-next      -- switch to the next available open buffer in the buffer list

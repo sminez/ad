@@ -14,7 +14,7 @@ fn main() {
     println!("Pattern length: {}", re.len());
 
     let t1 = Instant::now();
-    let mut r = Regex::compile(re.trim_end()).unwrap();
+    let r = Regex::compile(re.trim_end()).unwrap();
     let d_compile = Instant::now().duration_since(t1).as_micros();
     println!("Compile time: {d_compile} microseconds");
 

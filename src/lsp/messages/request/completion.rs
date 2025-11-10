@@ -8,7 +8,6 @@ use crate::{
         capabilities::Coords,
         messages::{EditAction, edit_actions_as_editor_actions, request::LspRequest, txtdoc_pos},
     },
-    regex::Haystack,
 };
 use lsp_types::{
     CompletionContext, CompletionItem, CompletionParams, CompletionResponse, CompletionTextEdit,
@@ -138,7 +137,7 @@ impl MbSelect for Completions {
 
         // find the start of the "word" we are on
         let offset = b
-            .rev_iter_between(cur.idx, 0)
+            .rev_iter_between_chars(cur.idx, 0)
             .take_while(|(_, ch)| ch.is_alphanumeric() || *ch == '_')
             .count();
         let start = Cur {

@@ -13,20 +13,15 @@ pub trait Haystack {
     fn try_make_contiguous(&mut self);
     fn is_contiguous(&self) -> bool;
     fn len(&self) -> usize;
-    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>>;
-    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str>;
+    fn substr_from<'a>(&'a self, offset: usize) -> Option<Cow<'a, str>>;
+    fn substr<'a>(&'a self, from: usize, to: usize) -> Cow<'a, str>;
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize>;
     fn char_to_byte(&self, char_idx: usize) -> Option<usize>;
 
-    fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>>;
-    fn iter_between(&self, char_from: usize, char_to: usize)
-    -> impl Iterator<Item = (usize, char)>;
-    fn rev_iter_between(
-        &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)>;
+    fn iter_from(&self, from: usize) -> Option<impl Iterator<Item = (usize, char)>>;
+    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)>;
+    fn rev_iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)>;
 }
 
 impl Haystack for &str {
@@ -40,18 +35,18 @@ impl Haystack for &str {
         str::len(self)
     }
 
-    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
-        if byte_offset > self.len() {
+    fn substr_from<'a>(&'a self, offset: usize) -> Option<Cow<'a, str>> {
+        if offset > self.len() {
             None
         } else {
-            let raw = &self.as_bytes()[byte_offset..];
+            let raw = &self.as_bytes()[offset..];
             // SAFETY: assumes a valid byte offset
             Some(Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(raw) }))
         }
     }
 
-    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
-        Cow::Borrowed(&self[byte_from..byte_to])
+    fn substr<'a>(&'a self, from: usize, to: usize) -> Cow<'a, str> {
+        Cow::Borrowed(&self[from..to])
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
@@ -66,37 +61,29 @@ impl Haystack for &str {
         self.char_indices().nth(char_idx).map(|(idx, _)| idx)
     }
 
-    fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
-        // This is not at all efficient but we only really make use of strings in test cases where
-        // the length of the string is small. For the "real" impls using GapBuffers, checking the number
-        // of chars in the buffer is O(1) as we cache it.
-        if char_from >= self.chars().count() {
+    fn iter_from(&self, from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
+        if from >= self.len() {
             None
         } else {
-            Some(self.chars().enumerate().skip(char_from))
+            Some(
+                self[from..]
+                    .char_indices()
+                    .map(move |(i, ch)| (i + from, ch)),
+            )
         }
     }
 
-    fn iter_between(
-        &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
-        // This is not at all efficient but we only really make use of strings in test cases where
-        // the length of the string is small. For the "real" impls using GapBuffers, checking the number
-        // of chars in the buffer is O(1) as we cache it.
-        self.chars()
-            .enumerate()
-            .skip(char_from)
-            .take(char_to.saturating_sub(char_from))
+    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        self[from..to]
+            .char_indices()
+            .map(move |(i, ch)| (i + from, ch))
     }
 
-    fn rev_iter_between(
-        &self,
-        _char_from: usize,
-        _char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
-        std::iter::empty()
+    fn rev_iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        self[from..to]
+            .char_indices()
+            .map(move |(i, ch)| (i + from, ch))
+            .rev()
     }
 }
 
@@ -113,17 +100,17 @@ impl Haystack for GapBuffer {
         self.len()
     }
 
-    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
-        if byte_offset > self.len() {
+    fn substr_from<'a>(&'a self, offset: usize) -> Option<Cow<'a, str>> {
+        if offset > self.len() {
             None
         } else {
             // SAFETY: assumes make_contiguous was called first
-            Some(Cow::Borrowed(unsafe { self.substr_from(byte_offset) }))
+            Some(Cow::Borrowed(unsafe { self.substr_from(offset) }))
         }
     }
 
-    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
-        self.slice_from_byte_offsets(byte_from, byte_to).into_cow()
+    fn substr<'a>(&'a self, from: usize, to: usize) -> Cow<'a, str> {
+        self.slice_from_byte_offsets(from, to).into_cow()
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
@@ -142,32 +129,44 @@ impl Haystack for GapBuffer {
         }
     }
 
-    fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
-        if char_from >= self.len_chars() {
+    fn iter_from(&self, from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
+        if from >= self.len() {
             None
         } else {
+            let mut acc = from;
             Some(
-                self.slice(char_from, self.len_chars())
-                    .indexed_chars(char_from, false),
+                self.slice_from_byte_offsets(from, self.len())
+                    .chars()
+                    .map(move |ch| {
+                        let item = (acc, ch);
+                        acc += ch.len_utf8();
+                        item
+                    }),
             )
         }
     }
 
-    fn iter_between(
-        &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
-        self.slice(char_from, char_to)
-            .indexed_chars(char_from, false)
+    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        let mut acc = from;
+
+        self.slice_from_byte_offsets(from, to)
+            .chars()
+            .map(move |ch| {
+                let item = (acc, ch);
+                acc += ch.len_utf8();
+                item
+            })
     }
 
-    fn rev_iter_between(
-        &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
-        self.slice(char_to, char_from).indexed_chars(char_to, true)
+    fn rev_iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        let mut acc = to;
+
+        self.slice_from_byte_offsets(from, to)
+            .rev_chars()
+            .map(move |ch| {
+                acc -= ch.len_utf8();
+                (acc, ch)
+            })
     }
 }
 
@@ -184,19 +183,17 @@ impl Haystack for Buffer {
         self.txt.len()
     }
 
-    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
-        if byte_offset > self.txt.len() {
+    fn substr_from<'a>(&'a self, offset: usize) -> Option<Cow<'a, str>> {
+        if offset > self.txt.len() {
             None
         } else {
             // SAFETY: assumes make_contiguous was called first
-            Some(Cow::Borrowed(unsafe { self.txt.substr_from(byte_offset) }))
+            Some(Cow::Borrowed(unsafe { self.txt.substr_from(offset) }))
         }
     }
 
-    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
-        self.txt
-            .slice_from_byte_offsets(byte_from, byte_to)
-            .into_cow()
+    fn substr<'a>(&'a self, from: usize, to: usize) -> Cow<'a, str> {
+        self.txt.slice_from_byte_offsets(from, to).into_cow()
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
@@ -215,35 +212,46 @@ impl Haystack for Buffer {
         }
     }
 
-    fn iter_from(&self, char_from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
-        if char_from >= self.txt.len_chars() {
+    fn iter_from(&self, from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
+        if from >= self.len() {
             None
         } else {
+            let mut acc = from;
             Some(
                 self.txt
-                    .slice(char_from, self.len_chars())
-                    .indexed_chars(char_from, false),
+                    .slice_from_byte_offsets(from, self.len())
+                    .chars()
+                    .map(move |ch| {
+                        let item = (acc, ch);
+                        acc += ch.len_utf8();
+                        item
+                    }),
             )
         }
     }
 
-    fn iter_between(
-        &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
+    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        let mut acc = from;
+
         self.txt
-            .slice(char_from, char_to)
-            .indexed_chars(char_from, false)
+            .slice_from_byte_offsets(from, to)
+            .chars()
+            .map(move |ch| {
+                let item = (acc, ch);
+                acc += ch.len_utf8();
+                item
+            })
     }
 
-    fn rev_iter_between(
-        &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
+    fn rev_iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+        let mut acc = to;
+
         self.txt
-            .slice(char_to, char_from)
-            .indexed_chars(char_to, true)
+            .slice_from_byte_offsets(from, to)
+            .rev_chars()
+            .map(move |ch| {
+                acc -= ch.len_utf8();
+                (acc, ch)
+            })
     }
 }

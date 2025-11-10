@@ -2,7 +2,7 @@ structural regular expressions:
 
     - the Edit command from the last slide looked a lot like a normal sed expression:
 
-          Edit , s/mouse/clicky thing/g
+          Edit , x/mouse/ c/clicky thing/
 
     - but the syntax supported in ad is a lot richer than you might expect
 

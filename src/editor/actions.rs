@@ -644,7 +644,7 @@ where
             _ => {
                 self.open_file(data, load_in_new_window);
                 if let Some(s) = attrs.get("addr") {
-                    match Addr::parse(&mut s.chars().peekable()) {
+                    match Addr::parse(s) {
                         Ok(mut addr) => {
                             let b = self.layout.active_buffer_mut();
                             b.dot = b.map_addr(&mut addr);
@@ -670,7 +670,7 @@ where
             Some(idx) => {
                 let (s, addr) = s.split_at(idx);
                 let (_, addr) = addr.split_at(1);
-                match Addr::parse(&mut addr.chars().peekable()) {
+                match Addr::parse(addr) {
                     Ok(expr) => (s, Some(expr)),
                     Err(_) => (s, None),
                 }

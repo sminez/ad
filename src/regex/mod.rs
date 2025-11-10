@@ -3,18 +3,18 @@
 //!
 //! Thompson's original paper on writing a regex engine can be found here:
 //!   <https://dl.acm.org/doi/pdf/10.1145/363347.363387>
-use std::{iter::Peekable, str::Chars};
+use std::{fmt, iter::Peekable, str::Chars};
 
 mod ast;
 mod compile;
 mod haystack;
 mod matches;
+mod stream;
 mod vm;
 
-// pub mod re2;
-
 pub use haystack::Haystack;
-pub use matches::{Match, MatchIter};
+pub use matches::Match;
+pub use stream::{CachingStream, CachingStreamIter};
 pub use vm::{Regex, RevRegex};
 
 /// Errors that can be returned by the regex engine
@@ -32,16 +32,33 @@ pub enum Error {
     InvalidRepetition,
     /// The provided regex is too long
     ReTooLong,
-    /// Too many parens in the provided regex
-    TooManyParens,
     /// Alternation without a right hand side
     UnbalancedAlt,
     /// Unbalanced parens
     UnbalancedParens,
-    /// Group name without a closing paren
+    /// Group name without a closing '<'
     UnclosedGroupName(String),
     /// Invalid group qualifier following (?...)
     UnknownGroupQualifier(char),
+}
+
+impl std::error::Error for Error {}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::EmptyParens => write!(f, "empty parens"),
+            Self::EmptyRegex => write!(f, "empty regular expression"),
+            Self::InvalidClass => write!(f, "invalid class"),
+            Self::InvalidEscape(c) => write!(f, "invalid escaped character {c:?}"),
+            Self::InvalidRepetition => write!(f, "invalid repetition"),
+            Self::ReTooLong => write!(f, "regex too long"),
+            Self::UnbalancedAlt => write!(f, "alternation had no right hand side"),
+            Self::UnbalancedParens => write!(f, "unbalanced parens"),
+            Self::UnclosedGroupName(s) => write!(f, "unclosed group name {s:?}"),
+            Self::UnknownGroupQualifier(c) => write!(f, "unknown group qualifier {c:?}"),
+        }
+    }
 }
 
 /// Helper for converting characters to 0 based inicies for looking things up in caches.
@@ -146,6 +163,134 @@ fn next_char(it: &mut Peekable<Chars<'_>>) -> Result<Option<(char, bool)>, Error
     match ESCAPES[char_ix(ch)] {
         Some(ch) => Ok(Some((ch, true))),
         None => Err(Error::InvalidEscape(ch)),
+    }
+}
+
+mod impl_structex {
+    use super::*;
+    use crate::buffer::{Buffer, GapBuffer, Slice};
+    use std::{io, ops::Range};
+    use structex::re::{Haystack, RawCaptures, RegexEngine, Sliceable, Writable};
+
+    impl RegexEngine for Regex {
+        type CompileError = Error;
+
+        fn compile(re: &str) -> Result<Self, Self::CompileError> {
+            Regex::compile(re)
+        }
+    }
+
+    impl Haystack<Regex> for &str {
+        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+            re.matches_between(self, from, to)
+        }
+
+        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+            let m = re.find_between(self, from, to)?;
+
+            Some(RawCaptures::new(m.iter_locs()))
+        }
+    }
+
+    impl Haystack<Regex> for &GapBuffer {
+        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+            re.matches_between(*self, from, to)
+        }
+
+        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+            let m = re.find_between(*self, from, to)?;
+
+            Some(RawCaptures::new(m.iter_locs()))
+        }
+    }
+
+    impl Sliceable for &GapBuffer {
+        type Slice<'h>
+            = Slice<'h>
+        where
+            Self: 'h;
+
+        fn char_at(&self, byte_offset: usize) -> Option<char> {
+            self.get_char_at(byte_offset)
+        }
+
+        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
+            self.slice_from_byte_offsets(range.start, range.end)
+        }
+
+        fn max_len(&self) -> usize {
+            self.len()
+        }
+    }
+
+    impl Writable for &GapBuffer {
+        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
+        where
+            W: io::Write,
+        {
+            let (l, r) = self.as_byte_slices();
+            w.write_all(l)?;
+            w.write_all(r)?;
+
+            Ok(self.len())
+        }
+    }
+
+    impl<'a> Writable for Slice<'a> {
+        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
+        where
+            W: std::io::Write,
+        {
+            let (l, r) = self.as_slices();
+            w.write_all(l)?;
+            w.write_all(r)?;
+
+            Ok(l.len() + r.len())
+        }
+    }
+
+    impl Haystack<Regex> for &Buffer {
+        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+            re.matches_between(*self, from, to)
+        }
+
+        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+            let m = re.find_between(*self, from, to)?;
+
+            Some(RawCaptures::new(m.iter_locs()))
+        }
+    }
+
+    impl Sliceable for &Buffer {
+        type Slice<'h>
+            = Slice<'h>
+        where
+            Self: 'h;
+
+        fn char_at(&self, byte_offset: usize) -> Option<char> {
+            self.txt.get_char_at(byte_offset)
+        }
+
+        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
+            self.txt.slice_from_byte_offsets(range.start, range.end)
+        }
+
+        fn max_len(&self) -> usize {
+            self.txt.len()
+        }
+    }
+
+    impl Writable for &Buffer {
+        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
+        where
+            W: io::Write,
+        {
+            let (l, r) = self.txt.as_byte_slices();
+            w.write_all(l)?;
+            w.write_all(r)?;
+
+            Ok(self.txt.len())
+        }
     }
 }
 

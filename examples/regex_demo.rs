@@ -23,7 +23,7 @@ fn main() {
 
     let re = "([0-9]+)-([0-9]+)";
     let t1 = Instant::now();
-    let mut r = Regex::compile(re).unwrap();
+    let r = Regex::compile(re).unwrap();
     let d_compile = Instant::now().duration_since(t1).as_micros();
     println!("compile time (micro seconds): {d_compile}");
 

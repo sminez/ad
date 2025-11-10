@@ -1,7 +1,4 @@
-use crate::regex::{
-    Haystack,
-    vm::{N_SLOTS, Regex},
-};
+use crate::regex::{Haystack, Regex, vm::N_SLOTS};
 use std::{borrow::Cow, sync::Arc};
 
 /// The match location of a Regex against a given input.
@@ -9,6 +6,7 @@ use std::{borrow::Cow, sync::Arc};
 /// The sub-match indices are relative to the input used to run the original match.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Match {
+    pub(super) n_submatches: usize,
     pub(super) sub_matches: [usize; N_SLOTS],
     pub(super) submatch_names: Arc<[String]>,
 }
@@ -18,18 +16,11 @@ impl Match {
         let mut sub_matches = [0; N_SLOTS];
         sub_matches[0] = from;
         sub_matches[1] = to;
+
         Self {
+            n_submatches: 0,
             sub_matches,
             submatch_names: Arc::new([]),
-        }
-    }
-
-    pub(crate) fn apply_offset(&mut self, offset: isize) {
-        for i in 0..N_SLOTS {
-            if i > 0 && self.sub_matches[i] == 0 {
-                continue;
-            }
-            self.sub_matches[i] = (self.sub_matches[i] as isize + offset) as usize;
         }
     }
 
@@ -38,13 +29,9 @@ impl Match {
     where
         H: Haystack,
     {
-        let (char_from, char_to) = self.loc();
-        let byte_from = haystack.char_to_byte(char_from).unwrap();
-        let byte_to = haystack
-            .char_to_byte(char_to)
-            .unwrap_or_else(|| haystack.len());
+        let (from, to) = self.loc();
 
-        haystack.substr(byte_from, byte_to)
+        haystack.substr(from, to)
     }
 
     /// Extract the given submatch by index if it exists
@@ -52,13 +39,9 @@ impl Match {
     where
         H: Haystack,
     {
-        let (char_from, char_to) = self.sub_loc(n)?;
-        let byte_from = haystack.char_to_byte(char_from).unwrap();
-        let byte_to = haystack
-            .char_to_byte(char_to)
-            .unwrap_or_else(|| haystack.len());
+        let (from, to) = self.sub_loc(n)?;
 
-        Some(haystack.substr(byte_from, byte_to))
+        Some(haystack.substr(from, to))
     }
 
     /// Extract the given submatch by name if it exists
@@ -66,13 +49,9 @@ impl Match {
     where
         H: Haystack,
     {
-        let (char_from, char_to) = self.sub_loc_by_name(name)?;
-        let byte_from = haystack.char_to_byte(char_from).unwrap();
-        let byte_to = haystack
-            .char_to_byte(char_to)
-            .unwrap_or_else(|| haystack.len());
+        let (from, to) = self.sub_loc_by_name(name)?;
 
-        Some(haystack.substr(byte_from, byte_to))
+        Some(haystack.substr(from, to))
     }
 
     /// The names of each submatch
@@ -87,7 +66,7 @@ impl Match {
         matches
     }
 
-    /// The start and end of this match in terms of character offsets
+    /// The start and end of this match in terms of byte offsets
     pub fn loc(&self) -> (usize, usize) {
         let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
 
@@ -122,6 +101,21 @@ impl Match {
 
         Some((start, end))
     }
+
+    pub fn iter_locs(&self) -> impl Iterator<Item = Option<(usize, usize)>> {
+        let mut n = 0;
+
+        std::iter::from_fn(move || {
+            if n > self.n_submatches {
+                None
+            } else {
+                let loc = self.sub_loc(n);
+                n += 1;
+
+                Some(loc)
+            }
+        })
+    }
 }
 
 /// An iterator over sequential, non overlapping matches of a Regex
@@ -146,7 +140,14 @@ where
         let m = self.r.find_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
         if from == self.from {
-            self.from += 1;
+            self.from += self
+                .haystack
+                .substr_from(from)
+                .unwrap()
+                .chars()
+                .next()
+                .unwrap()
+                .len_utf8();
         } else {
             self.from = from;
         }
