@@ -348,19 +348,31 @@ directory will be set to the directory containing the active buffer.
 
 ad supports running a form of the structural regular expression syntax first introduced in the
 Sam text editor as part of the Plan 9 operating system. The current supported syntax covers most
-use cases but it does not include some of the features found within Sam and Acme:
+use cases but it does not include some of the features found within Sam and Acme. Editing
+expressions are composed of an optional "address" (defaulting to the current buffer Dot) followed
+by a chain of operators, ending in an action.
 
-  s/re/template/         substitute (equivalent to "x/re/ c/template/")
-  x/re/                  loop over matches
-  y/re/                  loop between matches ("split on re")
-  g/re/                  filter matching
-  v/re/                  filter non-matching
-  i/template/            insert before each match
-  a/template/            insert after each match
-  c/template/            replace each match
-  d                      delete each match
-  p/template/            print with a string template
-  P                      print the match
+The following operators are supported by the engine:
+
+  n/re/                  narrow to the first match of re
+  x/re/                  extract all matches of re
+  y/re/                  extract between matches of re ("split on re")
+  g/re/                  require re to match
+  v/re/                  require re to not match
+
+The following actions are supported by the engine:
+
+  i/template/            template and insert before match
+  a/template/            template and insert after match
+  c/template/            template and replace match
+  p/template/            template and print print
+
+  d                      delete match
+
+Templating supports injecting the contents of the full match and submatches via '{n}' variable
+references, with '{0}' denoting the full match and '{1}' denoting the first submatch etc. It
+is also possible to reference '{FILENAME}', '{ROW}' and '{COL}' which will have their values
+set by the location of the match being templated.
 
 ---
 
