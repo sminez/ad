@@ -769,7 +769,9 @@ checksum = "2b2231b7c3057d5e4ad0156fb3dc807d900806020c5ffa3ee6ff2c8c76fb8520"
 
 [[package]]
 name = "structex"
-version = "0.3.0"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0bf494e5fe6f8ef308579e2e532fc172e6820ceb7a0344ef52eebc03d9515027"
 
 [[package]]
 name = "subprocess"

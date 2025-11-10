@@ -16,7 +16,7 @@ use std::{
 };
 use structex::{
     Structex, StructexBuilder,
-    template::{Context, Template},
+    template::{self, Context, Template},
 };
 
 mod addr;
@@ -34,11 +34,13 @@ pub enum Error {
     /// Invalid structex
     InvalidStructex(structex::Error),
     /// Invalid structex template
-    InvalidTemplate(structex::template::Error),
+    InvalidTemplate(template::Error),
     /// Invalid suffix
     InvalidSuffix,
     /// IO error
     Io(io::ErrorKind, String),
+    /// Error rendering a structex template
+    Render(template::RenderError),
     /// Unclosed delimiter
     UnclosedDelimiter(&'static str, char),
     /// Unexpected character
@@ -70,9 +72,16 @@ impl From<structex::Error> for Error {
         Error::InvalidStructex(err)
     }
 }
-impl From<structex::template::Error> for Error {
-    fn from(err: structex::template::Error) -> Self {
+
+impl From<template::Error> for Error {
+    fn from(err: template::Error) -> Self {
         Error::InvalidTemplate(err)
+    }
+}
+
+impl From<template::RenderError> for Error {
+    fn from(err: template::RenderError) -> Self {
+        Error::Render(err)
     }
 }
 
@@ -321,37 +330,30 @@ impl<'a, E> Context for Ctx<'a, E>
 where
     E: Edit,
 {
-    fn render_var<W>(&self, var: &str, w: &mut W) -> io::Result<usize>
+    fn render_var<W>(&self, var: &str, w: &mut W) -> Option<io::Result<usize>>
     where
         W: Write,
     {
         match var {
-            "FILENAME" => {
-                w.write_all(self.fname.as_bytes())?;
-                Ok(self.fname.len())
-            }
+            "FILENAME" => Some(w.write_all(self.fname.as_bytes()).map(|_| self.fname.len())),
 
             "ROW" => {
                 self.ensure_row_col();
                 let rc = self.row_col.borrow();
                 let row = &rc.as_ref().unwrap().0;
-                w.write_all(row.as_bytes())?;
-                Ok(row.len())
+
+                Some(w.write_all(row.as_bytes()).map(|_| row.len()))
             }
 
             "COL" => {
                 self.ensure_row_col();
                 let rc = self.row_col.borrow();
                 let col = &rc.as_ref().unwrap().1;
-                w.write_all(col.as_bytes())?;
-                Ok(col.len())
+
+                Some(w.write_all(col.as_bytes()).map(|_| col.len()))
             }
 
-            _ => {
-                let s = format!("{{{var}}}");
-                w.write_all(s.as_bytes())?;
-                Ok(s.len())
-            }
+            _ => None,
         }
     }
 }
