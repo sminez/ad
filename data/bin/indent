@@ -3,5 +3,5 @@ source "$HOME/.ad/lib/ad.sh"
 
 requireAd
 addr="$(bufRead "$AD_BUFID" addr | sed -E 's/(.+):.+,(.+):.+/\1,\2/')"
-adEdit '. x/.+/ s/^/    /'
+adEdit '. x/.+/ i/    /'
 echo "$addr" | bufWrite "$AD_BUFID" addr
