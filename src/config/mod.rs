@@ -2,7 +2,7 @@
 use crate::{
     buffer::Buffer,
     editor::{Action, Actions},
-    key::Input,
+    key::{Arrow, Input},
     syntax::TK_DEFAULT,
     term::{Color, Styles},
     trie::Trie,
@@ -356,6 +356,10 @@ fn try_input_from_str_template(s: &str) -> Result<Input, String> {
             "<page-up>" => Input::PageUp,
             "<space>" => Input::Char(' '),
             "<tab>" => Input::Tab,
+            "<left>" => Input::Arrow(Arrow::Left),
+            "<right>" => Input::Arrow(Arrow::Right),
+            "<up>" => Input::Arrow(Arrow::Up),
+            "<down>" => Input::Arrow(Arrow::Down),
             _ => return Err(format!("unknown key {s}")),
         };
 
@@ -408,6 +412,10 @@ mod tests {
     #[test_case("<page-down>", &[Input::PageDown]; "page down")]
     #[test_case("<space>", &[Input::Char(' ')]; "space")]
     #[test_case("<tab>", &[Input::Tab]; "tab")]
+    #[test_case("<left>", &[Input::Arrow(Arrow::Left)]; "left")]
+    #[test_case("<right>", &[Input::Arrow(Arrow::Right)]; "right")]
+    #[test_case("<up>", &[Input::Arrow(Arrow::Up)]; "up")]
+    #[test_case("<down>", &[Input::Arrow(Arrow::Down)]; "down")]
     #[test_case("A B C", &[Input::Char('A'), Input::Char('B'), Input::Char('C')]; "sequence")]
     #[test]
     fn inputs_try_from_string_works(raw: &str, expected: &[Input]) {

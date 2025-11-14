@@ -41,7 +41,11 @@ default = { fg = "#E6D29E", bg = "#1B1720" }
 "<page-down>" = { run = "echo hello world" }
 "<space>" = { run = "echo hello world" }
 "<tab>" = { run = "echo hello world" }
-"X" = { send_keys = "a 1 A-b C-c C-A-d <backspace> <delete> <end> <esc> <home> <page-up> <page-down> <space> <tab>" }
+"<left>" = { run = "echo hello world" }
+"<right>" = { run = "echo hello world" }
+"<up>" = { run = "echo hello world" }
+"<down>" = { run = "echo hello world" }
+"X" = { send_keys = "a 1 A-b C-c C-A-d <backspace> <delete> <end> <esc> <home> <page-up> <page-down> <space> <tab> <left> <right> <up> <down>" }
 
 [keys.insert]
 "A" = { run = "echo hello world" }
@@ -58,7 +62,11 @@ default = { fg = "#E6D29E", bg = "#1B1720" }
 "<page-down>" = { run = "echo hello world" }
 "<space>" = { run = "echo hello world" }
 "<tab>" = { run = "echo hello world" }
-"X" = { send_keys = "a 1 A-b C-c C-A-d <backspace> <delete> <end> <esc> <home> <page-up> <page-down> <space> <tab>" }
+"<left>" = { run = "echo hello world" }
+"<right>" = { run = "echo hello world" }
+"<up>" = { run = "echo hello world" }
+"<down>" = { run = "echo hello world" }
+"X" = { send_keys = "a 1 A-b C-c C-A-d <backspace> <delete> <end> <esc> <home> <page-up> <page-down> <space> <tab> <left> <right> <up> <down>" }
 
 [filetypes.rust]
 extensions = ["rs"]
