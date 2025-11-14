@@ -310,13 +310,56 @@ impl TryFrom<String> for Inputs {
     type Error = String;
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
-        let mut inputs = Vec::new();
+        let inputs = value
+            .split_whitespace()
+            .map(try_input_from_str_template)
+            .collect::<Result<Vec<_>, _>>()?;
 
-        for s in value.split_whitespace() {
-            inputs.push(Input::try_from_str_template(s)?);
+        if inputs.is_empty() {
+            return Err("empty key inputs string".to_owned());
         }
 
         Ok(Self(inputs))
+    }
+}
+
+/// Only supporting a subset of inputs for now
+fn try_input_from_str_template(s: &str) -> Result<Input, String> {
+    if s.len() == 1 {
+        Ok(Input::Char(s.chars().next().unwrap()))
+    } else if let Some(suffix) = s.strip_prefix("C-A-") {
+        if suffix.len() == 1 {
+            Ok(Input::CtrlAlt(suffix.chars().next().unwrap()))
+        } else {
+            Err(format!("invalid send_key value: C-A-{suffix}"))
+        }
+    } else if let Some(suffix) = s.strip_prefix("C-") {
+        if suffix.len() == 1 {
+            Ok(Input::Ctrl(suffix.chars().next().unwrap()))
+        } else {
+            Err(format!("invalid send_key value: C-{suffix}"))
+        }
+    } else if let Some(suffix) = s.strip_prefix("A-") {
+        if suffix.len() == 1 {
+            Ok(Input::Alt(suffix.chars().next().unwrap()))
+        } else {
+            Err(format!("invalid send_key value: A-{suffix}"))
+        }
+    } else {
+        let i = match s {
+            "<backspace>" => Input::Backspace,
+            "<delete>" => Input::Del,
+            "<end>" => Input::End,
+            "<esc>" => Input::Esc,
+            "<home>" => Input::Home,
+            "<page-down>" => Input::PageDown,
+            "<page-up>" => Input::PageUp,
+            "<space>" => Input::Char(' '),
+            "<tab>" => Input::Tab,
+            _ => return Err(format!("unknown key {s}")),
+        };
+
+        Ok(i)
     }
 }
 
@@ -325,30 +368,18 @@ where
     D: Deserializer<'de>,
 {
     let raw_map: HashMap<String, KeyAction> = Deserialize::deserialize(deserializer)?;
-    let mut raw = Vec::with_capacity(raw_map.len());
-
-    for (k, action) in raw_map.into_iter() {
-        let keys: Vec<Input> = k
-            .split_whitespace()
-            .filter_map(|s| {
-                if s.len() == 1 {
-                    let c = s.chars().next().unwrap();
-                    if c.is_whitespace() {
-                        None
-                    } else {
-                        Some(Input::Char(c))
-                    }
-                } else {
-                    match s {
-                        "<space>" => Some(Input::Char(' ')),
-                        _ => None,
-                    }
-                }
-            })
-            .collect();
-
-        raw.push((keys, action));
+    if raw_map.is_empty() {
+        return Err(de::Error::custom("empty key map"));
     }
+
+    let raw = raw_map
+        .into_iter()
+        .map(|(k, action)| {
+            Inputs::try_from(k)
+                .map(|Inputs(keys)| (keys, action))
+                .map_err(de::Error::custom)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
 
     Trie::from_pairs(raw).map_err(de::Error::custom)
 }
@@ -356,9 +387,45 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use simple_test_case::test_case;
 
     #[test]
     fn default_config_is_valid() {
         Config::default(); // will panic if default config is invalid
+    }
+
+    #[test_case("A", &[Input::Char('A')]; "single letter key")]
+    #[test_case("5", &[Input::Char('5')]; "single digit key")]
+    #[test_case("A-y", &[Input::Alt('y')]; "alt letter")]
+    #[test_case("C-y", &[Input::Ctrl('y')]; "control letter")]
+    #[test_case("C-A-y", &[Input::CtrlAlt('y')]; "control alt letter")]
+    #[test_case("<backspace>", &[Input::Backspace]; "backspace")]
+    #[test_case("<delete>", &[Input::Del]; "delete")]
+    #[test_case("<end>", &[Input::End]; "end")]
+    #[test_case("<esc>", &[Input::Esc]; "escape")]
+    #[test_case("<home>", &[Input::Home]; "home")]
+    #[test_case("<page-up>", &[Input::PageUp]; "page up")]
+    #[test_case("<page-down>", &[Input::PageDown]; "page down")]
+    #[test_case("<space>", &[Input::Char(' ')]; "space")]
+    #[test_case("<tab>", &[Input::Tab]; "tab")]
+    #[test_case("A B C", &[Input::Char('A'), Input::Char('B'), Input::Char('C')]; "sequence")]
+    #[test]
+    fn inputs_try_from_string_works(raw: &str, expected: &[Input]) {
+        let inputs = Inputs::try_from(raw.to_owned()).unwrap();
+        assert_eq!(&inputs.0, expected);
+    }
+
+    #[test]
+    fn inputs_try_from_empty_string_errors() {
+        assert_eq!(
+            &Inputs::try_from(String::new()).unwrap_err(),
+            "empty key inputs string"
+        );
+    }
+
+    #[test]
+    fn parsing_an_empty_keymap_errors() {
+        let res: Result<KeyBindings, _> = toml::from_str("[normal]");
+        assert!(res.is_err());
     }
 }
