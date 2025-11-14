@@ -1,0 +1,66 @@
+[editor]
+show_splash = true
+expand_tab = true
+tabstop = 4
+match_indent = true
+status_timeout = 3
+double_click_ms = 200
+minibuffer_lines = 8
+find_command = "fd -t f"
+
+[filesystem]
+enabled = true
+auto_mount = false
+
+[tree_sitter]
+parser_dir = "~/.ad/tree-sitter/parsers"
+syntax_query_dir = "~/.ad/tree-sitter/queries"
+
+[colorscheme]
+bg = "#1B1720"
+fg = "#E6D29E"
+bar_bg = "#4E415C"
+signcol_fg = "#544863"
+minibuffer_hl = "#3E3549"
+
+[colorscheme.syntax]
+default = { fg = "#E6D29E", bg = "#1B1720" }
+
+[keys.normal]
+"A" = { run = "echo hello world" }
+"1" = { run = "echo hello world" }
+"A-a" = { run = "echo hello world" }
+"C-a" = { run = "echo hello world" }
+"C-A-a" = { run = "echo hello world" }
+"<backspace>" = { run = "echo hello world" }
+"<delete>" = { run = "echo hello world" }
+"<end>" = { run = "echo hello world" }
+"<esc>" = { run = "echo hello world" }
+"<home>" = { run = "echo hello world" }
+"<page-up>" = { run = "echo hello world" }
+"<page-down>" = { run = "echo hello world" }
+"<space>" = { run = "echo hello world" }
+"<tab>" = { run = "echo hello world" }
+"X" = { send_keys = "a 1 A-b C-c C-A-d <backspace> <delete> <end> <esc> <home> <page-up> <page-down> <space> <tab>" }
+
+[keys.insert]
+"A" = { run = "echo hello world" }
+"1" = { run = "echo hello world" }
+"A-a" = { run = "echo hello world" }
+"C-a" = { run = "echo hello world" }
+"C-A-a" = { run = "echo hello world" }
+"<backspace>" = { run = "echo hello world" }
+"<delete>" = { run = "echo hello world" }
+"<end>" = { run = "echo hello world" }
+"<esc>" = { run = "echo hello world" }
+"<home>" = { run = "echo hello world" }
+"<page-up>" = { run = "echo hello world" }
+"<page-down>" = { run = "echo hello world" }
+"<space>" = { run = "echo hello world" }
+"<tab>" = { run = "echo hello world" }
+"X" = { send_keys = "a 1 A-b C-c C-A-d <backspace> <delete> <end> <esc> <home> <page-up> <page-down> <space> <tab>" }
+
+[filetypes.rust]
+extensions = ["rs"]
+lsp.command = "rust-analyzer"
+lsp.roots = ["Cargo.toml"]
