@@ -324,8 +324,9 @@ where
             return;
         }
 
-        let row = self.ed.char_to_line(self.byte_from).unwrap();
-        let col = self.byte_from - self.ed.line_to_char(row).unwrap();
+        let char_from = self.ed.byte_to_char(self.byte_from).unwrap();
+        let row = self.ed.char_to_line(char_from).unwrap();
+        let col = char_from - self.ed.line_to_char(row).unwrap();
 
         *self.row_col.borrow_mut() = Some((row.to_string(), col.to_string()));
     }
@@ -379,6 +380,25 @@ mod tests {
         let mut b = Buffer::new_unnamed(0, "this is a test string", Default::default());
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         assert_eq!(&b.txt.to_string(), expected);
+    }
+
+    #[test]
+    fn templating_context_vars_works() {
+        // FILENAME, ROW, and COL all need to be worked out from the buffer being run against
+        let mut prog = Program::try_parse(", x/line/ a/ ({FILENAME} {ROW}:{COL})/").unwrap();
+
+        let mut b = Buffer::new_unnamed(
+            0,
+            " │  line one\n世 line two\n   🦊  line three",
+            Default::default(),
+        );
+
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        assert_eq!(
+            &b.txt.to_string(),
+            // the column offsets here should be in terms of characters, not bytes
+            " │  line (test 0:4) one\n世 line (test 1:2) two\n   🦊  line (test 2:6) three"
+        );
     }
 
     #[test]
