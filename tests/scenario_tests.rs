@@ -524,6 +524,8 @@ enum TestAction {
     /// type: ihello, world!
     /// type: <esc>
     /// type: <alt>$single_character
+    /// type: <ctrl>$single_character
+    /// type: <ctrl-alt>$single_character
     Input(Input),
     /// Sleep for a given number of milliseconds.
     /// This may be required when running external programs through loading and executing.
@@ -584,6 +586,20 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
                         (None, _) => panic!("invalid <ctrl> input: expected a character"),
                         (_, Some(_)) => {
                             panic!("invalid <ctrl> input: expected a single char, got {tail:?}");
+                        }
+                    }
+                }
+
+                s if s.starts_with("<ctrl-alt>") => {
+                    let tail = escape(s.strip_prefix("<ctrl-alt>").unwrap().trim());
+                    let mut it = tail.chars();
+                    match (it.next(), it.next()) {
+                        (Some(ch), None) => actions.push(TestAction::Input(Input::CtrlAlt(ch))),
+                        (None, _) => panic!("invalid <ctrl-alt> input: expected a character"),
+                        (_, Some(_)) => {
+                            panic!(
+                                "invalid <ctrl-alt> input: expected a single char, got {tail:?}"
+                            );
                         }
                     }
                 }

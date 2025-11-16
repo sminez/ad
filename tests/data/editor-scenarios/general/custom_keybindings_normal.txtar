@@ -1,0 +1,25 @@
+Open an empty file and trigger each of the custom normal mode key bindings
+defined in with-custom-bindings.toml.
+
+-- config --
+path: tests/data/config/with-custom-bindings.toml
+-- file-new.txt --
+-- actions --
+# override single key (A)
+type: <ctrl>k
+
+# override sequence   (B)
+type: gg
+
+# new single key      (C)
+type: <ctrl-alt>T
+
+# new sequence        (D)
+type: <ctrl-alt>B
+type: X
+-- buffer-list --
+1    * new.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+ABCD

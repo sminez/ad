@@ -1,0 +1,21 @@
+Open an empty file and trigger each of the custom insert mode key bindings
+defined in with-custom-bindings.toml.
+
+-- config --
+path: tests/data/config/with-custom-bindings.toml
+-- file-new.txt --
+-- actions --
+# enter insert mode
+type: i
+
+# override single key (A)
+type: <ctrl>a
+
+# new single key      (B)
+type: <ctrl-alt>T
+-- buffer-list --
+1    * new.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+AB
