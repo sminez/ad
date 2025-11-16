@@ -983,16 +983,16 @@ impl Buffer {
     }
 
     fn set_dot_from_coords(&mut self, coords: Coords) {
-        let mut addr: Addr = coords.as_addr(self);
-        self.dot = self.map_addr(&mut addr);
+        let addr: Addr = coords.as_addr(self);
+        self.dot = self.map_addr(&addr);
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
         self.changed_since_last_render = true;
     }
 
     fn set_xdot_from_coords(&mut self, coords: Coords) {
-        let mut addr: Addr = coords.as_addr(self);
-        self.xdot = self.map_addr(&mut addr);
+        let addr: Addr = coords.as_addr(self);
+        self.xdot = self.map_addr(&addr);
         self.xdot.clamp_idx(self.txt.len_chars());
     }
 

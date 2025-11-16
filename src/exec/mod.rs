@@ -136,7 +136,7 @@ impl Edit for Buffer {
 /// A parsed and compiled program that can be executed against an input
 #[derive(Debug, Clone)]
 pub struct Program {
-    initial_dot: Addr,
+    initial_addr: Option<Addr>,
     se: Option<Structex<Regex>>,
     templates: BTreeMap<usize, Template>,
 }
@@ -147,14 +147,15 @@ impl Program {
         let s = s.trim();
 
         let input = ParseInput::new(s);
-        let (initial_dot, remaining_input) = match Addr::parse_from_input(&input) {
-            Ok(dot_expr) => (dot_expr, input.remaining()),
+        let (initial_addr, remaining_input) = match Addr::parse_from_input(&input) {
+            Ok(dot_expr) => (Some(dot_expr), input.remaining()),
 
-            // If the start of input is not an address we default to Full and attempt to parse the
-            // rest of the program. We need to reconstruct the iterator here as we may have
-            // advanced through the string while we attempt to parse the initial address.
+            // If the start of input is not an address we fall back to requesting the current dot
+            // from the Edit we are running over during execution and attempt to parse the rest of
+            // the program. We need to reconstruct the iterator here as we may have advanced
+            // through the string while we attempt to parse the initial address.
             Err(e) => match e.kind {
-                ErrorKind::NotAnAddress => (Addr::full(), s),
+                ErrorKind::NotAnAddress => (None, s),
                 ErrorKind::InvalidRegex(e) => return Err(Error::InvalidRegex(e)),
                 ErrorKind::UnclosedDelimiter => {
                     return Err(Error::UnclosedDelimiter("dot expr regex", '/'));
@@ -194,7 +195,7 @@ impl Program {
         }
 
         Ok(Self {
-            initial_dot,
+            initial_addr,
             se,
             templates,
         })
@@ -206,7 +207,11 @@ impl Program {
         E: Edit,
         W: Write,
     {
-        let dot = ed.map_addr(&mut self.initial_dot);
+        let dot = match self.initial_addr.as_ref() {
+            Some(addr) => ed.map_addr(addr),
+            None => ed.current_dot(),
+        };
+
         let se = match self.se.as_ref() {
             Some(se) => se,
             None => return Ok(dot),
@@ -432,6 +437,21 @@ mod tests {
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
 
         assert_eq!(&b.txt.to_string(), "foo\nfoo\nfoo");
+    }
+
+    #[test]
+    fn buffer_current_dot_is_used_when_there_is_no_leading_addr() {
+        // The only thing this program does is delete the selection which should be the current
+        // buffer dot rather than the entire buffer.
+        let mut prog = Program::try_parse("d").unwrap();
+
+        let initial_content = "this is a FOO line\nand another";
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+        b.dot = Dot::from_char_indices(9, 12);
+        assert_eq!(b.dot_contents(), " FOO");
+
+        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        assert_eq!(&b.str_contents(), "this is a line\nand another");
     }
 
     #[test_case(", d"; "delete buffer")]

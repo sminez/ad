@@ -465,16 +465,16 @@ where
             }),
 
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(mut expr) = Addr::parse(s.trim_end()) {
-                    b.dot = b.map_addr(&mut expr);
+                if let Ok(addr) = Addr::parse(s.trim_end()) {
+                    b.dot = b.map_addr(&addr);
                 };
             }),
             SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 b.handle_action(Action::InsertString { s }, Source::Fsys);
             }),
             SetBufferXAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(mut expr) = Addr::parse(s.trim_end()) {
-                    b.xdot = b.map_addr(&mut expr);
+                if let Ok(addr) = Addr::parse(s.trim_end()) {
+                    b.xdot = b.map_addr(&addr);
                 };
             }),
             SetBufferXDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {

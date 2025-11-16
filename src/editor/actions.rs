@@ -645,9 +645,9 @@ where
                 self.open_file(data, load_in_new_window);
                 if let Some(s) = attrs.get("addr") {
                     match Addr::parse(s) {
-                        Ok(mut addr) => {
+                        Ok(addr) => {
                             let b = self.layout.active_buffer_mut();
-                            b.dot = b.map_addr(&mut addr);
+                            b.dot = b.map_addr(&addr);
                         }
                         Err(e) => self.set_status_message(format!("malformed addr: {e:?}")),
                     }
@@ -691,9 +691,9 @@ where
 
         if is_file {
             self.open_file(path, load_in_new_window);
-            if let Some(mut addr) = maybe_addr {
+            if let Some(addr) = maybe_addr {
                 let b = self.layout.active_buffer_mut();
-                b.dot = b.map_addr(&mut addr);
+                b.dot = b.map_addr(&addr);
                 self.layout.clamp_scroll();
                 self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
             }

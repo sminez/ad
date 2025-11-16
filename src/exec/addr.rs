@@ -390,7 +390,7 @@ pub trait Address: Haystack + Sized {
         self.len_chars()
     }
 
-    fn map_addr(&self, a: &mut Addr) -> Dot {
+    fn map_addr(&self, a: &Addr) -> Dot {
         let maybe_dot = match a {
             Addr::Explicit(d) => Some(*d),
             Addr::Simple(a) => self.map_simple_addr(a, self.current_dot()),
@@ -410,7 +410,7 @@ pub trait Address: Haystack + Sized {
         Some(Dot::from_char_indices(from, to))
     }
 
-    fn map_addr_base(&self, addr_base: &mut AddrBase, cur_dot: Dot) -> Option<Dot> {
+    fn map_addr_base(&self, addr_base: &AddrBase, cur_dot: Dot) -> Option<Dot> {
         use AddrBase::*;
 
         let dot = match addr_base {
@@ -480,17 +480,17 @@ pub trait Address: Haystack + Sized {
         Some(dot)
     }
 
-    fn map_simple_addr(&self, addr: &mut SimpleAddr, cur_dot: Dot) -> Option<Dot> {
-        let mut dot = self.map_addr_base(&mut addr.base, cur_dot)?;
+    fn map_simple_addr(&self, addr: &SimpleAddr, cur_dot: Dot) -> Option<Dot> {
+        let mut dot = self.map_addr_base(&addr.base, cur_dot)?;
 
-        for suffix in addr.suffixes.iter_mut() {
+        for suffix in addr.suffixes.iter() {
             dot = self.map_addr_base(suffix, dot)?;
         }
 
         Some(dot)
     }
 
-    fn map_compound_addr(&self, from: &mut SimpleAddr, to: &mut SimpleAddr) -> Option<Dot> {
+    fn map_compound_addr(&self, from: &SimpleAddr, to: &SimpleAddr) -> Option<Dot> {
         let c1 = self.map_simple_addr(from, self.current_dot())?.first_cur();
         let c2 = self.map_simple_addr(to, self.current_dot())?.last_cur();
 
@@ -663,8 +663,8 @@ mod tests {
         );
         b.dot = Cur::new(16).into();
 
-        let mut addr = Addr::parse(s).expect("valid addr");
-        b.dot = b.map_addr(&mut addr);
+        let addr = Addr::parse(s).expect("valid addr");
+        b.dot = b.map_addr(&addr);
 
         assert_eq!(b.dot, expected, ">{}<", b.dot_contents());
         assert_eq!(b.dot_contents(), expected_contents);
