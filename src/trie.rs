@@ -1,6 +1,6 @@
 //! A simple trie data structure for supporting key bindings and autocompletions in a composible
 //! way with the rest of the ad internal APIs.
-use std::{collections::BTreeMap, fmt, ops::Range};
+use std::{collections::BTreeMap, fmt, ops::Range, sync::Arc};
 
 /// A singly initialised Trie mapping key sequences to a value.
 ///
@@ -15,7 +15,7 @@ where
     K: Clone + PartialEq + Ord,
     V: Clone,
 {
-    nodes: Vec<Node<K, V>>,
+    nodes: Arc<[Node<K, V>]>,
     n_roots: usize,
     default: Option<DefaultMapping<K, V>>,
 }
@@ -41,7 +41,7 @@ where
 {
     fn default() -> Self {
         Self {
-            nodes: Vec::new(),
+            nodes: Arc::from(Vec::new()),
             n_roots: 0,
             default: None,
         }
@@ -71,7 +71,7 @@ where
         let (_, n_roots) = flatten(roots, &mut nodes);
 
         Ok(Trie {
-            nodes,
+            nodes: Arc::from(nodes),
             n_roots,
             default: None,
         })
