@@ -144,7 +144,7 @@ where
     ///
     /// If the key maps to a leaf then the value is returned, if it maps to a sub-trie then
     /// `Partial` is returned to denote that the given key is a parent of one or more values. If
-    /// the key is not found within the `Try` then `Missing` is returned.
+    /// the key is not found within the `Trie` then `Missing` is returned.
     ///
     /// If this [Trie] contains a default mapping, it will be applied to missing single element
     /// keys.
@@ -155,7 +155,7 @@ where
         }
     }
 
-    /// Query this Try for a given key or key prefix requiring the key to match exactly.
+    /// Query this [Trie] for a given key or key prefix requiring the key to match exactly.
     ///
     /// If the key maps to a leaf then the `Some(value)` is returned, otherwise `None`.
     ///
