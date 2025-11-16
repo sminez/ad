@@ -35,10 +35,11 @@ n_comment_lines="$(echo "$xdot" | grep "^\\s*$comment_str" | wc -l)"
 
 if [ "$n_lines" != "$n_comment_lines" ]; then
   # expand to lines -> for each line -> insert comment_str at the start
-  adEdit "-,/\\n/ x/.*\\n/ i/$comment_str /"
+  adEdit "-,/\\n/ x/.*\\n/ i:$comment_str :"
 else
   # expand to lines -> for each line start up to comment_str -> remove comment_str
-  adEdit "-,/\\n/ x/.+\\n/ n/^(\\s*?)$comment_str ?/ c/{1}/"
+  adEdit "-,/\\n/ x/.+\\n/ n:^(\\s*?)$comment_str ?: c/{1}/"
 fi
 
 echo "$addr" | bufWrite "$AD_BUFID" addr
+adCtl "echo addr was '$addr'"
