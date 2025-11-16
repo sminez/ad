@@ -15,7 +15,8 @@ where
     K: Clone + PartialEq + Ord,
     V: Clone,
 {
-    nodes: Arc<[Node<K, V>]>,
+    nodes: Arc<[Node<K>]>,
+    values: Arc<[V]>,
     n_roots: usize,
     default: Option<DefaultMapping<K, V>>,
 }
@@ -28,6 +29,7 @@ where
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Trie")
             .field("nodes", &self.nodes)
+            .field("values", &self.values)
             .field("n_roots", &self.n_roots)
             .field("default", &"<function>")
             .finish()
@@ -42,6 +44,7 @@ where
     fn default() -> Self {
         Self {
             nodes: Arc::from(Vec::new()),
+            values: Arc::from(Vec::new()),
             n_roots: 0,
             default: None,
         }
@@ -68,10 +71,12 @@ where
         }
 
         let mut nodes = Vec::new();
-        let (_, n_roots) = flatten(roots, &mut nodes);
+        let mut values = Vec::new();
+        let (_, n_roots) = flatten(roots, &mut nodes, &mut values);
 
         Ok(Trie {
             nodes: Arc::from(nodes),
+            values: Arc::from(values),
             n_roots,
             default: None,
         })
@@ -124,13 +129,13 @@ where
             let mut child_key = key.clone();
             child_key.push(node.key.clone());
 
-            match &node.data {
-                Data::Leaf { value } => pairs.push((child_key, value.clone())),
+            match node.data {
+                Data::Leaf { i } => pairs.push((child_key, self.values[i].clone())),
 
                 Data::Internal {
                     child_start,
                     n_children,
-                } => self.extract_pairs(pairs, child_key, *child_start..*child_start + *n_children),
+                } => self.extract_pairs(pairs, child_key, child_start..child_start + n_children),
             }
         }
     }
@@ -186,10 +191,10 @@ where
                 if &node.key == target {
                     key_index += 1;
 
-                    match &node.data {
-                        Data::Leaf { value } => {
+                    match node.data {
+                        Data::Leaf { i } => {
                             return if key_index == key.len() {
-                                QueryResult::Val(value.clone())
+                                QueryResult::Val(self.values[i].clone())
                             } else {
                                 QueryResult::Missing
                             };
@@ -199,7 +204,7 @@ where
                             child_start,
                             n_children,
                         } => {
-                            indices = *child_start..*child_start + *n_children;
+                            indices = child_start..child_start + n_children;
                             continue 'outer;
                         }
                     }
@@ -256,12 +261,51 @@ where
     }
 }
 
+/// A single node within a [Trie].
+///
+/// Contains the last element of the key that traverses down to this node alongside [Data] that
+/// identifies this node as being internal or a leaf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Node<K>
+where
+    K: Clone + PartialEq + Ord,
+{
+    key: K,
+    data: Data,
+}
+
+impl<K> Node<K>
+where
+    K: Clone + PartialEq + PartialOrd + Ord,
+{
+    fn new_internal(key: K, child_start: usize, n_children: usize) -> Self {
+        Self {
+            key,
+            data: Data::Internal {
+                child_start,
+                n_children,
+            },
+        }
+    }
+
+    fn new_leaf(key: K, i: usize) -> Self {
+        Self {
+            key,
+            data: Data::Leaf { i },
+        }
+    }
+
+    fn is_leaf(&self) -> bool {
+        matches!(self.data, Data::Leaf { .. })
+    }
+}
+
 /// The internal data held at each node in a Trie.
 ///
 /// Internal nodes are "pointers" to their children while leaves hold the value associated with the
 /// full key used to traverse down to them.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Data<V> {
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum Data {
     Internal {
         /// Index of the first child node
         child_start: usize,
@@ -269,50 +313,9 @@ enum Data<V> {
         n_children: usize,
     },
     Leaf {
-        // Value associated with the full key-path down to this node
-        value: V,
+        // Index of the value associated with the full key-path down to this node
+        i: usize,
     },
-}
-
-/// A single node within a [Trie].
-///
-/// Contains the last element of the key that traverses down to this node alongside [Data] that
-/// identifies this node as being internal or a leaf.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Node<K, V>
-where
-    K: Clone + PartialEq + Ord,
-    V: Clone,
-{
-    key: K,
-    data: Data<V>,
-}
-
-impl<K, V> Node<K, V>
-where
-    K: Clone + PartialEq + PartialOrd + Ord,
-    V: Clone,
-{
-    fn new_internal(key: K, children_start: usize, children_count: usize) -> Self {
-        Self {
-            key,
-            data: Data::Internal {
-                child_start: children_start,
-                n_children: children_count,
-            },
-        }
-    }
-
-    fn new_leaf(key: K, value: V) -> Self {
-        Self {
-            key,
-            data: Data::Leaf { value },
-        }
-    }
-
-    fn is_leaf(&self) -> bool {
-        matches!(self.data, Data::Leaf { .. })
-    }
 }
 
 #[derive(Debug)]
@@ -374,7 +377,11 @@ where
     Ok(())
 }
 
-fn flatten<K, V>(mut roots: Vec<BuildNode<K, V>>, nodes: &mut Vec<Node<K, V>>) -> (usize, usize)
+fn flatten<K, V>(
+    mut roots: Vec<BuildNode<K, V>>,
+    nodes: &mut Vec<Node<K>>,
+    values: &mut Vec<V>,
+) -> (usize, usize)
 where
     K: Clone + PartialEq + Ord,
     V: Clone,
@@ -395,14 +402,18 @@ where
                 child_stack.push((i, children));
             }
 
-            BuildNodeData::Leaf(v) => nodes.push(Node::new_leaf(k, v)),
+            BuildNodeData::Leaf(v) => {
+                let i = values.len();
+                values.push(v);
+                nodes.push(Node::new_leaf(k, i))
+            }
         }
     }
 
     // Insert the child nodes for each root node, updating their state now that we know the offsets
     // of their children.
     for (i, children) in child_stack.into_iter() {
-        let (start, _) = flatten(children, nodes);
+        let (start, _) = flatten(children, nodes, values);
         match &mut nodes[i] {
             Node {
                 data: Data::Internal { child_start, .. },
