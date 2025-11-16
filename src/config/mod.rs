@@ -328,18 +328,24 @@ fn try_input_from_str_template(s: &str) -> Result<Input, String> {
     } else if let Some(suffix) = s.strip_prefix("C-A-") {
         if suffix.len() == 1 {
             Ok(Input::CtrlAlt(suffix.chars().next().unwrap()))
+        } else if suffix == "<space>" {
+            Ok(Input::CtrlAlt(' '))
         } else {
             Err(format!("invalid send_key value: C-A-{suffix}"))
         }
     } else if let Some(suffix) = s.strip_prefix("C-") {
         if suffix.len() == 1 {
             Ok(Input::Ctrl(suffix.chars().next().unwrap()))
+        } else if suffix == "<space>" {
+            Ok(Input::Ctrl(' '))
         } else {
             Err(format!("invalid send_key value: C-{suffix}"))
         }
     } else if let Some(suffix) = s.strip_prefix("A-") {
         if suffix.len() == 1 {
             Ok(Input::Alt(suffix.chars().next().unwrap()))
+        } else if suffix == "<space>" {
+            Ok(Input::Alt(' '))
         } else {
             Err(format!("invalid send_key value: A-{suffix}"))
         }
@@ -401,6 +407,9 @@ mod tests {
     #[test_case("A-y", &[Input::Alt('y')]; "alt letter")]
     #[test_case("C-y", &[Input::Ctrl('y')]; "control letter")]
     #[test_case("C-A-y", &[Input::CtrlAlt('y')]; "control alt letter")]
+    #[test_case("A-<space>", &[Input::Alt(' ')]; "alt space")]
+    #[test_case("C-<space>", &[Input::Ctrl(' ')]; "control space")]
+    #[test_case("C-A-<space>", &[Input::CtrlAlt(' ')]; "control alt space")]
     #[test_case("<backspace>", &[Input::Backspace]; "backspace")]
     #[test_case("<delete>", &[Input::Del]; "delete")]
     #[test_case("<end>", &[Input::End]; "end")]
