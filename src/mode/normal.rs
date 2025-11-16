@@ -6,6 +6,7 @@ use crate::{
     keymap,
     mode::Mode,
     term::CurShape,
+    trie::QueryResult,
 };
 
 pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
@@ -249,8 +250,61 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         name: "NORMAL".to_string(),
         cur_shape: CurShape::Block,
         keymap,
-        handle_expired_pending: |keys, cfg| cfg.keys.normal.get(keys).map(|ka| ka.as_actions()),
+        handle_expired_pending: |_| QueryResult::Missing,
     };
 
     (mode, docs)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::{Inputs, KeyBindings},
+        editor::Action,
+        key::Input,
+    };
+    use simple_test_case::test_case;
+
+    #[test_case("C-k", Some(Actions::Single(Action::LspHover)); "direct override single")]
+    #[test_case("g d", Some(Actions::Single(Action::LspGotoDefinition)); "direct override sequence")]
+    #[test_case("z x", None; "sharing prefix with defaults")]
+    #[test]
+    fn overrides_work(binding: &str, expected_default_actions: Option<Actions>) {
+        let action = r#"{ send_keys = "A" }"#;
+        let overrides: KeyBindings =
+            toml::from_str(&format!("[normal]\n\"{binding}\" = {action}")).unwrap();
+
+        let mut mode = normal_mode().0;
+
+        // Without the overrides in place we should get the default behaviour
+        let Inputs(mut keys) = Inputs::try_from(binding.to_owned()).unwrap();
+        let default_actions = mode.handle_keys(&mut keys);
+        assert_eq!(default_actions, expected_default_actions, "default");
+
+        mode.keymap = mode.keymap.merge_overriding(overrides.normal).unwrap();
+
+        // With the overrides we should see the send_keys action
+        let Inputs(mut keys) = Inputs::try_from(binding.to_owned()).unwrap();
+        let override_actions = mode.handle_keys(&mut keys);
+        assert_eq!(
+            override_actions,
+            Some(Actions::Single(Action::SendKeys {
+                ks: vec![Input::Char('A')]
+            })),
+            "override"
+        );
+    }
+
+    #[test_case("d g"; "shadowing an existing binding")]
+    #[test_case("g g g"; "shadowing an existing sequence")]
+    #[test]
+    fn overrides_shadowing_defaults_error(binding: &str) {
+        let action = r#"{ send_keys = "A" }"#;
+        let overrides: KeyBindings =
+            toml::from_str(&format!("[normal]\n\"{binding}\" = {action}")).unwrap();
+
+        let mut mode = normal_mode().0;
+        assert!(mode.with_overrides(overrides.normal).is_err());
+    }
 }

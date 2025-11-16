@@ -149,6 +149,7 @@ where
             config.lsp_autostart,
         ));
 
+        let modes = modes(&config.keys);
         let config = Arc::new(RwLock::new(config));
 
         let ui = Ui::new(mode, config.clone());
@@ -166,7 +167,7 @@ where
             ui,
             cwd,
             running: true,
-            modes: modes(),
+            modes,
             pending_keys: Vec::new(),
             layout,
             lsp_manager,
@@ -521,8 +522,7 @@ where
 
     pub fn handle_input(&mut self, input: Input) {
         self.pending_keys.push(input);
-        let maybe_actions =
-            self.modes[0].handle_keys(&mut self.pending_keys, &*config_handle!(self));
+        let maybe_actions = self.modes[0].handle_keys(&mut self.pending_keys);
 
         if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);
@@ -530,7 +530,7 @@ where
     }
 
     fn handle_explicit_inputs(&mut self, inputs: &mut Vec<Input>) {
-        let maybe_actions = self.modes[0].handle_keys(inputs, &*config_handle!(self));
+        let maybe_actions = self.modes[0].handle_keys(inputs);
 
         if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);

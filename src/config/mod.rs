@@ -269,16 +269,16 @@ impl LspConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct KeyBindings {
     #[serde(default, deserialize_with = "de_serde_trie")]
-    pub normal: Trie<Input, KeyAction>,
+    pub normal: Trie<Input, Actions>,
     #[serde(default, deserialize_with = "de_serde_trie")]
-    pub insert: Trie<Input, KeyAction>,
+    pub insert: Trie<Input, Actions>,
 }
 
 impl Default for KeyBindings {
     fn default() -> Self {
         KeyBindings {
-            normal: Trie::from_pairs(Vec::new()).unwrap(),
-            insert: Trie::from_pairs(Vec::new()).unwrap(),
+            normal: Trie::try_from_iter(Vec::new()).unwrap(),
+            insert: Trie::try_from_iter(Vec::new()).unwrap(),
         }
     }
 }
@@ -291,12 +291,10 @@ pub enum KeyAction {
 }
 
 impl KeyAction {
-    pub fn as_actions(&self) -> Actions {
+    fn into_actions(self) -> Actions {
         match self {
-            Self::Execute { run } => Actions::Single(Action::ExecuteString { s: run.clone() }),
-            Self::Keys { send_keys } => Actions::Single(Action::SendKeys {
-                ks: send_keys.0.clone(),
-            }),
+            Self::Execute { run } => Actions::Single(Action::ExecuteString { s: run }),
+            Self::Keys { send_keys } => Actions::Single(Action::SendKeys { ks: send_keys.0 }),
         }
     }
 }
@@ -304,7 +302,7 @@ impl KeyAction {
 /// Raw inputs to be sent through to the main editor event loop
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
-pub struct Inputs(Vec<Input>);
+pub struct Inputs(pub(crate) Vec<Input>);
 
 impl TryFrom<String> for Inputs {
     type Error = String;
@@ -367,7 +365,7 @@ fn try_input_from_str_template(s: &str) -> Result<Input, String> {
     }
 }
 
-fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, KeyAction>, D::Error>
+fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, Actions>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -380,12 +378,12 @@ where
         .into_iter()
         .map(|(k, action)| {
             Inputs::try_from(k)
-                .map(|Inputs(keys)| (keys, action))
+                .map(|Inputs(keys)| (keys, action.into_actions()))
                 .map_err(de::Error::custom)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Trie::from_pairs(raw).map_err(de::Error::custom)
+    Trie::try_from_iter(raw).map_err(de::Error::custom)
 }
 
 #[cfg(test)]
