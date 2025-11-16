@@ -1,32 +1,20 @@
 :: TODO
 
 -- RE rewrite --
-- [ ] have a StreamingHaystack trait?
-- [ ] MASSIVELY speed up methods on Match for extracting strings
-- [ ] track byte and char offsets when matching, not just char offsets
 - [ ] look at bailing early from running the VM to go back to aho-corasick if
       all threads die?
   - could be another large speed up but would need to contend with the unanchored
     matching instructions that wrap all VM programs
 
--- Exec rewrite --
-- [ ] better name...
-- [ ] use transient scratch for writing expressions
-- [ ] support running a script from a file
 
 -- Misc / Editor features --
 
-- [ ] Add command & Edit history using minibuffer with hidden lines
+- [ ] support running an exec script from a file
 
-- [ ] split apart the Regex itself and a Matcher struct which is what needs to be mutable
-      - The matcher can be reused if needed or used as a oneshot for the common case of
-        constructing a regex and then using it before throwing it away
+- [ ] Add command & Edit history using minibuffer with hidden lines
 
 -- Structural regular expressions --
 - [ ] Piping through a shell command
 - [ ] Replace without output from a shell command
-- [ ] Look at running grouped expressions in parallel a-la Sam
-      - This should be doable by pre-computing the match positions and tracking any edit
-        offsets that have built up
 - [ ] Storing the history of previous edit commands and allowing for cycling through
       them would be helpful (same for Command mode).
