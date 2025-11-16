@@ -6,13 +6,12 @@ use crate::{
     keymap,
     mode::Mode,
     term::CurShape,
-    trie::QueryResult,
 };
 
 pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
     let leader = Char(' ');
 
-    let (mut keymap, docs) = keymap! {
+    let (keymap, docs) = keymap! {
         // Exiting
         "close window";
         [ leader, Char('q') ] => [ DeleteWindow { force: false } ],
@@ -241,16 +240,20 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         [ Ctrl('k') ] => [ LspHover ],
     };
 
-    keymap.set_default(|&i| match i {
-        Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawInput { i })),
-        _ => None,
-    });
-
     let mode = Mode {
         name: "NORMAL".to_string(),
         cur_shape: CurShape::Block,
         keymap,
-        handle_expired_pending: |_| QueryResult::Missing,
+        handle_expired_pending: |keys| {
+            if keys.len() > 1 {
+                return None;
+            }
+            let i = keys[0];
+            match i {
+                Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawInput { i })),
+                _ => None,
+            }
+        },
     };
 
     (mode, docs)

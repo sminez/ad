@@ -8,7 +8,6 @@ use std::{collections::BTreeMap, fmt, ops::Range, sync::Arc};
 /// existing in the same Trie.
 ///
 /// There are convenience methods provided for `Trie<char, V>` for when &str values are used as keys.
-#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Clone, PartialEq, Eq)]
 pub struct Trie<K, V>
 where
@@ -18,7 +17,6 @@ where
     nodes: Arc<[Node<K>]>,
     values: Arc<[V]>,
     n_roots: usize,
-    default: Option<DefaultMapping<K, V>>,
 }
 
 impl<K, V> fmt::Debug for Trie<K, V>
@@ -31,7 +29,6 @@ where
             .field("nodes", &self.nodes)
             .field("values", &self.values)
             .field("n_roots", &self.n_roots)
-            .field("default", &"<function>")
             .finish()
     }
 }
@@ -46,7 +43,6 @@ where
             nodes: Arc::from(Vec::new()),
             values: Arc::from(Vec::new()),
             n_roots: 0,
-            default: None,
         }
     }
 }
@@ -78,7 +74,6 @@ where
             nodes: Arc::from(nodes),
             values: Arc::from(values),
             n_roots,
-            default: None,
         })
     }
 
@@ -140,41 +135,12 @@ where
         }
     }
 
-    /// Set the default handler for unmatched single element keys
-    pub fn set_default(&mut self, default: DefaultMapping<K, V>) {
-        self.default = Some(default);
-    }
-
     /// Query this [Trie] for a given key or key prefix
     ///
     /// If the key maps to a leaf then the value is returned, if it maps to a sub-trie then
     /// `Partial` is returned to denote that the given key is a parent of one or more values. If
     /// the key is not found within the `Trie` then `Missing` is returned.
-    ///
-    /// If this [Trie] contains a default mapping, it will be applied to missing single element
-    /// keys.
     pub fn get(&self, key: &[K]) -> QueryResult<V> {
-        match self.find_node(key) {
-            QueryResult::Missing if key.len() == 1 => self.default.and_then(|f| f(&key[0])).into(),
-            qr => qr,
-        }
-    }
-
-    /// Query this [Trie] for a given key or key prefix requiring the key to match exactly.
-    ///
-    /// If the key maps to a leaf then the `Some(value)` is returned, otherwise `None`.
-    ///
-    /// If this [Trie] contains a default mapping, it will be applied to missing single element
-    /// keys.
-    pub fn get_exact(&self, key: &[K]) -> Option<V> {
-        match self.find_node(key) {
-            QueryResult::Val(v) => Some(v),
-            QueryResult::Missing if key.len() == 1 => self.default.and_then(|f| f(&key[0])),
-            _ => None,
-        }
-    }
-
-    fn find_node(&self, key: &[K]) -> QueryResult<V> {
         if key.is_empty() {
             return QueryResult::Missing;
         }
@@ -218,6 +184,13 @@ where
         }
 
         QueryResult::Partial
+    }
+
+    /// Query this [Trie] for a given key or key prefix requiring the key to match exactly.
+    ///
+    /// If the key maps to a leaf then the `Some(value)` is returned, otherwise `None`.
+    pub fn get_exact(&self, key: &[K]) -> Option<V> {
+        self.get(key).into()
     }
 
     /// The number of leaf values in this Trie
@@ -566,35 +539,5 @@ mod tests {
         let t2 = Trie::from_str_keys(vec![("foo", 2)]).unwrap();
 
         assert!(t1.merge_overriding(t2).is_ok());
-    }
-
-    fn usize_default_handler(n: &usize) -> Option<usize> {
-        Some(n + 1)
-    }
-
-    #[test_case(&[42], QueryResult::Val(1); "exact single should match from the Trie")]
-    #[test_case(&[12, 13], QueryResult::Val(2); "exact multi should match from the Trie")]
-    #[test_case(&[69], QueryResult::Val(70); "missing single should be defaulted")]
-    #[test_case(&[69, 420], QueryResult::Missing; "missing multi should remain missing")]
-    #[test_case(&[12], QueryResult::Partial; "partial should remain partial")]
-    #[test]
-    fn get_uses_default_correctly(k: &[usize], expected: QueryResult<usize>) {
-        let mut t = Trie::try_from_iter(vec![(vec![42], 1), (vec![12, 13], 2)]).unwrap();
-        t.set_default(usize_default_handler);
-
-        assert_eq!(t.get(k), expected);
-    }
-
-    #[test_case(&[42], Some(1); "exact single should match from the Trie")]
-    #[test_case(&[12, 13], Some(2); "exact multi should match from the Trie")]
-    #[test_case(&[69], Some(70); "missing single should be defaulted")]
-    #[test_case(&[69, 420], None; "missing multi should remain None")]
-    #[test_case(&[12], None; "partial should remain None")]
-    #[test]
-    fn get_exact_uses_default_correctly(k: &[usize], expected: Option<usize>) {
-        let mut t = Trie::try_from_iter(vec![(vec![42], 1), (vec![12, 13], 2)]).unwrap();
-        t.set_default(usize_default_handler);
-
-        assert_eq!(t.get_exact(k), expected);
     }
 }
