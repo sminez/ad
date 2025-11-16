@@ -207,7 +207,7 @@ impl Program {
         E: Edit,
         W: Write,
     {
-        let dot = match self.initial_addr.as_ref() {
+        let mut dot = match self.initial_addr.as_ref() {
             Some(addr) => ed.map_addr(addr),
             None => ed.current_dot(),
         };
@@ -247,12 +247,11 @@ impl Program {
 
                 'd' => edit_actions.push(EditAction::Remove(caps.from(), caps.to())),
                 'c' => {
-                    // order flipped as we reverse before running
-                    edit_actions.push(EditAction::Insert(
+                    edit_actions.push(EditAction::Replace(
                         caps.from(),
+                        caps.to(),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
-                    edit_actions.push(EditAction::Remove(caps.from(), caps.to()));
                 }
                 'i' => {
                     edit_actions.push(EditAction::Insert(
@@ -271,21 +270,23 @@ impl Program {
             }
         }
 
-        edit_actions.reverse();
         ed.begin_edit_transaction();
-        for action in edit_actions {
-            match action {
-                EditAction::Insert(from, s) => {
-                    let from = ed.byte_to_char(from + byte_from).unwrap();
-                    ed.insert(from, &s);
-                }
-                EditAction::Remove(from, to) => {
-                    let from = ed.byte_to_char(from + byte_from).unwrap();
-                    let to = ed.byte_to_char(to + byte_from).unwrap();
-                    ed.remove(from, to);
-                }
-            };
+
+        // Determine the dot we need to set by applying the last action. All other actions update
+        // this selection based on how they manipulate the buffer so we need to special case this
+        // final action in order to not double-count the delta it would generate.
+        let last_action = edit_actions.pop();
+        let mut delta = 0;
+        if let Some(action) = last_action {
+            dot = action.as_dot(byte_from, ed);
+            action.apply(byte_from, ed);
         }
+
+        // apply remaining actions in reverse order, updating the final dot position accordingly
+        for action in edit_actions.into_iter().rev() {
+            delta += action.apply(byte_from, ed);
+        }
+
         ed.end_edit_transaction();
 
         // In the case of running against a lazy stream our initial `to` will be a sential value of
@@ -294,7 +295,12 @@ impl Program {
         // of always doing it is minimal as checking the number of chars in the buffer is O(1) due
         // to us caching the value.
         let ix_max = ed.len_chars();
+
+        // Apply the cumulative delta from all edit actions to the final dot position to account
+        // for changes made to the buffer state.
         let (from, to) = dot.as_char_indices();
+        let from = (from as isize + delta) as usize;
+        let to = (to as isize + delta) as usize;
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
     }
@@ -303,6 +309,54 @@ impl Program {
 enum EditAction {
     Insert(usize, String),
     Remove(usize, usize),
+    Replace(usize, usize, String),
+}
+
+impl EditAction {
+    fn as_dot<E>(&self, byte_from: usize, ed: &mut E) -> Dot
+    where
+        E: Edit,
+    {
+        match self {
+            Self::Insert(from, s) | Self::Replace(from, _, s) => {
+                let from = ed.byte_to_char(*from + byte_from).unwrap();
+                let n_chars = s.chars().count();
+
+                Dot::from_char_indices(from, from + n_chars - 1)
+            }
+
+            Self::Remove(from, _) => {
+                let from = ed.byte_to_char(*from + byte_from).unwrap();
+                Dot::from_char_indices(from, from)
+            }
+        }
+    }
+
+    fn apply<E>(self, byte_from: usize, ed: &mut E) -> isize
+    where
+        E: Edit,
+    {
+        match self {
+            Self::Insert(from, s) => {
+                let from = ed.byte_to_char(from + byte_from).unwrap();
+                ed.insert(from, &s);
+                s.chars().count() as isize
+            }
+
+            Self::Remove(from, to) => {
+                let from = ed.byte_to_char(from + byte_from).unwrap();
+                let to = ed.byte_to_char(to + byte_from).unwrap();
+                ed.remove(from, to);
+                -((to - from) as isize)
+            }
+
+            Self::Replace(from, to, s) => {
+                Self::Remove(from, to).apply(byte_from, ed);
+                let n_chars = Self::Insert(from, s).apply(byte_from, ed);
+                n_chars - (to - from) as isize
+            }
+        }
+    }
 }
 
 struct Ctx<'a, E>
@@ -472,6 +526,31 @@ mod tests {
 
         prog.execute(&mut b, "test", &mut vec![]).unwrap();
         assert_eq!(&b.str_contents(), "this is a line\nand another");
+    }
+
+    #[test_case(", x/a/ d", "foo br bz", "z", (8, 8); "extract delete")]
+    #[test_case(", x/a/ i/12/", "foo b12ar b12az", "12", (11, 12); "extract insert")]
+    #[test_case(", x/o/ a/XYZ/", "foXYZoXYZ bar baz", "XYZ", (6, 8); "extract append")] // typos:ignore
+    #[test_case(", x/b/ c/B/", "foo Bar Baz", "B", (8, 8); "extract change same length")]
+    #[test_case(", x/b./ c/X/", "foo Xr Xz", "X", (7, 7); "extract change shorter")]
+    #[test_case(", x/b/ c/Bee/", "foo Beear Beeaz", "Bee", (10, 12); "extract change longer")]
+    #[test_case(", x/b../ p/{0}/", "foo bar baz", "foo bar baz", (0, 11); "print should keep original")]
+    #[test]
+    fn returned_dot_should_hold_the_final_edit(
+        s: &str,
+        expected_content: &str,
+        expected_dot_content: &str,
+        expected_dot: (usize, usize),
+    ) {
+        let mut prog = Program::try_parse(s).unwrap();
+
+        let initial_content = "foo bar baz";
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        let dot = prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        assert_eq!(&b.str_contents(), expected_content);
+        assert_eq!(&dot.content(&b), expected_dot_content);
+        assert_eq!(dot.as_char_indices(), expected_dot);
     }
 
     #[test_case(", d"; "delete buffer")]
