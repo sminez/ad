@@ -140,7 +140,7 @@ where
     /// If the key maps to a leaf then the value is returned, if it maps to a sub-trie then
     /// `Partial` is returned to denote that the given key is a parent of one or more values. If
     /// the key is not found within the `Trie` then `Missing` is returned.
-    pub fn get(&self, key: &[K]) -> QueryResult<V> {
+    pub fn get<'a>(&'a self, key: &[K]) -> QueryResult<'a, V> {
         if key.is_empty() {
             return QueryResult::Missing;
         }
@@ -160,7 +160,7 @@ where
                     match node.data {
                         Data::Leaf { i } => {
                             return if key_index == key.len() {
-                                QueryResult::Val(self.values[i].clone())
+                                QueryResult::Val(&self.values[i])
                             } else {
                                 QueryResult::Missing
                             };
@@ -189,7 +189,7 @@ where
     /// Query this [Trie] for a given key or key prefix requiring the key to match exactly.
     ///
     /// If the key maps to a leaf then the `Some(value)` is returned, otherwise `None`.
-    pub fn get_exact(&self, key: &[K]) -> Option<V> {
+    pub fn get_exact<'a>(&'a self, key: &[K]) -> Option<&'a V> {
         self.get(key).into()
     }
 
@@ -222,14 +222,14 @@ where
     /// Query this [Trie] using a string key.
     ///
     /// Both full and partial matches are possible.
-    pub fn get_str(&self, key: &str) -> QueryResult<V> {
+    pub fn get_str<'a>(&'a self, key: &str) -> QueryResult<'a, V> {
         self.get(&key.chars().collect::<Vec<_>>())
     }
 
     /// Query this [Trie] using a string key.
     ///
     /// Only fll matches will be returned.
-    pub fn get_str_exact(&self, key: &str) -> Option<V> {
+    pub fn get_str_exact<'a>(&'a self, key: &str) -> Option<&'a V> {
         self.get_exact(&key.chars().collect::<Vec<_>>())
     }
 }
@@ -410,17 +410,17 @@ pub type DefaultMapping<K, V> = fn(&K) -> Option<V>;
 
 /// The result of querying a [Trie] for a particular Key.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum QueryResult<V> {
+pub enum QueryResult<'a, V> {
     /// A leaf value associated with the key used in the query
-    Val(V),
+    Val(&'a V),
     /// The key used to query is a prefix to multiple values
     Partial,
     /// The key does not exist within the [Trie]
     Missing,
 }
 
-impl<V> From<Option<V>> for QueryResult<V> {
-    fn from(opt: Option<V>) -> Self {
+impl<'a, V> From<Option<&'a V>> for QueryResult<'a, V> {
+    fn from(opt: Option<&'a V>) -> Self {
         match opt {
             Some(v) => QueryResult::Val(v),
             None => QueryResult::Missing,
@@ -428,24 +428,11 @@ impl<V> From<Option<V>> for QueryResult<V> {
     }
 }
 
-impl<V> From<QueryResult<V>> for Option<V> {
-    fn from(q: QueryResult<V>) -> Self {
+impl<'a, V> From<QueryResult<'a, V>> for Option<&'a V> {
+    fn from(q: QueryResult<'a, V>) -> Self {
         match q {
             QueryResult::Val(v) => Some(v),
             _ => None,
-        }
-    }
-}
-
-impl<V> QueryResult<V> {
-    pub fn map<F, U>(self, f: F) -> QueryResult<U>
-    where
-        F: Fn(V) -> U,
-    {
-        match self {
-            Self::Val(v) => QueryResult::Val(f(v)),
-            Self::Partial => QueryResult::Partial,
-            Self::Missing => QueryResult::Missing,
         }
     }
 }
@@ -465,15 +452,15 @@ mod tests {
         assert!(Trie::try_from_iter(vec![(vec![42], 1), (vec![42, 69], 2)]).is_err());
     }
 
-    #[test_case("foo", QueryResult::Val(1); "val 1")]
-    #[test_case("bar", QueryResult::Val(2); "val 2")]
-    #[test_case("baz", QueryResult::Val(3); "val 3")]
+    #[test_case("foo", QueryResult::Val(&1); "val 1")]
+    #[test_case("bar", QueryResult::Val(&2); "val 2")]
+    #[test_case("baz", QueryResult::Val(&3); "val 3")]
     #[test_case("ba", QueryResult::Partial; "partial 1")] // typos:ignore
     #[test_case("fo", QueryResult::Partial; "partial 2")] // typos:ignore
     #[test_case("barf", QueryResult::Missing; "overshoot")]
     #[test_case("have you any wool?", QueryResult::Missing; "fully missing")]
     #[test]
-    fn get_works(key: &str, expected: QueryResult<usize>) {
+    fn get_works(key: &str, expected: QueryResult<'_, usize>) {
         let t = Trie::from_str_keys(vec![("foo", 1), ("bar", 2), ("baz", 3)]).unwrap();
         assert_eq!(t.get_str(key), expected);
     }
@@ -485,7 +472,7 @@ mod tests {
     #[test]
     fn get_exact_works(key: &[usize], expected: Option<usize>) {
         let t = Trie::try_from_iter(vec![(vec![42, 69], 1)]).unwrap();
-        assert_eq!(t.get_exact(key), expected);
+        assert_eq!(t.get_exact(key), expected.as_ref());
     }
 
     #[test_case("fo", None; "partial")] // typos:ignore
@@ -495,7 +482,7 @@ mod tests {
     #[test]
     fn get_str_exact_works(key: &str, expected: Option<usize>) {
         let t = Trie::from_str_keys(vec![("foo", 1)]).unwrap();
-        assert_eq!(t.get_str_exact(key), expected);
+        assert_eq!(t.get_str_exact(key), expected.as_ref());
     }
 
     #[test]
@@ -505,10 +492,10 @@ mod tests {
 
         let merged = t1.merge(t2).unwrap();
 
-        assert_eq!(merged.get_str_exact("foo"), Some(1));
-        assert_eq!(merged.get_str_exact("bar"), Some(2));
-        assert_eq!(merged.get_str_exact("baz"), Some(3));
-        assert_eq!(merged.get_str_exact("qux"), Some(4));
+        assert_eq!(merged.get_str_exact("foo"), Some(&1));
+        assert_eq!(merged.get_str_exact("bar"), Some(&2));
+        assert_eq!(merged.get_str_exact("baz"), Some(&3));
+        assert_eq!(merged.get_str_exact("qux"), Some(&4));
         assert_eq!(merged.len(), 4);
     }
 
@@ -527,9 +514,9 @@ mod tests {
 
         let merged = t1.merge_overriding(t2).unwrap();
 
-        assert_eq!(merged.get_str_exact("foo"), Some(4));
-        assert_eq!(merged.get_str_exact("bar"), Some(2));
-        assert_eq!(merged.get_str_exact("baz"), Some(3));
+        assert_eq!(merged.get_str_exact("foo"), Some(&4));
+        assert_eq!(merged.get_str_exact("bar"), Some(&2));
+        assert_eq!(merged.get_str_exact("baz"), Some(&3));
         assert_eq!(merged.len(), 3);
     }
 

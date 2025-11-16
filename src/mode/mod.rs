@@ -69,7 +69,7 @@ impl Mode {
         match self.keymap.get(keys) {
             QueryResult::Val(actions) => {
                 keys.clear();
-                Some(actions)
+                Some(actions.clone())
             }
             QueryResult::Partial => None,
             QueryResult::Missing => {
