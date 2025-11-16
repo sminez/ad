@@ -1,19 +1,30 @@
 //! Modal editing support.
 use crate::{
-    config::Config,
+    config::KeyBindings,
     editor::Actions,
     key::Input,
     term::CurShape,
     trie::{QueryResult, Trie},
 };
 use std::fmt;
+use tracing::error;
 
 mod insert;
 mod normal;
 
 /// The modes available for ad
-pub(crate) fn modes() -> Vec<Mode> {
-    vec![normal::normal_mode().0, insert::insert_mode().0]
+pub(crate) fn modes(custom_bindings: &KeyBindings) -> Vec<Mode> {
+    let mut normal = normal::normal_mode().0;
+    if let Err(e) = normal.with_overrides(custom_bindings.normal.clone()) {
+        error!("unable to apply keymap overrides for NORMAL mode: {e}");
+    }
+
+    let mut insert = insert::insert_mode().0;
+    if let Err(e) = insert.with_overrides(custom_bindings.insert.clone()) {
+        error!("unable to apply keymap overrides for INSERT mode: {e}");
+    }
+
+    vec![normal, insert]
 }
 
 /// Docs for the different keybindings available in each mode
@@ -29,7 +40,7 @@ pub(crate) struct Mode {
     pub(crate) name: String,
     pub(crate) cur_shape: CurShape,
     pub(crate) keymap: Trie<Input, Actions>,
-    handle_expired_pending: fn(&[Input], &Config) -> QueryResult<Actions>,
+    handle_expired_pending: fn(&[Input]) -> Option<Actions>,
 }
 
 impl fmt::Display for Mode {
@@ -43,31 +54,28 @@ impl Mode {
         Mode {
             name: name.to_string(),
             cur_shape: CurShape::Block,
-            keymap: Trie::from_pairs(Vec::new()).unwrap(),
-            handle_expired_pending: |_, _| QueryResult::Missing,
+            keymap: Trie::try_from_iter(Vec::new()).unwrap(),
+            handle_expired_pending: |_| None,
         }
     }
 
-    pub fn handle_keys(&self, keys: &mut Vec<Input>, config: &Config) -> Option<Actions> {
+    fn with_overrides(&mut self, overrides: Trie<Input, Actions>) -> Result<(), &'static str> {
+        self.keymap = self.keymap.clone().merge_overriding(overrides)?;
+
+        Ok(())
+    }
+
+    pub fn handle_keys(&self, keys: &mut Vec<Input>) -> Option<Actions> {
         match self.keymap.get(keys) {
-            QueryResult::Val(outcome) => {
+            QueryResult::Val(actions) => {
                 keys.clear();
-                Some(outcome)
+                Some(actions.clone())
             }
             QueryResult::Partial => None,
             QueryResult::Missing => {
-                let res = (self.handle_expired_pending)(keys, config);
-                match res {
-                    QueryResult::Val(outcome) => {
-                        keys.clear();
-                        Some(outcome)
-                    }
-                    QueryResult::Missing => {
-                        keys.clear();
-                        None
-                    }
-                    QueryResult::Partial => None,
-                }
+                let res = (self.handle_expired_pending)(keys);
+                keys.clear();
+                res
             }
         }
     }
@@ -90,7 +98,7 @@ macro_rules! keymap {
                 docs.push((doc_key, $docs));
             )+
 
-            ($crate::trie::Trie::from_pairs(pairs).unwrap(), docs)
+            ($crate::trie::Trie::try_from_iter(pairs).unwrap(), docs)
         }
     };
 
@@ -108,6 +116,6 @@ mod tests {
     // making sure we've not messed anything up.
     #[test]
     fn mode_keymaps_have_no_collisions() {
-        _ = modes();
+        _ = modes(&KeyBindings::default());
     }
 }

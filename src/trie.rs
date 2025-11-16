@@ -1,196 +1,405 @@
-//! A trie data structure with modifications for supporting key bindings and autocompletions in a
-//! composible way with the rest of the ad internal APIs.
-use std::{cmp, fmt};
+//! A simple trie data structure for supporting key bindings and autocompletions in a composible
+//! way with the rest of the ad internal APIs.
+use std::{collections::BTreeMap, fmt, ops::Range, sync::Arc};
 
-/// A singly initialised Trie mapping sequences to a value
+/// A singly initialised Trie mapping key sequences to a value.
 ///
-/// NOTE: It is not permitted for values to be mapped to a key that is a prefix of another key also
-/// existing in the same Try.
+/// It is not permitted for values to be mapped to a key that is a prefix of another key also
+/// existing in the same Trie.
 ///
 /// There are convenience methods provided for `Trie<char, V>` for when &str values are used as keys.
-#[allow(unpredictable_function_pointer_comparisons)]
 #[derive(Clone, PartialEq, Eq)]
 pub struct Trie<K, V>
 where
-    K: Clone + PartialEq,
+    K: Clone + PartialEq + Ord,
     V: Clone,
 {
-    parent_key: Option<Vec<K>>,
-    roots: Vec<Node<K, V>>,
-    default: Option<DefaultMapping<K, V>>,
+    nodes: Arc<[Node<K>]>,
+    values: Arc<[V]>,
+    n_roots: usize,
 }
 
 impl<K, V> fmt::Debug for Trie<K, V>
 where
-    K: Clone + PartialEq + fmt::Debug,
+    K: Clone + PartialEq + Ord + fmt::Debug,
     V: Clone + fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Trie")
-            .field("parent_key", &self.parent_key)
-            .field("roots", &self.roots)
-            .field("default", &stringify!(self.default))
+            .field("nodes", &self.nodes)
+            .field("values", &self.values)
+            .field("n_roots", &self.n_roots)
             .finish()
     }
 }
 
 impl<K, V> Default for Trie<K, V>
 where
-    K: Clone + PartialEq,
+    K: Clone + PartialEq + Ord,
     V: Clone,
 {
     fn default() -> Self {
         Self {
-            parent_key: None,
-            roots: Vec::new(),
-            default: None,
+            nodes: Arc::from(Vec::new()),
+            values: Arc::from(Vec::new()),
+            n_roots: 0,
         }
     }
 }
 
 impl<K, V> Trie<K, V>
 where
-    K: Clone + PartialEq,
+    K: Clone + PartialEq + Ord,
     V: Clone,
 {
+    /// Construct a new Trie from key-value pairs.
+    ///
     /// Will panic if there are any key collisions or if there are any sequences that nest
     /// under a prefix that is already required to hold a value
-    pub fn from_pairs(pairs: Vec<(Vec<K>, V)>) -> Result<Self, &'static str> {
+    pub fn try_from_iter(it: impl IntoIterator<Item = (Vec<K>, V)>) -> Result<Self, &'static str> {
         let mut roots = Vec::new();
-
-        for (k, v) in pairs.into_iter() {
-            insert(k, v, &mut roots)?;
+        for (key, value) in it.into_iter() {
+            insert(key, value, &mut roots)?;
         }
 
-        Ok(Self {
-            parent_key: None,
-            roots,
-            default: None,
+        if roots.is_empty() {
+            return Ok(Self::default());
+        }
+
+        let mut nodes = Vec::new();
+        let mut values = Vec::new();
+        let (_, n_roots) = flatten(roots, &mut nodes, &mut values);
+
+        Ok(Trie {
+            nodes: Arc::from(nodes),
+            values: Arc::from(values),
+            n_roots,
         })
     }
 
-    // TODO: re-use this when dynamic config updates are supported
-    // pub(crate) fn extend_from_pairs(
-    //     &mut self,
-    //     pairs: Vec<(Vec<K>, V)>,
-    // ) -> Result<(), &'static str> {
-    //     for (k, v) in pairs.into_iter() {
-    //         insert(k, v, &mut self.roots)?;
-    //     }
-    //
-    //     Ok(())
-    // }
+    /// Merge two Tries.
+    ///
+    /// If the resulting Trie would be invalid to construct directly, an error is returned.
+    ///
+    /// Consumes both inputs.
+    pub fn merge(self, other: Self) -> Result<Self, &'static str> {
+        if self.is_empty() {
+            return Ok(other);
+        } else if other.is_empty() {
+            return Ok(self);
+        }
 
-    /// Set the default handler for unmatched single element keys
-    pub fn set_default(&mut self, default: DefaultMapping<K, V>) {
-        self.default = Some(default);
+        let mut pairs = Vec::with_capacity(self.len() + other.len());
+        self.extract_pairs(&mut pairs, Vec::new(), 0..self.n_roots);
+        other.extract_pairs(&mut pairs, Vec::new(), 0..other.n_roots);
+
+        Self::try_from_iter(pairs)
     }
 
-    /// Query this Try for a given key or key prefix.
+    /// Merge two Tries preferring keys from `other` in the case of collisions.
+    ///
+    /// If the resulting Trie would be invalid to construct directly, an error is returned.
+    ///
+    /// Consumes both inputs.
+    pub fn merge_overriding(self, other: Self) -> Result<Self, &'static str> {
+        if self.is_empty() {
+            return Ok(other);
+        } else if other.is_empty() {
+            return Ok(self);
+        }
+
+        let mut pairs = Vec::with_capacity(self.len() + other.len());
+        self.extract_pairs(&mut pairs, Vec::new(), 0..self.n_roots);
+
+        let mut m = BTreeMap::from_iter(pairs.drain(..));
+        other.extract_pairs(&mut pairs, Vec::new(), 0..other.n_roots);
+        m.extend(pairs.drain(..));
+
+        Self::try_from_iter(m)
+    }
+
+    fn extract_pairs(&self, pairs: &mut Vec<(Vec<K>, V)>, key: Vec<K>, indices: Range<usize>) {
+        for i in indices {
+            let node = &self.nodes[i];
+            let mut child_key = key.clone();
+            child_key.push(node.key.clone());
+
+            match node.data {
+                Data::Leaf { i } => pairs.push((child_key, self.values[i].clone())),
+
+                Data::Internal {
+                    child_start,
+                    n_children,
+                } => self.extract_pairs(pairs, child_key, child_start..child_start + n_children),
+            }
+        }
+    }
+
+    /// Query this [Trie] for a given key or key prefix
     ///
     /// If the key maps to a leaf then the value is returned, if it maps to a sub-trie then
     /// `Partial` is returned to denote that the given key is a parent of one or more values. If
-    /// the key is not found within the `Try` then `Missing` is returned.
-    pub fn get(&self, key: &[K]) -> QueryResult<V> {
-        match get_node(key, &self.roots) {
-            Some(Node {
-                d: Data::Val(v), ..
-            }) => QueryResult::Val(v.clone()),
-
-            Some(_) => QueryResult::Partial,
-
-            None => match self.default {
-                Some(f) if key.len() == 1 => f(&key[0]).into(),
-                _ => QueryResult::Missing,
-            },
+    /// the key is not found within the `Trie` then `Missing` is returned.
+    pub fn get<'a>(&'a self, key: &[K]) -> QueryResult<'a, V> {
+        if key.is_empty() {
+            return QueryResult::Missing;
         }
+
+        let mut indices = 0..self.n_roots;
+        let mut key_index = 0;
+
+        'outer: while key_index < key.len() {
+            let target = &key[key_index];
+
+            // Binary search within the current level (assumes sorted children)
+            for i in indices {
+                let node = &self.nodes[i];
+                if &node.key == target {
+                    key_index += 1;
+
+                    match node.data {
+                        Data::Leaf { i } => {
+                            return if key_index == key.len() {
+                                QueryResult::Val(&self.values[i])
+                            } else {
+                                QueryResult::Missing
+                            };
+                        }
+
+                        Data::Internal {
+                            child_start,
+                            n_children,
+                        } => {
+                            indices = child_start..child_start + n_children;
+                            continue 'outer;
+                        }
+                    }
+                } else if node.key > *target {
+                    // We've moved past where the node would be in sorted order
+                    return QueryResult::Missing;
+                }
+            }
+
+            return QueryResult::Missing;
+        }
+
+        QueryResult::Partial
     }
 
-    /// Query this Try for a given key or key prefix requiring the key to match exactly.
+    /// Query this [Trie] for a given key or key prefix requiring the key to match exactly.
     ///
     /// If the key maps to a leaf then the `Some(value)` is returned, otherwise `None`.
-    pub fn get_exact(&self, key: &[K]) -> Option<V> {
-        match get_node(key, &self.roots) {
-            Some(Node {
-                d: Data::Val(v), ..
-            }) => Some(v.clone()),
-
-            Some(_) => None,
-
-            None => match self.default {
-                Some(f) if key.len() == 1 => f(&key[0]),
-                _ => None,
-            },
-        }
+    pub fn get_exact<'a>(&'a self, key: &[K]) -> Option<&'a V> {
+        self.get(key).into()
     }
 
-    /// Find all candidate keys with the given key as a prefix (up to and including the given
-    /// prefix itself).
-    pub fn candidates(&self, key: &[K]) -> Vec<Vec<K>> {
-        match get_node(key, &self.roots) {
-            None => vec![],
-            Some(n) => n.resolved_keys(key),
-        }
-    }
-
-    /// The number of leaf nodes in this Try
+    /// The number of leaf values in this Trie
     pub fn len(&self) -> usize {
-        self.roots.iter().map(|r| r.len()).sum()
+        self.nodes.iter().filter(|n| n.is_leaf()).count()
     }
 
-    /// The number of leaf nodes in this Try
+    /// Whether this Trie is empty
     pub fn is_empty(&self) -> bool {
-        self.roots.is_empty()
-    }
-
-    /// Whether the given key is present in this [Trie] either as a full key or a partial prefix to
-    /// multiple keys.
-    pub fn contains_key_or_prefix(&self, key: &[K]) -> bool {
-        !matches!(self.get(key), QueryResult::Missing)
+        self.nodes.is_empty()
     }
 }
 
+// Implementation for char-based convenience methods
 impl<V> Trie<char, V>
 where
     V: Clone,
 {
-    /// Construct a new [Trie] with char internal keys from the given string keys.
+    /// Construct a new [Trie] with [char] internal keys from string keys.
     pub fn from_str_keys(pairs: Vec<(&str, V)>) -> Result<Self, &'static str> {
-        let mut roots = Vec::new();
+        let char_pairs: Vec<(Vec<char>, V)> = pairs
+            .into_iter()
+            .map(|(k, v)| (k.chars().collect(), v))
+            .collect();
 
-        for (k, v) in pairs.into_iter() {
-            insert(k.chars().collect(), v, &mut roots)?;
-        }
-
-        Ok(Self {
-            parent_key: None,
-            roots,
-            default: None,
-        })
+        Self::try_from_iter(char_pairs)
     }
 
     /// Query this [Trie] using a string key.
     ///
     /// Both full and partial matches are possible.
-    pub fn get_str(&self, key: &str) -> QueryResult<V> {
+    pub fn get_str<'a>(&'a self, key: &str) -> QueryResult<'a, V> {
         self.get(&key.chars().collect::<Vec<_>>())
     }
 
     /// Query this [Trie] using a string key.
     ///
     /// Only fll matches will be returned.
-    pub fn get_str_exact(&self, key: &str) -> Option<V> {
+    pub fn get_str_exact<'a>(&'a self, key: &str) -> Option<&'a V> {
         self.get_exact(&key.chars().collect::<Vec<_>>())
     }
+}
 
-    /// Show all partial and full matches for the given key.
-    pub fn candidate_strings(&self, key: &str) -> Vec<String> {
-        let raw = self.candidates(&key.chars().collect::<Vec<_>>());
-        let mut strings: Vec<String> = raw.into_iter().map(|v| v.into_iter().collect()).collect();
-        strings.sort();
+/// A single node within a [Trie].
+///
+/// Contains the last element of the key that traverses down to this node alongside [Data] that
+/// identifies this node as being internal or a leaf.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Node<K>
+where
+    K: Clone + PartialEq + Ord,
+{
+    key: K,
+    data: Data,
+}
 
-        strings
+impl<K> Node<K>
+where
+    K: Clone + PartialEq + PartialOrd + Ord,
+{
+    fn new_internal(key: K, child_start: usize, n_children: usize) -> Self {
+        Self {
+            key,
+            data: Data::Internal {
+                child_start,
+                n_children,
+            },
+        }
     }
+
+    fn new_leaf(key: K, i: usize) -> Self {
+        Self {
+            key,
+            data: Data::Leaf { i },
+        }
+    }
+
+    fn is_leaf(&self) -> bool {
+        matches!(self.data, Data::Leaf { .. })
+    }
+}
+
+/// The internal data held at each node in a Trie.
+///
+/// Internal nodes are "pointers" to their children while leaves hold the value associated with the
+/// full key used to traverse down to them.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum Data {
+    Internal {
+        /// Index of the first child node
+        child_start: usize,
+        /// Number of child nodes
+        n_children: usize,
+    },
+    Leaf {
+        // Index of the value associated with the full key-path down to this node
+        i: usize,
+    },
+}
+
+#[derive(Debug)]
+struct BuildNode<K, V>
+where
+    K: PartialEq + Ord,
+{
+    k: K,
+    data: BuildNodeData<K, V>,
+}
+
+#[derive(Debug)]
+enum BuildNodeData<K, V>
+where
+    K: PartialEq + Ord,
+{
+    Internal(Vec<BuildNode<K, V>>),
+    Leaf(V),
+}
+
+fn insert<K, V>(
+    mut key: Vec<K>,
+    v: V,
+    current: &mut Vec<BuildNode<K, V>>,
+) -> Result<(), &'static str>
+where
+    K: PartialEq + Ord,
+{
+    for n in current.iter_mut() {
+        if key[0] == n.k {
+            if key.len() <= 1 {
+                return Err("duplicate entry for key");
+            }
+
+            key.remove(0);
+            return match &mut n.data {
+                BuildNodeData::Internal(nodes) => insert(key, v, nodes),
+                BuildNodeData::Leaf(_) => Err("attempt to insert into value node"),
+            };
+        }
+    }
+
+    let k = key.remove(0);
+
+    if key.is_empty() {
+        current.push(BuildNode {
+            k,
+            data: BuildNodeData::Leaf(v),
+        });
+    } else {
+        let mut children = vec![];
+        insert(key, v, &mut children)?;
+        current.push(BuildNode {
+            k,
+            data: BuildNodeData::Internal(children),
+        });
+    }
+
+    Ok(())
+}
+
+fn flatten<K, V>(
+    mut roots: Vec<BuildNode<K, V>>,
+    nodes: &mut Vec<Node<K>>,
+    values: &mut Vec<V>,
+) -> (usize, usize)
+where
+    K: Clone + PartialEq + Ord,
+    V: Clone,
+{
+    roots.sort_by(|l, r| l.k.cmp(&r.k));
+
+    let child_start = nodes.len();
+    let n_children = roots.len();
+
+    let mut child_stack = Vec::new();
+
+    // Insert roots first, storing any child nodes that need to be inserted later.
+    for BuildNode { k, data } in roots.into_iter() {
+        match data {
+            BuildNodeData::Internal(children) => {
+                let i = nodes.len();
+                nodes.push(Node::new_internal(k, 0, children.len()));
+                child_stack.push((i, children));
+            }
+
+            BuildNodeData::Leaf(v) => {
+                let i = values.len();
+                values.push(v);
+                nodes.push(Node::new_leaf(k, i))
+            }
+        }
+    }
+
+    // Insert the child nodes for each root node, updating their state now that we know the offsets
+    // of their children.
+    for (i, children) in child_stack.into_iter() {
+        let (start, _) = flatten(children, nodes, values);
+        match &mut nodes[i] {
+            Node {
+                data: Data::Internal { child_start, .. },
+                ..
+            } => {
+                *child_start = start;
+            }
+
+            _ => unreachable!(),
+        }
+    }
+
+    (child_start, n_children)
 }
 
 /// A default handler for mapping a single length key to an `Option<V>`.
@@ -201,17 +410,17 @@ pub type DefaultMapping<K, V> = fn(&K) -> Option<V>;
 
 /// The result of querying a [Trie] for a particular Key.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum QueryResult<V> {
+pub enum QueryResult<'a, V> {
     /// A leaf value associated with the key used in the query
-    Val(V),
-    /// The key used to query is a prefix to multiple targets
+    Val(&'a V),
+    /// The key used to query is a prefix to multiple values
     Partial,
     /// The key does not exist within the [Trie]
     Missing,
 }
 
-impl<V> From<Option<V>> for QueryResult<V> {
-    fn from(opt: Option<V>) -> Self {
+impl<'a, V> From<Option<&'a V>> for QueryResult<'a, V> {
+    fn from(opt: Option<&'a V>) -> Self {
         match opt {
             Some(v) => QueryResult::Val(v),
             None => QueryResult::Missing,
@@ -219,159 +428,11 @@ impl<V> From<Option<V>> for QueryResult<V> {
     }
 }
 
-impl<V> From<QueryResult<V>> for Option<V> {
-    fn from(q: QueryResult<V>) -> Self {
+impl<'a, V> From<QueryResult<'a, V>> for Option<&'a V> {
+    fn from(q: QueryResult<'a, V>) -> Self {
         match q {
             QueryResult::Val(v) => Some(v),
             _ => None,
-        }
-    }
-}
-
-impl<V> QueryResult<V> {
-    pub fn map<F, U>(self, f: F) -> QueryResult<U>
-    where
-        F: Fn(V) -> U,
-    {
-        match self {
-            Self::Val(v) => QueryResult::Val(f(v)),
-            Self::Partial => QueryResult::Partial,
-            Self::Missing => QueryResult::Missing,
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Data<K, V>
-where
-    K: Clone + PartialEq,
-{
-    Val(V),
-    Children(Vec<Node<K, V>>),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct Node<K, V>
-where
-    K: Clone + PartialEq,
-{
-    k: K,
-    d: Data<K, V>,
-}
-
-impl<K, V> Node<K, V>
-where
-    K: Clone + PartialEq,
-{
-    fn len(&self) -> usize {
-        match &self.d {
-            Data::Children(nodes) => nodes.iter().map(|n| n.len()).sum(),
-            Data::Val(_) => 1,
-        }
-    }
-
-    // Errors if this node already holds a value
-    fn insert(&mut self, k: Vec<K>, v: V) -> Result<(), &'static str> {
-        match &mut self.d {
-            Data::Children(nodes) => insert(k, v, nodes),
-            Data::Val(_) => Err("attempt to insert into value node"),
-        }
-    }
-
-    fn get_child<'s>(&'s self, k: &[K]) -> Option<&'s Node<K, V>> {
-        match &self.d {
-            Data::Children(nodes) => get_node(k, nodes),
-            Data::Val(_) => None,
-        }
-    }
-
-    fn resolved_keys(&self, prefix: &[K]) -> Vec<Vec<K>> {
-        match &self.d {
-            Data::Val(_) => vec![prefix.to_vec()],
-            Data::Children(nodes) => nodes
-                .iter()
-                .flat_map(|n| {
-                    let mut so_far = prefix.to_vec();
-                    so_far.push(n.k.clone());
-                    n.resolved_keys(&so_far)
-                })
-                .collect(),
-        }
-    }
-}
-
-fn insert<K, V>(mut key: Vec<K>, v: V, current: &mut Vec<Node<K, V>>) -> Result<(), &'static str>
-where
-    K: Clone + PartialEq,
-{
-    for n in current.iter_mut() {
-        if key[0] == n.k {
-            if key.len() > 1 {
-                key.remove(0);
-                n.insert(key, v)?;
-                return Ok(());
-            }
-            return Err("duplicate entry for key");
-        }
-    }
-
-    let k = key.remove(0);
-
-    // No matching root so create a new one
-    if key.is_empty() {
-        current.push(Node { k, d: Data::Val(v) });
-    } else {
-        let mut children = vec![];
-        insert(key, v, &mut children)?;
-
-        let d = Data::Children(children);
-        current.push(Node { k, d });
-    }
-
-    Ok(())
-}
-
-fn get_node<'n, K, V>(key: &[K], nodes: &'n [Node<K, V>]) -> Option<&'n Node<K, V>>
-where
-    K: Clone + PartialEq,
-{
-    if key.is_empty() {
-        return None;
-    }
-
-    for n in nodes.iter() {
-        if key[0] == n.k {
-            return if key.len() == 1 {
-                Some(n)
-            } else {
-                n.get_child(&key[1..])
-            };
-        }
-    }
-
-    None
-}
-
-/// A match function to use as part of a wildcard match
-pub type WildcardFn<K> = fn(&K) -> bool;
-
-/// A wildcard node in a key sequence that can conditionally match a single key element.
-#[derive(Debug)]
-pub enum WildCard<K> {
-    /// A literal key
-    Lit(K),
-    /// A predicate function for checking whether a key should be considered a match
-    Wild(WildcardFn<K>),
-}
-
-impl<K> cmp::PartialEq<K> for WildCard<K>
-where
-    K: PartialEq,
-{
-    fn eq(&self, other: &K) -> bool {
-        match self {
-            WildCard::Lit(k) => k == other,
-            WildCard::Wild(f) => f(other),
         }
     }
 }
@@ -383,12 +444,25 @@ mod tests {
 
     #[test]
     fn duplicate_keys_errors() {
-        assert!(Trie::from_pairs(vec![(vec![42], 1), (vec![42], 2)]).is_err());
+        assert!(Trie::try_from_iter(vec![(vec![42], 1), (vec![42], 2)]).is_err());
     }
 
     #[test]
     fn children_under_a_value_node_errors() {
-        assert!(Trie::from_pairs(vec![(vec![42], 1), (vec![42, 69], 2)]).is_err());
+        assert!(Trie::try_from_iter(vec![(vec![42], 1), (vec![42, 69], 2)]).is_err());
+    }
+
+    #[test_case("foo", QueryResult::Val(&1); "val 1")]
+    #[test_case("bar", QueryResult::Val(&2); "val 2")]
+    #[test_case("baz", QueryResult::Val(&3); "val 3")]
+    #[test_case("ba", QueryResult::Partial; "partial 1")] // typos:ignore
+    #[test_case("fo", QueryResult::Partial; "partial 2")] // typos:ignore
+    #[test_case("barf", QueryResult::Missing; "overshoot")]
+    #[test_case("have you any wool?", QueryResult::Missing; "fully missing")]
+    #[test]
+    fn get_works(key: &str, expected: QueryResult<'_, usize>) {
+        let t = Trie::from_str_keys(vec![("foo", 1), ("bar", 2), ("baz", 3)]).unwrap();
+        assert_eq!(t.get_str(key), expected);
     }
 
     #[test_case(&[42], None; "partial should be None")]
@@ -396,87 +470,61 @@ mod tests {
     #[test_case(&[42, 69, 144], None; "overshoot should be None")]
     #[test_case(&[42, 69], Some(1); "exact should be Some")]
     #[test]
-    fn get_exact_works(k: &[usize], expected: Option<usize>) {
-        let t = Trie::from_pairs(vec![(vec![42, 69], 1)]).unwrap();
-
-        assert_eq!(t.get_exact(k), expected);
+    fn get_exact_works(key: &[usize], expected: Option<usize>) {
+        let t = Trie::try_from_iter(vec![(vec![42, 69], 1)]).unwrap();
+        assert_eq!(t.get_exact(key), expected.as_ref());
     }
 
-    #[test_case("fo", None; "partial should be None")] // typos:ignore
-    #[test_case("bar", None; "missing should be None")]
-    #[test_case("fooo", None; "overshoot should be None")]
-    #[test_case("foo", Some(1); "exact should be Some")]
+    #[test_case("fo", None; "partial")] // typos:ignore
+    #[test_case("bar", None; "missing")]
+    #[test_case("fool", None; "overshoot")]
+    #[test_case("foo", Some(1); "found")]
     #[test]
-    fn get_str_exact_works(k: &str, expected: Option<usize>) {
+    fn get_str_exact_works(key: &str, expected: Option<usize>) {
         let t = Trie::from_str_keys(vec![("foo", 1)]).unwrap();
-
-        assert_eq!(t.get_str_exact(k), expected);
-    }
-
-    #[test_case("ba", QueryResult::Partial; "partial match")] // typos:ignore
-    #[test_case("bar", QueryResult::Val(2); "exact match")]
-    #[test_case("baz", QueryResult::Val(3); "exact match with shared prefix")]
-    #[test_case("barf", QueryResult::Missing; "overshot known key")]
-    #[test_case("have you any wool?", QueryResult::Missing; "completely missing")]
-    #[test]
-    fn get_works(k: &str, expected: QueryResult<usize>) {
-        let t = Trie::from_str_keys(vec![("foo", 1), ("bar", 2), ("baz", 3)]).unwrap();
-
-        assert_eq!(t.get_str(k), expected);
-    }
-
-    #[test_case("f", &["fold", "food", "fool"]; "first char")]
-    #[test_case("fo", &["fold", "food", "fool"]; "shared prefix")] // typos:ignore
-    #[test_case("foo", &["food", "fool"]; "shared prefix not all match")]
-    #[test_case("food", &["food"]; "exact match")]
-    #[test_case("foods", &[]; "overshot")]
-    #[test_case("q", &[]; "unknown first char")]
-    #[test_case("quux", &[]; "unknown full key")]
-    #[test_case("", &[]; "empty string")]
-    #[test]
-    fn candidate_strings_works(k: &str, expected: &[&str]) {
-        let expected: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
-        let t = Trie::from_str_keys(
-            ["fool", "fold", "food"]
-                .into_iter()
-                .enumerate()
-                .map(|(i, s)| (s, i))
-                .collect(),
-        )
-        .unwrap();
-
-        assert_eq!(t.candidate_strings(k), expected);
-    }
-
-    fn usize_default_handler(n: &usize) -> Option<usize> {
-        Some(n + 1)
-    }
-
-    #[test_case(&[42], QueryResult::Val(1); "exact single should match from the Try")]
-    #[test_case(&[12, 13], QueryResult::Val(2); "exact multi should match from the Try")]
-    #[test_case(&[69], QueryResult::Val(70); "missing single should be defaulted")]
-    #[test_case(&[69, 420], QueryResult::Missing; "missing multi should always be missing")]
-    #[test_case(&[12], QueryResult::Partial; "partial should remain partial")]
-    #[test]
-    fn default_handlers_work(k: &[usize], expected: QueryResult<usize>) {
-        let mut t = Trie::from_pairs(vec![(vec![42], 1), (vec![12, 13], 2)]).unwrap();
-        t.set_default(usize_default_handler);
-
-        assert_eq!(t.get(k), expected);
-
-        let expected_opt: Option<usize> = expected.into();
-        assert_eq!(t.get_exact(k), expected_opt);
+        assert_eq!(t.get_str_exact(key), expected.as_ref());
     }
 
     #[test]
-    fn wildcards_match_correctly() {
-        fn is_valid(c: &char) -> bool {
-            *c == 'i' || *c == 'a'
-        }
+    fn merge_works() {
+        let t1 = Trie::from_str_keys(vec![("foo", 1), ("bar", 2)]).unwrap();
+        let t2 = Trie::from_str_keys(vec![("baz", 3), ("qux", 4)]).unwrap();
 
-        let w = WildCard::Wild(is_valid);
+        let merged = t1.merge(t2).unwrap();
 
-        assert!(w == 'a');
-        assert!(w != 'b');
+        assert_eq!(merged.get_str_exact("foo"), Some(&1));
+        assert_eq!(merged.get_str_exact("bar"), Some(&2));
+        assert_eq!(merged.get_str_exact("baz"), Some(&3));
+        assert_eq!(merged.get_str_exact("qux"), Some(&4));
+        assert_eq!(merged.len(), 4);
+    }
+
+    #[test]
+    fn merge_conflicts_error() {
+        let t1 = Trie::from_str_keys(vec![("foo", 1)]).unwrap();
+        let t2 = Trie::from_str_keys(vec![("foo", 2)]).unwrap();
+
+        assert!(t1.merge(t2).is_err());
+    }
+
+    #[test]
+    fn merge_overriding_works() {
+        let t1 = Trie::from_str_keys(vec![("foo", 1), ("bar", 2)]).unwrap();
+        let t2 = Trie::from_str_keys(vec![("baz", 3), ("foo", 4)]).unwrap();
+
+        let merged = t1.merge_overriding(t2).unwrap();
+
+        assert_eq!(merged.get_str_exact("foo"), Some(&4));
+        assert_eq!(merged.get_str_exact("bar"), Some(&2));
+        assert_eq!(merged.get_str_exact("baz"), Some(&3));
+        assert_eq!(merged.len(), 3);
+    }
+
+    #[test]
+    fn merge_overriding_conflicts_are_ok() {
+        let t1 = Trie::from_str_keys(vec![("foo", 1)]).unwrap();
+        let t2 = Trie::from_str_keys(vec![("foo", 2)]).unwrap();
+
+        assert!(t1.merge_overriding(t2).is_ok());
     }
 }

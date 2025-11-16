@@ -269,16 +269,16 @@ impl LspConfig {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct KeyBindings {
     #[serde(default, deserialize_with = "de_serde_trie")]
-    pub normal: Trie<Input, KeyAction>,
+    pub normal: Trie<Input, Actions>,
     #[serde(default, deserialize_with = "de_serde_trie")]
-    pub insert: Trie<Input, KeyAction>,
+    pub insert: Trie<Input, Actions>,
 }
 
 impl Default for KeyBindings {
     fn default() -> Self {
         KeyBindings {
-            normal: Trie::from_pairs(Vec::new()).unwrap(),
-            insert: Trie::from_pairs(Vec::new()).unwrap(),
+            normal: Trie::try_from_iter(Vec::new()).unwrap(),
+            insert: Trie::try_from_iter(Vec::new()).unwrap(),
         }
     }
 }
@@ -291,12 +291,10 @@ pub enum KeyAction {
 }
 
 impl KeyAction {
-    pub fn as_actions(&self) -> Actions {
+    fn into_actions(self) -> Actions {
         match self {
-            Self::Execute { run } => Actions::Single(Action::ExecuteString { s: run.clone() }),
-            Self::Keys { send_keys } => Actions::Single(Action::SendKeys {
-                ks: send_keys.0.clone(),
-            }),
+            Self::Execute { run } => Actions::Single(Action::ExecuteString { s: run }),
+            Self::Keys { send_keys } => Actions::Single(Action::SendKeys { ks: send_keys.0 }),
         }
     }
 }
@@ -304,7 +302,7 @@ impl KeyAction {
 /// Raw inputs to be sent through to the main editor event loop
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
-pub struct Inputs(Vec<Input>);
+pub struct Inputs(pub(crate) Vec<Input>);
 
 impl TryFrom<String> for Inputs {
     type Error = String;
@@ -330,18 +328,24 @@ fn try_input_from_str_template(s: &str) -> Result<Input, String> {
     } else if let Some(suffix) = s.strip_prefix("C-A-") {
         if suffix.len() == 1 {
             Ok(Input::CtrlAlt(suffix.chars().next().unwrap()))
+        } else if suffix == "<space>" {
+            Ok(Input::CtrlAlt(' '))
         } else {
             Err(format!("invalid send_key value: C-A-{suffix}"))
         }
     } else if let Some(suffix) = s.strip_prefix("C-") {
         if suffix.len() == 1 {
             Ok(Input::Ctrl(suffix.chars().next().unwrap()))
+        } else if suffix == "<space>" {
+            Ok(Input::Ctrl(' '))
         } else {
             Err(format!("invalid send_key value: C-{suffix}"))
         }
     } else if let Some(suffix) = s.strip_prefix("A-") {
         if suffix.len() == 1 {
             Ok(Input::Alt(suffix.chars().next().unwrap()))
+        } else if suffix == "<space>" {
+            Ok(Input::Alt(' '))
         } else {
             Err(format!("invalid send_key value: A-{suffix}"))
         }
@@ -367,7 +371,7 @@ fn try_input_from_str_template(s: &str) -> Result<Input, String> {
     }
 }
 
-fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, KeyAction>, D::Error>
+fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, Actions>, D::Error>
 where
     D: Deserializer<'de>,
 {
@@ -380,12 +384,12 @@ where
         .into_iter()
         .map(|(k, action)| {
             Inputs::try_from(k)
-                .map(|Inputs(keys)| (keys, action))
+                .map(|Inputs(keys)| (keys, action.into_actions()))
                 .map_err(de::Error::custom)
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    Trie::from_pairs(raw).map_err(de::Error::custom)
+    Trie::try_from_iter(raw).map_err(de::Error::custom)
 }
 
 #[cfg(test)]
@@ -403,6 +407,9 @@ mod tests {
     #[test_case("A-y", &[Input::Alt('y')]; "alt letter")]
     #[test_case("C-y", &[Input::Ctrl('y')]; "control letter")]
     #[test_case("C-A-y", &[Input::CtrlAlt('y')]; "control alt letter")]
+    #[test_case("A-<space>", &[Input::Alt(' ')]; "alt space")]
+    #[test_case("C-<space>", &[Input::Ctrl(' ')]; "control space")]
+    #[test_case("C-A-<space>", &[Input::CtrlAlt(' ')]; "control alt space")]
     #[test_case("<backspace>", &[Input::Backspace]; "backspace")]
     #[test_case("<delete>", &[Input::Del]; "delete")]
     #[test_case("<end>", &[Input::End]; "end")]

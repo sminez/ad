@@ -1,0 +1,23 @@
+[editor]
+show_splash = true
+expand_tab = true
+tabstop = 4
+match_indent = true
+status_timeout = 3
+double_click_ms = 200
+minibuffer_lines = 8
+find_command = "fd -t f"
+
+[filesystem]
+enabled = false
+auto_mount = false
+
+[keys.normal]
+"C-k" =     { send_keys = "i A <esc>" } # override single
+"g g" =     { send_keys = "i B <esc>" } # override seq
+"C-A-T" =   { send_keys = "i C <esc>" } # new single
+"C-A-B X" = { send_keys = "i D <esc>" } # new seq
+
+[keys.insert]
+"C-a" =   { send_keys = "A" } # override single
+"C-A-T" = { send_keys = "B" } # new single

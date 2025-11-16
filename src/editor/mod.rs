@@ -149,6 +149,7 @@ where
             config.lsp_autostart,
         ));
 
+        let modes = modes(&config.keys);
         let config = Arc::new(RwLock::new(config));
 
         let ui = Ui::new(mode, config.clone());
@@ -166,7 +167,7 @@ where
             ui,
             cwd,
             running: true,
-            modes: modes(),
+            modes,
             pending_keys: Vec::new(),
             layout,
             lsp_manager,
@@ -521,19 +522,16 @@ where
 
     pub fn handle_input(&mut self, input: Input) {
         self.pending_keys.push(input);
-        let maybe_actions =
-            self.modes[0].handle_keys(&mut self.pending_keys, &*config_handle!(self));
+        let maybe_actions = self.modes[0].handle_keys(&mut self.pending_keys);
 
         if let Some(actions) = maybe_actions {
             self.handle_actions(actions, Source::Keyboard);
         }
     }
 
-    fn handle_explicit_inputs(&mut self, inputs: &mut Vec<Input>) {
-        let maybe_actions = self.modes[0].handle_keys(inputs, &*config_handle!(self));
-
-        if let Some(actions) = maybe_actions {
-            self.handle_actions(actions, Source::Keyboard);
+    fn handle_explicit_inputs(&mut self, inputs: Vec<Input>) {
+        for i in inputs.into_iter() {
+            self.handle_input(i);
         }
     }
 
@@ -693,7 +691,7 @@ where
             SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),
             SaveBuffer { force } => self.save_current_buffer(None, force),
             SearchInCurrentBuffer => self.search_in_current_buffer(),
-            SendKeys { mut ks } => self.handle_explicit_inputs(&mut ks),
+            SendKeys { ks } => self.handle_explicit_inputs(ks),
             SelectBuffer => self.select_buffer(),
             SetMode { m } => self.set_mode(m),
             SetStatusMessage { message } => self.set_status_message(&message),
