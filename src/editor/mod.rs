@@ -342,6 +342,7 @@ where
             }
             Event::Input(i) => self.handle_input(i),
             Event::Message(msg) => self.handle_message(msg),
+            Event::StatusMessage(msg) => self.set_status_message(msg),
             Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
         }
     }
@@ -376,6 +377,7 @@ where
                 Event::Action(a) => self.handle_action(a, Source::Fsys),
                 Event::Actions(a) => self.handle_actions(a, Source::Fsys),
                 Event::Message(msg) => self.handle_message(msg),
+                Event::StatusMessage(msg) => self.set_status_message(msg),
                 Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
             }
         }

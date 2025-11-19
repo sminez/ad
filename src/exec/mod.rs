@@ -8,6 +8,7 @@ use crate::{
 };
 use ad_event::Source;
 use std::{
+    borrow::Cow,
     cell::RefCell,
     cmp::min,
     collections::BTreeMap,
@@ -16,13 +17,19 @@ use std::{
 };
 use structex::{
     Structex, StructexBuilder,
+    re::{Haystack, Sliceable},
     template::{self, Context, Template},
 };
 
 mod addr;
+mod runner;
+
+pub use runner::SystemRunner;
+
+pub(crate) use addr::{Addr, AddrBase, Address};
+pub(crate) use runner::{EditorRunner, Runner};
 
 use addr::ErrorKind;
-pub(crate) use addr::{Addr, AddrBase, Address};
 
 /// Errors that can be returned by the exec engine
 #[derive(Debug)]
@@ -172,7 +179,7 @@ impl Program {
 
         let se: Option<Structex<Regex>> = match StructexBuilder::new(remaining_input)
             .with_allowed_argless_tags("d")
-            .with_allowed_single_arg_tags("acip") // typos:ignore
+            .with_allowed_single_arg_tags("acip$<>|") // typos:ignore
             .allow_top_level_actions()
             .require_actions()
             .build()
@@ -202,9 +209,18 @@ impl Program {
     }
 
     /// Execute this program against a given [Edit].
-    pub fn execute<E, W>(&mut self, ed: &mut E, fname: &str, out: &mut W) -> Result<Dot, Error>
+    pub fn execute<'a, E, R, W>(
+        &self,
+        ed: &'a mut E,
+        runner: &mut R,
+        fname: &str,
+        out: &mut W,
+    ) -> Result<Dot, Error>
     where
         E: Edit,
+        for<'e> &'e E: Haystack<Regex>,
+        for<'s> <&'s E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
+        R: Runner,
         W: Write,
     {
         let mut dot = match self.initial_addr.as_ref() {
@@ -212,9 +228,8 @@ impl Program {
             None => ed.current_dot(),
         };
 
-        let se = match self.se.as_ref() {
-            Some(se) => se,
-            None => return Ok(dot),
+        if self.se.is_none() {
+            return Ok(dot);
         };
 
         let (char_from, char_to) = dot.as_char_indices();
@@ -223,52 +238,7 @@ impl Program {
             .char_to_byte(char_to.saturating_add(1))
             .unwrap_or_else(|| ed.len_bytes());
 
-        let initial = ed.substr(byte_from, byte_to);
-
-        let mut edit_actions = Vec::new();
-        let mut ctx = Ctx {
-            fname,
-            byte_from: 0,
-            ed,
-            row_col: RefCell::new(None),
-        };
-
-        for caps in se.iter_tagged_captures(initial.as_ref()) {
-            let action = caps.action.as_ref().unwrap();
-            let id = action.id();
-            ctx.byte_from = caps.from();
-            ctx.row_col.borrow_mut().take();
-
-            match action.tag() {
-                'p' => {
-                    // Handle print actions immediately
-                    self.templates[&id].render_with_context_to(out, &caps, &ctx)?;
-                }
-
-                'd' => edit_actions.push(EditAction::Remove(caps.from(), caps.to())),
-                'c' => {
-                    edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
-                        self.templates[&id].render_with_context(&caps, &ctx)?,
-                    ));
-                }
-                'i' => {
-                    edit_actions.push(EditAction::Insert(
-                        caps.from(),
-                        self.templates[&id].render_with_context(&caps, &ctx)?,
-                    ));
-                }
-                'a' => {
-                    edit_actions.push(EditAction::Insert(
-                        caps.to(),
-                        self.templates[&id].render_with_context(&caps, &ctx)?,
-                    ));
-                }
-
-                _ => unreachable!(),
-            }
-        }
+        let mut edit_actions = self.gather_actions(byte_from, byte_to, ed, runner, fname, out)?;
 
         ed.begin_edit_transaction();
 
@@ -278,13 +248,13 @@ impl Program {
         let last_action = edit_actions.pop();
         let mut delta = 0;
         if let Some(action) = last_action {
-            dot = action.as_dot(byte_from, ed);
-            action.apply(byte_from, ed);
+            dot = action.as_dot(ed);
+            action.apply(ed);
         }
 
         // apply remaining actions in reverse order, updating the final dot position accordingly
         for action in edit_actions.into_iter().rev() {
-            delta += action.apply(byte_from, ed);
+            delta += action.apply(ed);
         }
 
         ed.end_edit_transaction();
@@ -304,8 +274,123 @@ impl Program {
 
         Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
     }
+
+    fn gather_actions<'a, E, R, W>(
+        &self,
+        byte_from: usize,
+        byte_to: usize,
+        ed: &'a E,
+        runner: &mut R,
+        fname: &str,
+        out: &mut W,
+    ) -> Result<Vec<EditAction>, Error>
+    where
+        E: Edit,
+        for<'e> &'e E: Haystack<Regex>,
+        for<'s> <&'s E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
+        R: Runner,
+        W: Write,
+    {
+        let se = self.se.as_ref().unwrap();
+        let mut edit_actions = Vec::new();
+        let mut ctx = Ctx {
+            fname,
+            byte_from: 0,
+            ed,
+            row_col: RefCell::new(None),
+        };
+
+        for caps in se.iter_tagged_captures_between(byte_from, byte_to, ed) {
+            let action = caps.action.as_ref().unwrap();
+            let id = action.id();
+            ctx.byte_from = caps.from();
+            ctx.row_col.borrow_mut().take();
+
+            match action.tag() {
+                // Immediate actions
+
+                // Print rendered template
+                'p' => {
+                    self.templates[&id].render_with_context_to(out, &caps, &ctx)?;
+                }
+
+                // Run rendered template as shell command
+                '$' => {
+                    let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
+                    out.write_all(runner.run_shell_command(&cmd, None)?.as_bytes())?;
+                }
+
+                // Run template as shell command with match as input
+                '>' => {
+                    let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
+                    let slice = caps.as_slice();
+                    out.write_all(
+                        runner
+                            .run_shell_command(&cmd, Some(slice.into().as_ref()))?
+                            .as_bytes(),
+                    )?;
+                }
+
+                // Edit actions
+
+                // Delete matched text
+                'd' => edit_actions.push(EditAction::Remove(caps.from(), caps.to())),
+
+                // Change matched text to rendered template
+                'c' => {
+                    edit_actions.push(EditAction::Replace(
+                        caps.from(),
+                        caps.to(),
+                        self.templates[&id].render_with_context(&caps, &ctx)?,
+                    ));
+                }
+
+                // Insert rendered template before match
+                'i' => {
+                    edit_actions.push(EditAction::Insert(
+                        caps.from(),
+                        self.templates[&id].render_with_context(&caps, &ctx)?,
+                    ));
+                }
+
+                // Append rendered template after match
+                'a' => {
+                    edit_actions.push(EditAction::Insert(
+                        caps.to(),
+                        self.templates[&id].render_with_context(&caps, &ctx)?,
+                    ));
+                }
+
+                // Replace matched text with output from running rendered template as shell command
+                '<' => {
+                    let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
+                    edit_actions.push(EditAction::Replace(
+                        caps.from(),
+                        caps.to(),
+                        runner.run_shell_command(&cmd, None)?,
+                    ));
+                }
+
+                // Pipe matched text through running rendered template as a shell command
+                '|' => {
+                    let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
+                    let slice = caps.as_slice();
+                    edit_actions.push(EditAction::Replace(
+                        caps.from(),
+                        caps.to(),
+                        runner.run_shell_command(&cmd, Some(slice.into().as_ref()))?,
+                    ));
+                }
+
+                _ => unreachable!(),
+            }
+        }
+
+        Ok(edit_actions)
+    }
 }
 
+#[derive(Debug)]
 enum EditAction {
     Insert(usize, String),
     Remove(usize, usize),
@@ -313,46 +398,46 @@ enum EditAction {
 }
 
 impl EditAction {
-    fn as_dot<E>(&self, byte_from: usize, ed: &mut E) -> Dot
+    fn as_dot<E>(&self, ed: &mut E) -> Dot
     where
         E: Edit,
     {
         match self {
             Self::Insert(from, s) | Self::Replace(from, _, s) => {
-                let from = ed.byte_to_char(*from + byte_from).unwrap();
+                let from = ed.byte_to_char(*from).unwrap();
                 let n_chars = s.chars().count();
 
                 Dot::from_char_indices(from, from + n_chars - 1)
             }
 
             Self::Remove(from, _) => {
-                let from = ed.byte_to_char(*from + byte_from).unwrap();
+                let from = ed.byte_to_char(*from).unwrap();
                 Dot::from_char_indices(from, from)
             }
         }
     }
 
-    fn apply<E>(self, byte_from: usize, ed: &mut E) -> isize
+    fn apply<E>(self, ed: &mut E) -> isize
     where
         E: Edit,
     {
         match self {
             Self::Insert(from, s) => {
-                let from = ed.byte_to_char(from + byte_from).unwrap();
+                let from = ed.byte_to_char(from).unwrap();
                 ed.insert(from, &s);
                 s.chars().count() as isize
             }
 
             Self::Remove(from, to) => {
-                let from = ed.byte_to_char(from + byte_from).unwrap();
-                let to = ed.byte_to_char(to + byte_from).unwrap();
+                let from = ed.byte_to_char(from).unwrap();
+                let to = ed.byte_to_char(to).unwrap();
                 ed.remove(from, to);
                 -((to - from) as isize)
             }
 
             Self::Replace(from, to, s) => {
-                Self::Remove(from, to).apply(byte_from, ed);
-                let n_chars = Self::Insert(from, s).apply(byte_from, ed);
+                Self::Remove(from, to).apply(ed);
+                let n_chars = Self::Insert(from, s).apply(ed);
                 n_chars - (to - from) as isize
             }
         }
@@ -420,6 +505,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::env;
+
     use super::*;
     use crate::{buffer::Buffer, editor::Action};
     use simple_test_case::test_case;
@@ -429,17 +516,21 @@ mod tests {
     #[test_case(", x/(t.)/ a/{1}/", "ththis is a tetest t strtring"; "x a")]
     #[test]
     fn substitution_of_submatches_works(s: &str, expected: &str) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let prog = Program::try_parse(s).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
         let mut b = Buffer::new_unnamed(0, "this is a test string", Default::default());
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut Vec::new())
+            .unwrap();
+
         assert_eq!(&b.txt.to_string(), expected);
     }
 
     #[test]
     fn templating_context_vars_works() {
         // FILENAME, ROW, and COL all need to be worked out from the buffer being run against
-        let mut prog = Program::try_parse(", x/line/ a/ ({FILENAME} {ROW}:{COL})/").unwrap();
+        let prog = Program::try_parse(", x/line/ a/ ({FILENAME} {ROW}:{COL})/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
         let mut b = Buffer::new_unnamed(
             0,
@@ -447,7 +538,9 @@ mod tests {
             Default::default(),
         );
 
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut Vec::new())
+            .unwrap();
+
         assert_eq!(
             &b.txt.to_string(),
             // the column offsets here should be in terms of characters, not bytes
@@ -457,10 +550,13 @@ mod tests {
 
     #[test]
     fn loop_between_generates_the_correct_blocks() {
-        let mut prog = Program::try_parse(", y/ / p/>{0}<\n/").unwrap();
+        let prog = Program::try_parse(", y/ / p/>{0}<\n/").unwrap();
         let mut b = Buffer::new_unnamed(0, "this and that", Default::default());
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut output = Vec::new();
-        let dot = prog.execute(&mut b, "test", &mut output).unwrap();
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut output)
+            .unwrap();
 
         let s = String::from_utf8(output).unwrap();
         assert_eq!(s, ">this<\n>and<\n>that<\n");
@@ -486,19 +582,24 @@ mod tests {
     #[test_case(0, ", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
     #[test]
     fn execute_produces_the_correct_string(idx: usize, s: &str, expected: &str) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let prog = Program::try_parse(s).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+
         let mut b = Buffer::new_unnamed(0, "foo│foo│foo", Default::default());
         b.dot = Cur::new(idx).into();
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
 
         assert_eq!(&b.txt.to_string(), expected, "buffer");
     }
 
     #[test]
     fn multiline_file_dot_star_works() {
-        let mut prog = Program::try_parse(", x/.*/ c/foo/").unwrap();
+        let prog = Program::try_parse(", x/.*/ c/foo/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile", Default::default());
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
 
         // '.*' will match the null string at the end of lines containing a newline as well
         assert_eq!(&b.txt.to_string(), "foofoo\nfoofoo\nfoo");
@@ -506,9 +607,11 @@ mod tests {
 
     #[test]
     fn multiline_file_dot_plus_works() {
-        let mut prog = Program::try_parse(", x/.+/ c/foo/").unwrap();
+        let prog = Program::try_parse(", x/.+/ c/foo/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, "this is\na multiline\nfile", Default::default());
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
 
         assert_eq!(&b.txt.to_string(), "foo\nfoo\nfoo");
     }
@@ -517,14 +620,16 @@ mod tests {
     fn buffer_current_dot_is_used_when_there_is_no_leading_addr() {
         // The only thing this program does is delete the selection which should be the current
         // buffer dot rather than the entire buffer.
-        let mut prog = Program::try_parse("d").unwrap();
+        let prog = Program::try_parse("d").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
         let initial_content = "this is a FOO line\nand another";
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
         b.dot = Dot::from_char_indices(9, 12);
         assert_eq!(b.dot_contents(), " FOO");
 
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
         assert_eq!(&b.str_contents(), "this is a line\nand another");
     }
 
@@ -542,12 +647,16 @@ mod tests {
         expected_dot_content: &str,
         expected_dot: (usize, usize),
     ) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let prog = Program::try_parse(s).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
         let initial_content = "foo bar baz";
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
-        let dot = prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
         assert_eq!(&b.str_contents(), expected_content);
         assert_eq!(&dot.content(&b), expected_dot_content);
         assert_eq!(dot.as_char_indices(), expected_dot);
@@ -563,11 +672,13 @@ mod tests {
     #[test_case(", x/\\b\\w+\\b/ i/buffalo/"; "insert before each word")]
     #[test]
     fn buffer_execute_undo_all_is_a_noop(s: &str) {
-        let mut prog = Program::try_parse(s).unwrap();
+        let prog = Program::try_parse(s).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let initial_content = "this is a line\nand another\n- [ ] something to do\n";
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
-        prog.execute(&mut b, "test", &mut vec![]).unwrap();
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
         while b.handle_action(Action::Undo, Source::Keyboard).is_none() {}
         let final_content = b.str_contents();
 

@@ -136,15 +136,23 @@ where
     R: Read,
 {
     fn current_dot(&self) -> Dot {
-        Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
+        Dot::from_char_indices(0, usize::MAX)
     }
 
     fn len_bytes(&self) -> usize {
-        self.inner.borrow().gb.len()
+        if self.is_closed() {
+            self.inner.borrow().gb.len()
+        } else {
+            usize::MAX
+        }
     }
 
     fn len_chars(&self) -> usize {
-        self.inner.borrow().gb.len_chars()
+        if self.is_closed() {
+            self.inner.borrow().gb.len_chars()
+        } else {
+            usize::MAX
+        }
     }
 
     fn max_iter(&self) -> usize {
@@ -257,6 +265,26 @@ where
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+impl<'a, R> From<StreamSlice<'a, R>> for Cow<'a, str>
+where
+    R: Read,
+{
+    fn from(s: StreamSlice<'a, R>) -> Self {
+        let inner = s.inner.borrow();
+        let to = if s.to == usize::MAX {
+            inner.gb.len()
+        } else {
+            s.to - inner.cleared_bytes
+        };
+
+        let slice = inner
+            .gb
+            .slice_from_byte_offsets(s.from - inner.cleared_bytes, to);
+
+        Cow::Owned(slice.to_string())
     }
 }
 
@@ -373,10 +401,15 @@ mod impl_structex {
             W: std::io::Write,
         {
             let inner = self.inner.borrow();
-            let s = inner.gb.slice_from_byte_offsets(
-                self.from - inner.cleared_bytes,
-                self.to - inner.cleared_bytes,
-            );
+            let to = if self.to == usize::MAX {
+                inner.gb.len()
+            } else {
+                self.to - inner.cleared_bytes
+            };
+
+            let s = inner
+                .gb
+                .slice_from_byte_offsets(self.from - inner.cleared_bytes, to);
             let (l, r) = s.as_slices();
 
             w.write_all(l)?;

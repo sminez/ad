@@ -1,0 +1,26 @@
+The following exec script will locate all markdown code blocks within the
+file and replace them with content fetched using external commands based
+on their filetype tag:
+
+
+Edit , x/\n```@*?```\n/ {
+  n/file\n(.*)\n/ { i/\n/; <"head -n 5 {1}"; };
+  n/url\n(.*)\n/ { i/\n/; <"curl -s {1}"; };
+}
+
+
+```file
+../../../README.md
+```
+
+```file
+../../../Cargo.toml
+```
+
+```url
+http://example.com
+```
+
+```url
+http://wttr.in?format=%c%t\n
+```

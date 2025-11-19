@@ -110,7 +110,7 @@ impl Haystack for GapBuffer {
     }
 
     fn substr<'a>(&'a self, from: usize, to: usize) -> Cow<'a, str> {
-        self.slice_from_byte_offsets(from, to).into_cow()
+        self.slice_from_byte_offsets(from, to).into()
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
@@ -193,7 +193,7 @@ impl Haystack for Buffer {
     }
 
     fn substr<'a>(&'a self, from: usize, to: usize) -> Cow<'a, str> {
-        self.txt.slice_from_byte_offsets(from, to).into_cow()
+        self.txt.slice_from_byte_offsets(from, to).into()
     }
 
     fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
