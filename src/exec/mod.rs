@@ -93,7 +93,7 @@ impl From<template::RenderError> for Error {
 }
 
 /// Something that can be edited by a Program
-pub trait Edit: Address {
+pub trait Edit: Address + Haystack<Regex> {
     /// Insert a string at the specified index
     fn insert(&mut self, ix: usize, s: &str);
 
@@ -218,8 +218,7 @@ impl Program {
     ) -> Result<Dot, Error>
     where
         E: Edit,
-        for<'e> &'e E: Haystack<Regex>,
-        for<'s> <&'s E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
+        for<'s> <E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
         R: Runner,
         W: Write,
     {
@@ -286,8 +285,7 @@ impl Program {
     ) -> Result<Vec<EditAction>, Error>
     where
         E: Edit,
-        for<'e> &'e E: Haystack<Regex>,
-        for<'s> <&'s E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
+        for<'s> <E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
         R: Runner,
         W: Write,
     {
