@@ -999,12 +999,12 @@ mod tests {
     #[test_case(5, ".,. d", "foo│bar│baz", "foo│br│baz", (5, 5); "dot at delimiter")]
     #[test_case(0, "0,0 d", "foo│bar│baz", "oo│bar│baz", (0, 0); "bof beginning of file")]
     #[test_case(0, "$,$ d", "foo│bar│baz", "foo│bar│baz", (11, 11); "eof end of file")]
-    #[test_case(0, "-,- d", "line1\nline2\nline3", "ine1\nline2\nline3", (0, 0); "bol at line start")]
+    #[test_case(0, "-,- d", "line1\nline2\nline3", "ine1\nline2\nline3", (0, 0); "bol at line start")] // typos:ignore
     #[test_case(3, "-,- d", "line1\nline2\nline3", "1\nline2\nline3", (0, 0); "bol from mid line")]
-    #[test_case(0, "+,+ d", "line1\nline2", "ine2", (0, 0); "eol from line start")]
+    #[test_case(0, "+,+ d", "line1\nline2", "ine2", (0, 0); "eol from line start")] // typos:ignore
     #[test_case(2, "+,+ d", "line1\nline2", "liine2", (2, 2); "eol from mid line")]
-    #[test_case(0, "-,+ d", "line1\nline2", "ine2", (0, 0); "current line from start")]
-    #[test_case(3, "-,+ d", "line1\nline2", "ine2", (0, 0); "current line from middle")]
+    #[test_case(0, "-,+ d", "line1\nline2", "ine2", (0, 0); "current line from start")] // typos:ignore
+    #[test_case(3, "-,+ d", "line1\nline2", "ine2", (0, 0); "current line from middle")] // typos:ignore
     #[test_case(0, "2,2 d", "line1\nline2\nline3", "line1\nline3", (6, 6); "absolute line 2")]
     #[test_case(0, "1,1 d", "line1\nline2", "line2", (0, 0); "absolute line 1")]
     #[test_case(0, "#5,#5 d", "0123456789", "012346789", (5, 5); "absolute char offset")]
