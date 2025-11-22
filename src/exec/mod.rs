@@ -503,11 +503,10 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::env;
-
     use super::*;
     use crate::{buffer::Buffer, editor::Action};
     use simple_test_case::test_case;
+    use std::{collections::HashMap, env};
 
     #[test_case(", x/(t.)/ c/{1}X/", "thXis is a teXst XstrXing"; "x c")]
     #[test_case(", x/(t.)/ i/{1}/", "ththis is a tetest t strtring"; "x i")]
@@ -681,5 +680,194 @@ mod tests {
         let final_content = b.str_contents();
 
         assert_eq!(&final_content, initial_content);
+    }
+
+    struct MockRunner {
+        responses: HashMap<(String, Option<String>), io::Result<String>>,
+    }
+
+    impl MockRunner {
+        fn new() -> Self {
+            Self {
+                responses: HashMap::new(),
+            }
+        }
+
+        fn with_response(mut self, cmd: &str, output: &str) -> Self {
+            self.responses
+                .insert((cmd.to_string(), None), Ok(output.to_string()));
+            self
+        }
+
+        fn with_response_for_input(mut self, cmd: &str, input: &str, output: &str) -> Self {
+            self.responses.insert(
+                (cmd.to_string(), Some(input.to_string())),
+                Ok(output.to_string()),
+            );
+            self
+        }
+
+        fn with_failure_for_input(mut self, cmd: &str, input: &str, error_msg: &str) -> Self {
+            self.responses.insert(
+                (cmd.to_string(), Some(input.to_string())),
+                Err(io::Error::other(error_msg)),
+            );
+            self
+        }
+    }
+
+    impl Runner for MockRunner {
+        fn run_shell_command(&mut self, cmd: &str, input: Option<&str>) -> io::Result<String> {
+            let key = (cmd.to_string(), input.map(|s| s.to_string()));
+
+            match self.responses.get(&key) {
+                Some(Ok(output)) => Ok(output.clone()),
+                Some(Err(e)) => Err(io::Error::new(e.kind(), e.to_string())),
+                None => panic!(
+                    "MockRunner: no response configured for command {cmd:?} with input {input:?}"
+                ),
+            }
+        }
+    }
+
+    #[test]
+    fn runner_based_action_errors_are_returned() {
+        let prog = Program::try_parse(", x/foo/ $/fail/").unwrap();
+        let mut b = Buffer::new_unnamed(0, "foo bar", Default::default());
+        let mut runner = MockRunner::new().with_failure_for_input("fail", "foo", "error");
+
+        let result = prog.execute(&mut b, &mut runner, "test", &mut Vec::new());
+
+        assert!(result.is_err());
+        assert_eq!(b.str_contents(), "foo bar");
+    }
+
+    #[test_case("foo", ", x/foo/ $/cmd/", "cmd", "X", "foo", "X"; "simple output")]
+    #[test_case(" foo", ", x/foo/ $/cmd {FILENAME} {ROW} {COL}/", "cmd test 0 1", "ok\n", " foo", "ok\n"; "context variables")]
+    #[test_case("foo", ", x/foo/ $/empty/", "empty", "", "foo", ""; "empty output")]
+    #[test_case("foo", ", x/foo/ $/multi/", "multi", "line1\nline2\n", "foo", "line1\nline2\n"; "multiline output")]
+    #[test_case("foo bar foo", ", x/foo/ $/cmd/", "cmd", "X", "foo bar foo", "XX"; "multiple matches")]
+    #[test]
+    fn shell_dollar_action_works(
+        initial: &str,
+        program: &str,
+        mock_cmd: &str,
+        mock_output: &str,
+        expected_buffer: &str,
+        expected_output: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut b = Buffer::new_unnamed(0, initial, Default::default());
+        let mut runner = MockRunner::new().with_response(mock_cmd, mock_output);
+        let mut output = Vec::new();
+
+        prog.execute(&mut b, &mut runner, "test", &mut output)
+            .unwrap();
+
+        assert_eq!(b.str_contents(), expected_buffer);
+        assert_eq!(String::from_utf8(output).unwrap(), expected_output);
+    }
+
+    #[test_case("foo", ", x/foo/ >/cat/", "cat", "foo", "FOO", "foo", "FOO"; "simple")]
+    #[test_case("foo\nbar\nbaz", ", x/foo\\nbar/ >/process/", "process", "foo\nbar", "processed", "foo\nbar\nbaz", "processed"; "multiline input")]
+    #[test_case("word", ", x/(\\w+)/ >/process {1}/", "process word", "word", "result", "word", "result"; "template in command")]
+    #[test]
+    fn shell_redirect_in_action(
+        initial: &str,
+        program: &str,
+        mock_cmd: &str,
+        mock_input: &str,
+        mock_output: &str,
+        expected_buffer: &str,
+        expected_output: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut b = Buffer::new_unnamed(0, initial, Default::default());
+        let mut runner =
+            MockRunner::new().with_response_for_input(mock_cmd, mock_input, mock_output);
+        let mut output = Vec::new();
+
+        prog.execute(&mut b, &mut runner, "test", &mut output)
+            .unwrap();
+
+        assert_eq!(b.str_contents(), expected_buffer);
+        assert_eq!(String::from_utf8(output).unwrap(), expected_output);
+    }
+
+    #[test_case("this foo that", ", x/foo/ </cmd/", "cmd", "bar", "this bar that"; "simple replacement")]
+    #[test_case("foo foo foo", ", x/foo/ </cmd/", "cmd", "X", "X X X"; "multiple matches")]
+    #[test_case("word", ", x/(\\w+)/ </process {1}/", "process word", "WORD", "WORD"; "template in command")]
+    #[test_case("foo bar foo", ", x/foo/ </cmd/", "cmd", "", " bar "; "empty output deletes")]
+    #[test_case("foo", ", x/foo/ </cmd/", "cmd", "line1\nline2\n", "line1\nline2\n"; "multiline output")]
+    #[test]
+    fn shell_redirect_out_action(
+        initial: &str,
+        program: &str,
+        mock_cmd: &str,
+        mock_output: &str,
+        expected_buffer: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut b = Buffer::new_unnamed(0, initial, Default::default());
+        let mut runner = MockRunner::new().with_response(mock_cmd, mock_output);
+        let mut output = Vec::new();
+
+        prog.execute(&mut b, &mut runner, "test", &mut output)
+            .unwrap();
+
+        assert_eq!(b.str_contents(), expected_buffer);
+    }
+
+    #[test]
+    fn shell_redirect_out_action_sets_dot() {
+        let prog = Program::try_parse(", x/foo/ </cmd/").unwrap();
+        let mut runner = MockRunner::new().with_response("cmd", "REPLACEMENT");
+        let mut b = Buffer::new_unnamed(0, "foo bar foo", Default::default());
+        let mut output = Vec::new();
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut output)
+            .unwrap();
+
+        assert_eq!(dot.content(&b), "REPLACEMENT");
+    }
+
+    #[test_case("this foo that", ", x/foo/ |/upper/", "upper", "foo", "FOO", "this FOO that"; "simple transformation")]
+    #[test_case("foo\nbar\nbaz", ", x/foo\\nbar/ |/transform/", "transform", "foo\nbar", "transformed", "transformed\nbaz"; "multiline match")]
+    #[test_case("word", ", x/(\\w+)/ |/process {1}/", "process word", "word", "WORD", "WORD"; "template in command")]
+    #[test_case("foo\tbar\n", ", |/cmd/", "cmd", "foo\tbar\n", "transformed", "transformed"; "special chars")]
+    #[test]
+    fn shell_pipe_action(
+        initial: &str,
+        program: &str,
+        mock_cmd: &str,
+        mock_input: &str,
+        mock_output: &str,
+        expected_buffer: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut b = Buffer::new_unnamed(0, initial, Default::default());
+        let mut runner =
+            MockRunner::new().with_response_for_input(mock_cmd, mock_input, mock_output);
+
+        prog.execute(&mut b, &mut runner, "test", &mut Vec::new())
+            .unwrap();
+
+        assert_eq!(b.str_contents(), expected_buffer);
+    }
+
+    #[test]
+    fn shell_pipe_action_sets_dot() {
+        let prog = Program::try_parse(", x/foo/ |/expand/").unwrap();
+        let mut b = Buffer::new_unnamed(0, "foo bar", Default::default());
+        let mut runner =
+            MockRunner::new().with_response_for_input("expand", "foo", "much longer replacement");
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut Vec::new())
+            .unwrap();
+
+        assert_eq!(b.str_contents(), "much longer replacement bar");
+        assert_eq!(dot.content(&b), "much longer replacement");
     }
 }
