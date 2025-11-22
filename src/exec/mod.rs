@@ -506,7 +506,7 @@ mod tests {
     use super::*;
     use crate::{buffer::Buffer, editor::Action};
     use simple_test_case::test_case;
-    use std::{collections::HashMap, env};
+    use std::{collections::HashMap, env, io};
 
     #[test_case(", x/(t.)/ c/{1}X/", "thXis is a teXst XstrXing"; "x c")]
     #[test_case(", x/(t.)/ i/{1}/", "ththis is a tetest t strtring"; "x i")]
@@ -732,7 +732,7 @@ mod tests {
 
     #[test]
     fn runner_based_action_errors_are_returned() {
-        let prog = Program::try_parse(", x/foo/ $/fail/").unwrap();
+        let prog = Program::try_parse(", x/foo/ >/fail/").unwrap();
         let mut b = Buffer::new_unnamed(0, "foo bar", Default::default());
         let mut runner = MockRunner::new().with_failure_for_input("fail", "foo", "error");
 
@@ -869,5 +869,195 @@ mod tests {
 
         assert_eq!(b.str_contents(), "much longer replacement bar");
         assert_eq!(dot.content(&b), "much longer replacement");
+    }
+
+    #[test_case("/[unclosed/"; "invalid regex forward")]
+    #[test_case("-/[unclosed/"; "invalid regex backward")]
+    #[test_case("/foo/,/[bad/"; "invalid regex in compound")]
+    #[test_case("/(?P<invalid>/"; "invalid regex special chars")]
+    #[test]
+    fn try_parse_invalid_regex_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::InvalidRegex(_))));
+    }
+
+    #[test_case("/foo"; "forward regex no closing")]
+    #[test_case("-/bar"; "backward regex no closing")]
+    #[test_case("/foo/,/bar"; "compound second unclosed")]
+    #[test]
+    fn try_parse_unclosed_delimiter_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::UnclosedDelimiter(_, '/'))));
+    }
+
+    #[test_case("5:@"; "unexpected char after colon")]
+    #[test_case("5:@10"; "unexpected char before column")]
+    #[test]
+    fn try_parse_unexpected_character_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::UnexpectedCharacter(_))));
+    }
+
+    #[test_case("1:0"; "zero column")]
+    #[test_case("2:00"; "zero column with double zero")]
+    #[test_case("10:000"; "zero column with triple zero")]
+    #[test]
+    fn try_parse_zero_indexed_line_or_column_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::ZeroIndexedLineOrColumn)));
+    }
+
+    #[test_case(", x/foo/ c/{0/"; "change action unclosed submatch")]
+    #[test_case(", x/foo/ i/{1/"; "insert action unclosed submatch")]
+    #[test_case(", x/foo/ a/{FILENAME/"; "append action unclosed variable")]
+    #[test_case(", x/foo/ p/{ROW/"; "print action unclosed variable")]
+    #[test_case(", x/foo/ $/cmd {0/"; "shell dollar action unclosed")]
+    #[test_case(", x/foo/ >/cmd {1/"; "shell redirect in unclosed")]
+    #[test_case(", x/foo/ </cmd {2/"; "shell redirect out unclosed")]
+    #[test_case(", x/foo/ |/cmd {COL/"; "shell pipe unclosed")]
+    #[test]
+    fn try_parse_template_unclosed_brace_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::InvalidTemplate(_))));
+    }
+
+    #[test_case(", x/foo/ c/\\x/"; "escape x not valid")]
+    #[test_case(", x/foo/ i/\\z/"; "escape z not valid")]
+    #[test_case(", x/foo/ a/\\r/"; "escape r not valid")]
+    #[test_case(", x/foo/ p/\\b/"; "escape b not valid")]
+    #[test_case(", x/foo/ c/foo\\qbar/"; "escape q in middle")]
+    #[test_case(", x/foo/ i/\\d/"; "escape d not valid")]
+    #[test_case(", x/foo/ $/cmd \\w/"; "escape w in shell command")]
+    #[test]
+    fn try_parse_template_invalid_escape_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::InvalidTemplate(_))));
+    }
+
+    // Note: Some apparent template EOF errors are actually caught by structex as
+    // MissingDelimiter errors. For example:
+    // - ", x/foo/ i/\\/" - backslash escapes the closing '/', causing structex error
+    // - ", x/foo/ a/{0" - missing closing '/', caught by structex before template parsing
+    #[test_case(", x/foo/ c/{/"; "eof after opening brace")]
+    #[test_case(", x/foo/ p/{F/"; "eof in middle of variable")]
+    #[test_case(", x/foo/ $/cmd {/"; "shell command eof after brace")]
+    #[test]
+    fn try_parse_template_unexpected_eof_returns_error(input: &str) {
+        let res = Program::try_parse(input);
+        assert!(matches!(res, Err(Error::InvalidTemplate(_))));
+    }
+
+    #[test_case(", x/foo/ p/{UNKNOWN}/"; "print with unknown variable")]
+    #[test_case(", x/foo/ c/{INVALID_VAR}/"; "change with unknown variable")]
+    #[test_case(", x/foo/ i/{NOTDEFINED}/"; "insert with unknown variable")]
+    #[test_case(", x/foo/ a/{BADVAR}/"; "append with unknown variable")]
+    #[test]
+    fn execute_with_unknown_variable_returns_error(input: &str) {
+        let program = Program::try_parse(input).unwrap();
+        let mut buffer = Buffer::new_unnamed(0, "foo bar", Default::default());
+        let mut runner = MockRunner::new();
+        let mut output = Vec::new();
+
+        let res = program.execute(&mut buffer, &mut runner, "test.txt", &mut output);
+        assert!(matches!(res, Err(Error::Render(_))));
+    }
+
+    /// A Writer that always returns IO errors
+    struct FailingWriter;
+
+    impl io::Write for FailingWriter {
+        fn write(&mut self, _buf: &[u8]) -> io::Result<usize> {
+            Err(io::Error::other("mock write failure"))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::other("mock flush failure"))
+        }
+    }
+
+    #[test]
+    fn execute_print_with_failing_writer_returns_io_error() {
+        let program = Program::try_parse(", x/foo/ p/{0}/").unwrap();
+        let mut buffer = Buffer::new_unnamed(0, "foo bar foo", Default::default());
+        let mut runner = MockRunner::new();
+
+        let res = program.execute(&mut buffer, &mut runner, "test.txt", &mut FailingWriter);
+        assert!(matches!(res, Err(Error::Render(_))));
+    }
+
+    #[test]
+    fn execute_shell_dollar_with_failing_writer_returns_io_error() {
+        let program = Program::try_parse(", x/foo/ $/echo test/").unwrap();
+        let mut buffer = Buffer::new_unnamed(0, "foo", Default::default());
+        let mut runner = MockRunner::new().with_response("echo test", "output");
+
+        let res = program.execute(&mut buffer, &mut runner, "test.txt", &mut FailingWriter);
+        assert!(matches!(res, Err(Error::Io(..))));
+    }
+
+    #[test_case(0, ".,. d", "foo│bar│baz", "oo│bar│baz", (0, 0); "dot current position")]
+    #[test_case(5, ".,. d", "foo│bar│baz", "foo│br│baz", (5, 5); "dot at delimiter")]
+    #[test_case(0, "0,0 d", "foo│bar│baz", "oo│bar│baz", (0, 0); "bof beginning of file")]
+    #[test_case(0, "$,$ d", "foo│bar│baz", "foo│bar│baz", (11, 11); "eof end of file")]
+    #[test_case(0, "-,- d", "line1\nline2\nline3", "ine1\nline2\nline3", (0, 0); "bol at line start")]
+    #[test_case(3, "-,- d", "line1\nline2\nline3", "1\nline2\nline3", (0, 0); "bol from mid line")]
+    #[test_case(0, "+,+ d", "line1\nline2", "ine2", (0, 0); "eol from line start")]
+    #[test_case(2, "+,+ d", "line1\nline2", "liine2", (2, 2); "eol from mid line")]
+    #[test_case(0, "-,+ d", "line1\nline2", "ine2", (0, 0); "current line from start")]
+    #[test_case(3, "-,+ d", "line1\nline2", "ine2", (0, 0); "current line from middle")]
+    #[test_case(0, "2,2 d", "line1\nline2\nline3", "line1\nline3", (6, 6); "absolute line 2")]
+    #[test_case(0, "1,1 d", "line1\nline2", "line2", (0, 0); "absolute line 1")]
+    #[test_case(0, "#5,#5 d", "0123456789", "012346789", (5, 5); "absolute char offset")]
+    #[test_case(0, "#0,#0 d", "hello world", "ello world", (0, 0); "char offset at start")]
+    #[test_case(5, "+2,+2 d", "L1\nL2\nL3\nL4", "L1\nL2\nL3\n4", (9, 9); "relative line forward")]
+    #[test_case(10, "-2,-2 d", "L1\nL2\nL3\nL4", "L1\nL3\nL4", (3, 3); "relative line backward")]
+    #[test_case(5, "+#3,+#3 d", "hello world", "hello wold", (8, 8); "relative char forward")]
+    #[test_case(8, "-#3,-#3 d", "hello world", "helloworld", (5, 5); "relative char backward")]
+    #[test_case(0, "2:3,2:3 d", "L1\nL2\nL3", "L1\nL2L3", (5, 5); "line and column")]
+    #[test_case(0, "1:1,1:1 d", "hello\nworld", "ello\nworld", (0, 0); "line 1 col 1")]
+    #[test_case(0, "2:1,2:1 d", "hello\nworld", "hello\norld", (6, 6); "second line first col")]
+    #[test]
+    fn address_simple_positions_work(
+        initial_dot_idx: usize,
+        program: &str,
+        initial_content: &str,
+        expected_content: &str,
+        expected_dot: (usize, usize),
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+        b.dot = Cur::new(initial_dot_idx).into();
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), expected_content, "buffer content");
+        assert_eq!(dot.as_char_indices(), expected_dot, "returned dot");
+    }
+
+    #[test_case("0,/foo/ d", "start\nfoo bar", " bar"; "bof to regex")]
+    #[test_case("0,$ d", "hello\nworld", ""; "bof to eof entire buffer")]
+    #[test_case("/foo/,$ d", "hello\nfoo\nbar", "hello\n"; "regex to eof")]
+    #[test_case("2,4 d", "L1\nL2\nL3\nL4\nL5", "L1\nL5"; "line range")]
+    #[test_case("#5,#10 d", "0123456789abc", "01234bc"; "char range")]
+    #[test_case("1:2,2:3 d", "hello\nworld", "hld"; "line:col range")]
+    #[test_case("-,+ d", "L1\nL2\nL3", "2\nL3"; "bol to eol entire line")]
+    #[test_case(".,$ d", "foo\nbar\nbaz", ""; "dot to eof")]
+    #[test_case("0,#10 d", "hello world test", " test"; "bof to char offset")]
+    #[test_case("2,/end/ d", "start\nL2\nend here", "start\n here"; "line to regex")]
+    #[test_case("#10,$ d", "0123456789rest", "0123456789"; "char to eof")]
+    #[test_case("/start/,3 d", "foo\nstart\nL3\nbar", "foo\nbar"; "regex to line")]
+    #[test]
+    fn address_compound_ranges_work(program: &str, initial_content: &str, expected_content: &str) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), expected_content);
     }
 }
