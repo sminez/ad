@@ -1121,6 +1121,20 @@ pub struct Slice<'a> {
     right: &'a [u8],
 }
 
+impl<'a> From<Slice<'a>> for Cow<'a, str> {
+    fn from(s: Slice<'a>) -> Self {
+        if s.left.is_empty() {
+            // SAFETY: we know that we have valid utf8 data internally
+            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(s.right) })
+        } else if s.right.is_empty() {
+            // SAFETY: we know that we have valid utf8 data internally
+            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(s.left) })
+        } else {
+            Cow::Owned(s.to_string())
+        }
+    }
+}
+
 impl<'a> Slice<'a> {
     const NULL: Slice<'a> = Slice {
         from: 0,
@@ -1135,18 +1149,6 @@ impl<'a> Slice<'a> {
     /// The logical byte offset that this slice was taken from.
     pub fn from(&self) -> usize {
         self.from
-    }
-
-    pub fn into_cow(self) -> Cow<'a, str> {
-        if self.left.is_empty() {
-            // SAFETY: we know that we have valid utf8 data internally
-            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self.right) })
-        } else if self.right.is_empty() {
-            // SAFETY: we know that we have valid utf8 data internally
-            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(self.left) })
-        } else {
-            Cow::Owned(self.to_string())
-        }
     }
 
     #[inline]

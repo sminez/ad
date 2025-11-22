@@ -1,10 +1,11 @@
 //! Benchmarking for the structural regular expression engine
 use ad_editor::{
     buffer::{Buffer, GapBuffer},
-    exec::Program,
+    exec::{Program, SystemRunner},
 };
 use criterion::{Criterion, criterion_group};
 use std::{
+    env,
     hint::black_box,
     io::{self, Write},
 };
@@ -22,19 +23,20 @@ const GAP_BUFFER: &str = include_str!("../../src/buffer/internal.rs");
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("Structural regex");
 
-    let mut prog = Program::try_parse(SCRIPT).expect("valid test script");
+    let prog = Program::try_parse(SCRIPT).expect("valid test script");
     let mut w = StdoutSink(Vec::with_capacity(10 * 1024));
+    let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
     for (name, s) in [("ziplist", ZIPLIST), ("internal", GAP_BUFFER)] {
         let mut buf = Buffer::new_unnamed(0, s, Default::default());
         let mut gb = GapBuffer::from(s);
 
         group.bench_function(format!("fancy impl blocks {name} (buffer)"), |b| {
-            b.iter(|| prog.execute(black_box(&mut buf), name, black_box(&mut w)));
+            b.iter(|| prog.execute(black_box(&mut buf), &mut runner, name, black_box(&mut w)));
         });
 
         group.bench_function(format!("fancy impl blocks {name} (gap buffer)"), |b| {
-            b.iter(|| prog.execute(black_box(&mut gb), name, black_box(&mut w)));
+            b.iter(|| prog.execute(black_box(&mut gb), &mut runner, name, black_box(&mut w)));
         });
     }
 

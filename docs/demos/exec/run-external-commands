@@ -1,0 +1,30 @@
+The following exec script will locate all markdown code blocks within the
+file and process based on their filetype tag:
+
+Edit , x/\n```@*?```\n/ {
+  n/file\n(.*)\n/ {
+    p/\n:: FILE\n/;
+    $"head -n 5 {1}";
+  };
+
+  n/url\n(.*)\n/ {
+    p/\n:: URL\n/;
+    $"curl -s {1}";
+  };
+}
+
+```file
+../../../README.md
+```
+
+```file
+../../../Cargo.toml
+```
+
+```url
+http://example.com
+```
+
+```url
+http://wttr.in?format=%c%t\n
+```

@@ -5,7 +5,7 @@ use crate::{
     config_handle,
     dot::{Cur, Dot, Range, TextObject},
     editor::{Editor, MbSelector, MiniBufferSelection},
-    exec::{Addr, Address, Program},
+    exec::{Addr, Address, EditorRunner, Program},
     fsys::LogEvent,
     key::{Arrow, Input},
     lsp::Coords,
@@ -760,7 +760,7 @@ where
 
     pub(super) fn execute_edit_command(&mut self, cmd: &str) {
         debug!(%cmd, "executing edit command");
-        let mut prog = match Program::try_parse(cmd) {
+        let prog = match Program::try_parse(cmd) {
             Ok(prog) => prog,
             Err(error) => {
                 warn!(?error, "invalid edit command");
@@ -773,7 +773,13 @@ where
         let b = self.layout.active_buffer_mut_ignoring_scratch();
         let fname = b.full_name().to_string();
 
-        match prog.execute(b, &fname, &mut buf) {
+        let mut runner = EditorRunner {
+            system: &mut self.system,
+            dir: b.dir().unwrap_or(&self.cwd).to_path_buf(),
+            bufid: b.id,
+        };
+
+        match prog.execute(b, &mut runner, &fname, &mut buf) {
             Ok(new_dot) => {
                 self.layout.record_jump_position();
                 self.layout.active_buffer_mut_ignoring_scratch().dot = new_dot;

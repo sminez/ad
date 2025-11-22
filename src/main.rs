@@ -1,6 +1,6 @@
 use ad_editor::{
     CliAction, Cmd9p, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer, PlumbingRules,
-    Program, USAGE, VERSION, buffer::GapBuffer, regex::CachingStream,
+    Program, USAGE, VERSION, buffer::GapBuffer, exec::SystemRunner, regex::CachingStream,
 };
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
@@ -73,18 +73,19 @@ fn log_level_from_env() -> LevelFilter {
 }
 
 fn run_script(script: &str, files: Vec<PathBuf>) {
-    let mut prog = match Program::try_parse(script) {
+    let prog = match Program::try_parse(script) {
         Ok(prog) => prog,
         Err(e) => {
             eprintln!("error parsing script: {e:?}");
             exit(1);
         }
     };
-    let mut stdout = io::stdout().lock();
+    let mut stdout = io::stdout();
+    let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
     if files.is_empty() {
-        // Read from stdin and write directly to stdout
-        match prog.execute(&mut CachingStream::new(stdin()), "stdin", &mut stdout) {
+        let mut haystack = CachingStream::new(stdin());
+        match prog.execute(&mut haystack, &mut runner, "stdin", &mut stdout) {
             Ok(_) => return,
             Err(e) => {
                 eprintln!("error running script: {e:?}");
@@ -103,7 +104,8 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
         };
 
         let mut gb = GapBuffer::from(s);
-        if let Err(e) = prog.execute(&mut gb, path.to_str().unwrap(), &mut stdout) {
+        runner.set_dir(path.parent().unwrap());
+        if let Err(e) = prog.execute(&mut gb, &mut runner, path.to_str().unwrap(), &mut stdout) {
             eprintln!("error running script: {e:?}");
             exit(1);
         }

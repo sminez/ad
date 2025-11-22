@@ -18,6 +18,8 @@ pub enum Event {
     Input(Input),
     /// A Message received from the virtual filesystem interface
     Message(Message),
+    /// A status message to display in the editor UI
+    StatusMessage(String),
     /// A signal that our window size has changed
     WinsizeChanged { rows: usize, cols: usize },
 }
