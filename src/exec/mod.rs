@@ -1060,4 +1060,170 @@ mod tests {
 
         assert_eq!(&b.str_contents(), expected_content);
     }
+
+    #[test_case(", d", "", ""; "delete on empty buffer")]
+    #[test_case(", x/foo/ c/bar/", "", ""; "x on empty buffer")]
+    #[test_case(", y/foo/ c/bar/", "", ""; "y on empty buffer")]
+    #[test_case("0,$ d", "", ""; "full buffer delete on empty")]
+    #[test_case(", x/foo/ d", "bar baz qux", "bar baz qux"; "x no matches")]
+    #[test_case(", x/foo/ c/replacement/", "bar baz", "bar baz"; "x no matches change")]
+    #[test_case(", y/foo/ i/X/", "bar baz", "Xbar baz"; "y no matches inserts once")]
+    #[test_case("/foo/ d", "bar baz", "ar baz"; "regex address no match")]
+    #[test]
+    fn edge_case_empty_and_no_matches_work(
+        program: &str,
+        initial_content: &str,
+        expected_content: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), expected_content, "buffer content");
+    }
+
+    #[test_case(", x/.*/ i/X/", "foo", "Xfoo"; "zero-length dot star insert")]
+    #[test_case(", x/.*/ p/{0}/", "a\nb", "a\nb"; "zero-length dot star print")]
+    #[test_case(", x/^/ i/> /", "foo\nbar", "> f> o> o> \n> b> a> r"; "zero-length line start")]
+    #[test_case(", x/$/ a/ </", "foo\nbar", " <f <o <o <\n <b <a <r"; "zero-length line end")]
+    #[test_case(", x/\\b/ i/|/", "foo bar", "|f|o|o| |b|a|r"; "zero-length word boundary")]
+    #[test_case(", y/.*/ i/X/", "foo", "foo"; "y with zero-length")]
+    #[test]
+    fn edge_case_zero_length_matches_work(
+        program: &str,
+        initial_content: &str,
+        expected_content: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), expected_content, "buffer content");
+    }
+
+    #[test]
+    fn edge_case_very_large_replacement() {
+        let large_replacement = "X".repeat(10000);
+        let prog = Program::try_parse(&format!(", x/foo/ c/{}/", large_replacement)).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, "foo bar foo", Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        let expected = format!("{} bar {}", large_replacement, large_replacement);
+        assert_eq!(&b.str_contents(), &expected);
+    }
+
+    #[test]
+    fn edge_case_large_buffer_with_many_matches() {
+        let initial = "foo ".repeat(1000);
+        let prog = Program::try_parse(", x/foo/ c/bar/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, &initial, Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        let expected = "bar ".repeat(1000);
+        assert_eq!(&b.str_contents(), &expected);
+    }
+
+    #[test_case("0,$", "hello world", "hello world", (0, 11); "full buffer address only")]
+    #[test_case("/foo/", "bar foo baz", "bar foo baz", (4, 6); "regex address only")]
+    #[test_case("2", "L1\nL2\nL3", "L1\nL2\nL3", (3, 5); "line address only")]
+    #[test_case("#5", "hello world", "hello world", (5, 5); "char address only")]
+    #[test]
+    fn edge_case_address_only_programs_work(
+        program: &str,
+        initial_content: &str,
+        expected_content: &str,
+        expected_dot: (usize, usize),
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(
+            &b.str_contents(),
+            expected_content,
+            "buffer should not change"
+        );
+        assert_eq!(dot.as_char_indices(), expected_dot, "dot should be set");
+    }
+
+    #[test_case(", x/./ c/X/", "hello", "XXXXX"; "ascii single char")]
+    #[test_case(", x/./ c/X/", "世界", "XX"; "multibyte chars")]
+    #[test_case(", x/./ c/X/", "🦊🐕", "XX"; "emoji")]
+    #[test_case("#2,#4 d", "世界你好", "世界"; "char offset with multibyte")]
+    #[test_case(", x/\\w+/ c/X/", "hello世界", "X世界"; "word with mixed scripts")]
+    #[test_case("1:2,1:4 d", "世界你好", "世"; "line:col with multibyte")]
+    #[test]
+    fn edge_case_unicode_works(program: &str, initial_content: &str, expected_content: &str) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), expected_content, "buffer content");
+    }
+
+    #[test]
+    fn edge_case_buffer_grows_significantly() {
+        let prog = Program::try_parse(", x/x/ c/REPLACEMENT/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, "x x x", Default::default());
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), "REPLACEMENT REPLACEMENT REPLACEMENT");
+        assert!(dot.as_char_indices().1 > 5);
+    }
+
+    #[test]
+    fn edge_case_buffer_shrinks_significantly() {
+        let prog = Program::try_parse(", x/LONGWORD/ c/x/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, "LONGWORD LONGWORD LONGWORD", Default::default());
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), "x x x");
+        assert_eq!(dot.as_char_indices(), (4, 4));
+    }
+
+    #[test_case(", x/foo/ x/o/ c/X/", "foo bar", "fXX bar"; "nested x")]
+    #[test_case(", x/\\w+/ y/o/ c/X/", "foo boo", "Xoo Xoo"; "x containing y")]
+    #[test_case(", y/foo/ x/o/ c/X/", "foo bar foo", "foo bar foo"; "y containing x")]
+    #[test]
+    fn edge_case_complex_structex_works(
+        program: &str,
+        initial_content: &str,
+        expected_content: &str,
+    ) {
+        let prog = Program::try_parse(program).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
+
+        prog.execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), expected_content, "buffer content");
+    }
 }
