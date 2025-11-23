@@ -1036,12 +1036,18 @@ impl GapBuffer {
             return i;
         }
 
+        // Empty buffer is a special case: the only valid char index is 0 which maps to gap_start
+        if self.n_chars == 0 {
+            assert_eq!(char_idx, 0);
+            return self.gap_start;
+        }
+
         // When looking for the last character of a buffer containing a single line we can decode
         // backwards from either the start of the gap or the end of the raw buffer depending on
         // where the gap currently lies.
         if self.line_endings.is_empty() && char_idx == self.len_chars().saturating_sub(1) {
-            if self.gap_end == self.cap {
-                let ch_end = self.gap_start.saturating_sub(1);
+            if self.gap_end == self.cap && self.gap_start > 0 {
+                let ch_end = self.gap_start - 1;
                 // SAFETY: we know that we have valid utf-8 data immediately before the gap
                 let ch = unsafe { decode_char_ending_at(ch_end, &self.data) };
 

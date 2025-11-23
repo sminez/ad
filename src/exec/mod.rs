@@ -1165,6 +1165,7 @@ mod tests {
     #[test_case(", x/./ c/X/", "hello", "XXXXX"; "ascii single char")]
     #[test_case(", x/./ c/X/", "世界", "XX"; "multibyte chars")]
     #[test_case(", x/./ c/X/", "🦊🐕", "XX"; "emoji")]
+    #[test_case(", x/./ c/X/", "é", "X"; "e with acute literal")]
     #[test_case("#2,#4 d", "世界你好", "世界"; "char offset with multibyte")]
     #[test_case(", x/\\w+/ c/X/", "hello世界", "X世界"; "word with mixed scripts")]
     #[test_case("1:2,1:4 d", "世界你好", "世"; "line:col with multibyte")]
@@ -1178,6 +1179,22 @@ mod tests {
             .unwrap();
 
         assert_eq!(&b.str_contents(), expected_content, "buffer content");
+    }
+
+    // This is a regression test for a panic found when testing the program being run here. This
+    // should replace each character in the buffer with an "X": originally this incorrectly treated
+    // the "é" character as two distinct characters and ended up positioning the GapBuffer gap in
+    // an invalid position.
+    #[test]
+    fn multibyte_unicode_combining_characters_are_handled_correctly() {
+        let prog = Program::try_parse(", x/./ c/X/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut gb = GapBuffer::from("é");
+
+        prog.execute(&mut gb, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&gb.to_string(), "X");
     }
 
     #[test]
