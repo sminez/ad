@@ -8,13 +8,9 @@
 
 
 -- Misc / Editor features --
-
 - [ ] support running an exec script from a file
-
 - [ ] Add command & Edit history using minibuffer with hidden lines
 
 -- Structural regular expressions --
-- [ ] Piping through a shell command
-- [ ] Replace without output from a shell command
 - [ ] Storing the history of previous edit commands and allowing for cycling through
       them would be helpful (same for Command mode).
