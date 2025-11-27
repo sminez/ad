@@ -12,6 +12,9 @@ lsp.roots = ["melos.yaml", "pubspec.yaml"]
 [graphql]
 extensions = ["graphql"]
 
+[haskell]
+extensions = ["hs"]
+
 [json]
 extensions = ["json"]
 

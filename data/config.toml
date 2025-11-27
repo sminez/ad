@@ -144,6 +144,9 @@ lsp.roots = ["melos.yaml", "pubspec.yaml"]
 [filetypes.graphql]
 extensions = ["graphql"]
 
+[filetypes.haskell]
+extensions = ["hs"]
+
 [filetypes.json]
 extensions = ["json"]
 

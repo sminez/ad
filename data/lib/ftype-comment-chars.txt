@@ -2,6 +2,7 @@ bash #
 c //
 dart //
 graphql #
+haskell --
 just #
 make #
 plumbingrules #
