@@ -9,4 +9,5 @@ criterion_main! {
     benchmarks::ts_update::benches,
     benchmarks::exec::benches,
     benchmarks::re_fast_match::benches,
+    benchmarks::gap_buffer::benches,
 }
