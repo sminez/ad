@@ -20,7 +20,7 @@ use std::{
     borrow::Cow,
     cell::UnsafeCell,
     cmp::{Ordering, max, min},
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fmt,
 };
 
@@ -115,7 +115,7 @@ pub struct GapBuffer {
     /// this is != line_endings.last() if there is no trailing newline
     n_chars: usize,
     /// line ending raw byte offset -> char offset
-    line_endings: BTreeMap<ByteOffset, CharOffset>,
+    line_endings: Vec<(ByteOffset, CharOffset)>,
     /// Simple cache of computed char->byte mappings since the last time the buffer was modified
     char_to_byte_cache: CharToByteCache,
 }
@@ -126,14 +126,14 @@ impl Default for GapBuffer {
     }
 }
 
-fn compute_line_endings(s: &str) -> (usize, BTreeMap<ByteOffset, CharOffset>) {
+fn compute_line_endings(s: &str) -> (usize, Vec<(ByteOffset, CharOffset)>) {
     let mut n_chars = 0;
-    let mut line_endings = BTreeMap::new();
+    let mut line_endings = Vec::new();
 
     for (line_chars, (idx, ch)) in s.char_indices().enumerate() {
         n_chars += 1;
         if ch == '\n' {
-            line_endings.insert(idx, line_chars);
+            line_endings.push((idx, line_chars));
         }
     }
 
@@ -231,7 +231,7 @@ macro_rules! assert_line_endings {
             .filter(|&(i, &b)| b == b'\n' && (i < $self.gap_start || i >= $self.gap_end))
             .map(|(i, _)| i)
             .collect();
-        let tracked_line_endings: Vec<usize> = $self.line_endings.keys().copied().collect();
+        let tracked_line_endings: Vec<usize> = $self.line_endings.iter().map(|(n, _)| *n).collect();
 
         assert_eq!(
             tracked_line_endings, true_endings,
@@ -246,7 +246,7 @@ macro_rules! assert_line_endings {
             .filter(|&(_, c)| c == '\n')
             .map(|(i, _)| i)
             .collect();
-        let tracked_line_endings: Vec<usize> = $self.line_endings.values().copied().collect();
+        let tracked_line_endings: Vec<usize> = $self.line_endings.iter().map(|(_, n)| *n).collect();
 
         assert_eq!(
             tracked_line_endings, true_endings,
@@ -380,8 +380,8 @@ impl GapBuffer {
     /// The number of lines within the buffer
     #[inline]
     pub fn len_lines(&self) -> usize {
-        match self.line_endings.last_key_value() {
-            Some((&raw_idx, _)) => {
+        match self.line_endings.last() {
+            Some(&(raw_idx, _)) => {
                 let n = self.line_endings.len();
                 let byte_idx = if raw_idx > self.gap_start {
                     raw_idx - self.gap_end
@@ -405,8 +405,8 @@ impl GapBuffer {
     pub fn byte_line_endings(&self) -> Vec<usize> {
         let mut endings: Vec<_> = self
             .line_endings
-            .keys()
-            .map(|i| self.raw_byte_to_byte(*i))
+            .iter()
+            .map(|(i, _)| self.raw_byte_to_byte(*i))
             .collect();
         let eob = self.len();
 
@@ -498,14 +498,17 @@ impl GapBuffer {
             )
         }
 
-        let to = match self.line_endings.iter().nth(line_idx) {
-            Some((&idx, _)) => idx + self.char_len(idx),
-            None => self.cap,
+        let to = if line_idx < self.line_endings.len() {
+            let idx = self.line_endings[line_idx].0;
+            idx + self.char_len(idx)
+        } else {
+            self.cap
         };
+
         let from = if line_idx == 0 {
             0
         } else {
-            let idx = *self.line_endings.iter().nth(line_idx - 1).unwrap().0;
+            let idx = self.line_endings[line_idx - 1].0;
             idx + 1
         };
 
@@ -540,16 +543,18 @@ impl GapBuffer {
             )
         }
 
-        let chars_to = match self.line_endings.iter().nth(line_idx) {
-            Some((_, &char_idx)) => char_idx + 1,
-            None if line_idx == 0 => return self.n_chars,
-            None => self.n_chars,
+        let chars_to = if self.line_endings.is_empty() {
+            return self.n_chars;
+        } else if line_idx < self.line_endings.len() {
+            self.line_endings[line_idx].1 + 1
+        } else {
+            self.n_chars
         };
 
         let chars_from = if line_idx == 0 {
             0
         } else {
-            *self.line_endings.iter().nth(line_idx - 1).unwrap().1 + 1
+            self.line_endings[line_idx - 1].1 + 1
         };
 
         chars_to - chars_from
@@ -629,12 +634,11 @@ impl GapBuffer {
     pub fn try_char_to_line(&self, char_idx: usize) -> Option<usize> {
         match char_idx.cmp(&self.n_chars) {
             Ordering::Less => {
-                for (i, &char_offset) in self.line_endings.values().enumerate() {
-                    if char_idx <= char_offset {
-                        return Some(i);
-                    }
+                if char_idx < self.n_chars {
+                    Some(self.line_endings.partition_point(|(_, i)| *i < char_idx))
+                } else {
+                    Some(self.len_lines() - 1)
                 }
-                Some(self.len_lines() - 1)
             }
 
             // We allow setting the cursor to the end of the buffer for inserts
@@ -670,7 +674,7 @@ impl GapBuffer {
         if line_idx == 0 {
             Some(0)
         } else {
-            let k = *self.line_endings.iter().nth(line_idx - 1).unwrap().1;
+            let k = self.line_endings[line_idx - 1].1;
             Some(k + 1)
         }
     }
@@ -683,7 +687,7 @@ impl GapBuffer {
         let raw = if line_idx == 0 {
             0
         } else {
-            *self.line_endings.iter().nth(line_idx - 1).unwrap().0 + 1
+            self.line_endings[line_idx - 1].0 + 1
         };
 
         self.raw_byte_to_byte(raw)
@@ -706,17 +710,10 @@ impl GapBuffer {
         self.gap_start += len;
         self.n_chars += 1;
 
-        if ch == '\n' {
-            self.line_endings.insert(idx, char_idx);
-        }
+        let endings: &[(ByteOffset, CharOffset)] =
+            if ch == '\n' { &[(idx, char_idx)] } else { &[] };
 
-        self.update_line_endings(|(&bidx, &cidx)| {
-            if bidx > idx {
-                (bidx, cidx + 1)
-            } else {
-                (bidx, cidx)
-            }
-        });
+        self.add_line_endings(idx, 1, endings);
         self.char_to_byte_cache.clear();
 
         #[cfg(test)]
@@ -739,21 +736,16 @@ impl GapBuffer {
 
         self.data[self.gap_start..self.gap_start + len].copy_from_slice(s.as_bytes());
         self.gap_start += len;
-        self.n_chars += s.chars().count();
+        self.n_chars += len_chars;
 
-        for (i, (offset, ch)) in s.char_indices().enumerate() {
-            if ch == '\n' {
-                self.line_endings.insert(idx + offset, char_idx + i);
-            }
-        }
+        let endings: Vec<_> = s
+            .char_indices()
+            .enumerate()
+            .filter(|(_, (_, ch))| *ch == '\n')
+            .map(|(i, (offset, _))| (idx + offset, char_idx + i))
+            .collect();
 
-        self.update_line_endings(|(&bidx, &cidx)| {
-            if bidx >= idx + len {
-                (bidx, cidx + len_chars)
-            } else {
-                (bidx, cidx)
-            }
-        });
+        self.add_line_endings(idx, len_chars, &endings);
         self.char_to_byte_cache.clear();
 
         #[cfg(test)]
@@ -775,15 +767,7 @@ impl GapBuffer {
         self.gap_end += len;
         self.n_chars -= 1;
 
-        if self.data[self.gap_end - 1] == b'\n' {
-            self.line_endings.remove(&(self.gap_end - 1));
-        }
-
-        for (_, count) in self.line_endings.iter_mut() {
-            if *count >= char_idx {
-                *count -= 1;
-            }
-        }
+        self.remove_line_endings(idx, idx + len, 1);
         self.char_to_byte_cache.clear();
 
         #[cfg(test)]
@@ -813,32 +797,64 @@ impl GapBuffer {
         let n_bytes = to - from;
         let n_chars = char_to - char_from;
 
+        self.remove_line_endings(from, self.byte_to_raw_byte(to), n_chars);
+
         self.gap_end += n_bytes;
         self.n_chars -= n_chars;
-
-        self.line_endings
-            .retain(|idx, _| !((self.gap_end - n_bytes)..(self.gap_end)).contains(idx));
-
-        for (_, count) in self.line_endings.iter_mut() {
-            if *count >= char_to {
-                *count -= n_chars;
-            } else if *count > char_from {
-                *count = char_from;
-            }
-        }
         self.char_to_byte_cache.clear();
 
         #[cfg(test)]
         assert_line_endings!(self);
     }
 
-    /// BTreeMap doesn't support iter_mut with mutable keys so we need to map over the existing
-    /// line endings and collect into a new map.
-    fn update_line_endings<F>(&mut self, f: F)
-    where
-        F: Fn((&usize, &usize)) -> (usize, usize),
-    {
-        self.line_endings = self.line_endings.iter().map(f).collect();
+    fn add_line_endings(
+        &mut self,
+        byte_from: usize,
+        n_chars: usize,
+        new_endings: &[(ByteOffset, CharOffset)],
+    ) {
+        let idx = self.line_endings.partition_point(|(b, _)| *b < byte_from);
+        for (_, c) in &mut self.line_endings[idx..] {
+            *c += n_chars;
+        }
+
+        self.line_endings
+            .splice(idx..idx, new_endings.iter().copied());
+    }
+
+    fn remove_line_endings(&mut self, byte_from: usize, byte_to: usize, n_chars: usize) {
+        self.line_endings
+            .retain(|(b, _)| *b < self.gap_start || *b >= self.gap_end);
+
+        // If we have no line endings at all, or the removal occurred past the end of the last line
+        // endings we have tracked then there's nothing to do.
+        // > In the second case, _not_ early returning here results in the calls to partition_point
+        //   below being invalid.
+        if self.line_endings.is_empty()
+            || self
+                .line_endings
+                .last()
+                .map(|(b, _)| *b < byte_from)
+                .unwrap_or(false)
+        {
+            return;
+        }
+
+        let line_from = self.line_endings.partition_point(|(b, _)| *b < byte_from);
+        let line_to = self.line_endings.partition_point(|(b, _)| *b < byte_to);
+
+        if line_from == line_to {
+            let (b, _) = self.line_endings[line_from];
+            if b >= byte_from && b < byte_to {
+                self.line_endings.remove(line_from);
+            }
+        } else {
+            self.line_endings.drain(line_from..line_to);
+        }
+
+        for (_, c) in &mut self.line_endings[line_from..] {
+            *c -= n_chars;
+        }
     }
 
     fn grow_gap(&mut self, n: usize) {
@@ -855,13 +871,10 @@ impl GapBuffer {
         buf.extend_from_slice(&self.data[self.gap_end..]); // data after gap
 
         let start = self.gap_start;
-        self.update_line_endings(|(&bidx, &cidx)| {
-            if bidx > start {
-                (bidx + gap_increase, cidx)
-            } else {
-                (bidx, cidx)
-            }
-        });
+        let from = self.line_endings.partition_point(|(b, _)| *b <= start);
+        for (b, _) in &mut self.line_endings[from..] {
+            *b += gap_increase;
+        }
 
         self.next_gap = clamp_gap_size(self.len(), self.next_gap * 2);
         self.data = buf.into_boxed_slice();
@@ -898,13 +911,11 @@ impl GapBuffer {
             // Gap moving left
             Ordering::Less => {
                 let start = self.gap_start;
-                self.update_line_endings(|(&bidx, &cidx)| {
-                    if bidx >= byte_idx && bidx <= start {
-                        (bidx + gap, cidx)
-                    } else {
-                        (bidx, cidx)
-                    }
-                });
+                let from = self.line_endings.partition_point(|(b, _)| *b < byte_idx);
+                let to = self.line_endings.partition_point(|(b, _)| *b <= start);
+                for (b, _) in &mut self.line_endings[from..to] {
+                    *b += gap;
+                }
 
                 (byte_idx..self.gap_start, byte_idx + gap)
             }
@@ -912,13 +923,13 @@ impl GapBuffer {
             // Gap moving right
             Ordering::Greater => {
                 let end = self.gap_end;
-                self.update_line_endings(|(&bidx, &cidx)| {
-                    if bidx >= end && bidx < byte_idx + gap {
-                        (bidx - gap, cidx)
-                    } else {
-                        (bidx, cidx)
-                    }
-                });
+                let from = self.line_endings.partition_point(|(b, _)| *b < end);
+                let to = self
+                    .line_endings
+                    .partition_point(|(b, _)| *b < byte_idx + gap);
+                for (b, _) in &mut self.line_endings[from..to] {
+                    *b -= gap;
+                }
 
                 (self.gap_end..byte_idx + gap, self.gap_start)
             }
@@ -949,7 +960,7 @@ impl GapBuffer {
 
         // Determine which line the character lies in based on the byte index, skipping all
         // lines that are before the byte offset we were given.
-        for (&b, &c) in self.line_endings.iter() {
+        for &(b, c) in self.line_endings.iter() {
             match b.cmp(&raw_byte_idx) {
                 Ordering::Less => (raw_byte_offset, char_offset) = (b, c),
                 Ordering::Equal => {
@@ -1069,20 +1080,23 @@ impl GapBuffer {
 
         // Determine which line the character lies in based on the character index, skipping all
         // lines that are before the byte offset we were given.
-        for (&b, &c) in self
-            .line_endings
-            .iter()
-            .skip_while(move |(b, _)| **b < byte_offset)
-        {
-            match c.cmp(&char_idx) {
-                Ordering::Less => (byte_offset, char_offset) = (b, c),
-                Ordering::Equal => {
-                    self.char_to_byte_cache.insert(char_idx, b);
-                    return b;
+        let line_from = self.line_endings.partition_point(|(b, _)| *b < byte_offset);
+        let line_endings = &self.line_endings[line_from..];
+
+        match line_endings.binary_search_by_key(&char_idx, |&(_, c)| c) {
+            Ok(i) => {
+                let b = line_endings[i].0;
+                self.char_to_byte_cache.insert(char_idx, b);
+                return b;
+            }
+            Err(i) => {
+                if i > 0 {
+                    let (b, c) = line_endings[i - 1];
+                    byte_offset = b;
+                    char_offset = c;
                 }
-                Ordering::Greater => {
-                    to = b;
-                    break;
+                if i < line_endings.len() {
+                    to = line_endings[i].0;
                 }
             }
         }
@@ -1645,6 +1659,16 @@ mod tests {
             "char iter len != len_chars"
         );
         assert_eq!(gb.to_string(), s);
+    }
+
+    #[test_case(0, 14; "first line")]
+    #[test_case(1, 13; "second line")]
+    #[test_case(2, 14; "last line no trailing newline")]
+    #[test]
+    fn line_len_chars_works(line_idx: usize, expected: usize) {
+        let gb = GapBuffer::from("hello, world!\nhow are you?\nthis is a test");
+
+        assert_eq!(gb.line_len_chars(line_idx), expected);
     }
 
     #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
@@ -2225,6 +2249,49 @@ mod tests {
             let n_chars = gb.chars_in_raw_range(0, gb.char_to_raw_byte(gb.n_chars));
             assert_eq!(n_chars, gb.n_chars, "gap at {i}");
         }
+    }
+
+    #[test_case(0, "\n", 2; "insert newline at start")]
+    #[test_case(6, "\n", 2; "insert newline at end of first line")]
+    #[test_case(3, "\n", 2; "insert newline in middle of line")]
+    #[test_case(0, "new\n", 2; "insert line at start")]
+    #[test_case(6, "\nnew", 2; "insert line at end")]
+    #[test_case(3, "X\nY\n", 3; "insert multiple newlines in middle")]
+    #[test_case(0, "a\nb\nc\n", 4; "insert multiple lines at start")]
+    #[test_case(6, "\na\nb\nc", 4; "insert multiple lines at end")]
+    #[test]
+    fn insert_str_tracks_line_endings_correctly(at: usize, insert: &str, expected_lines: usize) {
+        let s = "line 1";
+        let mut gb = GapBuffer::from(s);
+        assert_eq!(gb.len_lines(), 1);
+
+        gb.insert_str(at, insert);
+        gb.shred_gap();
+
+        assert_eq!(gb.len_lines(), expected_lines);
+    }
+
+    #[test_case(0, 7, "line 2\nline 3", 2; "remove first line from start")]
+    #[test_case(0, 14, "line 3", 1; "remove first two lines from start")]
+    #[test_case(7, 14, "line 1\nline 3", 2; "remove middle line")]
+    #[test_case(14, 20, "line 1\nline 2\n", 3; "remove last line")]
+    #[test_case(6, 14, "line 1line 3", 1; "remove spanning first newline")]
+    #[test]
+    fn remove_range_tracks_line_endings_correctly(
+        from: usize,
+        to: usize,
+        expected: &str,
+        expected_lines: usize,
+    ) {
+        let s = "line 1\nline 2\nline 3";
+        let mut gb = GapBuffer::from(s);
+        assert_eq!(gb.len_lines(), 3);
+
+        gb.remove_range(from, to);
+        gb.shred_gap();
+
+        assert_eq!(gb.to_string(), expected);
+        assert_eq!(gb.len_lines(), expected_lines);
     }
 
     fn _insert_chars(gb: &mut GapBuffer, s: &str) {
