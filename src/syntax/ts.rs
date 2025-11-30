@@ -86,11 +86,23 @@ impl TsState {
         }
     }
 
-    pub fn edit(&mut self, ch_start: usize, ch_old_end: usize, ch_new_end: usize, gb: &GapBuffer) {
+    /// Apply a previously prepared edit to the tree-sitter state.
+    ///
+    /// The byte offset parameters must have been computed BEFORE the buffer is modified:
+    /// - `start_byte`: byte offset where the edit starts (same in old and new)
+    /// - `old_end_byte`: byte offset where the edit ends in the ORIGINAL buffer
+    /// - `new_end_byte`: byte offset where the edit ends in the MODIFIED buffer
+    pub(super) fn apply_prepared_edit(
+        &mut self,
+        start_byte: usize,
+        old_end_byte: usize,
+        new_end_byte: usize,
+        gb: &GapBuffer,
+    ) {
         self.tree.edit(&ts::InputEdit {
-            start_byte: gb.char_to_byte(ch_start),
-            old_end_byte: gb.char_to_byte(ch_old_end),
-            new_end_byte: gb.char_to_byte(ch_new_end),
+            start_byte,
+            old_end_byte,
+            new_end_byte,
             // See https://github.com/tree-sitter/tree-sitter/discussions/1793 for why this OK
             start_position: ts::Point::new(0, 0),
             old_end_position: ts::Point::new(0, 0),
@@ -110,6 +122,49 @@ impl TsState {
         }
 
         self.t.clear();
+    }
+
+    pub(super) fn prepare_insert_char(
+        &self,
+        ch_idx: usize,
+        ch: char,
+        gb: &GapBuffer,
+    ) -> (usize, usize, usize) {
+        let start_byte = gb.char_to_byte(ch_idx);
+
+        (start_byte, start_byte, start_byte + ch.len_utf8())
+    }
+
+    pub(super) fn prepare_insert_string(
+        &self,
+        ch_idx: usize,
+        s: &str,
+        gb: &GapBuffer,
+    ) -> (usize, usize, usize) {
+        let start_byte = gb.char_to_byte(ch_idx);
+
+        (start_byte, start_byte, start_byte + s.len())
+    }
+
+    pub(super) fn prepare_delete_char(
+        &self,
+        ch_idx: usize,
+        gb: &GapBuffer,
+    ) -> (usize, usize, usize) {
+        let (start_byte, old_end_byte) = gb.char_range_to_byte_range(ch_idx, ch_idx + 1);
+
+        (start_byte, old_end_byte, start_byte)
+    }
+
+    pub(super) fn prepare_delete_range(
+        &self,
+        ch_from: usize,
+        ch_to: usize,
+        gb: &GapBuffer,
+    ) -> (usize, usize, usize) {
+        let (start_byte, old_end_byte) = gb.char_range_to_byte_range(ch_from, ch_to);
+
+        (start_byte, old_end_byte, start_byte)
     }
 
     pub fn update(&mut self, gb: &GapBuffer, from_row: usize, n_rows: usize) {
@@ -480,7 +535,7 @@ mod tests {
         buffer::Buffer,
         dot::{Cur, Dot},
         editor::Action,
-        syntax::{RangeToken, SyntaxState},
+        syntax::{RangeToken, SyntaxState, SyntaxStateInner},
     };
     use ad_event::Source;
     use simple_test_case::test_case;
@@ -507,12 +562,15 @@ mod tests {
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
                 .unwrap();
         ts.update(gb, 0, gb.len());
-        b.syntax_state = Some(SyntaxState::Ts(ts));
+        b.syntax_state = Some(SyntaxState::ts(ts));
 
         assert_eq!(b.str_contents(), "fn main() {}");
 
         let ranges = match b.syntax_state.as_ref() {
-            Some(SyntaxState::Ts(ts)) => ts.t.range_tokens(),
+            Some(SyntaxState {
+                inner: SyntaxStateInner::Ts(ts),
+                ..
+            }) => ts.t.range_tokens(),
             _ => panic!("no ts state"),
         };
         assert_eq!(
@@ -533,7 +591,10 @@ mod tests {
             .unwrap()
             .update(&b.txt, 0, usize::MAX - 1);
         let ranges = match b.syntax_state.as_ref() {
-            Some(SyntaxState::Ts(ts)) => ts.t.range_tokens(),
+            Some(SyntaxState {
+                inner: SyntaxStateInner::Ts(ts),
+                ..
+            }) => ts.t.range_tokens(),
             _ => panic!("no ts state"),
         };
 

@@ -997,6 +997,15 @@ impl GapBuffer {
         self.offset_char_to_byte(char_idx, 0, 0)
     }
 
+    /// Convert a character range to a byte range
+    pub fn char_range_to_byte_range(&self, ch_from: usize, ch_to: usize) -> (usize, usize) {
+        let raw_byte_from = self.char_to_raw_byte(ch_from);
+        let byte_from = self.raw_byte_to_byte(raw_byte_from);
+        let byte_to = self.offset_char_to_byte(ch_to, raw_byte_from, ch_from);
+
+        (byte_from, byte_to)
+    }
+
     #[inline]
     fn raw_byte_to_byte(&self, raw: usize) -> usize {
         if raw > self.gap_start {

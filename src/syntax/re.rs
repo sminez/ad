@@ -38,15 +38,6 @@ impl ReState {
         })
     }
 
-    pub fn edit(
-        &mut self,
-        _ch_start: usize,
-        _ch_old_end: usize,
-        _ch_new_end: usize,
-        _gb: &GapBuffer,
-    ) {
-    }
-
     pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
         self.ranges.clear();
 

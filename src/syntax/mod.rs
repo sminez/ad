@@ -37,7 +37,13 @@ pub const TK_EXEC: &str = "exec";
 
 /// Buffer level state for parsing and highlighting visible lines.
 #[derive(Debug)]
-pub enum SyntaxState {
+pub struct SyntaxState {
+    pub(crate) pending_edit: Option<(usize, usize, usize)>,
+    pub(crate) inner: SyntaxStateInner,
+}
+
+#[derive(Debug)]
+pub(crate) enum SyntaxStateInner {
     Ts(ts::TsState),
     Re(re::ReState),
 }
@@ -49,33 +55,79 @@ impl SyntaxState {
             .get(lang)
             .ok_or_else(|| format!("unknown language {lang:?}"))?;
 
-        if lang_cfg.re_syntax.is_empty() {
-            Ok(Self::Ts(ts::TsState::try_new(
+        let inner = if lang_cfg.re_syntax.is_empty() {
+            SyntaxStateInner::Ts(ts::TsState::try_new(
                 lang,
                 &cfg.tree_sitter.parser_dir,
                 &cfg.tree_sitter.syntax_query_dir,
                 gb,
-            )?))
+            )?)
         } else {
-            Ok(Self::Re(re::ReState::new(&lang_cfg.re_syntax)?))
+            SyntaxStateInner::Re(re::ReState::new(&lang_cfg.re_syntax)?)
+        };
+
+        Ok(Self {
+            pending_edit: None,
+            inner,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn ts(inner: ts::TsState) -> Self {
+        Self {
+            pending_edit: None,
+            inner: SyntaxStateInner::Ts(inner),
+        }
+    }
+
+    pub fn prepare_insert_char(&mut self, idx: usize, ch: char, gb: &GapBuffer) {
+        if let SyntaxStateInner::Ts(ts) = &self.inner {
+            self.pending_edit = Some(ts.prepare_insert_char(idx, ch, gb));
+        }
+    }
+
+    pub fn prepare_insert_string(&mut self, idx: usize, s: &str, gb: &GapBuffer) {
+        if let SyntaxStateInner::Ts(ts) = &self.inner {
+            self.pending_edit = Some(ts.prepare_insert_string(idx, s, gb));
+        }
+    }
+
+    pub fn prepare_delete_char(&mut self, idx: usize, gb: &GapBuffer) {
+        if let SyntaxStateInner::Ts(ts) = &self.inner {
+            self.pending_edit = Some(ts.prepare_delete_char(idx, gb));
+        }
+    }
+
+    pub fn prepare_delete_range(&mut self, from: usize, to: usize, gb: &GapBuffer) {
+        if let SyntaxStateInner::Ts(ts) = &self.inner {
+            self.pending_edit = Some(ts.prepare_delete_range(from, to, gb));
         }
     }
 
     /// Mirror an edit that has been made to the underlying GapBuffer to the syntax state in
     /// order to keep syntax ranges in sync.
-    pub fn edit(&mut self, ch_start: usize, ch_old_end: usize, ch_new_end: usize, gb: &GapBuffer) {
-        match self {
-            Self::Ts(s) => s.edit(ch_start, ch_old_end, ch_new_end, gb),
-            Self::Re(s) => s.edit(ch_start, ch_old_end, ch_new_end, gb),
+    ///
+    /// # Panics
+    /// This method will panic if the edit was not previously prepared using one of the `prepare_*`
+    /// methods.
+    pub fn apply_prepared_edit(&mut self, gb: &GapBuffer) {
+        // Only TsState needs to care about tracking edits
+        if let SyntaxStateInner::Ts(ts) = &mut self.inner {
+            let (start_byte, old_end_byte, new_end_byte) = self
+                .pending_edit
+                .take()
+                .expect("edit should have been prepared");
+
+            ts.apply_prepared_edit(start_byte, old_end_byte, new_end_byte, gb);
         }
     }
 
     /// Update internal state for the requested region to prepare for a call to
     /// [Self::iter_tokenized_lines_from].
     pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
-        match self {
-            Self::Ts(s) => s.update(gb, from, n_rows),
-            Self::Re(s) => s.update(gb, from, n_rows),
+        match &mut self.inner {
+            SyntaxStateInner::Ts(s) => s.update(gb, from, n_rows),
+            SyntaxStateInner::Re(s) => s.update(gb, from, n_rows),
         }
     }
 
@@ -89,17 +141,21 @@ impl SyntaxState {
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
     ) -> LineIter<'_> {
-        match self {
-            Self::Ts(s) => s.iter_tokenized_lines_from(line, gb, dot_range, load_exec_range),
-            Self::Re(s) => s.iter_tokenized_lines_from(line, gb, dot_range, load_exec_range),
+        match &self.inner {
+            SyntaxStateInner::Ts(s) => {
+                s.iter_tokenized_lines_from(line, gb, dot_range, load_exec_range)
+            }
+            SyntaxStateInner::Re(s) => {
+                s.iter_tokenized_lines_from(line, gb, dot_range, load_exec_range)
+            }
         }
     }
 
     /// Return a string representation of the current syntax tree if possible
     pub fn pretty_print_tree(&self) -> Option<String> {
-        match self {
-            Self::Ts(s) => Some(s.pretty_print_tree()),
-            Self::Re(_) => None,
+        match &self.inner {
+            SyntaxStateInner::Ts(s) => Some(s.pretty_print_tree()),
+            SyntaxStateInner::Re(_) => None,
         }
     }
 }

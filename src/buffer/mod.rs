@@ -1113,19 +1113,27 @@ impl Buffer {
 
     fn insert_char(&mut self, dot: Dot, ch: char, source: Option<Source>) -> (Cur, Option<String>) {
         let ch = if ch == '\r' { '\n' } else { ch };
+        let mut have_prepared_edit = false;
+        if let Dot::Range { r } = &dot
+            && r.start.idx != r.end.idx
+            && let Some(s) = self.syntax_state.as_mut()
+        {
+            s.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+            have_prepared_edit = true;
+        }
+
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
             Dot::Range { r } => self.delete_range(r, source),
         };
 
-        let idx = cur.idx;
+        if have_prepared_edit && let Some(ts) = self.syntax_state.as_mut() {
+            ts.apply_prepared_edit(&self.txt);
+        }
 
-        if let Some(ts) = self.syntax_state.as_mut()
-            && let Some(s) = deleted.as_ref()
-        {
-            let len = s.chars().count();
-            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-            ts.edit(idx, ch_old_end, idx, &self.txt);
+        let idx = cur.idx;
+        if let Some(s) = self.syntax_state.as_mut() {
+            s.prepare_insert_char(idx, ch, &self.txt);
         }
 
         self.txt.insert_char(idx, ch);
@@ -1135,9 +1143,8 @@ impl Buffer {
         }
 
         self.edit_log.insert_char(cur, ch);
-
         if let Some(ts) = self.syntax_state.as_mut() {
-            ts.edit(idx, idx, idx + 1, &self.txt);
+            ts.apply_prepared_edit(&self.txt);
         }
 
         self.mark_dirty();
@@ -1154,19 +1161,32 @@ impl Buffer {
     ) -> (Cur, Option<String>) {
         let s = normalize_line_endings(s);
         let len = s.chars().count();
+        let mut have_prepared_edit = false;
+
+        if let Dot::Range { r } = &dot
+            && r.start.idx != r.end.idx
+            && let Some(ts) = self.syntax_state.as_mut()
+        {
+            ts.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+            have_prepared_edit = true;
+        }
+
         let (mut cur, deleted) = match dot {
             Dot::Cur { c } => (c, None),
             Dot::Range { r } => self.delete_range(r, source),
         };
 
-        let idx = cur.idx;
+        if have_prepared_edit && let Some(ts) = self.syntax_state.as_mut() {
+            ts.apply_prepared_edit(&self.txt);
+        }
 
-        if let Some(ts) = self.syntax_state.as_mut()
-            && let Some(s) = deleted.as_ref()
+        let idx = cur.idx;
+        have_prepared_edit = false;
+        if !s.is_empty()
+            && let Some(ts) = self.syntax_state.as_mut()
         {
-            let len = s.chars().count();
-            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-            ts.edit(idx, ch_old_end, idx, &self.txt);
+            ts.prepare_insert_string(idx, &s, &self.txt);
+            have_prepared_edit = true;
         }
 
         // Inserting an empty string should not be recorded as an edit (and is
@@ -1183,8 +1203,8 @@ impl Buffer {
             cur.idx += len;
         }
 
-        if let Some(ts) = self.syntax_state.as_mut() {
-            ts.edit(idx, idx, idx + len, &self.txt);
+        if have_prepared_edit && let Some(ts) = self.syntax_state.as_mut() {
+            ts.apply_prepared_edit(&self.txt);
         }
 
         self.mark_dirty();
@@ -1194,15 +1214,29 @@ impl Buffer {
     }
 
     fn delete_dot(&mut self, dot: Dot, source: Option<Source>) -> (Cur, Option<String>) {
+        let mut have_prepared_edit = false;
+
+        if let Some(ts) = self.syntax_state.as_mut() {
+            match &dot {
+                Dot::Cur { c } if c.idx < self.txt.len_chars() => {
+                    ts.prepare_delete_char(c.idx, &self.txt);
+                    have_prepared_edit = true;
+                }
+                Dot::Range { r } if r.start.idx != r.end.idx => {
+                    ts.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+                    have_prepared_edit = true;
+                }
+                _ => (),
+            }
+        }
+
         let (cur, deleted) = match dot {
             Dot::Cur { c } => (self.delete_cur(c, source), None),
             Dot::Range { r } => self.delete_range(r, source),
         };
 
-        if let Some(ts) = self.syntax_state.as_mut() {
-            let len = deleted.as_ref().map(|s| s.chars().count()).unwrap_or(1);
-            let ch_old_end = min(dot.first_cur().idx + len, self.txt.len_chars());
-            ts.edit(cur.idx, ch_old_end, cur.idx, &self.txt);
+        if have_prepared_edit && let Some(ts) = self.syntax_state.as_mut() {
+            ts.apply_prepared_edit(&self.txt);
         }
 
         (cur, deleted)
@@ -1648,7 +1682,7 @@ pub(crate) mod tests {
     #[test]
     fn insert_string_reducing_buffer_len_works_with_ts_state() {
         let mut b = Buffer::new_virtual(0, "test", "fn main() {}", Default::default());
-        b.syntax_state = Some(SyntaxState::Ts(
+        b.syntax_state = Some(SyntaxState::ts(
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
                 .unwrap(),
         ));
@@ -1670,7 +1704,7 @@ pub(crate) mod tests {
     #[test]
     fn insert_char_reducing_buffer_len_works_with_ts_state() {
         let mut b = Buffer::new_virtual(0, "test", "fn main() {}", Default::default());
-        b.syntax_state = Some(SyntaxState::Ts(
+        b.syntax_state = Some(SyntaxState::ts(
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), "", &b.txt)
                 .unwrap(),
         ));
