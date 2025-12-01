@@ -1,0 +1,173 @@
+================================================================================
+Data narrows pattern
+================================================================================
+data narrows [a-z]+
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_narrows
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data set with literal value
+================================================================================
+data set /some/path
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_set
+        value: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data set with variable reference
+================================================================================
+data set $file
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_set
+        value: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data set with mixed content
+================================================================================
+data set /path/to/$file
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_set
+        value: (value
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data from with simple command
+================================================================================
+data from cat
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_from
+        command: (command
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data from with command and arguments
+================================================================================
+data from git -C $wdir show $0
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_from
+        command: (command
+          (value_content)
+          (value_content)
+          (variable_reference)
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data from with man command
+================================================================================
+data from man $2 $1
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_from
+        command: (command
+          (value_content)
+          (variable_reference)
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Multiple data matches patterns
+================================================================================
+data matches [a-zA-Z0-9_\-./@]+
+data matches ([a-zA-Z0-9_\-./@]+)\.(jpe?g|gif|png)
+plumb to image
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data matches followed by data narrows
+================================================================================
+data matches [a-z]+
+data narrows foo
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (data_narrows
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))

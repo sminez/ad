@@ -1,0 +1,290 @@
+================================================================================
+Complete rule from plumbing.rules - git commits
+================================================================================
+data matches [a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9][a-f0-9]+
+data from git -C $wdir show $0
+attr add action=showdata filename=/git/$0
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (data_from
+        command: (command
+          (value_content)
+          (value_content)
+          (variable_reference)
+          (value_content)
+          (variable_reference))))
+    (pattern
+      (attr_add
+        attrs: (attr_list
+          (attr_pair
+            attr: (identifier)
+            attr_value: (value
+              (value_content)))
+          (attr_pair
+            attr: (identifier)
+            attr_value: (value
+              (value_content)
+              (variable_reference))))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Complete rule from plumbing.rules - URLs
+================================================================================
+data matches https?://example\.com/.*
+plumb to web
+plumb start xdg-open $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))))
+
+================================================================================
+Complete rule from plumbing.rules - image files
+================================================================================
+data matches [a-zA-Z0-9_\-./@]+
+data matches ([a-zA-Z0-9_\-./@]+)\.(jpe?g|gif|png)
+arg isfile $0
+plumb to image
+plumb start xdg-open $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (arg_isfile
+        path: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))))
+
+================================================================================
+Complete rule from plumbing.rules - file with line and column
+================================================================================
+data matches (.+):([0-9]+):([0-9]+):?
+arg isfile $1
+data set $file
+attr add addr=$2:$3
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (arg_isfile
+        path: (value
+          (variable_reference))))
+    (pattern
+      (data_set
+        value: (value
+          (variable_reference))))
+    (pattern
+      (attr_add
+        attrs: (attr_list
+          (attr_pair
+            attr: (identifier)
+            attr_value: (value
+              (variable_reference)
+              (value_content)
+              (variable_reference))))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Complete rule from plumbing.rules - man pages
+================================================================================
+data matches ([a-zA-Z0-9_\-./]+)\(([1-8])\)
+data from man $2 $1
+attr add action=showdata filename=/man/$1($2)
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (pattern
+      (data_from
+        command: (command
+          (value_content)
+          (variable_reference)
+          (variable_reference))))
+    (pattern
+      (attr_add
+        attrs: (attr_list
+          (attr_pair
+            attr: (identifier)
+            attr_value: (value
+              (value_content)))
+          (attr_pair
+            attr: (identifier)
+            attr_value: (value
+              (value_content)
+              (variable_reference)
+              (value_content)
+              (variable_reference)
+              (value_content))))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Multiple rule blocks separated by blank lines
+================================================================================
+data matches foo
+plumb to edit
+
+data matches bar
+plumb to web
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier))))
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Variables followed by rule block
+================================================================================
+editor = ad
+addrelem = [0-9]+
+
+data matches foo
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value))
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value))
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Rule with three actions
+================================================================================
+data matches foo
+plumb to pdf
+plumb start zathura $0
+plumb start xdg-open $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))))
+
+================================================================================
+Attr delete pattern
+================================================================================
+attr delete someattr
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (attr_delete
+        attr: (identifier)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Single attr pair (not a list)
+================================================================================
+attr add action=showdata
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (attr_add
+        attrs: (attr_list
+          (attr_pair
+            attr: (identifier)
+            attr_value: (value
+              (value_content))))))
+    (action
+      (plumb_to
+        port: (identifier)))))

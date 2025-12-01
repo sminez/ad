@@ -1,0 +1,129 @@
+================================================================================
+Arg isfile with literal path
+================================================================================
+arg isfile /etc/passwd
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isfile
+        path: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Arg isfile with variable reference
+================================================================================
+arg isfile $0
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isfile
+        path: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Arg isfile with match group variable
+================================================================================
+arg isfile $1
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isfile
+        path: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Arg isfile with path containing variable
+================================================================================
+arg isfile $wdir/$0
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isfile
+        path: (value
+          (variable_reference)
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Arg isdir with literal path
+================================================================================
+arg isdir /tmp
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isdir
+        path: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Arg isdir with variable reference
+================================================================================
+arg isdir $0
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isdir
+        path: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Arg isdir with path containing variable
+================================================================================
+arg isdir $wdir/$subdir
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isdir
+        path: (value
+          (variable_reference)
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))

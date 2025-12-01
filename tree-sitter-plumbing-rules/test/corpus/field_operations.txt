@@ -1,0 +1,187 @@
+================================================================================
+Src is literal
+================================================================================
+src is /home/user
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_is
+        (field)
+        value: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Dst is with variable
+================================================================================
+dst is $target
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_is
+        (field)
+        value: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Wdir is literal
+================================================================================
+wdir is /tmp
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_is
+        (field)
+        value: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data is literal
+================================================================================
+data is somevalue
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_is
+        (field)
+        value: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Src set with literal
+================================================================================
+src set /new/path
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_set
+        (match_field)
+        value: (value
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Dst set with variable
+================================================================================
+dst set $destination
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_set
+        (match_field)
+        value: (value
+          (variable_reference))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Wdir set with mixed content
+================================================================================
+wdir set $base/subdir
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_set
+        (match_field)
+        value: (value
+          (variable_reference)
+          (value_content))))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Src matches pattern
+================================================================================
+src matches /home/.*
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_matches
+        (match_field)
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Dst matches pattern
+================================================================================
+dst matches .*\.txt$
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_matches
+        (match_field)
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Wdir matches pattern
+================================================================================
+wdir matches /projects/[a-z]+
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (field_matches
+        (match_field)
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
