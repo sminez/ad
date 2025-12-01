@@ -7,15 +7,23 @@ minibuffer_hl = "#3E3549"
 [palette]
 fg = "#E6D29E"
 bg = "#1B1720"
+bg2 = "#292532"
 blue = "#8793B5"
 brown = "#624354"
+cyan = "#7AA89F"
 dark-blue = "#2D4F67"
 dark-yellow = "#DCA561"
+gray = "#716E77"
+green = "#76946A"
 light-blue = "#9CABCA"
+light-gray = "#908D96"
 light-red = "#D27E99"
+magenta = "#A292E8"
 mint = "#61DCA5"
 orange = "#FFA066"
+pink = "#D27E99"
 purple = "#957FB8"
+red = "#C34043"
 sage = "#9AB292"
 salmon = "#Bf616A"
 sea-blue = "#336677"
@@ -30,9 +38,8 @@ exec = { bg = "salmon" }
 boolean = { fg = "dark-yellow", bold = true }
 character = { fg = "mint", italic = true }
 comment = { fg = "brown", italic = true }
-constant = { fg = "orange" }
+constant = { fg = "orange", bold = true }
 function = { fg = "blue" }
-"function.macro" = { fg = "orange" }
 keyword = { fg = "salmon" }
 module = { fg = "dark-blue" }
 number = { fg = "light-red" }
@@ -41,6 +48,11 @@ punctuation = { fg = "light-blue" }
 string = { fg = "mint" }
 type = { fg = "sage" }
 variable = { }
+
+# Specialisations
+
+"function.macro" = { fg = "orange", italic = true }
+"function.operator" = { fg = "light-gray" }
 
 "markup.italic" = { italic = true } 
 "markup.bold" = { bold = true } 
@@ -52,5 +64,8 @@ variable = { }
 "markup.list.unchecked" = { fg = "dark-yellow", bold = true }
 "markup.list.checked" = { fg = "sage", bold = true }
 "markup.list" = { fg = "light-blue", bold = true } 
+
+"string.template" = { fg = "mint", bg = "bg2", bold = true }
+"string.regex" = { fg = "sea-blue", bg = "bg", italic = true }
 
 label = { fg = "yellow" }

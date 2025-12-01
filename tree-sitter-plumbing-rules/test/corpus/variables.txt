@@ -1,0 +1,75 @@
+================================================================================
+Single variable
+================================================================================
+editor = ad
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value)))
+
+================================================================================
+Multiple variables
+================================================================================
+editor = ad
+addrelem = ((#?[0-9]+)|(/[A-Za-z0-9_\^]+/?)|[.$])
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value))
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value)))
+
+================================================================================
+Single variable with comment on the previous line
+================================================================================
+# a comment
+editor = ad
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value)))
+
+================================================================================
+Single variable with comment on the following line
+================================================================================
+editor = ad
+# a comment
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (variable_declaration
+    name: (identifier)
+    value: (variable_value))
+  (comment))
+
+================================================================================
+Variable reference in value
+================================================================================
+arg isfile $wdir/$0
+plumb to image
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (arg_isfile
+        (value
+          (variable_reference)
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_to
+        (identifier)))))

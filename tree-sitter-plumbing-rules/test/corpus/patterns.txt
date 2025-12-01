@@ -1,0 +1,37 @@
+================================================================================
+Data matches pattern
+================================================================================
+data matches [a-f0-9]+
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Data matches pattern with comments between lines
+================================================================================
+# this is a comment
+data matches [a-f0-9]+
+# another comment
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (comment)
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (comment)
+    (action
+      (plumb_to
+        port: (identifier)))))

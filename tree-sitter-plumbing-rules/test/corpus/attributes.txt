@@ -1,0 +1,25 @@
+================================================================================
+Attribute list
+================================================================================
+attr add action=showdata filename=/git/$0
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (attr_add
+        (attr_list
+          (attr_pair
+            (identifier)
+            (value
+              (value_content)))
+          (attr_pair
+            (identifier)
+            (value
+              (value_content)
+              (variable_reference))))))
+    (action
+      (plumb_to
+        (identifier)))))
