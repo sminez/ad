@@ -146,6 +146,15 @@ impl CharClass {
 
         if self.negated { !res } else { res }
     }
+
+    fn size(&self) -> usize {
+        self.chars.len()
+            + self
+                .ranges
+                .iter()
+                .map(|(s, e)| (*e as u32 - *s as u32 + 1) as usize)
+                .sum::<usize>()
+    }
 }
 
 fn next_char(it: &mut Peekable<Chars<'_>>) -> Result<Option<(char, bool)>, Error> {

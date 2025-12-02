@@ -7,6 +7,10 @@ use std::{collections::HashSet, iter::Peekable, mem::swap, str::Chars};
 /// exponentially longer to compute. We impose a hard limit on the number of patterns we collect in
 /// order to keep this under control at the expense of not being able to always find leading
 /// literals for complex patterns.
+/// When combining leading literals we check using this constant to see if we are exceeding this
+/// limit and cancel the calculation (returning no leading literals at all) if the correct set
+/// would need to be truncated. This prevents us running an invalid fast path optimisation that can
+/// end up advancing us too far through the input.
 const MAX_LEADING_LITERALS: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -44,10 +48,7 @@ impl Ast {
             Self::Comp(Comp::Char(c)) => (std::iter::once(c.to_string()).collect(), true),
             Self::Comp(Comp::Numeric) => (('0'..='9').map(String::from).collect(), true),
 
-            // FIXME: fan out from character classes in this way can result in a LOT of leading
-            // literals and really we should be keeping the leading prefixes where possible rather
-            // than the first MAX_LEADING_LITERALS we encounter.
-            Self::Comp(Comp::Class(cls)) if !cls.negated => (
+            Self::Comp(Comp::Class(cls)) if !cls.negated && cls.size() <= MAX_LEADING_LITERALS => (
                 cls.chars
                     .iter()
                     .map(|ch| ch.to_string())
@@ -56,7 +57,6 @@ impl Ast {
                             .iter()
                             .flat_map(|(start, end)| (*start..=*end).map(String::from)),
                     )
-                    .take(MAX_LEADING_LITERALS)
                     .collect(),
                 true,
             ),
@@ -70,14 +70,18 @@ impl Ast {
             // Nested structure we need to combine
             Self::Concat(nodes) => leading_literals_for_concat(nodes.iter()),
 
-            Self::Alt(nodes) => (
-                nodes
-                    .iter()
-                    .flat_map(|node| node.leading_literals())
-                    .take(MAX_LEADING_LITERALS)
-                    .collect(),
-                true,
-            ),
+            Self::Alt(nodes) => {
+                let mut lits = HashSet::new();
+                for node in nodes {
+                    lits.extend(node.leading_literals());
+                    if lits.len() > MAX_LEADING_LITERALS {
+                        lits.clear();
+                        return (lits, false);
+                    }
+                }
+
+                (lits, true)
+            }
 
             Self::Rep(r, node) => {
                 let mut lits = node.leading_literals();
@@ -186,10 +190,6 @@ fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> (HashSet<St
     while let Some(node) = it.next()
         && ongoing
     {
-        if lits.len() > MAX_LEADING_LITERALS {
-            break;
-        }
-
         // We stop at assertions and repetitions alter how we proceed
         let rep = match node {
             Ast::Assertion(_) => {
@@ -209,6 +209,11 @@ fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> (HashSet<St
             // and include all of the literals that come afterwards directly.
             Some(Rep::Plus(_)) => {
                 lits = combine(&lits, &node_lits);
+                if lits.len() > MAX_LEADING_LITERALS {
+                    lits.clear();
+                    return (lits, false);
+                }
+
                 break;
             }
 
@@ -220,12 +225,21 @@ fn leading_literals_for_concat(mut it: std::slice::Iter<'_, Ast>) -> (HashSet<St
                     star_lits.extend(combine(&lits, &without_star_lits));
                     lits = star_lits;
                 }
+                if lits.len() > MAX_LEADING_LITERALS {
+                    lits.clear();
+                    return (lits, false);
+                }
+
                 lits.remove("");
                 break;
             }
 
             _ => {
                 lits = combine(&lits, &node_lits);
+                if lits.len() > MAX_LEADING_LITERALS {
+                    lits.clear();
+                    return (lits, false);
+                }
             }
         };
     }
@@ -818,6 +832,10 @@ mod tests {
     #[test_case(".+a", &[]; "leading dot plus")]
     #[test_case(".?a", &[]; "leading dot question mark")]
     #[test_case("([0-2]+)-more", &["0", "1", "2"]; "leading submatch")]
+    // Cases where we exceed MAX_LEADING_LITERALS and therefor return nothing
+    #[test_case("[a-zA-Z]+foo", &[]; "char class exceeds limit")]
+    #[test_case("[a-z]|[A-Z]|[0-9]", &[]; "alt branches exceed limit")]
+    #[test_case("[a-z][a-c]foo", &[]; "concat product exceeds limit")]
     #[test]
     fn ast_leading_literal_patterns_works(re: &str, expected: &[&str]) {
         let ast = parse(re).unwrap();

@@ -885,4 +885,16 @@ impl Editor {
             assert!(r.find(&"foo").is_none());
         }
     }
+
+    // Regression case for https://github.com/sminez/ad/issues/165
+    #[test_case("Tracing_Summit_2025_Perfet_RYQoyoF.pdf"; "tracing")]
+    #[test_case("Bracing_Summit_2025_Perfet_RYQoyoF.pdf"; "bracing")]
+    #[test]
+    fn leading_literal_truncation_doesnt_affect_matching(s: &str) {
+        let re = "([a-zA-Z¡-�0-9_\\-./@]+).[Pp][Dd][Ff]";
+        let r = Regex::compile(re).unwrap();
+        let m = r.find(&s).unwrap();
+
+        assert_eq!(m.match_text(&s), s);
+    }
 }
