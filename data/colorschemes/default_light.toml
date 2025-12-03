@@ -1,39 +1,71 @@
-bg = "#EBDBB2"
-fg = "#644855"
+fg = "fg"
+bg = "bg"
 bar_bg = "#83A598"
 signcol_fg = "#458488"
 minibuffer_hl = "#8fafa2"
 
-[syntax]
-default = { }
-dot = { bg = "#D5C4A1" }
-load = { bg = "#957FB8" }
-exec = { bg = "#Bf616A" }
+[palette]
+fg = "#644855"
+bg = "#EBDBB2"
+bg2 = "#DED0A4"
+blue = "#4685c0"
+brown = "#9b8391"
+cyan = "#2D8A7A"
+dark-blue = "#726a98"
+dark-yellow = "#DCA561"
+gray = "#7C7976"
+green = "#5F8A3B"
+light-blue = "#6B9BC3"
+light-gray = "#9A9895"
+light-red = "#D27E99"
+magenta = "#8A6DB8"
+mint = "#347e73"
+orange = "#ce752c"
+pink = "#D27E99"
+purple = "#957FB8"
+red = "#C34043"
+sage = "#6A8A62"
+salmon = "#a44860"
+sea-blue = "#458488"
+yellow = "#B8960C"
 
-boolean = { fg = "#DCA561", bold = true }
-character = { fg = "#347e73", italic = true }
-comment = { fg = "#9b8391", italic = true }
-constant = { fg = "#ce752c" }
-function = { fg = "#4685c0" }
-"function.macro" = { fg = "#ce752c" }
-keyword = { fg = "#a44860" }
-module = { fg = "#726a98" }
-number = { fg = "#D27E99" }
-operator = { fg = "#ad6693" }
-punctuation = { fg = "#754e85" }
-string = { fg = "#347e73" }
-type = { fg = "#0f8a97" }
+[syntax]
+default = { fg = "fg", bg = "bg" }
+dot = { bg = "bg2" }
+load = { bg = "purple" }
+exec = { bg = "salmon" }
+
+boolean = { fg = "dark-yellow", bold = true }
+character = { fg = "mint", italic = true }
+comment = { fg = "brown", italic = true }
+constant = { fg = "orange", bold = true }
+function = { fg = "blue" }
+keyword = { fg = "salmon" }
+module = { fg = "dark-blue" }
+number = { fg = "light-red" }
+operator = { fg = "dark-yellow" }
+punctuation = { fg = "light-blue" }
+string = { fg = "mint" }
+type = { fg = "sage" }
 variable = { }
 
-"markup.italic" = { italic = true } 
-"markup.bold" = { bold = true } 
-"markup.heading" = { fg = "#8793B5", bold = true }
-"markup.raw" = { fg = "#624354", italic = true }
-"markup.quote" = { fg = "#957FB8", italic = true }
-"markup.link.url" = { fg = "#9CABCA", underline = true }
-"markup.link.label" = { fg = "#2D4F67", bold = true }
-"markup.list.unchecked" = { fg = "#DCA561", bold = true }
-"markup.list.checked" = { fg = "#9AB292", bold = true }
-"markup.list" = { fg = "#9CABCA", bold = true } 
+# Specialisations
 
-label = { fg = "#E6C384" }
+"function.macro" = { fg = "orange", italic = true }
+"function.operator" = { fg = "light-gray" }
+
+"markup.italic" = { italic = true }
+"markup.bold" = { bold = true }
+"markup.heading" = { fg = "blue", bold = true }
+"markup.raw" = { fg = "brown", italic = true }
+"markup.quote" = { fg = "purple", italic = true }
+"markup.link.url" = { fg = "light-blue", underline = true }
+"markup.link.label" = { fg = "dark-blue", bold = true }
+"markup.list.unchecked" = { fg = "dark-yellow", bold = true }
+"markup.list.checked" = { fg = "sage", bold = true }
+"markup.list" = { fg = "light-blue", bold = true }
+
+"string.template" = { fg = "mint", bg = "bg2", bold = true }
+"string.regex" = { fg = "sea-blue", bg = "bg", italic = true }
+
+label = { fg = "yellow" }

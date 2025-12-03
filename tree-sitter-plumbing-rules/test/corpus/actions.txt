@@ -1,0 +1,123 @@
+================================================================================
+Plumb to action
+================================================================================
+data matches foo
+plumb to edit
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))))
+
+================================================================================
+Plumb start with simple command
+================================================================================
+data matches foo
+plumb start xdg-open
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content))))))
+
+================================================================================
+Plumb start with variable reference
+================================================================================
+data matches foo
+plumb start xdg-open $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))))
+
+================================================================================
+Plumb start with multiple arguments
+================================================================================
+data matches foo
+plumb start git -C $wdir show $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (value_content)
+          (variable_reference)
+          (value_content)
+          (variable_reference))))))
+
+================================================================================
+Multiple plumb start actions
+================================================================================
+data matches foo
+plumb start zathura $0
+plumb start xdg-open $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))))
+
+================================================================================
+Mixed plumb to and plumb start
+================================================================================
+data matches foo
+plumb to pdf
+plumb start zathura $0
+
+--------------------------------------------------------------------------------
+
+(source_file
+  (rule_block
+    (pattern
+      (data_matches
+        regex: (regex)))
+    (action
+      (plumb_to
+        port: (identifier)))
+    (action
+      (plumb_start
+        command: (command
+          (value_content)
+          (variable_reference))))))

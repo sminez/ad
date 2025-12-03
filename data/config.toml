@@ -156,9 +156,8 @@ filenames = ["Makefile"]
 [filetypes.markdown]
 extensions = ["md"]
 
-# [filetypes.plumbingrules]
-# filenames = ["plumbing.rules"]
-# re_syntax = "~/.ad/syntax/plumbing-rules.toml"
+[filetypes.plumbing_rules]
+filenames = ["plumbing.rules"]
 
 [filetypes.proto]
 extensions = ["proto"]

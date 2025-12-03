@@ -1,0 +1,38 @@
+{
+  "$schema": "https://tree-sitter.github.io/tree-sitter/assets/schemas/config.schema.json",
+  "grammars": [
+    {
+      "name": "plumbing_rules",
+      "camelcase": "PlumbingRules",
+      "title": "Plumbing rules for the ad text editor",
+      "scope": "source.plumbing_rules",
+      "file-types": [
+        "plumbing.rules"
+      ],
+      "injection-regex": "^plumbing_rules$",
+      "class-name": "TreeSitterPlumbingRules"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "PlumbingRules grammar for tree-sitter",
+    "authors": [
+      {
+        "name": "Innes Anderson-Morrison"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/tree-sitter/tree-sitter-plumbing_rules"
+    }
+  },
+  "bindings": {
+    "c": false,
+    "go": false,
+    "node": false,
+    "python": false,
+    "rust": false,
+    "swift": false,
+    "zig": false
+  }
+}
