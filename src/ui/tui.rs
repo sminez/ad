@@ -403,11 +403,16 @@ impl Frame {
         self.status_bar.clear();
 
         let lstatus = format!(
-            "{} {} - {} lines {}",
+            "{} {} - {} lines {}{}",
             mode_name,
             b.display_name(),
             b.len_lines(),
-            if b.dirty { "[+]" } else { "" }
+            if b.dirty { "[+]" } else { "" },
+            if !b.has_trailing_newline() {
+                "[noeol]"
+            } else {
+                ""
+            }
         );
         let rstatus = format!(
             "{}{}",

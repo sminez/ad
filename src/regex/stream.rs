@@ -230,13 +230,7 @@ where
 
     fn clear_until(&mut self, logical_offset: usize) {
         let offset = logical_offset - self.cleared_bytes;
-        let cleared_lines = self
-            .gb
-            .byte_line_endings()
-            .iter()
-            .take_while(|i| **i < offset)
-            .count();
-
+        let cleared_lines = self.gb.lines_before_byte_offset(offset);
         let char_to = self.gb.byte_to_char(offset);
         self.gb.remove_range(0, char_to);
 

@@ -355,6 +355,10 @@ impl Buffer {
     }
 
     pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> Result<String, String> {
+        if !self.has_trailing_newline() {
+            self.insert_char(TextObject::BufferEnd.as_dot(self), '\n', None);
+        }
+
         if !self.dirty {
             return Err("Nothing to save".to_string());
         }
@@ -475,6 +479,16 @@ impl Buffer {
     /// Check whether or not this is an unnamed buffer
     pub fn is_unnamed(&self) -> bool {
         self.kind == BufferKind::Unnamed
+    }
+
+    /// Whether or not the contents of the buffer end with a final newline character.
+    ///
+    /// POSIX semantics define a line as "A sequence of zero or more non- <newline> characters plus
+    /// a terminating <newline> character."
+    ///
+    /// See: <https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_206>
+    pub fn has_trailing_newline(&self) -> bool {
+        self.txt.has_trailing_newline()
     }
 
     /// Check the current [Config] to see if this buffer matches a known filetype configuration.
