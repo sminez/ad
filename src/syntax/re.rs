@@ -57,13 +57,13 @@ impl ReState {
     }
 
     #[inline]
-    pub fn iter_tokenized_lines_from(
-        &self,
+    pub fn iter_tokenized_lines_from<'a>(
+        &'a self,
         line: usize,
-        gb: &GapBuffer,
+        gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
-    ) -> LineIter<'_> {
+    ) -> LineIter<'a> {
         LineIter::new(
             line,
             gb,

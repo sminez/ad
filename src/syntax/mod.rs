@@ -134,13 +134,13 @@ impl SyntaxState {
     /// Yield per-line [RangeToken]s for use in a UI impl to render the contents of the associated
     /// buffer.
     #[inline]
-    pub fn iter_tokenized_lines_from(
-        &self,
+    pub fn iter_tokenized_lines_from<'a>(
+        &'a self,
         line: usize,
-        gb: &GapBuffer,
+        gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
-    ) -> LineIter<'_> {
+    ) -> LineIter<'a> {
         match &self.inner {
             SyntaxStateInner::Ts(s) => {
                 s.iter_tokenized_lines_from(line, gb, dot_range, load_exec_range)
@@ -281,13 +281,14 @@ impl Ord for SyntaxRange {
 pub struct LineIter<'a> {
     /// capture names to be used as the token types
     names: &'a [String],
-    /// byte offsets for the position of each newline in the input
-    line_endings: Vec<usize>,
+    /// the underlying buffer being iterated
+    gb: &'a GapBuffer,
     /// full set of syntax ranges for the input
     ranges: &'a [SyntaxRange],
-    start_byte: usize,
     /// the next line to yield
     line: usize,
+    /// total number of lines (cached from gb.len_lines())
+    n_lines: usize,
     dot_range: ByteRange,
     load_exec_range: Option<(bool, ByteRange)>,
 }
@@ -295,29 +296,22 @@ pub struct LineIter<'a> {
 impl<'a> LineIter<'a> {
     pub(crate) fn new(
         line: usize,
-        gb: &GapBuffer,
+        gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
         names: &'a [String],
         ranges: &'a [SyntaxRange],
     ) -> LineIter<'a> {
-        let line_endings = gb.byte_line_endings();
-        let start_byte = if line == 0 {
-            0
-        } else {
-            line_endings[line - 1] + 1
-        };
-
         let dot_range = ByteRange::from_range(dot_range, gb);
         let load_exec_range =
             load_exec_range.map(|(is_load, r)| (is_load, ByteRange::from_range(r, gb)));
 
         LineIter {
             names,
-            line_endings,
+            gb,
             ranges,
-            start_byte,
             line,
+            n_lines: gb.len_lines(),
             dot_range,
             load_exec_range,
         }
@@ -328,15 +322,14 @@ impl<'a> Iterator for LineIter<'a> {
     type Item = TokenIter<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.line == self.line_endings.len() {
+        if self.line == self.n_lines {
             return None;
         }
 
-        let start_byte = self.start_byte;
-        let end_byte = self.line_endings[self.line];
+        let start_byte = self.gb.line_to_byte(self.line);
+        let end_byte = self.gb.line_end_byte(self.line);
 
         self.line += 1;
-        self.start_byte = end_byte + 1;
 
         // Determine tokens required for the next line
         let held: Option<RangeToken<'_>>;

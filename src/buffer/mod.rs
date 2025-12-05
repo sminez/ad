@@ -483,8 +483,8 @@ impl Buffer {
 
     /// Whether or not the contents of the buffer end with a final newline character.
     ///
-    /// POSIX semantics define a line as "A sequence of zero or more non- <newline> characters plus
-    /// a terminating <newline> character."
+    /// POSIX semantics define a line as "A sequence of zero or more non-newline characters plus
+    /// a terminating newline character."
     ///
     /// See: <https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/V1_chap03.html#tag_03_206>
     pub fn has_trailing_newline(&self) -> bool {
