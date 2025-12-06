@@ -65,7 +65,7 @@ pub enum ActionOutcome {
 }
 
 /// Buffer kinds control how each buffer interacts with the rest of the editor functionality
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub(crate) enum BufferKind {
     /// A regular buffer that is backed by a file on disk.
     File(PathBuf),
@@ -76,15 +76,10 @@ pub(crate) enum BufferKind {
     /// An in-memory buffer holding output from commands run within a given directory
     Output(String),
     /// A currently un-named buffer that can be converted to a File buffer when named
+    #[default]
     Unnamed,
     /// State for an active mini-buffer
     MiniBuffer,
-}
-
-impl Default for BufferKind {
-    fn default() -> Self {
-        Self::Unnamed
-    }
 }
 
 impl BufferKind {
