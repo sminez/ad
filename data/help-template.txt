@@ -30,6 +30,7 @@ Editor Modes
 Key Bindings
 Mouse Interactions
 The Minibuffer
+Windows and Columns
 Loading Text
 Executing Text
 Running Built In Commands
@@ -257,6 +258,50 @@ buffer. Hitting enter will jump you to that line within the buffer.
 The number of lines displayed in the minibuffer can be configured by setting the
 'minibuffer_lines' property in your config.toml file (see the "Configuration" section for
 more details). The default is to show up to 8 lines at a time.
+
+---
+
+>> Windows and Columns
+
+The ad user interface is inspired by the acme text editor and is made up of a array of
+columns, each containing one or more windows that are arranged vertically one above the
+other. This setup doesn't support arbitrary arrangements of windows but it is more than
+sufficient for arranging multiple buffers alongside one another for editing.
+
+Windows in the UI layout are permitted to contain any open buffer within the editor, allowing
+you to have multiple copies of the same buffer side by side in order to view different parts
+of the file at once.
+
+  Creating Windows and Columns
+    You can create a new window within the current column by running the 'new-window' command,
+    which will clone the current window and place it at the end of the column. Similarly, the
+    'new-column' command will create a new column containing a clone of the current window. See
+    the "Running Built In Commands" section for the full list of available commands.
+
+  Navigating Between Windows and Columns
+    In NORMAL mode you can use Alt-w/a/s/d to move focus between open windows.
+
+  Moving Windows Around
+    In NORMAL mode you can use Alt-W/A/S/D to drag the focused window between columns and within
+    the column it is currently in.
+
+    You can move the currently focused window by holding down Alt and pressing W, A, S or D to
+    drag it up, left, down or right respectively. Moving a window left or right will move it to
+    the adjacent column, while moving it up or down will swap it with the window above or below.
+
+  Resizing
+    Windows and columns can be resized either by clicking and dragging on the border between
+    them with the mouse (see the "Mouse Interactions" section) or by using the 'resize-window'
+    and 'resize-column' commands. The 'balance-all', 'balance-column', 'balance-columns' and
+    'balance-windows' commands can be used to reset windows and columns to equal sizes.
+
+  Closing Windows and Columns
+    The 'delete-window' and 'delete-column' commands (along with their forced variants) can be
+    used to close windows and columns. If you close the last window displaying a buffer with
+    unsaved changes you will be prompted to save before the window is closed.
+
+See the "Key Bindings" section for details of available shortcuts for running some of the more
+common layout manipulation commands.
 
 ---
 
