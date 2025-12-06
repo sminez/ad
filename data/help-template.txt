@@ -28,6 +28,7 @@ The Tour
 Configuration
 Editor Modes
 Key Bindings
+Mouse Interactions
 Loading Text
 Executing Text
 Running Built In Commands
@@ -195,6 +196,45 @@ Any key bindings that you specify need to be distinct from the ones shown below 
 default key maps.
 
 {{KEY_BINDINGS}}
+
+---
+
+>> Mouse Interactions
+
+ad supports using the mouse for navigation, selection and interaction with text. The mouse
+bindings are inspired by those found in the acme text editor from Plan 9, providing a
+consistent way to Load and Execute text alongside the keyboard shortcuts described in the
+previous section.
+
+  Left Click
+    The left mouse button is used to select text. A single click positions the cursor, and a
+    drag will select a continuous range of text (as you would expect from pretty much any text
+    editor you have used previously). Double clicking will expand to select the word you are
+    clicking inside of, or if you click just inside of a standard delimiter as shown below,
+    expand to contain all of the text within the delimiters.
+
+      "Double click just after the opening quote or before the closing one"
+      (same for parentheses) [and brackets] {and curly brackets} <and angle brackets>
+
+    Double clicking at the start or end of a line will select the entire line.
+
+  Right Click
+    The right mouse button is used for Loading text (see the "Loading Text" section for
+    more details). Right clicking will Load the text at the current cursor position after
+    first expanding to a word, file path or URL if the cursor is not already part of a
+    selection. If you click and drag with the right button held down you will Load the
+    selected range when you release the button.
+
+  Middle Click
+    The middle mouse button is used for Executing text (see the "Executing Text" section for
+    more details). Middle clicking will Execute the text under the current cursor position,
+    after first expanding to a whitespace delimited word if the cursor is not already
+    part of a selection. If you click and drag with the middle button held down you will
+    Execute the selected range when you release the button.
+
+You can also use the mouse to resize windows and columns by clicking and dragging on the
+border between them. This allows you to quickly adjust your layout without having to run
+the resize commands described in the "Running Built In Commands" section.
 
 ---
 
