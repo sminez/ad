@@ -29,6 +29,7 @@ Configuration
 Editor Modes
 Key Bindings
 Mouse Interactions
+The Minibuffer
 Loading Text
 Executing Text
 Running Built In Commands
@@ -235,6 +236,27 @@ previous section.
 You can also use the mouse to resize windows and columns by clicking and dragging on the
 border between them. This allows you to quickly adjust your layout without having to run
 the resize commands described in the "Running Built In Commands" section.
+
+---
+
+>> The Minibuffer
+
+The minibuffer is ad's interactive selection interface. It is presented at the bottom of
+the screen whenever you need to select from a list of options (such as searching within a
+buffer, selecting a file to open or reviewing LSP diagnostics).
+
+When the minibuffer is visible you can use the up and down arrow keys (or Alt-j/k) to move
+the highlighted line up and down through the available options. Pressing Enter will select
+the currently highlighted line and apply the associated action based on the mode that opened
+the minibuffer. Pressing Escape will cancel the operation and close the minibuffer without
+making a selection.
+
+Try pressing the "/" key in normal mode to fuzzy search through the contents of the active
+buffer. Hitting enter will jump you to that line within the buffer.
+
+The number of lines displayed in the minibuffer can be configured by setting the
+'minibuffer_lines' property in your config.toml file (see the "Configuration" section for
+more details). The default is to show up to 8 lines at a time.
 
 ---
 
