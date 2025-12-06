@@ -6,7 +6,7 @@ use crate::{
     fsys::LogEvent,
     key::{MouseButton, MouseEvent, MouseEventKind, MouseMod},
     system::System,
-    ui::SCRATCH_ID,
+    ui::{Border, SCRATCH_ID},
 };
 use ad_event::Source;
 use std::time::Instant;
@@ -19,32 +19,33 @@ const FAST_SCROLL_ROWS: usize = 5;
 /// Transient state that we hold to track the last mouse click we saw while
 /// we wait for it to be released or if the buffer changes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Click {
-    /// The button being held down
-    pub(crate) btn: MouseButton,
-    /// The current state of the dot associated with this click. This is updated
-    /// by Hold events and matches the buffer Dot for Left clicks. For Right and
-    /// Middle clicks this is a separate selection that is used on release.
-    pub(crate) selection: Range,
-    cut_handled: bool,
-    paste_handled: bool,
+pub enum Click {
+    Text {
+        /// The button being held down
+        btn: MouseButton,
+        /// The current state of the dot associated with this click. This is updated
+        /// by Hold events and matches the buffer Dot for Left clicks. For Right and
+        /// Middle clicks this is a separate selection that is used on release.
+        selection: Range,
+        cut_handled: bool,
+        paste_handled: bool,
+    },
+    ResizeColumn {
+        last_x: usize,
+    },
+    ResizeWindow {
+        last_y: usize,
+    },
 }
 
 impl Click {
-    fn new(btn: MouseButton, selection: Range) -> Self {
-        Self {
+    pub(super) fn text(btn: MouseButton, selection: Range) -> Self {
+        Self::Text {
             btn,
             selection,
             cut_handled: false,
             paste_handled: false,
         }
-    }
-
-    /// Only needed for Left clicks. Used to ensure that once the user has made
-    /// a chorded action we still support the other remaining action but we
-    /// stop setting the buffer Dot.
-    fn chord_handled(&self) -> bool {
-        self.btn == MouseButton::Left && (self.cut_handled || self.paste_handled)
     }
 }
 
@@ -102,6 +103,23 @@ where
                     return;
                 }
 
+                // Check border hits first as they don't attempt to modify the focus state in the
+                // same way that `set_dot_from_screen_coords` does.
+                if let Some(border) = self.layout.border_at_coords(x, y) {
+                    match border {
+                        Border::Vertical { col_idx } => {
+                            self.layout.focus_column_for_resize(col_idx);
+                            self.held_click = Some(Click::ResizeColumn { last_x: x });
+                        }
+                        Border::Horizontal { col_idx, win_idx } => {
+                            self.layout
+                                .focus_column_and_window_for_resize(col_idx, win_idx);
+                            self.held_click = Some(Click::ResizeWindow { last_y: y });
+                        }
+                    }
+                    return;
+                }
+
                 let click_in_active_buffer = self.layout.set_dot_from_screen_coords(x, y);
                 let b = self.layout.active_buffer_mut();
                 if !click_in_active_buffer && b.id != SCRATCH_ID {
@@ -116,7 +134,7 @@ where
                     }
                 }
 
-                self.held_click = Some(Click::new(Left, b.dot.as_range()));
+                self.held_click = Some(Click::text(Left, b.dot.as_range()));
                 self.last_click_was_left = true;
             }
 
@@ -127,22 +145,45 @@ where
                 self.handle_right_or_middle_click(false, x, y)
             }
 
-            (Hold, _, _) => {
-                if let Some(click) = &mut self.held_click {
-                    if click.chord_handled() {
+            (Hold, _, _) => match &mut self.held_click {
+                Some(Click::Text {
+                    btn,
+                    selection,
+                    cut_handled,
+                    paste_handled,
+                }) => {
+                    if *btn == Left && (*cut_handled || *paste_handled) {
                         return;
                     }
 
                     match self.layout.try_active_cur_from_screen_coords(x, y) {
-                        Some(cur) => click.selection.set_active_cursor(cur),
+                        Some(cur) => selection.set_active_cursor(cur),
                         None => return,
                     }
 
-                    if click.btn == Left {
-                        self.layout.active_buffer_mut().dot = Dot::from(click.selection);
+                    if *btn == Left {
+                        self.layout.active_buffer_mut().dot = Dot::from(*selection);
                     }
                 }
-            }
+
+                Some(Click::ResizeColumn { last_x }) => {
+                    let delta = x as i16 - *last_x as i16;
+                    if delta != 0 {
+                        self.layout.resize_active_column_against_next(delta);
+                        *last_x = x;
+                    }
+                }
+
+                Some(Click::ResizeWindow { last_y }) => {
+                    let delta = y as i16 - *last_y as i16;
+                    if delta != 0 {
+                        self.layout.resize_active_window_against_next(delta);
+                        *last_y = y;
+                    }
+                }
+
+                None => (),
+            },
 
             (Press, _, WheelUp) => {
                 self.last_click_was_left = false;
@@ -157,32 +198,43 @@ where
             }
 
             (Release, m, b) => {
-                if let Some(click) = self.held_click
-                    && click.btn == Left
+                if let Some(Click::Text { btn, .. }) = self.held_click
+                    && btn == Left
                     && (b == Right || b == Middle)
                 {
                     return; // paste and cut are handled on click
                 }
 
-                let mut click = match self.held_click.take() {
-                    Some(click) => click,
+                let held = match self.held_click.take() {
+                    Some(held) => held,
                     None => return,
                 };
 
-                if click.chord_handled() {
+                // Only Text clicks need further processing on release
+                let (btn, mut selection, cut_handled, paste_handled) = match held {
+                    Click::Text {
+                        btn,
+                        selection,
+                        cut_handled,
+                        paste_handled,
+                    } => (btn, selection, cut_handled, paste_handled),
+                    Click::ResizeColumn { .. } | Click::ResizeWindow { .. } => return,
+                };
+
+                if btn == Left && (cut_handled || paste_handled) {
                     return;
                 }
 
                 // Support releasing the mouse over a different window as actioning the selection
                 // as it was present in the active buffer
                 if let Some(cur) = self.layout.try_active_cur_from_screen_coords(x, y) {
-                    click.selection.set_active_cursor(cur);
+                    selection.set_active_cursor(cur);
                 }
 
-                match click.btn {
+                match btn {
                     Left | WheelUp | WheelDown => (),
                     Right | Middle => {
-                        self.handle_right_or_middle_release(click.btn == Right, click, m == Alt)
+                        self.handle_right_or_middle_release(btn == Right, selection, m == Alt)
                     }
                 }
             }
@@ -196,30 +248,39 @@ where
         use MouseButton::*;
 
         self.last_click_was_left = false;
-        match self.held_click {
-            Some(mut click) => {
+
+        match &mut self.held_click {
+            Some(Click::Text {
+                btn,
+                selection,
+                cut_handled,
+                paste_handled,
+            }) => {
                 // Mouse chords execute on the click of the second button rather than the release
-                if click.btn == Left {
-                    if is_right && !click.paste_handled {
+                if *btn == Left {
+                    if is_right && !*paste_handled {
+                        *paste_handled = true;
                         self.paste_from_clipboard(Source::Mouse);
-                        click.paste_handled = true;
-                        self.held_click = Some(click);
-                    } else if !is_right && !click.cut_handled {
+                    } else if !is_right && !*cut_handled {
+                        *selection = self.layout.active_buffer().dot.as_range();
+                        *cut_handled = true;
                         self.forward_action_to_active_buffer(Action::Delete, Source::Mouse);
-                        click.selection = self.layout.active_buffer().dot.as_range();
-                        click.cut_handled = true;
-                        self.held_click = Some(click);
                     }
-                } else if (is_right && click.btn == Middle) || (!is_right && click.btn == Right) {
+                } else if (is_right && *btn == Middle) || (!is_right && *btn == Right) {
                     self.held_click = None;
                 }
+            }
+
+            Some(_) => {
+                // ResizeColumn or ResizeWindow - cancel on other button press
+                self.held_click = None;
             }
 
             None => {
                 let btn = if is_right { Right } else { Middle };
                 let (id, cur) = self.layout.focus_cur_from_screen_coords(x, y);
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
-                self.held_click = Some(Click::new(btn, Range::from_cursors(cur, cur, false)));
+                self.held_click = Some(Click::text(btn, Range::from_cursors(cur, cur, false)));
             }
         };
     }
@@ -228,19 +289,19 @@ where
     fn handle_right_or_middle_release(
         &mut self,
         is_right: bool,
-        click: Click,
+        selection: Range,
         load_in_new_window: bool,
     ) {
-        if click.selection.start != click.selection.end {
+        if selection.start != selection.end {
             // In the case where the click selection is a range we Load/Execute it directly.
             // For Middle clicks, if there is also a range dot in the buffer then that is
             // used as an argument to the command being executed.
             if is_right {
-                self.layout.active_buffer_mut().dot = Dot::from(click.selection);
+                self.layout.active_buffer_mut().dot = Dot::from(selection);
                 self.default_load_dot(Source::Mouse, load_in_new_window);
             } else {
                 let dot = self.layout.active_buffer().dot;
-                self.layout.active_buffer_mut().dot = Dot::from(click.selection);
+                self.layout.active_buffer_mut().dot = Dot::from(selection);
 
                 if dot.is_range() {
                     // Execute as if the click selection was dot then reset dot
@@ -255,13 +316,8 @@ where
             // In the case where the click selection was a Cur rather than a Range we
             // set the buffer dot to the click location if it is outside of the current buffer
             // dot (and allow smart expand to handle generating the selection) before we Load/Execute
-            if !self
-                .layout
-                .active_buffer()
-                .dot
-                .contains(&click.selection.start)
-            {
-                self.layout.active_buffer_mut().dot = Dot::from(click.selection.start);
+            if !self.layout.active_buffer().dot.contains(&selection.start) {
+                self.layout.active_buffer_mut().dot = Dot::from(selection.start);
             }
 
             if is_right {
@@ -319,6 +375,8 @@ mod tests {
         }
     }
 
+    // NOTE: All mouse tests use 1-indexed terminal coordinates
+
     #[test_case(
         &[
             MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
@@ -367,7 +425,7 @@ mod tests {
             MouseEvent { k: Press, m: NoMod, b: Left, x: 3, y: 1 },
             MouseEvent { k: Hold, m: NoMod, b: Left, x: 7, y: 1 },
         ],
-        Some(Click::new(Left, r(0, 3, false))),
+        Some(Click::text(Left, r(0, 3, false))),
         "some",
         "some text to test with",
         "X",
@@ -379,7 +437,7 @@ mod tests {
             MouseEvent { k: Press, m: NoMod, b: Right, x: 3, y: 1 },
             MouseEvent { k: Hold, m: NoMod, b: Right, x: 7, y: 1 },
         ],
-        Some(Click::new(Right, r(0, 3, false))),
+        Some(Click::text(Right, r(0, 3, false))),
         "t",  // default dot position
         "some text to test with",
         "X",
@@ -391,7 +449,7 @@ mod tests {
             MouseEvent { k: Press, m: NoMod, b: Middle, x: 3, y: 1 },
             MouseEvent { k: Hold, m: NoMod, b: Middle, x: 7, y: 1 },
         ],
-        Some(Click::new(Middle, r(0, 3, false))),
+        Some(Click::text(Middle, r(0, 3, false))),
         "t",  // default dot position
         "some text to test with",
         "X",
@@ -724,4 +782,225 @@ mod tests {
     //   - test that each mouse click and scroll informs fsys that the appropriate
     //     window is focused
     //   - test that focus events aren't sent when they aren't needed
+
+    fn editor_with_layout(n_cols: usize, n_wins: usize) -> Editor<TestSystem> {
+        let mut ed = Editor::new_with_system(
+            Default::default(),
+            Default::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+            TestSystem::default(),
+        );
+        ed.update_window_size(80, 100);
+        ed.layout.open_virtual("test", "test content", false);
+
+        for _ in 1..n_cols {
+            ed.layout.new_column();
+        }
+        for _ in 1..n_wins {
+            ed.layout.new_window();
+        }
+
+        ed
+    }
+
+    #[test_case(5; "drag right grows first column")]
+    #[test_case(-5; "drag left shrinks first column")]
+    #[test]
+    fn resize_column_drag(delta: i16) {
+        let mut ed = editor_with_layout(2, 1);
+        let initial_sizes = ed.layout.column_widths();
+        let border_x = initial_sizes[0] + 1;
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: Left,
+            x: border_x,
+            y: 10,
+        });
+        assert!(matches!(ed.held_click, Some(Click::ResizeColumn { .. })));
+
+        let target_x = (border_x as i16 + delta) as usize;
+        ed.handle_mouse_event(MouseEvent {
+            k: Hold,
+            m: NoMod,
+            b: Left,
+            x: target_x,
+            y: 10,
+        });
+        ed.handle_mouse_event(MouseEvent {
+            k: Release,
+            m: NoMod,
+            b: Left,
+            x: target_x,
+            y: 10,
+        });
+
+        assert!(ed.held_click.is_none());
+
+        let final_sizes = ed.layout.column_widths();
+        assert_eq!(
+            final_sizes[0] as i16,
+            initial_sizes[0] as i16 + delta,
+            "first column"
+        );
+        assert_eq!(
+            final_sizes[1] as i16,
+            initial_sizes[1] as i16 - delta,
+            "second column"
+        );
+    }
+
+    #[test_case(5; "drag down grows first window")]
+    #[test_case(-5; "drag up shrinks first window")]
+    #[test]
+    fn resize_window_drag(delta: i16) {
+        let mut ed = editor_with_layout(1, 2);
+        let initial_sizes = ed.layout.window_heights();
+        let border_y = initial_sizes[0] + 1;
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: Left,
+            x: 10,
+            y: border_y,
+        });
+        assert!(matches!(ed.held_click, Some(Click::ResizeWindow { .. })));
+
+        let target_y = (border_y as i16 + delta) as usize;
+        ed.handle_mouse_event(MouseEvent {
+            k: Hold,
+            m: NoMod,
+            b: Left,
+            x: 10,
+            y: target_y,
+        });
+        ed.handle_mouse_event(MouseEvent {
+            k: Release,
+            m: NoMod,
+            b: Left,
+            x: 10,
+            y: target_y,
+        });
+
+        assert!(ed.held_click.is_none());
+
+        let final_sizes = ed.layout.window_heights();
+        assert_eq!(
+            final_sizes[0] as i16,
+            initial_sizes[0] as i16 + delta,
+            "first window"
+        );
+        assert_eq!(
+            final_sizes[1] as i16,
+            initial_sizes[1] as i16 - delta,
+            "second window"
+        );
+    }
+
+    #[test]
+    fn resize_sets_correct_focus() {
+        let mut ed = editor_with_layout(3, 1);
+
+        ed.layout.focus_column_for_resize(0);
+        assert_eq!(ed.layout.cols_before_focus(), 0, "initially on column 0");
+
+        let widths = ed.layout.column_widths();
+        let border_x = widths[0] + widths[1] + 2;
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: Left,
+            x: border_x,
+            y: 10,
+        });
+
+        assert_eq!(ed.layout.cols_before_focus(), 1, "focus moved to column 1");
+    }
+
+    #[test]
+    fn click_on_border_without_drag_is_noop() {
+        let mut ed = editor_with_layout(2, 1);
+        let initial_sizes = ed.layout.column_widths();
+        let border_x = initial_sizes[0] + 1;
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: Left,
+            x: border_x,
+            y: 10,
+        });
+        ed.handle_mouse_event(MouseEvent {
+            k: Release,
+            m: NoMod,
+            b: Left,
+            x: border_x,
+            y: 10,
+        });
+
+        let final_sizes = ed.layout.column_widths();
+        assert_eq!(initial_sizes, final_sizes, "sizes unchanged");
+    }
+
+    #[test_case(Right; "right click")]
+    #[test_case(Middle; "middle click")]
+    #[test]
+    fn non_left_click_on_border_is_noop(btn: MouseButton) {
+        let mut ed = editor_with_layout(2, 1);
+        let initial_sizes = ed.layout.column_widths();
+        let border_x = initial_sizes[0] + 1;
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: btn,
+            x: border_x,
+            y: 10,
+        });
+        ed.handle_mouse_event(MouseEvent {
+            k: Release,
+            m: NoMod,
+            b: btn,
+            x: border_x,
+            y: 10,
+        });
+
+        assert!(ed.held_click.is_none());
+
+        let final_sizes = ed.layout.column_widths();
+        assert_eq!(initial_sizes, final_sizes, "sizes unchanged");
+    }
+
+    #[test]
+    fn resize_cancelled_by_right_click() {
+        let mut ed = editor_with_layout(2, 1);
+        let initial_sizes = ed.layout.column_widths();
+
+        let border_x = initial_sizes[0] + 1;
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: Left,
+            x: border_x,
+            y: 10,
+        });
+        assert!(matches!(ed.held_click, Some(Click::ResizeColumn { .. })));
+
+        ed.handle_mouse_event(MouseEvent {
+            k: Press,
+            m: NoMod,
+            b: Right,
+            x: border_x,
+            y: 10,
+        });
+        assert!(ed.held_click.is_none(), "resize cancelled");
+
+        let final_sizes = ed.layout.column_widths();
+        assert_eq!(initial_sizes, final_sizes, "sizes unchanged after cancel");
+    }
 }

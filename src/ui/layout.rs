@@ -405,6 +405,53 @@ impl Layout {
         self.buffers.focus_id_silent(id);
     }
 
+    /// Focus the column at the given index without recording a jump.
+    ///
+    /// # Panics
+    /// Panics if col_idx is out of bounds.
+    pub fn focus_column_for_resize(&mut self, col_idx: usize) {
+        assert!(col_idx < self.cols.len(), "col_idx out of bounds");
+
+        self.scratch.is_focused = false;
+        self.changed_since_last_render = true;
+
+        self.cols.focus_head();
+        for _ in 0..col_idx {
+            self.cols.focus_down();
+        }
+
+        self.buffers.focus_id_silent(self.focused_view().bufid);
+    }
+
+    /// Focus the window at the given index within the currently focused column,
+    /// without recording a jump.
+    ///
+    /// # Panics
+    /// Panics if win_idx is out of bounds.
+    pub fn focus_window_for_resize(&mut self, win_idx: usize) {
+        let wins = &mut self.cols.focus.wins;
+        assert!(win_idx < wins.len(), "win_idx out of bounds");
+
+        self.scratch.is_focused = false;
+        self.changed_since_last_render = true;
+
+        wins.focus_head();
+        for _ in 0..win_idx {
+            wins.focus_down();
+        }
+
+        self.buffers.focus_id_silent(self.focused_view().bufid);
+    }
+
+    /// Focus the column and window at the given indices without recording a jump.
+    ///
+    /// # Panics
+    /// Panics if either index is out of bounds.
+    pub fn focus_column_and_window_for_resize(&mut self, col_idx: usize, win_idx: usize) {
+        self.focus_column_for_resize(col_idx);
+        self.focus_window_for_resize(win_idx);
+    }
+
     pub(crate) fn focus_next_buffer(&mut self) -> BufferId {
         self.scratch.is_focused = false;
         self.changed_since_last_render = true;
@@ -735,6 +782,18 @@ impl Layout {
         self.cols.focus.wins.grow_focus(delta_rows);
     }
 
+    /// Resize the active column against the column to its right.
+    pub fn resize_active_column_against_next(&mut self, delta: i16) {
+        self.changed_since_last_render = true;
+        self.cols.grow_focus_against_next(delta);
+    }
+
+    /// Resize the active window against the window below it.
+    pub fn resize_active_window_against_next(&mut self, delta: i16) {
+        self.changed_since_last_render = true;
+        self.cols.focus.wins.grow_focus_against_next(delta);
+    }
+
     /// Update the current layout state to reflect a new physical screen size given in terms
     /// of the number of character rows and columns.
     ///
@@ -1011,6 +1070,46 @@ impl Layout {
         }
 
         y > (self.screen_rows - self.scratch.w.n_rows + 1)
+    }
+
+    pub fn border_at_coords(&self, x: usize, y: usize) -> Option<Border> {
+        if self.row_is_scratch(y) {
+            return None;
+        }
+
+        let n_cols = self.cols.len();
+        let mut x_offset = 0;
+
+        for (col_idx, (_, col)) in self.cols.iter().enumerate() {
+            let border_x = x_offset + col.n_cols + 1;
+
+            if x == border_x && col_idx < n_cols - 1 {
+                return Some(Border::Vertical { col_idx });
+            } else if x > border_x {
+                x_offset = border_x;
+                continue;
+            }
+
+            let n_wins = col.wins.len();
+            let mut y_offset = 0;
+
+            for (win_idx, (_, win)) in col.wins.iter().enumerate() {
+                let border_y = y_offset + win.n_rows + 1;
+
+                if y == border_y && win_idx < n_wins - 1 {
+                    return Some(Border::Horizontal { col_idx, win_idx });
+                } else if y > border_y {
+                    y_offset = border_y;
+                    continue;
+                }
+
+                return None; // Click was inside a window
+            }
+
+            return None;
+        }
+
+        None
     }
 
     /// If the given coordinates lie within the scratch buffer return None, otherwise return the ID
@@ -1544,6 +1643,24 @@ where
         }
     }
 
+    /// Resize the focused element against the next element (down[0]).
+    ///
+    /// No-op if there's no next element to resize against.
+    fn grow_focus_against_next(&mut self, delta: i16) {
+        if self.down.is_empty() || delta == 0 {
+            return;
+        }
+
+        let other = &mut self.down[0];
+        if delta < 0 {
+            let actual = self.focus.clamped_sub((-delta) as usize, MIN_DIM);
+            *other.size() += actual;
+        } else {
+            let actual = other.clamped_sub(delta as usize, MIN_DIM);
+            *self.focus.size() += actual;
+        }
+    }
+
     /// Attempt to preserve the current relative size of each element when the
     /// overall available space changes.
     fn scale_sizes(&mut self, ratio: f32, new_total: usize) {
@@ -1563,6 +1680,15 @@ where
             }
         }
     }
+}
+
+/// A border that can be dragged to resize
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Border {
+    /// Vertical border after column at index `col_idx`
+    Vertical { col_idx: usize },
+    /// Horizontal border after window at index `win_idx` within column at index `col_idx`
+    Horizontal { col_idx: usize, win_idx: usize },
 }
 
 /// Calculate the size (rows/cols) for n blocks within an available space of t
@@ -1642,6 +1768,20 @@ mod tests {
     };
     use simple_test_case::test_case;
     use std::{path::PathBuf, sync::mpsc::channel};
+
+    impl Layout {
+        pub fn column_widths(&self) -> Vec<usize> {
+            self.cols.iter().map(|(_, c)| c.n_cols).collect()
+        }
+
+        pub fn window_heights(&self) -> Vec<usize> {
+            self.cols.focus.wins.iter().map(|(_, w)| w.n_rows).collect()
+        }
+
+        pub fn cols_before_focus(&self) -> usize {
+            self.cols.up.len()
+        }
+    }
 
     fn test_layout(col_wins: &[usize], n_rows: usize, n_cols: usize) -> Layout {
         let mut cols = Vec::with_capacity(col_wins.len());
@@ -2065,5 +2205,223 @@ mod tests {
         assert_eq!(l.cols[0].wins[0].n_rows, 80);
         assert_eq!(l.cols[1].wins[0].n_rows, 40);
         assert_eq!(l.cols[1].wins[1].n_rows, 39);
+    }
+
+    #[test]
+    fn single_column_single_window_has_no_borders() {
+        let l = test_layout(&[1], 80, 100);
+
+        for x in 1..=100 {
+            for y in 1..=80 {
+                assert_eq!(
+                    l.border_at_coords(x, y),
+                    None,
+                    "unexpected hit @ ({x}, {y})"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn single_column_multiple_windows_has_horizontal_borders() {
+        let l = test_layout(&[3], 80, 100);
+
+        assert_eq!(l.cols[0].wins[0].n_rows, 26);
+        assert_eq!(l.cols[0].wins[1].n_rows, 26);
+        assert_eq!(l.cols[0].wins[2].n_rows, 26);
+
+        assert_eq!(
+            l.border_at_coords(50, 27),
+            Some(Border::Horizontal {
+                col_idx: 0,
+                win_idx: 0
+            })
+        );
+
+        assert_eq!(
+            l.border_at_coords(50, 54),
+            Some(Border::Horizontal {
+                col_idx: 0,
+                win_idx: 1
+            })
+        );
+
+        assert_eq!(l.border_at_coords(50, 81), None); // past last window
+        assert_eq!(l.border_at_coords(50, 1), None); // inside first window
+        assert_eq!(l.border_at_coords(50, 26), None); // last row of first window
+        assert_eq!(l.border_at_coords(50, 28), None); // first row of second window
+    }
+
+    #[test]
+    fn multiple_columns_single_window_each_has_vertical_borders() {
+        let l = test_layout(&[1, 1, 1], 80, 100);
+
+        assert_eq!(l.cols[0].n_cols, 33);
+        assert_eq!(l.cols[1].n_cols, 33);
+        assert_eq!(l.cols[2].n_cols, 32);
+
+        assert_eq!(
+            l.border_at_coords(34, 40),
+            Some(Border::Vertical { col_idx: 0 })
+        );
+
+        assert_eq!(
+            l.border_at_coords(68, 40),
+            Some(Border::Vertical { col_idx: 1 })
+        );
+
+        assert_eq!(l.border_at_coords(101, 40), None); // past last column
+        assert_eq!(l.border_at_coords(1, 40), None); // inside first column
+        assert_eq!(l.border_at_coords(33, 40), None); // last char of first column
+        assert_eq!(l.border_at_coords(35, 40), None); // first char of second column
+    }
+
+    #[test]
+    fn multiple_columns_multiple_windows_has_both_border_types() {
+        let l = test_layout(&[2, 2], 80, 100);
+
+        let col0_width = l.cols[0].n_cols;
+        let win0_height = l.cols[0].wins[0].n_rows;
+
+        assert_eq!(
+            l.border_at_coords(col0_width + 1, 20),
+            Some(Border::Vertical { col_idx: 0 })
+        );
+
+        assert_eq!(
+            l.border_at_coords(10, win0_height + 1),
+            Some(Border::Horizontal {
+                col_idx: 0,
+                win_idx: 0
+            })
+        );
+
+        let col1_x = col0_width + 1 + 10; // inside col1
+        assert_eq!(
+            l.border_at_coords(col1_x, win0_height + 1),
+            Some(Border::Horizontal {
+                col_idx: 1,
+                win_idx: 0
+            })
+        );
+
+        assert_eq!(l.border_at_coords(10, 10), None); // inside window
+        assert_eq!(l.border_at_coords(col1_x, 10), None); // inside window in col1
+    }
+
+    #[test]
+    fn border_coords_at_screen_edges() {
+        let l = test_layout(&[1, 1], 80, 100);
+
+        assert_eq!(l.border_at_coords(1, 1), None); // top-left corner, inside first window
+        assert_eq!(l.border_at_coords(101, 40), None); // past right edge
+        assert_eq!(l.border_at_coords(10, 81), None); // past bottom edge
+    }
+
+    #[test]
+    fn focus_column_for_resize_works() {
+        let mut l = test_layout(&[1, 1, 1], 80, 100);
+        assert_eq!(l.cols.up.len(), 0);
+
+        l.focus_column_for_resize(1);
+        assert_eq!(l.cols.up.len(), 1);
+        assert_eq!(l.cols.down.len(), 1);
+
+        l.focus_column_for_resize(2);
+        assert_eq!(l.cols.up.len(), 2);
+        assert_eq!(l.cols.down.len(), 0);
+
+        l.focus_column_for_resize(0);
+        assert_eq!(l.cols.up.len(), 0);
+        assert_eq!(l.cols.down.len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "col_idx out of bounds")]
+    fn focus_column_for_resize_panics_on_out_of_bounds() {
+        let mut l = test_layout(&[1, 1, 1], 80, 100);
+        l.focus_column_for_resize(99);
+    }
+
+    #[test]
+    fn focus_window_for_resize_works() {
+        let mut l = test_layout(&[3], 80, 100);
+        assert_eq!(l.cols.focus.wins.up.len(), 0);
+
+        l.focus_window_for_resize(1);
+        assert_eq!(l.cols.focus.wins.up.len(), 1);
+        assert_eq!(l.cols.focus.wins.down.len(), 1);
+
+        l.focus_window_for_resize(2);
+        assert_eq!(l.cols.focus.wins.up.len(), 2);
+        assert_eq!(l.cols.focus.wins.down.len(), 0);
+
+        l.focus_window_for_resize(0);
+        assert_eq!(l.cols.focus.wins.up.len(), 0);
+        assert_eq!(l.cols.focus.wins.down.len(), 2);
+    }
+
+    #[test]
+    #[should_panic(expected = "win_idx out of bounds")]
+    fn focus_window_for_resize_panics_on_out_of_bounds() {
+        let mut l = test_layout(&[3], 80, 100);
+        l.focus_window_for_resize(99);
+    }
+
+    #[test]
+    fn focus_column_and_window_for_resize_works() {
+        let mut l = test_layout(&[2, 2], 80, 100);
+
+        l.focus_column_and_window_for_resize(1, 1);
+        assert_eq!(l.cols.up.len(), 1);
+        assert_eq!(l.cols.focus.wins.up.len(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "col_idx out of bounds")]
+    fn focus_column_and_window_for_resize_panics_on_bad_col() {
+        let mut l = test_layout(&[2, 2], 80, 100);
+        l.focus_column_and_window_for_resize(99, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "win_idx out of bounds")]
+    fn focus_column_and_window_for_resize_panics_on_bad_win() {
+        let mut l = test_layout(&[2, 2], 80, 100);
+        l.focus_column_and_window_for_resize(0, 99);
+    }
+
+    #[test_case(2, 0, 10, &[60, 39]; "two cols grow first against second")]
+    #[test_case(2, 0, -10, &[40, 59]; "two cols shrink first against second")]
+    #[test_case(3, 1, 10, &[33, 43, 22]; "three cols grow middle against last")]
+    #[test_case(3, 1, -10, &[33, 23, 42]; "three cols shrink middle against last")]
+    #[test_case(2, 0, -200, &[MIN_DIM, 100 - MIN_DIM - 1]; "clamps to MIN_DIM")]
+    #[test_case(2, 1, 10, &[50, 49]; "last column has no next so noop")]
+    #[test]
+    fn resize_column_against_next(n_cols: usize, focus_idx: usize, delta: i16, expected: &[usize]) {
+        let mut l = test_layout(&vec![1; n_cols], 80, 100);
+        l.focus_column_for_resize(focus_idx);
+        l.resize_active_column_against_next(delta);
+
+        for (i, (_, c)) in l.cols.iter().enumerate() {
+            assert_eq!(c.n_cols, expected[i], "column {i}");
+        }
+    }
+
+    #[test_case(2, 0, 10, &[50, 29]; "two wins grow first against second")]
+    #[test_case(2, 0, -10, &[30, 49]; "two wins shrink first against second")]
+    #[test_case(3, 1, 10, &[26, 36, 16]; "three wins grow middle against last")]
+    #[test_case(3, 1, -10, &[26, 16, 36]; "three wins shrink middle against last")]
+    #[test_case(2, 0, -200, &[MIN_DIM, 80 - MIN_DIM - 1]; "clamps to MIN_DIM")]
+    #[test_case(2, 1, 10, &[40, 39]; "last window has no next so noop")]
+    #[test]
+    fn resize_window_against_next(n_wins: usize, focus_idx: usize, delta: i16, expected: &[usize]) {
+        let mut l = test_layout(&[n_wins], 80, 100);
+        l.focus_window_for_resize(focus_idx);
+        l.resize_active_window_against_next(delta);
+
+        for (i, (_, w)) in l.cols.focus.wins.iter().enumerate() {
+            assert_eq!(w.n_rows, expected[i], "window {i}");
+        }
     }
 }
