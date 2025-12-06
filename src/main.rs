@@ -1,6 +1,7 @@
 use ad_editor::{
-    CliAction, Cmd9p, Config, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer, PlumbingRules,
-    Program, USAGE, VERSION, buffer::GapBuffer, exec::SystemRunner, regex::CachingStream,
+    CliAction, Cmd9p, Config, ConfigSource, Editor, EditorMode, LOG_LEVEL_ENV_VAR, LogBuffer,
+    ParsedArgs, PlumbingRules, Program, USAGE, VERSION, buffer::GapBuffer, exec::SystemRunner,
+    regex::CachingStream,
 };
 use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{
@@ -12,8 +13,11 @@ use std::{
 use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 
 fn main() {
-    let action = match CliAction::try_parse() {
-        Ok(action) => action,
+    let ParsedArgs {
+        action,
+        config_source,
+    } = match ParsedArgs::try_parse() {
+        Ok(parsed) => parsed,
         Err(msg) => {
             println!("{msg}");
             exit(1);
@@ -44,8 +48,17 @@ fn main() {
     let subscriber = builder.finish();
     set_global_default(subscriber).expect("unable to set a global tracing subscriber");
 
+    let config = match config_source {
+        ConfigSource::Default => Ok(Config::default()),
+        ConfigSource::User => Config::try_load(),
+        ConfigSource::Custom(path) => {
+            let home = env::var("HOME").unwrap();
+            Config::try_load_from_path(&path.to_string_lossy(), &home)
+        }
+    };
+
     let mut e = Editor::new_with_initial_files(
-        Config::try_load(),
+        config,
         PlumbingRules::try_load(),
         EditorMode::Terminal,
         log_buffer,

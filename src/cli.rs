@@ -14,6 +14,8 @@ options:
   -9p [-A aname] ls [path]         List the contents of a directory on a 9p file server
   -l, --list-sessions              List the current open editor 9p sessions
   --rm-sockets                     Remove all ad 9p sockets from the default namespace directory
+  -c, --config <path>              Load config from the specified path
+  --default-config                 Force default config instead of loading the user config file
   -h, --help                       Print this help message
   -v, --version                    Print version information
 ";
@@ -45,7 +47,20 @@ pub enum Cmd9p {
     List,
 }
 
-impl CliAction {
+#[derive(Debug)]
+pub struct ParsedArgs {
+    pub action: CliAction,
+    pub config_source: ConfigSource,
+}
+
+#[derive(Debug)]
+pub enum ConfigSource {
+    Default,
+    User,
+    Custom(PathBuf),
+}
+
+impl ParsedArgs {
     pub fn try_parse() -> Result<Self, String> {
         let mut parser = Parser::from_env();
 
@@ -54,6 +69,8 @@ impl CliAction {
 
     fn try_from_parser(parser: &mut Parser) -> Result<Self, lexopt::Error> {
         let mut action: Option<CliAction> = None;
+        let mut config_source = ConfigSource::User;
+        let mut config_set = false;
 
         loop {
             // If we've already parsed a valid action and there are arguments remaining then the
@@ -111,6 +128,34 @@ impl CliAction {
                     Short('h') | Long("help") => action = Some(CliAction::ShowHelp),
                     Long("rm-sockets") => action = Some(CliAction::RmSockets),
 
+                    Short('c') | Long("config") => {
+                        if config_set {
+                            return Err(lexopt::Error::from("config source already specified"));
+                        }
+                        let path = PathBuf::from(parser.value()?);
+                        if !path.exists() {
+                            return Err(lexopt::Error::from(format!(
+                                "config path does not exist: {}",
+                                path.display()
+                            )));
+                        } else if !path.is_file() {
+                            return Err(lexopt::Error::from(format!(
+                                "config path is not a file: {}",
+                                path.display()
+                            )));
+                        }
+                        config_source = ConfigSource::Custom(path);
+                        config_set = true;
+                    }
+
+                    Long("default-config") => {
+                        if config_set {
+                            return Err(lexopt::Error::from("config source already specified"));
+                        }
+                        config_source = ConfigSource::Default;
+                        config_set = true;
+                    }
+
                     Value(fname) if action.is_none() => {
                         let files: Vec<PathBuf> = match parser.values() {
                             Ok(vals) => std::iter::once(fname)
@@ -130,7 +175,10 @@ impl CliAction {
             }
         }
 
-        Ok(action.unwrap_or_else(|| CliAction::OpenEditor { files: Vec::new() }))
+        Ok(ParsedArgs {
+            action: action.unwrap_or_else(|| CliAction::OpenEditor { files: Vec::new() }),
+            config_source,
+        })
     }
 }
 
@@ -213,11 +261,16 @@ mod tests {
     #[test_case("--help"; "long help")]
     #[test_case("-v"; "short version")]
     #[test_case("--version"; "long version")]
+    #[test_case("-c README.md"; "config short")]
+    #[test_case("--config README.md"; "config long")]
+    #[test_case("--default-config"; "default config")]
+    #[test_case("-c README.md foo.txt"; "config with file")]
+    #[test_case("--default-config foo.txt"; "default config with file")]
     #[test]
     fn valid_args(cmd_line: &str) {
         let it = cmd_line.split_whitespace().map(|s| s.to_string());
         let mut parser = Parser::from_args(it);
-        let res = CliAction::try_from_parser(&mut parser);
+        let res = ParsedArgs::try_from_parser(&mut parser);
 
         assert!(res.is_ok(), "{res:?}");
     }
@@ -229,11 +282,18 @@ mod tests {
     #[test_case("--script-file"; "script file with no script file long")]
     #[test_case("-f foo.txt"; "script file with unknown script file")]
     #[test_case("--script-file foo.txt"; "script file with unknown script file long")]
+    #[test_case("-c"; "config with no path")]
+    #[test_case("--config"; "config with no path long")]
+    #[test_case("-c nonexistent.toml"; "config with nonexistent path")]
+    #[test_case("--config nonexistent.toml"; "config with nonexistent path long")]
+    #[test_case("--default-config -c README.md"; "both default and custom config")]
+    #[test_case("-c README.md --default-config"; "both custom and default config")]
+    #[test_case("-c README.md -c README.md"; "duplicate config flag")]
     #[test]
     fn invalid_args(cmd_line: &str) {
         let it = cmd_line.split_whitespace().map(|s| s.to_string());
         let mut parser = Parser::from_args(it);
-        let res = CliAction::try_from_parser(&mut parser);
+        let res = ParsedArgs::try_from_parser(&mut parser);
 
         assert!(res.is_err(), "{res:?}");
     }

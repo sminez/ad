@@ -42,7 +42,7 @@ pub mod ui;
 pub mod util;
 pub mod ziplist;
 
-pub use cli::{CliAction, Cmd9p, USAGE};
+pub use cli::{CliAction, Cmd9p, ConfigSource, ParsedArgs, USAGE};
 pub use config::Config;
 pub use editor::{Editor, EditorMode};
 pub use exec::{Edit, Program};
