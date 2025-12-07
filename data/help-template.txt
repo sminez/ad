@@ -31,6 +31,7 @@ Key Bindings
 Mouse Interactions
 The Minibuffer
 Windows and Columns
+Virtual Buffers
 Loading Text
 Executing Text
 Running Built In Commands
@@ -302,6 +303,40 @@ of the file at once.
 
 See the "Key Bindings" section for details of available shortcuts for running some of the more
 common layout manipulation commands.
+
+---
+
+>> Virtual Buffers
+
+In addition to buffers that are backed by files on disk, ad makes use of several virtual
+buffers that exist only within the editor. Typically the name for these buffers start with
+a "+" character but that is simply a naming convention.
+
+  +scratch
+    The scratch buffer is a place for you to quickly write and run commands or keep notes.
+    You can toggle the scratch buffer open and closed by pressing Alt-; in either NORMAL or
+    INSERT mode. Commands executed from the scratch buffer act as if they were executed from
+    within the currently active buffer.
+
+  +output
+    When you run external commands from within ad (either using RUN mode or by Executing text),
+    the standard output and error from those commands will be redirected to an output buffer
+    named after the directory containing the active buffer. For example, if you run a command
+    while editing a file in /home/innes/example/hello.txt, the output will be written to a buffer
+    named '/home/innes/example/+output'.
+
+  +help
+    The built-in help documentation (this file!) is displayed in a buffer named '+help' when you
+    run the 'help' command.
+
+  +logs
+    Internal editor logs can be viewed by running the 'view-logs' command or pressing Alt-= in
+    NORMAL mode. This can be useful for debugging issues with your config files and the editor
+    itself. You can increase the verbosity of the logs by setting the AD_LOG environment variable
+    to "debug" or "trace".
+
+  NOTE: Unlike file-backed buffers, virtual buffers are not saved to disk and their contents
+        will be lost when you close the editor unless you explicitly save them to a file.
 
 ---
 
