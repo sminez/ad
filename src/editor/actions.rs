@@ -123,6 +123,7 @@ pub enum Action {
     RunMode,
     SamMode,
     SaveBuffer { force: bool },
+    SaveBufferAll { force: bool },
     SaveBufferAs { path: String, force: bool },
     SearchInCurrentBuffer,
     SendKeys { ks: Vec<Input> },
@@ -342,6 +343,49 @@ where
 
             Err(msg) => self.set_status_message(msg),
         }
+    }
+
+    pub(super) fn save_all_buffers(&mut self, force: bool) {
+        trace!("attempting to save all open buffers");
+        let ids: Vec<usize> = self
+            .layout
+            .buffers()
+            .iter()
+            .flat_map(|b| if b.dirty { Some(b.id) } else { None })
+            .collect();
+        let mut n_saved = 0;
+        let mut n_errors = 0;
+
+        for &id in ids.iter() {
+            let b = self.layout.buffer_with_id_mut(id).unwrap();
+            let p = match &b.kind {
+                BufferKind::File(p) if b.dirty => p.clone(),
+                _ => continue,
+            };
+
+            match b.save_to_disk_at(p, force) {
+                Ok(_) => {
+                    self.lsp_manager.document_changed(b);
+                    self.lsp_manager.document_saved(b);
+                    n_saved += 1;
+                    _ = self.tx_fsys.send(LogEvent::Save(id));
+                }
+
+                Err(msg) => {
+                    error!("id={id} {msg}");
+                    n_errors += 1;
+                    continue;
+                }
+            }
+        }
+
+        let error_msg = if n_errors > 0 {
+            format!(", {n_errors} failed to save: see logs for details")
+        } else {
+            String::new()
+        };
+
+        self.set_status_message(format!("{n_saved} buffers saved{error_msg}"));
     }
 
     fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {

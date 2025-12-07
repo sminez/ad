@@ -188,6 +188,9 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             }
         }
 
+        "wa" | "write-all" => Ok(Single(SaveBufferAll { force: false })),
+        "wa!" | "write-all!" => Ok(Single(SaveBufferAll { force: true })),
+
         "wq" | "write-quit" => Ok(Multi(vec![
             SaveBuffer { force: false },
             Exit { force: false },

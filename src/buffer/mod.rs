@@ -349,7 +349,11 @@ impl Buffer {
         None
     }
 
-    pub(crate) fn save_to_disk_at(&mut self, path: PathBuf, force: bool) -> Result<String, String> {
+    pub(crate) fn save_to_disk_at(
+        &mut self,
+        path: impl AsRef<Path>,
+        force: bool,
+    ) -> Result<String, String> {
         if !self.has_trailing_newline() {
             self.insert_char(TextObject::BufferEnd.as_dot(self), '\n', None);
         }
@@ -366,6 +370,7 @@ impl Buffer {
             }
         }
 
+        let path = path.as_ref();
         let n_lines = self.len_lines();
         let contents = self.txt.make_contiguous();
         let display_path = match path.canonicalize() {
