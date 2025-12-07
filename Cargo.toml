@@ -53,23 +53,23 @@ codegen-units = 16
 ad_event = { version = "0.4", path = "crates/ad_event" }
 aho-corasick = "1.1.4"
 lexopt = "0.3.1"
-libc = "0.2.177"
-libloading = "0.8.9"
+libc = "0.2.178"
+libloading = "0.9.0"
 lsp-types = "0.97.0"
 ninep = { version = "0.4", path = "crates/ninep", default-features = false }
 serde = "1.0.228"
 serde_json = "1.0.145"
 structex = { version = "0.6", default-features = false }
 toml = { version = "0.9.8", features = [ "preserve_order" ] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = [ "fmt" ] }
+tracing = "0.1.43"
+tracing-subscriber = { version = "0.3.22", features = [ "fmt" ] }
 tree-sitter = "0.25.10"
 unicode-width = "0.2.2"
 
 [dev-dependencies]
-criterion = { version = "0.7.0", features = ["html_reports"] }
-libflate = "2.1.0"
+criterion = { version = "0.8.0", features = ["html_reports"] }
+libflate = "2.2.1"
 simple_test_case = "1"
 simple_txtar = "1"
-tree-sitter-python = "0.23.6"
+tree-sitter-python = "0.25.0"
 tree-sitter-rust = "0.24.0"
