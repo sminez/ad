@@ -27,13 +27,14 @@ About
 The Tour
 Configuration
 Editor Modes
+Selecting Text
+Loading Text
+Executing Text
 Key Bindings
 Mouse Interactions
 The Minibuffer
 Windows and Columns
 Virtual Buffers
-Loading Text
-Executing Text
 The Jump List
 Running Built In Commands
 Running External Commands
@@ -175,6 +176,186 @@ mode you are in you will find that the keys that you press have a different effe
     https://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf
 
     To enter EDIT mode from NORMAL mode, type "."
+
+---
+
+>> Selecting Text
+
+ad is built around the idea of making and refining text selections within a buffer before
+applying an editing action to that selection. While you can always move into INSERT mode
+and use ad as any other text editor, you will quickly find that you are missing a lot of
+what makes ad unique if you don't take the time to learn about selecting text.
+
+Each buffer in ad has an active selection that is known as "dot". This can be a single
+character (a "cursor") or a continuous range of characters (a "range"). The current dot
+for a given buffer can be set and manipulated in a number of different ways, the most
+obvious being through clicking and dragging the mouse or using the arrow keys. However,
+there are more advanced ways of manipulating the current dot that can help you to perform
+more complex editing and automation tasks once you get the hang of them.
+
+  Extending and Setting Dot
+    The first and most commonly used way of altering your selection within a buffer is to
+    use the built-in NORMAL mode key bindings. As a general rule, lowercase keys will *set*
+    the current dot and uppercase keys will *extend* it. For example, j/k moves up and down
+    lines while J/K starts and extends a selection up or down one line from the current
+    active cursor position.
+    
+    See the "Keybindings" section for all of the available actions.
+
+  Selecting Within Delimiters
+    You can quickly select text within matching delimiters by using Alt-i followed by the
+    delimiter character. For example, Alt-i " will select the text within the nearest pair
+    of double quotes, and Alt-i ( will select the text within the nearest pair of parentheses.
+
+    The following delimiters are supported: ( ) [ ] { } < > " ' /
+
+  "Smart" expansion
+    Pressing "*" in NORMAL mode while dot is a cursor will attempt to smart-expand to select
+    the filepath, URL or word under that cursor. This is a best-effort convenience that is
+    typically then followed by loading or executing that selection rather than being used in
+    conjunction with other dot manipulation techniques.
+
+  Flipping and Collapsing Ranges
+    When you have a range dot you will notice that you still have a visual marker for the
+    cursor at one end of your selection. This is your "active" cursor, and it is where all
+    actions that extend or set the current dot are applied. If you want to instead work with
+    the other end of your selected range you can press ";" in NORMAL mode to flip which
+    cursor is active. (This is particularly useful for refining selections from both ends
+    with additional NORMAL mode key bindings for extending dot).
+
+    If instead you want to quickly collapse a range down to a single cursor, you can press ","
+    to collapse to the start of the selection or Alt-, to collapse to the end.
+
+  Edit Mode and Structural Regular Expressions
+    ad contains a powerful editing language known as "structural regular expressions" that is
+    exposed through its EDIT mode. See the "Running Edit Commands" section for details on how
+    this works and how it can be used to both manipulate dot and directly apply editing actions.
+
+---
+
+>> Loading Text
+
+Along with "Executing" text, the idea of "Loading" text is taken from the Plan 9 text editor
+acme as a way of providing a form of programmable hyperlinking within arbitrary text files.
+Unlike HTML links where the target of the link is defined within the source text, ad Loading
+makes use of centrally defined "plumbing" rules in order to determine what the outcome of a
+given Load should be.
+
+To "Load" text, highlight the text you wish to Load and hit Enter from within NORMAL mode.
+Alternatively, right clicking the mouse within your current selection will work in any mode.
+If your current selection is a single character cursor, Loading will first expand to the
+surrounding word, filepath or URL before attempting to interpret the selected text.
+
+By default, if no rules are matched then a Load of a file path is defined to be opening that
+file within ad and a Load of any other text will search for the next occurrence of that text
+within the current buffer. Rules are defined in ~/.ad/plumbing.rules with the default ruleset
+being viewable here:
+
+  https://github.com/sminez/ad/blob/develop/data/plumbing.rules
+
+
+The structure of the 'plumbing.rules' file is as follows:
+
+  Comments
+    Any line beginning with a '#' is a comment and is ignored when parsing the file.
+
+  Variable declarations
+    At the top of the file you may have any number of 'var = value' lines that declare a
+    variable that may be used as '$var' in the rest of your rules file. Variables declared
+    in this way are replaced when the rules file is parsed. When a message is being processed
+    by your rules, there are several built in variables that are always available:
+
+      $0     The result of the most recent 'matches' pattern ($1, $2, ... for submatches)
+      $src   The 'src' field of the message being processed
+      $dst   The 'dst' field of the message being processed
+      $wdir  The 'wdir' field of the message being processed
+      $data  The 'data' field of the message being processed
+      $file  The matched file name from a successful 'isfile' pattern
+      $dir   The matched directory name from a successful 'isdir' pattern
+
+  Rule sets
+    After any variable declarations your rules file consists of one or more rule blocks that
+    define a set of patterns that must hold for an incoming message in order for the paired
+    action to be run. Every rule set must contain at least one pattern and one action. Rule
+    sets are terminated by a blank line or end of file.
+
+  Patterns
+    The following pattern lines are supported as part of a Rule set:
+
+      $field is $value    If the specified field exactly matches the given value, then
+                          the rule matches.
+
+      arg isfile $value   If the given value is a valid file path for an existing file
+                          then the rule matches.
+
+      arg isdir $value    If the given value is a valid directory path for an existing
+                          file then the rule matches.
+
+      $field matches $re  If the specified field matches the provided regex then the
+                          rule matches. (You must specify ^$ anchors to match against
+                          the full contents of the field if that is what you want)
+
+      data narrows $re    If the provided regex matches the message's data field at the
+                          offset specified by its cur field (defaulting to 0) then data
+                          is replaced with that match.
+
+      data from $cmd      Replaces the current contents of 'data' with the stdout of
+                          the provided shell command.
+
+      $field set $value   Replace the specified field with a new value.
+
+      attr add $attr=$val Set or replace the $attr attribute on the message. Multiple
+                          attributes may be set at once in a single 'attr add' line if
+                          desired. Message attributes are ignored by the plumber but
+                          can be used to pass additional information to the program that
+                          receives the resulting plumbing message from a 'plumb to' action.
+                          For ad, the following attributes are currently supported:
+
+                            action=showdata  causes ad to open a new window showing a
+                                             virtual buffer containing the contents of
+                                             the 'data' field.
+                            filename=$fname  sets the file name of a virtual buffer
+                                             opened using 'showdata' (defaults to
+                                             '+plumbing-message' if not set).
+                            addr=$addr       parses $addr as an Edit Command address
+                                             and sets the current dot to that range
+                                             after opening 'data' as a new file.
+
+      attr delete $attr   Delete the $attr attribute from the message.
+
+  Actions
+    The following actions are supported as part of a Rule set:
+
+      plumb to $port      Send the message to the specified port for handling by the
+                          program listening on it. Currently only the 'edit' port is
+                          supported where plumbed messages will be handled internally
+                          by ad itself.
+      plumb start $cmd    Discard the message and run the provided shell command instead.
+                          Typically this is used with variables to control how a command
+                          is executed (such as opening a picture in an image viewer, or
+                          a URL in a browser). 
+
+---
+
+>> Executing Text
+
+Executing text within ad is a way of running both built in and external commands by name
+from within a buffer. ad will prefer internal commands over external ones in the event of
+duplicate command names. Standard output and error from commands run in this way will be
+redirected to a buffer named "$DIR/+output" where "$DIR" is the directory containing the
+active buffer.
+
+To "Execute" text, highlight the text you wish to Execute and hit "@" from within NORMAL
+mode. Alternatively, middle clicking the mouse within your current selection will work in
+any mode. If your current selection is a single character cursor, Loading will first
+expand to the surrounding whitespace delimited word before attempting to interpret the
+selected text.
+
+If the selection being executed begins with a "<" character then the output of running
+the command will replace the selection within the buffer it was executed in rather than
+being redirected to a +output buffer.
+
+  <date
 
 ---
 
@@ -338,132 +519,6 @@ a "+" character but that is simply a naming convention.
 
   NOTE: Unlike file-backed buffers, virtual buffers are not saved to disk and their contents
         will be lost when you close the editor unless you explicitly save them to a file.
-
----
-
->> Loading Text
-
-Along with "Executing" text, the idea of "Loading" text is taken from the Plan 9 text editor
-acme as a way of providing a form of programmable hyperlinking within arbitrary text files.
-Unlike HTML links where the target of the link is defined within the source text, ad Loading
-makes use of centrally defined "plumbing" rules in order to determine what the outcome of a
-given Load should be.
-
-To "Load" text, highlight the text you wish to Load and hit Enter from within NORMAL mode.
-Alternatively, right clicking the mouse within your current selection will work in any mode.
-If your current selection is a single character cursor, Loading will first expand to the
-surrounding word, filepath or URL before attempting to interpret the selected text.
-
-By default, if no rules are matched then a Load of a file path is defined to be opening that
-file within ad and a Load of any other text will search for the next occurrence of that text
-within the current buffer. Rules are defined in ~/.ad/plumbing.rules with the default ruleset
-being viewable here:
-
-  https://github.com/sminez/ad/blob/develop/data/plumbing.rules
-
-
-The structure of the 'plumbing.rules' file is as follows:
-
-  Comments
-    Any line beginning with a '#' is a comment and is ignored when parsing the file.
-
-  Variable declarations
-    At the top of the file you may have any number of 'var = value' lines that declare a
-    variable that may be used as '$var' in the rest of your rules file. Variables declared
-    in this way are replaced when the rules file is parsed. When a message is being processed
-    by your rules, there are several built in variables that are always available:
-
-      $0     The result of the most recent 'matches' pattern ($1, $2, ... for submatches)
-      $src   The 'src' field of the message being processed
-      $dst   The 'dst' field of the message being processed
-      $wdir  The 'wdir' field of the message being processed
-      $data  The 'data' field of the message being processed
-      $file  The matched file name from a successful 'isfile' pattern
-      $dir   The matched directory name from a successful 'isdir' pattern
-
-  Rule sets
-    After any variable declarations your rules file consists of one or more rule blocks that
-    define a set of patterns that must hold for an incoming message in order for the paired
-    action to be run. Every rule set must contain at least one pattern and one action. Rule
-    sets are terminated by a blank line or end of file.
-
-  Patterns
-    The following pattern lines are supported as part of a Rule set:
-
-      $field is $value    If the specified field exactly matches the given value, then
-                          the rule matches.
-
-      arg isfile $value   If the given value is a valid file path for an existing file
-                          then the rule matches.
-
-      arg isdir $value    If the given value is a valid directory path for an existing
-                          file then the rule matches.
-
-      $field matches $re  If the specified field matches the provided regex then the
-                          rule matches. (You must specify ^$ anchors to match against
-                          the full contents of the field if that is what you want)
-
-      data narrows $re    If the provided regex matches the message's data field at the
-                          offset specified by its cur field (defaulting to 0) then data
-                          is replaced with that match.
-
-      data from $cmd      Replaces the current contents of 'data' with the stdout of
-                          the provided shell command.
-
-      $field set $value   Replace the specified field with a new value.
-
-      attr add $attr=$val Set or replace the $attr attribute on the message. Multiple
-                          attributes may be set at once in a single 'attr add' line if
-                          desired. Message attributes are ignored by the plumber but
-                          can be used to pass additional information to the program that
-                          receives the resulting plumbing message from a 'plumb to' action.
-                          For ad, the following attributes are currently supported:
-
-                            action=showdata  causes ad to open a new window showing a
-                                             virtual buffer containing the contents of
-                                             the 'data' field.
-                            filename=$fname  sets the file name of a virtual buffer
-                                             opened using 'showdata' (defaults to
-                                             '+plumbing-message' if not set).
-                            addr=$addr       parses $addr as an Edit Command address
-                                             and sets the current dot to that range
-                                             after opening 'data' as a new file.
-
-      attr delete $attr   Delete the $attr attribute from the message.
-
-  Actions
-    The following actions are supported as part of a Rule set:
-
-      plumb to $port      Send the message to the specified port for handling by the
-                          program listening on it. Currently only the 'edit' port is
-                          supported where plumbed messages will be handled internally
-                          by ad itself.
-      plumb start $cmd    Discard the message and run the provided shell command instead.
-                          Typically this is used with variables to control how a command
-                          is executed (such as opening a picture in an image viewer, or
-                          a URL in a browser). 
-
----
-
->> Executing Text
-
-Executing text within ad is a way of running both built in and external commands by name
-from within a buffer. ad will prefer internal commands over external ones in the event of
-duplicate command names. Standard output and error from commands run in this way will be
-redirected to a buffer named "$DIR/+output" where "$DIR" is the directory containing the
-active buffer.
-
-To "Execute" text, highlight the text you wish to Execute and hit "@" from within NORMAL
-mode. Alternatively, middle clicking the mouse within your current selection will work in
-any mode. If your current selection is a single character cursor, Loading will first
-expand to the surrounding whitespace delimited word before attempting to interpret the
-selected text.
-
-If the selection being executed begins with a "<" character then the output of running
-the command will replace the selection within the buffer it was executed in rather than
-being redirected to a +output buffer.
-
-  <date
 
 ---
 
