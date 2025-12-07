@@ -238,6 +238,8 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         [ Char('g'), Char('t') ] => [ LspGotoTypeDefinition ],
         "LSP: show hover";
         [ Ctrl('k') ] => [ LspHover ],
+        "LSP: rename";
+        [ leader, Char('l'), Char('R') ] => [ LspRenamePrepare ],
     };
 
     let mode = Mode {

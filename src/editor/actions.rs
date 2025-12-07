@@ -89,6 +89,8 @@ pub enum Action {
     LspGotoTypeDefinition,
     LspHover,
     LspReferences,
+    LspRename,
+    LspRenamePrepare,
     LspShowCapabilities,
     LspShowDiagnostics,
     LspStart,
@@ -827,6 +829,23 @@ where
 
         if let Some(input) = self.minibuffer_prompt("Edit> ") {
             self.execute_edit_command(&input);
+        };
+
+        self.modes.remove(0);
+    }
+
+    pub(super) fn prepare_lsp_rename(&mut self) {
+        self.set_status_message("preparing LSP rename...");
+        self.lsp_manager
+            .prepare_rename(self.layout.active_buffer_ignoring_scratch());
+    }
+
+    pub(super) fn lsp_rename(&mut self) {
+        self.modes.insert(0, Mode::ephemeral_mode("LSP-RENAME"));
+
+        if let Some(input) = self.minibuffer_prompt("LSP Rename> ") {
+            let b = self.layout.active_buffer_ignoring_scratch();
+            self.lsp_manager.rename(b, input);
         };
 
         self.modes.remove(0);

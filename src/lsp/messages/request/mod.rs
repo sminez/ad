@@ -16,6 +16,7 @@ mod goto;
 mod hover;
 mod init;
 mod references;
+mod rename;
 
 pub(crate) use init::OpenDocument;
 

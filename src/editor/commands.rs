@@ -99,6 +99,7 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
         "lsp-goto-definition" => Ok(Single(LspGotoDefinition)),
         "lsp-goto-type-definition" => Ok(Single(LspGotoTypeDefinition)),
         "lsp-hover" => Ok(Single(LspHover)),
+        "lsp-rename" => Ok(Single(LspRenamePrepare)),
         "lsp-show-capabilities" => Ok(Single(LspShowCapabilities)),
         "lsp-show-diagnostics" => Ok(Single(LspShowDiagnostics)),
         "lsp-start" => Ok(Single(LspStart)),

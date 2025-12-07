@@ -355,6 +355,34 @@ impl LspManagerHandle {
             ));
         }
     }
+
+    pub fn prepare_rename(&self, b: &Buffer) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
+            if b.dirty {
+                self.document_changed(b);
+            }
+
+            debug!("sending LSP textDocument/prepareRename ({lsp_id})");
+            let pos = enc.buffer_pos(b);
+            self.send_req(req::PrepareRenameRequest::data(lsp_id, pos, ()));
+        }
+    }
+
+    pub fn rename(&self, b: &Buffer, new_name: String) {
+        if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
+            if b.dirty {
+                self.document_changed(b);
+            }
+
+            debug!("sending LSP textDocument/rename ({lsp_id})");
+            let pos = enc.buffer_pos(b);
+            self.send_req(req::Rename::data(
+                lsp_id,
+                (pos.clone(), new_name),
+                (pos, b.id),
+            ));
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -16,9 +16,10 @@ use lsp_types::{
     ClientCapabilities, ClientInfo, CompletionClientCapabilities, CompletionItemCapability,
     CompletionItemCapabilityResolveSupport, DiagnosticTag, DynamicRegistrationClientCapabilities,
     GeneralClientCapabilities, HoverClientCapabilities, InitializeParams, MarkupKind,
-    NumberOrString, PositionEncodingKind, PublishDiagnosticsClientCapabilities, TagSupport,
-    TextDocumentClientCapabilities, TextDocumentSyncClientCapabilities, Uri,
-    WindowClientCapabilities, WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceFolder,
+    NumberOrString, PositionEncodingKind, PublishDiagnosticsClientCapabilities,
+    RenameClientCapabilities, TagSupport, TextDocumentClientCapabilities,
+    TextDocumentSyncClientCapabilities, Uri, WindowClientCapabilities, WorkDoneProgressParams,
+    WorkspaceClientCapabilities, WorkspaceEditClientCapabilities, WorkspaceFolder,
     WorkspaceSymbolClientCapabilities,
     notification::{DidOpenTextDocument, Initialized},
     request::{Initialize, Request as _, Shutdown},
@@ -109,6 +110,13 @@ impl LspRequest for Initialize {
                     did_change_configuration: Some(DynamicRegistrationClientCapabilities {
                         dynamic_registration: Some(false),
                     }),
+                    workspace_edit: Some(WorkspaceEditClientCapabilities {
+                        document_changes: Some(false),
+                        resource_operations: Some(Vec::new()),
+                        failure_handling: None,
+                        normalizes_line_endings: Some(true),
+                        change_annotation_support: None,
+                    }),
                     ..Default::default()
                 }),
                 text_document: Some(TextDocumentClientCapabilities {
@@ -154,6 +162,12 @@ impl LspRequest for Initialize {
                             value_set: vec![DiagnosticTag::UNNECESSARY, DiagnosticTag::DEPRECATED],
                         }),
                         ..Default::default()
+                    }),
+                    rename: Some(RenameClientCapabilities {
+                        dynamic_registration: Some(false),
+                        prepare_support: Some(true),
+                        prepare_support_default_behavior: None,
+                        honors_change_annotations: Some(false),
                     }),
                     // https://docs.rs/lsp-types/0.97.0/lsp_types/struct.TextDocumentClientCapabilities.html
                     ..Default::default()

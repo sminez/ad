@@ -203,6 +203,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "display hover text for the symbol under the current cursor in a new window (requires an attached LSP server)",
         ),
         (
+            vec!["lsp-rename"],
+            "rename the symbol under the active cursor (requires an attached LSP server)",
+        ),
+        (
             vec!["lsp-show-capabilities"],
             "display the JSON capabilities of the LSP server for the current buffer (requires an attached LSP server)",
         ),

@@ -642,6 +642,8 @@ where
             LspReferences => self
                 .lsp_manager
                 .find_references(self.layout.active_buffer_ignoring_scratch()),
+            LspRename => self.lsp_rename(),
+            LspRenamePrepare => self.prepare_lsp_rename(),
             MarkClean { bufid } => self.mark_clean(bufid),
             MbSelect(selector) => selector.run(self),
             NewEditLogTransaction => self.layout.active_buffer_mut().new_edit_log_transaction(),
