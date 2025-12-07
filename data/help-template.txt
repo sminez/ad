@@ -43,6 +43,7 @@ The Filesystem Interface
 Plumbing
 LSP support
 Syntax Highlighting
+Debugging and Troubleshooting
 
 ---
 
@@ -705,5 +706,32 @@ For a quick way of re-using parsers and queries from neovim, see the following f
 project:
   https://github.com/nvim-treesitter/nvim-treesitter/blob/master/lua/nvim-treesitter/parsers.lua
   https://github.com/nvim-treesitter/nvim-treesitter/tree/master/queries
+
+---
+
+>> Debugging and Troubleshooting
+
+ad provides several commands and key bindings for inspecting the internal state of the editor
+and debugging issues with your configuration or the editor itself.
+
+  Viewing Internal Logs
+    You can view the internal editor logs by running the 'view-logs' command from COMMAND mode
+    or by pressing Alt-= in NORMAL mode. This will open a buffer named '+logs' containing log
+    messages from the editor.
+
+    The verbosity of the logs can be increased by setting the AD_LOG environment variable to
+    "debug" or "trace" before starting ad. This can be useful when tracking down issues with
+    configuration files or unexpected behavior.
+
+  Viewing the Edit Log
+    The edit log tracks all changes made to the current buffer as a series of transactions.
+    You can view this log by pressing Alt-# in NORMAL mode, which can help you understand the
+    undo/redo history and diagnose issues with editing operations.
+
+  Tree-Sitter Parse Trees
+    If you have tree-sitter syntax highlighting enabled for the current buffer, you can view
+    the parse tree by running the 'ts-show-tree' command. This will open a buffer showing the
+    hierarchical structure of the parsed syntax tree, which can be useful for debugging syntax
+    highlighting issues or understanding how tree-sitter is interpreting your code.
 
 ---
