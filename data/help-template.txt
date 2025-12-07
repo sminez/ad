@@ -551,7 +551,15 @@ string to the "ctl" file in the filesystem interface.
 All commands available on the user's $PATH are executable from within ad in addition to anything
 located in the ~/.ad/bin directory. The $bufid environment variable will be set to the id of the
 buffer that the command was run from (the active buffer if run from RUN mode) and the working
-directory will be set to the directory containing the active buffer.
+directory will be set to the directory containing the active buffer. Output from running commands
+is redirected to the appropriate +output buffer as described in the "Virtual Buffers" section.
+
+  Managing Running Processes
+    When you execute external commands from within ad, those commands run as child processes
+    of the editor. If you need to terminate a long-running command, you can use the 'kill'
+    command from COMMAND mode which will present you with a list of currently running processes
+    in the minibuffer. Select the process you wish to terminate and press Enter to send it a
+    SIGTERM signal.
 
 ---
 
