@@ -893,11 +893,11 @@ impl Buffer {
             Action::Redo => return self.redo(),
             Action::Undo => return self.undo(),
 
-            Action::DotCollapseFirst => self.dot = self.dot.collapse_to_first_cur(),
-            Action::DotCollapseLast => self.dot = self.dot.collapse_to_last_cur(),
+            Action::DotCollapseFirst => self.collapse_dot(true),
+            Action::DotCollapseLast => self.collapse_dot(false),
             Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
             Action::DotExtendForward(tobj, count) => self.extend_dot_forward(tobj, count),
-            Action::DotFlip => self.dot.flip(),
+            Action::DotFlip => self.flip_dot(),
             Action::DotSet(t, count) => self.set_dot(t, count),
             Action::DotSetFromCoords { coords } => self.set_dot_from_coords(coords),
 
@@ -1022,6 +1022,21 @@ impl Buffer {
         }
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
+        self.changed_since_last_render = true;
+    }
+
+    fn collapse_dot(&mut self, first: bool) {
+        self.dot = if first {
+            self.dot.collapse_to_first_cur()
+        } else {
+            self.dot.collapse_to_last_cur()
+        };
+
+        self.changed_since_last_render = true;
+    }
+
+    fn flip_dot(&mut self) {
+        self.dot.flip();
         self.changed_since_last_render = true;
     }
 
