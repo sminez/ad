@@ -34,6 +34,7 @@ Windows and Columns
 Virtual Buffers
 Loading Text
 Executing Text
+The Jump List
 Running Built In Commands
 Running External Commands
 Running Edit Commands
@@ -463,6 +464,19 @@ the command will replace the selection within the buffer it was executed in rath
 being redirected to a +output buffer.
 
   <date
+
+---
+
+>> The Jump List
+
+ad maintains a "jump list" that tracks your navigation history as you move between buffers.
+The jump list automatically records your position whenever you set the buffer Dot via a
+command (such as searching or switching buffers) or make an edit to a buffer. Navigating
+back through the jump list and then making further edits will clear any "stale" entries
+that are now invalid beyond that point in the list.
+
+To make use of the jump list, you need to be in NORMAL mode. From there, you can press
+Alt-[ or Ctrl-o to move backwards through the list, and Alt-] or Ctrl-i to move forward.
 
 ---
 
