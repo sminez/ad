@@ -1751,7 +1751,7 @@ fn apply_scroll(
     view.row_off = if up {
         view.row_off.saturating_sub(scroll_rows)
     } else {
-        view.row_off + scroll_rows
+        min(view.row_off + scroll_rows, y_max)
     };
 
     if focused {
@@ -2423,5 +2423,26 @@ mod tests {
         for (i, (_, w)) in l.cols.focus.wins.iter().enumerate() {
             assert_eq!(w.n_rows, expected[i], "window {i}");
         }
+    }
+
+    #[test]
+    fn apply_scroll_for_unfocused_window_clamps_row_off() {
+        let config = Arc::new(RwLock::new(Config::default()));
+        let mut b = Buffer::new_unnamed(0, "line1\nline2\nline3\nline4\nline5", config);
+        let y_max = b.txt.len_lines() - 1;
+        assert_eq!(y_max, 4);
+
+        let mut win = Window::new(0, 3);
+        win.view.row_off = 3;
+
+        let focused = false;
+        let up = false;
+        let n_cols = 80;
+        let tabstop = 4;
+        let scroll_rows = 5;
+
+        apply_scroll(&mut b, &mut win, n_cols, tabstop, focused, up, scroll_rows);
+
+        assert_eq!(win.view.row_off, y_max);
     }
 }

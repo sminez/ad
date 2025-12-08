@@ -12,7 +12,7 @@ use ad_event::Source;
 use std::time::Instant;
 
 /// Number of milliseconds between successive mouse inputs under which we enable fast scrolling.
-const FAST_SCROLL_MS: u128 = 5;
+const FAST_SCROLL_MS: u128 = 10;
 /// Number of rows to scroll per mouse wheel event when fast scrolling is enabled.
 const FAST_SCROLL_ROWS: usize = 5;
 
