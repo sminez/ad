@@ -984,7 +984,8 @@ impl Layout {
         assert_invariants!(self);
     }
 
-    /// Clamp all visible views to the current dot of the Buffer they are displaying.
+    /// Clamp the active view to the current dot of the Buffer it is displaying and ensure that all
+    /// other views are within bounds for the end of the buffer.
     ///
     /// We need to do this for every visible view, not just the active one as external
     /// inputs from systems such as the 9p filesystem and LSP servers can manipulate
@@ -992,6 +993,8 @@ impl Layout {
     pub(crate) fn clamp_scroll(&mut self) {
         let tabstop = config_handle!(self).tabstop;
 
+        // Clamp the scratch buffer if it is visible unconditionally as we can't have multiple
+        // views of it.
         if self.scratch.is_visible {
             self.scratch.w.view.clamp_scroll(
                 self.scratch.b.buffer_mut(),
@@ -1001,10 +1004,28 @@ impl Layout {
             );
         }
 
-        for (_, col) in self.cols.iter_mut() {
-            for (_, win) in col.wins.iter_mut() {
+        // Clamp the active buffer fully to ensure that Dot is remaining within bounds
+        let b = self.buffers.active_mut();
+        let cols = self.cols.focus.n_cols;
+        let rows = self.cols.focus.wins.focus.n_rows;
+
+        self.cols
+            .focus
+            .focused_view_mut()
+            .clamp_scroll(b, rows, cols, tabstop);
+
+        // For all other visible Views, ensure that row_off is clamped to the end of the buffer but
+        // don't _fully_ clamp to force the current Dot to be visible. This allows us to present
+        // multiple Views of the same Buffer while only scrolling one of them.
+        for (col_focused, col) in self.cols.iter_mut() {
+            for (win_focused, win) in col.wins.iter_mut() {
+                if col_focused && win_focused {
+                    continue; // handled above
+                }
+
                 let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
-                win.view.clamp_scroll(b, win.n_rows, col.n_cols, tabstop);
+                let y_max = b.txt.len_lines() - 1;
+                win.view.row_off = min(win.view.row_off, y_max);
             }
         }
 
