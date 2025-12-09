@@ -95,15 +95,17 @@ impl PositionEncoding {
 
             Self::Utf16 => {
                 let slice = b.txt.line(pos.line as usize);
-                let mut character = pos.character as usize;
+                let mut remaining = pos.character as usize;
                 let mut col = 0;
-                for (idx, ch) in slice.chars().enumerate() {
-                    let n = ch.len_utf16();
-                    col = idx;
-                    character -= n;
-                    if character == 0 {
+                for ch in slice.chars() {
+                    if remaining == 0 {
                         break;
                     }
+                    remaining = remaining.saturating_sub(ch.len_utf16());
+                    col += 1;
+                }
+                if remaining > 0 {
+                    col = slice.chars().count(); // clamp to EOL
                 }
 
                 (pos.line as usize, col)
@@ -191,7 +193,7 @@ impl Coords {
         self.start.line
     }
 
-    pub fn as_addr(&self, b: &Buffer) -> Addr {
+    pub(crate) fn as_addr(&self, b: &Buffer) -> Addr {
         let (row_start, col_start) = self.encoding.parse_lsp_position(b, self.start);
         let (mut row_end, mut col_end) = self.encoding.parse_lsp_position(b, self.end);
 
@@ -220,5 +222,41 @@ impl Coords {
                 AddrBase::LineAndColumn(row_end, col_end.saturating_sub(1)).into(),
             )
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::Position;
+    use simple_test_case::test_case;
+
+    // LSP positions are _between_ characters (like a cursor).
+    // Position 0 = before first char, position N = after Nth char.
+    //
+    // For ASCII text, UTF-16 positions equal character indices.
+    //
+    // Multi-byte UTF-16: emoji like 😀 uses 2 UTF-16 code units (surrogate pair)
+    // String "a😀b" is 3 chars but 4 UTF-16 units: a(1) + 😀(2) + b(1)
+
+    #[test_case("hello", 0, 0; "ascii position 0")]
+    #[test_case("hello", 1, 1; "ascii position 1")]
+    #[test_case("hello", 5, 5; "ascii position 5")]
+    #[test_case("a😀b", 0, 0; "emoji position 0")]
+    #[test_case("a😀b", 1, 1; "emoji position 1 after a before emoji")]
+    #[test_case("a😀b", 3, 2; "emoji position 3 after emoji before b")]
+    #[test_case("a😀b", 4, 3; "emoji position 4 after b")]
+    #[test]
+    fn parse_lsp_position_utf16_ascii(content: &str, lsp_char: u32, expected_col: usize) {
+        let b = Buffer::new_virtual(0, "test", content, Default::default());
+        let pos = Position {
+            line: 0,
+            character: lsp_char,
+        };
+
+        let (line, col) = PositionEncoding::Utf16.parse_lsp_position(&b, pos);
+
+        assert_eq!(line, 0);
+        assert_eq!(col, expected_col);
     }
 }
