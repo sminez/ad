@@ -984,25 +984,28 @@ impl Layout {
         assert_invariants!(self);
     }
 
+    /// Clamp all visible views to the current dot of the Buffer they are displaying.
+    ///
+    /// We need to do this for every visible view, not just the active one as external
+    /// inputs from systems such as the 9p filesystem and LSP servers can manipulate
+    /// state for non-active buffers.
     pub(crate) fn clamp_scroll(&mut self) {
         let tabstop = config_handle!(self).tabstop;
 
-        if self.scratch.is_focused {
+        if self.scratch.is_visible {
             self.scratch.w.view.clamp_scroll(
                 self.scratch.b.buffer_mut(),
                 self.scratch.w.n_rows,
                 self.screen_cols,
                 tabstop,
             );
-        } else {
-            let b = self.buffers.active_mut();
-            let cols = self.cols.focus.n_cols;
-            let rows = self.cols.focus.wins.focus.n_rows;
+        }
 
-            self.cols
-                .focus
-                .focused_view_mut()
-                .clamp_scroll(b, rows, cols, tabstop);
+        for (_, col) in self.cols.iter_mut() {
+            for (_, win) in col.wins.iter_mut() {
+                let b = self.buffers.with_id_mut(win.view.bufid).unwrap();
+                win.view.clamp_scroll(b, win.n_rows, col.n_cols, tabstop);
+            }
         }
 
         #[cfg(test)]
@@ -2422,6 +2425,31 @@ mod tests {
 
         for (i, (_, w)) in l.cols.focus.wins.iter().enumerate() {
             assert_eq!(w.n_rows, expected[i], "window {i}");
+        }
+    }
+
+    #[test]
+    fn clamp_scroll_clamps_all_visible_views() {
+        let mut l = test_layout(&[2, 3], 80, 100);
+
+        for (_, col) in l.cols.iter_mut() {
+            for (_, win) in col.wins.iter_mut() {
+                let b = l.buffers.with_id_mut(win.view.bufid).unwrap();
+                b.insert_xdot("line1\nline2\nline3".to_string());
+                win.view.row_off = 100;
+            }
+        }
+
+        l.clamp_scroll();
+
+        for (_, col) in l.cols.iter() {
+            for (_, win) in col.wins.iter() {
+                assert_eq!(
+                    win.view.row_off, 2,
+                    "bufid {} had row_off={}",
+                    win.view.bufid, win.view.row_off
+                );
+            }
         }
     }
 
