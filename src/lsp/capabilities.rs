@@ -198,7 +198,14 @@ impl Coords {
         let (mut row_end, mut col_end) = self.encoding.parse_lsp_position(b, self.end);
 
         if (row_start, col_start) == (row_end, col_end) {
+            // LSP insert at this position within the buffer
             Addr::Simple(AddrBase::LineAndColumn(row_start, col_start).into())
+        } else if row_start == row_end && col_end == col_start + 1 {
+            // LSP delete of a single character
+            Addr::Compound(
+                AddrBase::LineAndColumn(row_start, col_start).into(),
+                AddrBase::LineAndColumn(row_start, col_start).into(),
+            )
         } else {
             // From the LSP spec on Ranges:
             //   https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#range

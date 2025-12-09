@@ -130,7 +130,9 @@ pub(crate) fn edit_actions_as_editor_actions(mut edit_actions: Vec<EditAction>) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::Buffer;
+    use crate::{buffer::Buffer, lsp::capabilities::PositionEncoding};
+    use ad_event::Source;
+    use lsp_types::{Position, Range, TextEdit};
     use simple_test_case::test_case;
 
     // The first "blank" line here contains leading whitespace
@@ -202,15 +204,24 @@ fn main() {}"#;
         ];
         "joining lines"
     )]
+    #[test_case(
+        "hello world",
+        "helloworld",
+        vec![TextEdit {
+            range: Range {
+                start: Position { line: 0, character: 5 },
+                end: Position { line: 0, character: 6 }
+            },
+            new_text: "".to_string(),
+        }];
+        "single char deletion"
+    )]
     #[test]
     fn format_actions_work_when_blank_lines_are_involved(
         content: &str,
         expected: &str,
         text_edits: Vec<TextEdit>,
     ) {
-        use ad_event::Source;
-        use lsp_types::{Range, TextEdit};
-
         let mut b = Buffer::new_virtual(0, "test", content, Default::default());
 
         let actions = edit_actions_as_editor_actions(
@@ -225,5 +236,81 @@ fn main() {}"#;
         }
 
         assert_eq!(b.str_contents(), expected);
+    }
+
+    // This is a regression test for some broken behaviour that I was able to pin down to being
+    // related to how the LSP spec handles TextEdits. Annoyingly, there is no built in way to
+    // delete, only insert: so LSP servers send edit ranges where start == end along with an empty
+    // string as the insert text.
+    // This...does not play well with how ad likes to handle ranges and inserts. The buggy
+    // behaviour was that the line ending `println!("{ones:?}");` ended with an additional `}`
+    // because rust-analyzer decided to delete that curly and insert a new one on the line below
+    // for some reason.
+    // The TextEdits used as the inputs here are ones captured from logging in the `handle_res`
+    // method above prior to the fix.
+
+    // NOTE: some of the blank lines here have trailing whitespace that is required for the test to
+    // run successfully
+    const BEFORE: &str = r#"fn main() {
+    println!("Hello, world!");
+
+    match "this" {
+        "some" => {
+            for x in 0..10 { let ones: Vec<usize> = std::iter::repeat(1)            .take(x).collect();             println!("{ones:?}");}
+        }
+        
+        "that" => println!("not here"),
+        
+        "this" => println!("here"),
+    }
+}
+"#;
+
+    const AFTER: &str = r#"fn main() {
+    println!("Hello, world!");
+
+    match "this" {
+        "some" => {
+            for x in 0..10 {
+                let ones: Vec<usize> = std::iter::repeat(1).take(x).collect();
+                println!("{ones:?}");
+            }
+        }
+
+        "that" => println!("not here"),
+
+        "this" => println!("here"),
+    }
+}
+"#;
+
+    #[test]
+    fn regression_lsp_delete_single_char() {
+        #[rustfmt::skip]
+        let text_edits = vec![
+            TextEdit { range: Range { start: Position { line: 5, character: 28 }, end: Position { line: 5, character: 28 } }, new_text: "\n               ".into() },
+            TextEdit { range: Range { start: Position { line: 5, character: 72 }, end: Position { line: 5, character: 84 } }, new_text: "".into() },
+            TextEdit { range: Range { start: Position { line: 5, character: 103 }, end: Position { line: 5, character: 103 } }, new_text: "\n ".into() },
+            TextEdit { range: Range { start: Position { line: 5, character: 116 }, end: Position { line: 5, character: 116 } }, new_text: "  ".into() },
+            TextEdit { range: Range { start: Position { line: 5, character: 137 }, end: Position { line: 5, character: 138 } }, new_text: "".into() },
+            TextEdit { range: Range { start: Position { line: 6, character: 0 }, end: Position { line: 6, character: 0 } }, new_text: "   ".into() },
+            TextEdit { range: Range { start: Position { line: 6, character: 8 }, end: Position { line: 6, character: 8 } }, new_text: " ".into() },
+            TextEdit { range: Range { start: Position { line: 7, character: 8 }, end: Position { line: 7, character: 8 } }, new_text: "}\n".into() },
+            TextEdit { range: Range { start: Position { line: 9, character: 0 }, end: Position { line: 9, character: 8 } }, new_text: "".into() }
+        ];
+
+        let mut b = Buffer::new_unnamed(0, BEFORE, Default::default());
+        let actions = edit_actions_as_editor_actions(
+            text_edits
+                .into_iter()
+                .map(|edit| EditAction::from_text_edit(edit, PositionEncoding::Utf32))
+                .collect(),
+        );
+
+        for action in actions {
+            b.handle_action(action, Source::Fsys);
+        }
+
+        assert_eq!(b.str_contents(), AFTER);
     }
 }
