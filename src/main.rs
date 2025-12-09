@@ -239,9 +239,11 @@ fn remove_open_sockets() {
     fn inner() -> io::Result<()> {
         let d = socket_dir();
         for ns in open_9p_sockets()?.into_iter() {
-            let path = d.join(ns);
-            println!("removing {}", path.display());
-            fs::remove_file(path)?;
+            if UnixClient::new_unix(&ns, "").is_err() {
+                let path = d.join(ns);
+                println!("removing unresponsive ad socket at {}", path.display());
+                fs::remove_file(path)?;
+            }
         }
 
         Ok(())

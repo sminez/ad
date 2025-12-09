@@ -33,7 +33,7 @@ name = "bench_main"
 harness = false
 
 [profile.release]
-strip = true
+# strip = true
 lto = true
 codegen-units = 1
 

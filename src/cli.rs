@@ -13,7 +13,7 @@ options:
   -9p [-A aname] write [path]      Write the contents of stdin to a file on a 9p file server
   -9p [-A aname] ls [path]         List the contents of a directory on a 9p file server
   -l, --list-sessions              List the current open editor 9p sessions
-  --rm-sockets                     Remove all ad 9p sockets from the default namespace directory
+  --rm-sockets                     Remove all unresponsive ad 9p sockets from the default namespace directory
   -c, --config <path>              Load config from the specified path
   --default-config                 Force default config instead of loading the user config file
   -h, --help                       Print this help message
