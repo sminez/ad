@@ -310,12 +310,15 @@ impl Buffers {
             .push(self.inner.focus.id, self.inner.focus.dot.active_cur());
     }
 
-    fn jump(&mut self, bufid: BufferId, cur: Cur) -> (BufferId, BufferId) {
+    fn jump(&mut self, bufid: BufferId, mut cur: Cur) -> (BufferId, BufferId) {
         self.notify_lsp_changes_if_dirty();
         let prev_id = self.inner.focus.id;
         self.inner.focus_element_by(|b| b.id == bufid);
         let new_id = self.inner.focus.id;
         if new_id == bufid {
+            // Clamp the cursor to the buffer's valid range before setting it
+            // in case the buffer was edited since this position was recorded
+            cur.clamp_idx(self.inner.focus.txt.len_chars());
             self.inner.focus.dot = cur.into();
         }
 
@@ -442,5 +445,49 @@ impl JumpList {
     fn clear_for_buffer(&mut self, id: BufferId) {
         self.jumps.retain(|j| j.0 != id);
         self.idx = self.jumps.len();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jump_backward_clamps_stale_cursor_positions() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let config = Arc::new(RwLock::new(Config::default()));
+        let mut buffers = Buffers::new_with_raw_sender(tx, config.clone());
+
+        let initial_content = "This is a test buffer with enough content to demonstrate the bug.";
+        buffers.inner.focus.txt = initial_content.into();
+
+        buffers.inner.focus.set_dot_from_cursor(60);
+        assert_eq!(buffers.inner.focus.dot.active_cur().idx, 60);
+
+        buffers.record_jump_position();
+
+        assert_eq!(buffers.inner.focus.txt.len_chars(), 65);
+        let new_len = 30;
+        buffers
+            .inner
+            .focus
+            .txt
+            .remove_range(new_len, buffers.inner.focus.txt.len_chars());
+        assert_eq!(buffers.inner.focus.txt.len_chars(), new_len);
+
+        buffers.inner.focus.set_dot_from_cursor(0);
+        let result = buffers.jump_list_backward();
+
+        assert!(result.is_some());
+
+        let cur = buffers.inner.focus.dot.active_cur();
+        let (_y, _x) = cur.as_yx(&buffers.inner.focus);
+
+        assert!(
+            cur.idx <= buffers.inner.focus.txt.len_chars(),
+            "cursor index {} exceeds buffer length {}",
+            cur.idx,
+            buffers.inner.focus.txt.len_chars()
+        );
     }
 }
