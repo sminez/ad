@@ -32,23 +32,11 @@ fuzz_target!(|data: FuzzData| {
         .into_iter()
         .enumerate()
         .flat_map(|(i, f)| {
-            let p = if f.name.to_string_lossy().is_empty() {
-                test_file_dir.join(i.to_string())
-            } else {
-                test_file_dir.join(f.name)
-            };
+            let p = test_file_dir.join(i.to_string());
 
             // If the fuzzer gives us a path that we can't use then we skip including this file
             // rather than erroring out at this stage. We can still run the generated inputs
             // against the default empty buffer in the case that all generated names are invalid.
-            if let Some(parent) = p.parent()
-                && matches!(parent.try_exists(), Ok(true))
-                && fs::create_dir_all(parent).is_err()
-            {
-                return None;
-            }
-
-            // Same for writing the file content
             match fs::write(&p, f.content) {
                 Ok(_) => Some(p),
                 Err(_) => None,
@@ -84,7 +72,7 @@ struct FuzzData {
 
 #[derive(Debug, Arbitrary)]
 struct File {
-    name: PathBuf,
+    // name: PathBuf,
     content: String,
 }
 
