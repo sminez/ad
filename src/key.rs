@@ -3,6 +3,7 @@ use std::fmt;
 use tracing::trace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "fuzz", derive(arbitrary::Arbitrary))]
 pub enum Arrow {
     Up,
     Down,
@@ -23,6 +24,7 @@ impl Arrow {
 
 // using 'showkey -a' to view keycodes is useful for adding to this
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "fuzz", derive(arbitrary::Arbitrary))]
 pub enum Input {
     Char(char),
     Ctrl(char),
@@ -118,6 +120,7 @@ impl Input {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "fuzz", derive(arbitrary::Arbitrary))]
 pub enum MouseButton {
     Left,
     Middle,
@@ -127,6 +130,7 @@ pub enum MouseButton {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "fuzz", derive(arbitrary::Arbitrary))]
 pub enum MouseMod {
     NoMod,
     Alt,
@@ -135,6 +139,7 @@ pub enum MouseMod {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "fuzz", derive(arbitrary::Arbitrary))]
 pub enum MouseEventKind {
     Press,
     Hold,
@@ -142,6 +147,7 @@ pub enum MouseEventKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "fuzz", derive(arbitrary::Arbitrary))]
 pub struct MouseEvent {
     pub k: MouseEventKind,
     pub m: MouseMod,

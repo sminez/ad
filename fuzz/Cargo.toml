@@ -1,0 +1,21 @@
+[package]
+name = "ad-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+ad-editor = { path = "../", features = ["fuzz"] }
+
+[[bin]]
+name = "fuzz_input_handling"
+path = "fuzz_targets/fuzz_input_handling.rs"
+test = false
+doc = false
+bench = false
