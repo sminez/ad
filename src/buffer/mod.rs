@@ -379,13 +379,23 @@ impl Buffer {
         };
         let n_bytes = contents.len();
 
-        match fs::write(path, contents) {
-            Ok(_) => {
-                self.dirty = false;
-                self.last_save = SystemTime::now();
-                Ok(format!("\"{display_path}\" {n_lines}L {n_bytes}B written"))
+        #[cfg(not(feature = "fuzz"))]
+        {
+            match fs::write(path, contents) {
+                Ok(_) => {
+                    self.dirty = false;
+                    self.last_save = SystemTime::now();
+                    Ok(format!("\"{display_path}\" {n_lines}L {n_bytes}B written"))
+                }
+                Err(e) => Err(format!("Unable to save buffer: {e}")),
             }
-            Err(e) => Err(format!("Unable to save buffer: {e}")),
+        }
+
+        #[cfg(feature = "fuzz")]
+        {
+            self.dirty = false;
+            self.last_save = SystemTime::now();
+            Ok(format!("\"{display_path}\" {n_lines}L {n_bytes}B written"))
         }
     }
 

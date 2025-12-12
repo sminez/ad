@@ -8,10 +8,12 @@ edition = "2024"
 cargo-fuzz = true
 
 [dependencies]
-libfuzzer-sys = "0.4"
-arbitrary = { version = "1", features = ["derive"] }
-
 ad-editor = { path = "../", features = ["fuzz"] }
+
+assert_fs = "1.1"
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+ninep = { path = "../crates/ninep", default-features = false }
 
 [[bin]]
 name = "fuzz_input_handling"

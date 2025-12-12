@@ -37,7 +37,9 @@ version = "0.0.0"
 dependencies = [
  "ad-editor",
  "arbitrary",
+ "assert_fs",
  "libfuzzer-sys",
+ "ninep",
 ]
 
 [[package]]
