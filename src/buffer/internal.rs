@@ -1074,9 +1074,12 @@ impl GapBuffer {
             return i;
         }
 
-        // Empty buffer is a special case: the only valid char index is 0 which maps to gap_start
+        // Empty buffer is a special case: the only valid char indices are 0 or 1 which maps to gap_start/EOF
         if self.n_chars == 0 {
-            assert_eq!(char_idx, 0);
+            assert!(
+                char_idx == 0 || char_idx == 1,
+                "char index should be 0 or 1 for an empty buffer"
+            );
             return self.gap_start;
         }
 
