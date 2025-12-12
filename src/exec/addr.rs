@@ -277,7 +277,7 @@ impl<'a> Parser<'a> {
 
             ('#', dir) => {
                 self.input.advance();
-                if !self.input.char().is_ascii_digit() {
+                if self.input.at_eof() || !self.input.char().is_ascii_digit() {
                     return Err(self.error(ErrorKind::NotAnAddress));
                 }
 
