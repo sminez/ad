@@ -51,7 +51,7 @@ pub unsafe fn register_signal_handler() {
         }
 
         let mut sa_ptr = *maybe_sa.as_mut_ptr();
-        sa_ptr.sa_sigaction = handle_win_size_change as sighandler_t;
+        sa_ptr.sa_sigaction = handle_win_size_change as *const () as sighandler_t;
         sa_ptr.sa_flags = SA_SIGINFO;
 
         if libc::sigaction(SIGWINCH, &sa_ptr as *const _, ptr::null_mut()) == -1 {
