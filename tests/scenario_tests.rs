@@ -12,6 +12,7 @@ use ad_editor::{
     term::CurShape,
     ui::{Layout, StateChange, UserInterface},
 };
+use assert_fs::TempDir;
 use ninep::sync::client::UnixClient;
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
@@ -21,7 +22,7 @@ use std::{
     str::FromStr,
     sync::{Arc, Mutex, mpsc::Sender},
     thread::{sleep, spawn},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 /// The number of milliseconds to sleep before sending a noop when a render is triggered while we
@@ -45,7 +46,6 @@ const FSYS_MAX_TRIES: usize = 10;
 fn editor_scenarios(path: &str, content: &str) {
     // Parse the given test case file and validate it before initialising the editor
     let TestCase {
-        test_id,
         mut setup,
         assertions,
         status_messages,
@@ -56,12 +56,13 @@ fn editor_scenarios(path: &str, content: &str) {
     }
 
     // Create a new temp directory to hold our test files while the test runs
-    let dir = PathBuf::from("/tmp").join(&test_id);
-    let test_file_dir = dir.join("files");
-    let socket_path = dir.join("sock");
+    let tmp = TempDir::new().unwrap();
+    let test_file_dir = tmp.join("files");
+    let socket_path = tmp.join("sock");
     setup.ui.socket_path = socket_path.clone();
 
     fs::create_dir_all(&test_file_dir).expect("unable to create temp directory");
+    println!("using temp directory: {}", tmp.path().display());
     println!("using {} for the fsys socket", socket_path.display());
     println!("using {} for test files", test_file_dir.display());
 
@@ -76,7 +77,6 @@ fn editor_scenarios(path: &str, content: &str) {
                 _ = fs::create_dir_all(parent);
             }
             if let Err(e) = fs::write(&p, f.content) {
-                fs::remove_dir_all(&test_file_dir).expect("unable to remove temp directory");
                 panic!("failed to write test file {}: {e}", f.name);
             }
 
@@ -93,10 +93,7 @@ fn editor_scenarios(path: &str, content: &str) {
         &file_paths,
     );
 
-    e.run_with_explicit_fsys_path(socket_path.clone());
-
-    _ = fs::remove_file(socket_path);
-    _ = fs::remove_dir_all(&dir);
+    e.run_with_explicit_fsys_path(socket_path);
 
     let status_hist = status_messages.lock().unwrap().join("\n");
     println!(">> STATUS HISTORY:\n{status_hist}");
@@ -107,7 +104,6 @@ fn editor_scenarios(path: &str, content: &str) {
 /// A parsed test case from a scenario file
 #[derive(Debug)]
 struct TestCase {
-    test_id: String,
     setup: Setup,
     assertions: Assertions,
     status_messages: Arc<Mutex<Vec<String>>>,
@@ -272,22 +268,7 @@ impl TestCase {
             buffer_dots,
         };
 
-        // End of file parsing
-
-        // Create a unique ID for our testing temp directory and fsys socket (if created) so
-        // we can control the paths that appear in the editor and simplify cleanup of test
-        // data.
-        let (_dir, fname) = path.rsplit_once('/').unwrap();
-        let test_id = format!(
-            "ad-tests-{}-{fname}",
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        );
-
         Self {
-            test_id,
             setup,
             assertions,
             status_messages,

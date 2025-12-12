@@ -21,7 +21,10 @@ categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
 
 [workspace]
-members = [ "crates/*" , "xtask" ]
+members = [ "crates/*", "fuzz", "xtask" ]
+
+[features]
+fuzz = ["arbitrary"]
 
 [[bin]]
 doc = false
@@ -52,6 +55,7 @@ codegen-units = 16
 [dependencies]
 ad_event = { version = "0.4", path = "crates/ad_event" }
 aho-corasick = "1.1.4"
+arbitrary = { version = "1", features = ["derive"], optional = true }
 lexopt = "0.3.1"
 libc = "0.2.178"
 libloading = "0.9.0"
@@ -67,6 +71,7 @@ tree-sitter = "0.25.10"
 unicode-width = "0.2.2"
 
 [dev-dependencies]
+assert_fs = "1.1"
 criterion = { version = "0.8.0", features = ["html_reports"] }
 libflate = "2.2.1"
 simple_test_case = "1"
