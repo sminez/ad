@@ -1218,7 +1218,11 @@ impl Layout {
             .saturating_sub(1)
             .saturating_sub(x_offset)
             .saturating_sub(w_sgncol);
-        let y = min(y.saturating_sub(y_offset) + row_off, b.len_lines()).saturating_sub(1);
+        let y = min(
+            y.saturating_sub(y_offset).saturating_add(row_off),
+            b.len_lines(),
+        )
+        .saturating_sub(1);
 
         win.view.rx = rx;
         b.cached_rx = rx;
