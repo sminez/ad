@@ -39,7 +39,6 @@ dependencies = [
  "arbitrary",
  "assert_fs",
  "libfuzzer-sys",
- "ninep",
 ]
 
 [[package]]

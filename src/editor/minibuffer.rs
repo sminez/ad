@@ -272,7 +272,7 @@ where
                 .handle_action(Action::InsertString { s }, Source::Fsys);
         }
 
-        loop {
+        while self.running {
             mb.update_state();
             self.refresh_screen_w_minibuffer(Some(mb.current_state()));
             let inputs = self.block_for_input();
@@ -282,6 +282,8 @@ where
                 }
             }
         }
+
+        MiniBufferSelection::Cancelled
     }
 
     /// Use the minibuffer to prompt for user input

@@ -370,7 +370,7 @@ where
     }
 
     pub(crate) fn block_for_input(&mut self) -> Vec<Input> {
-        loop {
+        while self.running {
             match self.rx_events.recv().unwrap() {
                 Event::Input(i) => return vec![i],
                 Event::BracketedPaste(s) => return s.chars().map(Input::Char).collect(),
@@ -381,6 +381,8 @@ where
                 Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
             }
         }
+
+        Vec::new()
     }
 
     fn send_buffer_resp(
