@@ -35,7 +35,7 @@ jobs:
 
     # Build and then run the fuzz target.
     - run: cargo fuzz build ${{ matrix.fuzz_target }} -s none
-    - run: cargo fuzz run ${{ matrix.fuzz_target }} -s none -- -max_total_time=${{ env.FUZZ_TIME }}
+    - run: cargo fuzz run ${{ matrix.fuzz_target }} -s none -- -max_total_time=${{ env.FUZZ_TIME }} -rss_limit_mb=250
 
     # Upload fuzzing artifacts on failure for post-mortem debugging.
     - uses: actions/upload-artifact@v4
