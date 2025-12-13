@@ -20,3 +20,10 @@ path = "fuzz_targets/fuzz_input_handling.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "fuzz_gap_buffer"
+path = "fuzz_targets/fuzz_gap_buffer.rs"
+test = false
+doc = false
+bench = false

@@ -20,8 +20,8 @@ bench FILTER="":
 	firefox --new-tab target/criterion/report/index.html
 
 # run cargo fuzz to check for possible panics
-fuzz:
-	RUST_BACKTRACE=1 cargo fuzz run fuzz_input_handling -s none -- -max_total_time=300 -workers=4 -jobs=4
+fuzz TARGET="fuzz_input_handling":
+	RUST_BACKTRACE=1 cargo fuzz run {{TARGET}} -s none -- -max_total_time=300 -workers=4 -jobs=4
 
 # Use entr to run tests every time git tracked files are modified
 watch-tests FILTER="":
