@@ -15,8 +15,8 @@ arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
 
 [[bin]]
-name = "fuzz_input_handling"
-path = "fuzz_targets/fuzz_input_handling.rs"
+name = "fuzz_addr_parse"
+path = "fuzz_targets/fuzz_addr_parse.rs"
 test = false
 doc = false
 bench = false
@@ -24,6 +24,13 @@ bench = false
 [[bin]]
 name = "fuzz_gap_buffer"
 path = "fuzz_targets/fuzz_gap_buffer.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_input_handling"
+path = "fuzz_targets/fuzz_input_handling.rs"
 test = false
 doc = false
 bench = false
