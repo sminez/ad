@@ -281,7 +281,7 @@ impl<'a> Parser<'a> {
                     return Err(self.error(ErrorKind::NotAnAddress));
                 }
 
-                let ix = self.parse_num();
+                let ix = self.try_parse_num()?;
                 match dir {
                     None => Ok(AddrBase::Char(ix)),
                     Some(Dir::Fwd) => Ok(AddrBase::RelativeChar(ix as isize)),
@@ -290,7 +290,7 @@ impl<'a> Parser<'a> {
             }
 
             (c, dir) if c.is_ascii_digit() => {
-                let line = self.parse_num();
+                let line = self.try_parse_num()?;
                 if line == 0 {
                     return Err(self.error(ErrorKind::ZeroIndexedLineOrColumn));
                 }
@@ -305,7 +305,7 @@ impl<'a> Parser<'a> {
                         } else if !self.input.char().is_ascii_digit() {
                             Err(self.error(ErrorKind::UnexpectedCharacter(self.input.char())))
                         } else {
-                            match self.parse_num() {
+                            match self.try_parse_num()? {
                                 0 => Err(self.error(ErrorKind::ZeroIndexedLineOrColumn)),
                                 col => Ok(AddrBase::LineAndColumn(line - 1, col - 1)),
                             }
@@ -327,7 +327,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_num(&self) -> usize {
+    fn try_parse_num(&self) -> Result<usize, Error> {
         assert!(self.input.char().is_ascii_digit());
         let mut s = self.input.char().to_string();
         self.input.advance();
@@ -340,7 +340,7 @@ impl<'a> Parser<'a> {
             self.input.advance();
         }
 
-        s.parse().unwrap()
+        s.parse().map_err(|_| self.error(ErrorKind::NotAnAddress))
     }
 
     fn parse_delimited_regex(&self, dir: Dir) -> Result<AddrBase, Error> {
