@@ -321,7 +321,7 @@ fn strip_unreachable_instructions(ops: &mut Vec<Op>) {
             continue;
         }
 
-        for &(to, from) in to_from.iter() {
+        for &(to, from) in to_from.iter().rev() {
             if to > i {
                 match &mut ops[from] {
                     Op::Jump(x) => *x -= 1,
