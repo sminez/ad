@@ -117,6 +117,10 @@ impl CharClass {
                 '-' if !escaped => {
                     let start = chars.pop().ok_or(Error::InvalidClass)?;
                     let (end, _) = next()?;
+                    if start as u32 >= end as u32 {
+                        return Err(Error::InvalidClass);
+                    }
+
                     ranges.push((start, end));
                 }
 
