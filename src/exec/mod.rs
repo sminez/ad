@@ -26,7 +26,8 @@ mod runner;
 
 pub use runner::SystemRunner;
 
-pub(crate) use addr::{Addr, AddrBase, Address};
+pub(crate) use addr::Address;
+pub use addr::{Addr, AddrBase, SimpleAddr};
 pub(crate) use runner::{EditorRunner, Runner};
 
 use addr::ErrorKind;
