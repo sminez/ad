@@ -28,7 +28,6 @@ test = false
 doc = false
 bench = false
 
-
 [[bin]]
 name = "gap_buffer"
 path = "fuzz_targets/fuzz_gap_buffer.rs"
@@ -39,6 +38,13 @@ bench = false
 [[bin]]
 name = "input_handling"
 path = "fuzz_targets/fuzz_input_handling.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plumbing_rules_fromstr"
+path = "fuzz_targets/fuzz_plumbing_rules_fromstr.rs"
 test = false
 doc = false
 bench = false
