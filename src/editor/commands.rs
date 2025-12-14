@@ -9,6 +9,11 @@ use crate::{
 };
 use std::path::Path;
 
+#[cfg(feature = "fuzz")]
+pub fn parse_command_fuzz(input: &str) {
+    _ = parse_command(input, 0, Path::new("/home/fuzz"));
+}
+
 fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Actions, String> {
     if let Some(actions) = try_parse_single_char_command(input) {
         return Ok(actions);

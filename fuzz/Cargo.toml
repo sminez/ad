@@ -22,6 +22,14 @@ doc = false
 bench = false
 
 [[bin]]
+name = "command_parse"
+path = "fuzz_targets/fuzz_command_parse.rs"
+test = false
+doc = false
+bench = false
+
+
+[[bin]]
 name = "gap_buffer"
 path = "fuzz_targets/fuzz_gap_buffer.rs"
 test = false

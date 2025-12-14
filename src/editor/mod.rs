@@ -38,6 +38,9 @@ pub use actions::Action;
 pub use minibuffer::MiniBufferState;
 pub use mouse::Click;
 
+#[cfg(feature = "fuzz")]
+pub use commands::parse_command_fuzz;
+
 pub(crate) use actions::{Actions, ViewPort};
 pub(crate) use built_in_commands::built_in_commands;
 pub(crate) use minibuffer::{MbSelect, MbSelector, MiniBufferSelection};
