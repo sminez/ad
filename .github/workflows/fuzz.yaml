@@ -1,0 +1,39 @@
+# Manually triggered only workflow for running fuzz targets in CI
+# The available targets can be found in fuzz/Cargo.toml
+name: Fuzz
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: The fuzz target to run
+        required: true
+      max_time:
+        description: The max_total_time to run the fuzzer for in seconds
+        default: "300"
+        required: false
+
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_FUZZ_VERSION: 0.12.0
+
+    steps:
+    - uses: actions/checkout@v4
+    - run: rustup toolchain install nightly
+    - run: rustup default nightly
+
+    - uses: actions/cache@v4
+      with:
+        path: ${{ runner.tool_cache }}/cargo-fuzz
+        key: cargo-fuzz-bin-${{ env.CARGO_FUZZ_VERSION }}
+    - run: echo "${{ runner.tool_cache }}/cargo-fuzz/bin" >> $GITHUB_PATH
+    - run: cargo install --root "${{ runner.tool_cache }}/cargo-fuzz" --version ${{ env.CARGO_FUZZ_VERSION }} cargo-fuzz --locked
+    - run: cargo fuzz run ${{ inputs.target }} -s none -- -max_total_time=${{ inputs.max_time }} -rss_limit_mb=250
+
+    - uses: actions/upload-artifact@v4
+      if: failure()
+      with:
+        name: fuzzing-artifacts-${{ matrix.fuzz_target }}-${{ github.sha }}
+        path: fuzz/artifacts
