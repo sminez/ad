@@ -321,16 +321,21 @@ fn strip_unreachable_instructions(ops: &mut Vec<Op>) {
             continue;
         }
 
-        for &(to, from) in to_from.iter().rev() {
-            if to > i {
-                match &mut ops[from] {
+        for (to, from) in to_from.iter_mut() {
+            if *to > i {
+                match &mut ops[*from] {
                     Op::Jump(x) => *x -= 1,
                     Op::Split(x, _) if *x > i => *x -= 1,
                     Op::Split(_, x) if *x > i => *x -= 1,
                     _ => (),
                 }
             }
+
+            if *from > i {
+                *from -= 1;
+            }
         }
+
         ops.remove(i);
     }
 }
