@@ -677,4 +677,29 @@ mod tests {
         assert_eq!(b.dot, expected, ">{}<", b.dot_contents());
         assert_eq!(b.dot_contents(), expected_contents);
     }
+
+    #[test_case("99999999999999999999"; "line number overflow")]
+    #[test_case("#99999999999999999999"; "char index overflow")]
+    #[test_case("+#99999999999999999999"; "relative char forward overflow")]
+    #[test_case("-#99999999999999999999"; "relative char back overflow")]
+    #[test_case("5:99999999999999999999"; "column number overflow")]
+    #[test_case("99999999999999999999,100"; "range start overflow")]
+    #[test_case("1,99999999999999999999"; "range end overflow")]
+    #[test_case("99999999999999999999:5"; "line in line col overflow")]
+    #[test]
+    fn giant_address_integers_error(s: &str) {
+        let res = Addr::parse(s);
+        assert!(res.is_err(), "expected error, got {res:?}");
+    }
+
+    #[test_case("#"; "char address at eof")]
+    #[test_case("1,#"; "compound with eof after hash")]
+    #[test_case("#,5"; "compound with incomplete char start")]
+    #[test_case("+#"; "relative forward at eof")]
+    #[test_case("-#"; "relative back at eof")]
+    #[test]
+    fn incomplete_char_addresses_error(s: &str) {
+        let res = Addr::parse(s);
+        assert!(res.is_err(), "expected error, got {res:?}");
+    }
 }

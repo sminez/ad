@@ -333,4 +333,18 @@ mod tests {
             assert_eq!(cls, expected, "negated={negated}");
         }
     }
+
+    // Each of the inputs here is missing the opening '[' as that is consumed prior to calling
+    // `CharClass::try_parse`
+    #[test_case("z-a]"; "backwards alpha")]
+    #[test_case("Z-A]"; "backwards upper alpha")]
+    #[test_case("9-0]"; "backwards numeric")]
+    #[test_case("a-a]"; "equal alpha endpoints")]
+    #[test_case("5-5]"; "equal numeric endpoints")]
+    #[test_case("a-z9-0]"; "valid then invalid range")]
+    #[test_case("\u{00FF}-\u{0000}]"; "backwards unicode")]
+    #[test]
+    fn invalid_character_ranges_error(s: &str) {
+        assert!(CharClass::try_parse(&mut s.chars().peekable()).is_err());
+    }
 }

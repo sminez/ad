@@ -862,4 +862,13 @@ mod tests {
 
         assert_eq!(pats, expected);
     }
+
+    #[test_case("a{99999999999999999999}"; "single count")]
+    #[test_case("a{99999999999999999999,5}"; "lower bound")]
+    #[test_case("a{2,99999999999999999999}"; "upper bound")]
+    #[test_case("a{99999999999999999999,99999999999999999999}"; "both bounds")]
+    #[test]
+    fn giant_counted_repetitions_error(re: &str) {
+        assert!(parse(re).is_err());
+    }
 }

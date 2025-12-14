@@ -409,4 +409,17 @@ mod tests {
 
         assert_eq!(prog, full);
     }
+
+    #[test_case("(a*)*b"; "nested star")]
+    #[test_case("((a|b)*)*c"; "nested alternation star")]
+    #[test_case("(a+|b+)*c"; "alternation of plus star")]
+    #[test_case("((a*b*)*c*)*d"; "deeply nested stars")]
+    #[test_case("(((x|y)*z*)*w*)*v"; "complex nested pattern")]
+    #[test]
+    fn stripping_nested_ops_doesnt_panic(re: &str) {
+        let ast = parse(re).unwrap();
+        let compiled = compile_ast(ast, false);
+        // This used to panic when tracking the removed op indices was incorrect
+        let _optimized = optimise(compiled.ops);
+    }
 }
