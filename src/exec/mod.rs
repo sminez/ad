@@ -53,6 +53,8 @@ pub enum Error {
     UnclosedDelimiter(&'static str, char),
     /// Unexpected character
     UnexpectedCharacter(char),
+    /// Unexpected end of file
+    UnexpectedEof,
     /// A 0 was provided as a line or column index
     ZeroIndexedLineOrColumn,
 }
@@ -165,13 +167,14 @@ impl Program {
             Err(e) => match e.kind {
                 ErrorKind::NotAnAddress => (None, s),
                 ErrorKind::InvalidRegex(e) => return Err(Error::InvalidRegex(e)),
+                ErrorKind::InvalidSuffix => return Err(Error::InvalidSuffix),
                 ErrorKind::UnclosedDelimiter => {
                     return Err(Error::UnclosedDelimiter("dot expr regex", '/'));
                 }
                 ErrorKind::UnexpectedCharacter(c) => {
                     return Err(Error::UnexpectedCharacter(c));
                 }
-                ErrorKind::InvalidSuffix => return Err(Error::InvalidSuffix),
+                ErrorKind::UnexpectedEof => return Err(Error::UnexpectedEof),
                 ErrorKind::ZeroIndexedLineOrColumn => {
                     return Err(Error::ZeroIndexedLineOrColumn);
                 }

@@ -34,6 +34,7 @@ pub enum ErrorKind {
     NotAnAddress,
     UnclosedDelimiter,
     UnexpectedCharacter(char),
+    UnexpectedEof,
     ZeroIndexedLineOrColumn,
 }
 
@@ -45,6 +46,7 @@ impl fmt::Display for ErrorKind {
             Self::NotAnAddress => write!(f, "not an address"),
             Self::UnclosedDelimiter => write!(f, "unclosed delimiter"),
             Self::UnexpectedCharacter(c) => write!(f, "unexpected character {c:?}"),
+            Self::UnexpectedEof => write!(f, "unexpecterd EOF"),
             Self::ZeroIndexedLineOrColumn => write!(f, "zero indexed line or column"),
         }
     }
@@ -179,7 +181,7 @@ impl<'a> Parser<'a> {
     fn parse(&self) -> Result<Addr, Error> {
         let start = match self.parse_simple() {
             Ok(addr) => Some(addr),
-            Err(e) if e.kind == ErrorKind::NotAnAddress => None,
+            Err(e) if self.input.at_bof() && self.input.try_char() == Some(',') => None,
             Err(e) => return Err(e),
         };
 
@@ -193,10 +195,16 @@ impl<'a> Parser<'a> {
             // Compound addrs default their first element to Bof and last to Eof
             self.input.advance(); // consume the ','
             let start = start.unwrap_or(AddrBase::Bof.into());
-            let end = match self.parse_simple() {
-                Ok(addr) => addr,
-                Err(e) if e.kind == ErrorKind::NotAnAddress => AddrBase::Eof.into(),
-                Err(e) => return Err(e),
+            let next_is_eof_or_whitespace = self
+                .input
+                .try_char()
+                .map(|ch| ch.is_whitespace())
+                .unwrap_or(true);
+
+            let end = if next_is_eof_or_whitespace {
+                AddrBase::Eof.into()
+            } else {
+                self.parse_simple()?
             };
 
             Ok(Addr::Compound(start, end))
@@ -229,7 +237,7 @@ impl<'a> Parser<'a> {
 
     fn parse_base(&self) -> Result<AddrBase, Error> {
         if self.input.at_eof() {
-            return Err(self.error(ErrorKind::NotAnAddress));
+            return Err(self.error(ErrorKind::UnexpectedEof));
         }
 
         let dir = match self.input.char() {

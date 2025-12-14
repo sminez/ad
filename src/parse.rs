@@ -112,6 +112,10 @@ impl<'a> ParseInput<'a> {
         self.input
     }
 
+    pub fn at_bof(&self) -> bool {
+        self.offset() == 0
+    }
+
     pub fn at_eof(&self) -> bool {
         self.offset() == self.input.len()
     }
