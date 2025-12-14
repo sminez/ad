@@ -1,6 +1,5 @@
 //! A simple AST for parsing and manipulating regex strings
 use super::{CharClass, Error, next_char};
-use crate::util::parse_num;
 use std::{collections::HashSet, iter::Peekable, mem::swap, str::Chars};
 
 /// Complex regex patterns can cause the generation of leading literal patterns to take
@@ -693,7 +692,7 @@ fn try_parse_counted_repetition(it: &mut Peekable<Chars<'_>>) -> Result<Counted,
     if !ch.is_ascii_digit() {
         return Err(Error::InvalidRepetition);
     }
-    let n = parse_num(ch, it);
+    let n = parse_num(ch, it).ok_or(Error::InvalidRepetition)?;
     if n == 0 {
         return Err(Error::InvalidRepetition);
     }
@@ -713,7 +712,7 @@ fn try_parse_counted_repetition(it: &mut Peekable<Chars<'_>>) -> Result<Counted,
     if !ch.is_ascii_digit() {
         return Err(Error::InvalidRepetition);
     }
-    let m = parse_num(ch, it);
+    let m = parse_num(ch, it).ok_or(Error::InvalidRepetition)?;
     if m == 0 {
         return Err(Error::InvalidRepetition);
     }
@@ -723,6 +722,24 @@ fn try_parse_counted_repetition(it: &mut Peekable<Chars<'_>>) -> Result<Counted,
         Ok(Counted::RepBetween(n, m))
     } else {
         Err(Error::InvalidRepetition)
+    }
+}
+
+/// Attempt to parse a number from a sequence of digits.
+///
+/// `initial` must be an ASCII digit (enforced with an assert).
+/// This function will return `None` if the parsed sequence of digits is too large
+/// to fit within a `usize`.
+fn parse_num(initial: char, it: &mut Peekable<Chars<'_>>) -> Option<usize> {
+    assert!(initial.is_ascii_digit());
+    let mut s = String::from(initial);
+    loop {
+        match it.peek() {
+            Some(ch) if ch.is_ascii_digit() => {
+                s.push(it.next().unwrap());
+            }
+            _ => return s.parse().ok(),
+        }
     }
 }
 

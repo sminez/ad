@@ -2,10 +2,8 @@
 use crate::{config::config_path, editor::built_in_commands, mode::keybindings};
 use std::{
     fs,
-    iter::Peekable,
     os::unix::fs::PermissionsExt,
     path::Path,
-    str::Chars,
     sync::{Arc, LockResult, RwLock, RwLockReadGuard},
 };
 use tracing::warn;
@@ -72,20 +70,6 @@ fn commands_section() -> String {
     }
 
     s
-}
-
-// returns the parsed number and following character if there was one.
-// initial must be a valid ascii digit
-pub(crate) fn parse_num(initial: char, it: &mut Peekable<Chars<'_>>) -> usize {
-    let mut s = String::from(initial);
-    loop {
-        match it.peek() {
-            Some(ch) if ch.is_ascii_digit() => {
-                s.push(it.next().unwrap());
-            }
-            _ => return s.parse().unwrap(),
-        }
-    }
 }
 
 pub(crate) fn normalize_line_endings(mut s: String) -> String {
