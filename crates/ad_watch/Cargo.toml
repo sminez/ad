@@ -1,6 +1,6 @@
 [package]
 name = "ad_watch"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 
 [[bin]]
@@ -9,6 +9,6 @@ name = "ad-watch"
 path = "src/main.rs"
 
 [dependencies]
-ad_client = { version = "0.4", path = "../ad_client" }
+ad_client = { version = "0.5", path = "../ad_client" }
 anyhow = "1.0.100"
 subprocess = "0.2.9"
