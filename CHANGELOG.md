@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - POSIX line semantics enforced
 - Improved minibuffer UI for empty/whitespace input
 - Fast mouse wheel scrolling detection
+- Exec string templating changed from `$1` to `{1}`
 
 ### Fixed
 
