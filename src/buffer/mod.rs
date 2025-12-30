@@ -724,7 +724,6 @@ impl Buffer {
             (Some('<'), _) | (_, Some('>')) => ('<', '>'),
             (Some('"'), _) | (_, Some('"')) => ('"', '"'),
             (Some('\''), _) | (_, Some('\'')) => ('\'', '\''),
-            (Some(' '), _) | (_, Some(' ')) => (' ', ' '),
 
             _ => return self.expand_cur_dot(),
         };
@@ -752,14 +751,14 @@ impl Buffer {
         // Expand until we hit non-alphanumeric characters on each sides
         let (mut from, mut to) = (current_index, current_index);
         for (i, ch) in self.iter_between_chars(current_index, self.txt.len_chars()) {
-            if !(ch == '_' || ch.is_alphanumeric()) {
+            if !(ch == '_' || ch == '-' || ch.is_alphanumeric()) {
                 break;
             }
             to = i;
         }
 
         for (i, ch) in self.rev_iter_between_chars(current_index, 0) {
-            if !(ch == '_' || ch.is_alphanumeric()) {
+            if !(ch == '_' || ch == '-' || ch.is_alphanumeric()) {
                 break;
             }
             from = i;
@@ -1661,6 +1660,36 @@ pub(crate) mod tests {
         b.handle_action(Action::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
+    }
+
+    #[test_case('(', ')'; "parens")]
+    #[test_case('[', ']'; "brackets")]
+    #[test_case('{', '}'; "braces")]
+    #[test_case('<', '>'; "angle brackets")]
+    #[test_case('"', '"'; "double quotes")]
+    #[test_case('\'', '\''; "single quotes")]
+    #[test_case('\n', '\n'; "newlines")]
+    #[test_case(' ', ' '; "spaces")]
+    #[test_case('\t', '\t'; "tabs")]
+    #[test_case(' ', '\t'; "space and tab")]
+    #[test_case('\t', ' '; "tab and space")]
+    #[test]
+    fn try_expand_delimited_works(l: char, r: char) {
+        let mut b = Buffer::new_unnamed(
+            0,
+            format!("before...{l}target-text{r}  after"),
+            Default::default(),
+        );
+
+        for i in [10, 20] {
+            b.dot = c(i).into();
+            b.try_expand_delimited();
+            assert_eq!(
+                b.dot.content(&b),
+                "target-text",
+                "failed at offset={i} with lr=({l:?}, {r:?})"
+            )
+        }
     }
 
     // Tests are executed from the root of the crate so existing file paths are relative to there
