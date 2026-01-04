@@ -311,7 +311,7 @@ impl GapBuffer {
     /// You must call [GapBuffer::make_contiguous] before calling this method.
     pub unsafe fn substr_from(&self, byte_offset: usize) -> &str {
         // SAFETY: See above
-        unsafe { std::str::from_utf8_unchecked(&self.data[self.gap_end + byte_offset..]) }
+        unsafe { std::str::from_utf8_unchecked(&self.data[byte_offset..]) }
     }
 
     /// Assume that the gap is at 0 and return the full contents of the inner buffer as a slice of
