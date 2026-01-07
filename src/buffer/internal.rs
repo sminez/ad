@@ -311,7 +311,13 @@ impl GapBuffer {
     /// You must call [GapBuffer::make_contiguous] before calling this method.
     pub unsafe fn substr_from(&self, byte_offset: usize) -> &str {
         // SAFETY: See above
-        unsafe { std::str::from_utf8_unchecked(&self.data[byte_offset..]) }
+        let (start, end) = if self.gap_start == 0 {
+            (self.gap_end + byte_offset, self.cap)
+        } else {
+            (byte_offset, self.gap_start)
+        };
+        // SAFETY: We know that buffer is contiguous and that indices are within bounds
+        unsafe { std::str::from_utf8_unchecked(&self.data[start..end]) }
     }
 
     /// Assume that the gap is at 0 and return the full contents of the inner buffer as a slice of
@@ -2412,5 +2418,55 @@ mod tests {
 
         assert_eq!(s, "foo bar");
         assert_eq!(gb.gap_start, 0);
+    }
+
+    #[test]
+    fn substr_from_works_when_gap_at_start() {
+        let mut gb = GapBuffer::from("hello world");
+
+        gb.make_contiguous();
+
+        assert!(gb.is_contiguous());
+        assert_eq!(gb.gap_start, 0);
+        assert_ne!(gb.gap_end, gb.cap);
+
+        // SAFETY: buffer is contiguous and offset is valid
+        let result = unsafe { gb.substr_from(6) };
+        assert_eq!(result, "world");
+    }
+
+    #[test]
+    fn substr_from_works_when_gap_at_end() {
+        let mut gb = GapBuffer::from("hello world");
+
+        gb.move_gap_to(gb.len());
+
+        assert!(gb.is_contiguous());
+        assert_eq!(gb.gap_end, gb.cap);
+        assert_ne!(gb.gap_start, 0);
+
+        // SAFETY: buffer is contiguous and offset is valid
+        let result = unsafe { gb.substr_from(6) };
+        assert_eq!(result, "world");
+    }
+
+    #[test]
+    fn substr_from_matches_expected_after_appending_to_end() {
+        let mut gb = GapBuffer::from("hello");
+
+        gb.insert_char(5, ' ');
+        gb.insert_char(6, 'w');
+        gb.insert_char(7, 'o');
+        gb.insert_char(8, 'r');
+        gb.insert_char(9, 'l');
+        gb.insert_char(10, 'd');
+
+        assert!(gb.is_contiguous());
+        assert_eq!(gb.gap_end, gb.cap);
+        assert_ne!(gb.gap_start, 0);
+
+        // SAFETY: buffer is contiguous and offset is valid
+        let result = unsafe { gb.substr_from(6) };
+        assert_eq!(result, "world");
     }
 }
