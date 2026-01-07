@@ -181,7 +181,7 @@ impl<'a> Parser<'a> {
     fn parse(&self) -> Result<Addr, Error> {
         let start = match self.parse_simple() {
             Ok(addr) => Some(addr),
-            Err(e) if self.input.at_bof() && self.input.try_char() == Some(',') => None,
+            Err(_) if self.input.at_bof() && self.input.try_char() == Some(',') => None,
             Err(e) => return Err(e),
         };
 
