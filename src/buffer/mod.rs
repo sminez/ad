@@ -460,7 +460,8 @@ impl Buffer {
         } else {
             // Find the last character boundary at or before MAX_NAME_LEN bytes
             // to avoid slicing in the middle of a multi-byte UTF-8 character
-            let boundary = s.char_indices()
+            let boundary = s
+                .char_indices()
                 .map(|(i, _)| i)
                 .take_while(|&i| i < MAX_NAME_LEN)
                 .last()
@@ -1463,7 +1464,8 @@ pub(crate) mod tests {
     fn display_name_long_path_is_truncated() {
         // Long path (> MAX_NAME_LEN) should be truncated
         // Create a path with 60+ ASCII characters
-        let long_path = PathBuf::from("/a/very/long/path/that/exceeds/the/maximum/name/length/limit.txt");
+        let long_path =
+            PathBuf::from("/a/very/long/path/that/exceeds/the/maximum/name/length/limit.txt");
         let b = Buffer::new_from_canonical_file_path(0, long_path, Default::default())
             .expect("create buffer");
 
@@ -1481,7 +1483,8 @@ pub(crate) mod tests {
         // The path "ai_coding_能力边界探索.md" has a multi-byte character
         // '索' at bytes 49-52, and the old code tried to slice at byte 50,
         // which is in the middle of that character
-        let path_with_multibyte = PathBuf::from("/Users/genius/Downloads/ai_coding_能力边界探索.md");
+        let path_with_multibyte =
+            PathBuf::from("/Users/genius/Downloads/ai_coding_能力边界探索.md");
         let b = Buffer::new_from_canonical_file_path(0, path_with_multibyte, Default::default())
             .expect("create buffer");
 
