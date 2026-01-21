@@ -10,7 +10,7 @@ use crate::{
     key::Input,
     lsp::Coords,
     syntax::{LineIter, SyntaxState},
-    util::normalize_line_endings,
+    util::{normalize_line_endings, truncate_string_to_columns},
 };
 use ad_event::Source;
 use std::{
@@ -453,9 +453,7 @@ impl Buffer {
 
     /// Short name for displaying in the status line
     pub fn display_name(&self) -> String {
-        let s = self.kind.display_name();
-
-        s[0..min(MAX_NAME_LEN, s.len())].to_string()
+        truncate_string_to_columns(&self.kind.display_name(), MAX_NAME_LEN)
     }
 
     /// Absolute path of full name of a virtual buffer

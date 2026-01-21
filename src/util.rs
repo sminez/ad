@@ -7,6 +7,7 @@ use std::{
     sync::{Arc, LockResult, RwLock, RwLockReadGuard},
 };
 use tracing::warn;
+use unicode_width::UnicodeWidthChar;
 
 /// A wrapper around an `Arc<RwLock<T>>` so that the owner is only
 /// permitted read access to the underlying value.
@@ -82,6 +83,25 @@ pub(crate) fn normalize_line_endings(mut s: String) -> String {
     s.replace("\r", "\n")
 }
 
+/// Truncate a string to a maximum number of terminal columns based on unicode character display
+/// width.
+pub(crate) fn truncate_string_to_columns(original: &str, n_cols: usize) -> String {
+    // This width isn't strictly correct when we have multi-byte characters involved but it
+    // gets us a single allocation in the common case.
+    let mut s = String::with_capacity(n_cols);
+    let mut total_len = 0;
+
+    for ch in original.chars() {
+        total_len += UnicodeWidthChar::width(ch).unwrap_or(1);
+        if total_len > n_cols {
+            break;
+        }
+        s.push(ch);
+    }
+
+    s
+}
+
 /// Locate the first parent directory containing a target file
 pub(crate) fn parent_dir_containing<'a>(initial: &'a Path, target: &str) -> Option<&'a Path> {
     initial
@@ -121,5 +141,17 @@ mod tests {
         let exists = exists_on_path_as_executable(cmd, &PathBuf::from("/tmp"), &path);
 
         assert_eq!(exists, expected);
+    }
+
+    #[test_case("example_file.md", 100, "example_file.md"; "shorter than n_cols")]
+    #[test_case("example_file_能力边界探索.md", 12, "example_file"; "ascii boundary 1")]
+    #[test_case("example_file_能力边界探索.md", 13, "example_file_"; "ascii boundary 2")]
+    #[test_case("example_file_能力边界探索.md", 14, "example_file_"; "inside unicode 1")]
+    #[test_case("example_file_能力边界探索.md", 15, "example_file_能"; "unicode boundary 1")]
+    #[test_case("example_file_能力边界探索.md", 16, "example_file_能"; "inside unicode 2")]
+    #[test_case("example_file_能力边界探索.md", 17, "example_file_能力"; "unicode boundary 2")]
+    #[test]
+    fn truncate_string_to_columns_works(original: &str, n_cols: usize, expected: &str) {
+        assert_eq!(truncate_string_to_columns(original, n_cols), expected);
     }
 }
