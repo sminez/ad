@@ -88,7 +88,10 @@ mod tests {
         let default_actions = mode.handle_keys(&mut keys);
         assert_eq!(default_actions, expected_default_actions, "default");
 
-        mode.keymap = mode.keymap.merge_overriding(overrides.insert).unwrap();
+        mode.keymap = mode
+            .keymap
+            .merge_overriding(overrides.insert.additional)
+            .unwrap();
 
         // With the overrides we should see the send_keys action
         let Inputs(mut keys) = Inputs::try_from(binding.to_owned()).unwrap();

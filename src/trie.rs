@@ -96,6 +96,25 @@ where
         Self::try_from_iter(pairs)
     }
 
+    /// Remove all keys that match or are prefixed by any of the given prefixes.
+    ///
+    /// This performs subtree removal: if a prefix matches an internal node, all keys
+    /// under that node are removed. If it matches a leaf exactly, just that leaf is removed.
+    pub fn without_prefixes(self, prefixes: &[Vec<K>]) -> Self {
+        if self.is_empty() || prefixes.is_empty() {
+            return self;
+        }
+
+        let mut pairs = Vec::with_capacity(self.len());
+        self.extract_pairs(&mut pairs, Vec::new(), 0..self.n_roots);
+
+        let filtered = pairs
+            .into_iter()
+            .filter(|(k, _)| !prefixes.iter().any(|p| k.starts_with(p)));
+
+        Self::try_from_iter(filtered).expect("all remaining keys are valid")
+    }
+
     /// Merge two Tries preferring keys from `other` in the case of collisions.
     ///
     /// If the resulting Trie would be invalid to construct directly, an error is returned.
@@ -526,5 +545,41 @@ mod tests {
         let t2 = Trie::from_str_keys(vec![("foo", 2)]).unwrap();
 
         assert!(t1.merge_overriding(t2).is_ok());
+    }
+
+    #[test]
+    fn without_prefixes_on_empty_trie_returns_empty() {
+        let t: Trie<char, usize> = Trie::default();
+
+        assert!(t.without_prefixes(&[vec!['a', 'b']]).is_empty());
+    }
+
+    #[test_case(&["foo"], &["bar", "baz", "qxa", "qxb"]; "exact match single leaf")]
+    #[test_case(&["bar", "qxb"], &["foo", "baz", "qxa"]; "exact match multiple leaves")]
+    #[test_case(&["ba"], &["foo", "qxa", "qxb"]; "prefix removes subtree")] // typos:ignore
+    #[test_case(&["ba", "qx"], &["foo"]; "multiple prefixes remove multiple subtrees")] // typos:ignore
+    #[test_case(&["xy"], &["foo", "bar", "baz", "qxa", "qxb"]; "no match")]
+    #[test_case(&[], &["foo", "bar", "baz", "qxa", "qxb"]; "empty prefixes")]
+    #[test]
+    fn without_prefixes_works(prefixes: &[&str], expected_keys: &[&str]) {
+        let t = Trie::from_str_keys(vec![
+            ("foo", 1),
+            ("bar", 2),
+            ("baz", 3),
+            ("qxa", 4),
+            ("qxb", 5),
+        ])
+        .unwrap();
+
+        let prefixes: Vec<Vec<char>> = prefixes.iter().map(|s| s.chars().collect()).collect();
+        let result = t.without_prefixes(&prefixes);
+
+        assert_eq!(result.len(), expected_keys.len());
+        for key in expected_keys {
+            assert!(
+                result.get_str_exact(key).is_some(),
+                "expected key '{key}' to be present"
+            );
+        }
     }
 }
