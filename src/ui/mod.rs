@@ -4,7 +4,7 @@ use crate::{
     editor::{Click, EditorMode, MiniBufferState},
     input::Event,
     key::Input,
-    term::CurShape,
+    ui::style::CurShape,
 };
 use std::{
     fmt,
@@ -12,6 +12,7 @@ use std::{
 };
 
 mod layout;
+pub mod style;
 mod tui;
 
 pub use layout::{Border, Layout, SCRATCH_ID};

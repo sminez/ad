@@ -4,8 +4,8 @@ use crate::{
     editor::{Action, Actions},
     key::{Arrow, Input},
     syntax::TK_DEFAULT,
-    term::{Color, Styles},
     trie::Trie,
+    ui::style::{Color, Styles},
     util::parent_dir_containing,
 };
 use serde::{Deserialize, Deserializer, de};

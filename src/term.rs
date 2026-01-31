@@ -1,12 +1,15 @@
 //! Terminal TUI support.
-use crate::die;
+use crate::{
+    die,
+    ui::style::{Color, CurShape, Styles},
+};
 use libc::{
     BRKINT, CS8, ECHO, ICANON, ICRNL, IEXTEN, ISIG, ISTRIP, IXON, OPOST, SA_SIGINFO, SIGWINCH,
     STDOUT_FILENO, TCSAFLUSH, TIOCGWINSZ, VMIN, VTIME, c_int, c_void, ioctl, sigaction,
     sighandler_t, siginfo_t, tcgetattr, tcsetattr, termios as Termios,
 };
-use serde::Deserialize;
 use std::{
+    borrow::Cow,
     fmt,
     io::{self, Write},
     mem, ptr,
@@ -63,76 +66,19 @@ pub unsafe fn register_signal_handler() {
     }
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub struct Color {
-    r: u8,
-    g: u8,
-    b: u8,
-}
-
-impl Color {
-    pub fn as_rgb_hex_string(&self) -> String {
-        let rgb: u32 = ((self.r as u32) << 16) + ((self.g as u32) << 8) + self.b as u32;
-        format!("#{:0>6X}", rgb)
-    }
-}
-
-impl From<Color> for String {
-    fn from(value: Color) -> Self {
-        value.as_rgb_hex_string()
-    }
-}
-
-impl TryFrom<&str> for Color {
-    type Error = String;
-
-    fn try_from(s: &str) -> Result<Self, String> {
-        let [_, r, g, b] = match u32::from_str_radix(s.strip_prefix('#').unwrap_or(s), 16) {
-            Ok(hex) => hex.to_be_bytes(),
-            Err(e) => return Err(format!("invalid color ('{s}'): {e}")),
-        };
-
-        Ok(Self { r, g, b })
-    }
-}
-
-impl TryFrom<String> for Color {
-    type Error = String;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        Self::try_from(value.as_str())
-    }
-}
-
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct Styles {
-    pub fg: Option<Color>,
-    pub bg: Option<Color>,
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-}
-
-impl fmt::Display for Styles {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(fg) = self.fg {
-            write!(f, "{}", Style::Fg(fg))?;
-        }
-        if let Some(bg) = self.bg {
-            write!(f, "{}", Style::Bg(bg))?;
-        }
-        if self.bold {
-            write!(f, "{}", Style::Bold)?;
-        }
-        if self.italic {
-            write!(f, "{}", Style::Italic)?;
-        }
-        if self.underline {
-            write!(f, "{}", Style::Underline)?;
-        }
-
-        Ok(())
+impl Styles {
+    pub fn as_ansi(&self) -> String {
+        [
+            self.fg.as_ref().map(|fg| Style::Fg(*fg).as_ansi()),
+            self.bg.as_ref().map(|bg| Style::Bg(*bg).as_ansi()),
+            self.bold.then(|| Style::Bold.as_ansi()),
+            self.italic.then(|| Style::Italic.as_ansi()),
+            self.underline.then(|| Style::Underline.as_ansi()),
+        ]
+        .iter()
+        .flatten()
+        .map(|cow| cow.as_ref())
+        .collect()
     }
 }
 
@@ -151,24 +97,30 @@ pub enum Style {
     Reset,
 }
 
-// https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797#8-16-colors
-impl fmt::Display for Style {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Style {
+    // https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797#8-16-colors
+    pub fn as_ansi(&self) -> Cow<'static, str> {
         use Style::*;
 
         match self {
-            Fg(Color { r, b, g }) => write!(f, "\x1b[38;2;{r};{g};{b}m"),
-            Bg(Color { r, b, g }) => write!(f, "\x1b[48;2;{r};{g};{b}m"),
-            Bold => write!(f, "\x1b[1m"),
-            NoBold => write!(f, "\x1b[22m"),
-            Italic => write!(f, "\x1b[3m"),
-            NoItalic => write!(f, "\x1b[23m"),
-            Underline => write!(f, "\x1b[4m"),
-            NoUnderline => write!(f, "\x1b[24m"),
-            Reverse => write!(f, "\x1b[7m"),
-            NoReverse => write!(f, "\x1b[27m"),
-            Reset => write!(f, "\x1b[m"),
+            Fg(Color { r, b, g }) => Cow::Owned(format!("\x1b[38;2;{r};{g};{b}m")),
+            Bg(Color { r, b, g }) => Cow::Owned(format!("\x1b[48;2;{r};{g};{b}m")),
+            Bold => Cow::Borrowed("\x1b[1m"),
+            NoBold => Cow::Borrowed("\x1b[22m"),
+            Italic => Cow::Borrowed("\x1b[3m"),
+            NoItalic => Cow::Borrowed("\x1b[23m"),
+            Underline => Cow::Borrowed("\x1b[4m"),
+            NoUnderline => Cow::Borrowed("\x1b[24m"),
+            Reverse => Cow::Borrowed("\x1b[7m"),
+            NoReverse => Cow::Borrowed("\x1b[27m"),
+            Reset => Cow::Borrowed("\x1b[m"),
         }
+    }
+}
+
+impl fmt::Display for Style {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_ansi())
     }
 }
 
@@ -181,42 +133,33 @@ pub(crate) enum Cursor {
     ClearRight,
 }
 
-impl fmt::Display for Cursor {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use Cursor::*;
-
+impl Cursor {
+    pub fn as_ansi(&self) -> Cow<'static, str> {
         match self {
-            To(x, y) => write!(f, "\x1b[{y};{x}H"),
-            ToStart => write!(f, "\x1b[H"),
-            Hide => write!(f, "\x1b[?25l"),
-            Show => write!(f, "\x1b[?25h"),
-            ClearRight => write!(f, "\x1b[K"),
+            Cursor::To(x, y) => Cow::Owned(format!("\x1b[{y};{x}H")),
+            Cursor::ToStart => Cow::Borrowed("\x1b[H"),
+            Cursor::Hide => Cow::Borrowed("\x1b[?25l"),
+            Cursor::Show => Cow::Borrowed("\x1b[?25h"),
+            Cursor::ClearRight => Cow::Borrowed("\x1b[K"),
         }
     }
 }
 
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CurShape {
-    Block,
-    Bar,
-    Underline,
-    BlinkingBlock,
-    BlinkingBar,
-    BlinkingUnderline,
+impl fmt::Display for Cursor {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_ansi())
+    }
 }
 
-impl fmt::Display for CurShape {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use CurShape::*;
-
+impl CurShape {
+    pub const fn as_ansi(&self) -> &'static str {
         match self {
-            BlinkingBlock => write!(f, "\x1b[\x31 q"),
-            Block => write!(f, "\x1b[\x32 q"),
-            BlinkingUnderline => write!(f, "\x1b[\x33 q"),
-            Underline => write!(f, "\x1b[\x34 q"),
-            BlinkingBar => write!(f, "\x1b[\x35 q"),
-            Bar => write!(f, "\x1b[\x36 q"),
+            CurShape::BlinkingBlock => "\x1b[\x31 q",
+            CurShape::Block => "\x1b[\x32 q",
+            CurShape::BlinkingUnderline => "\x1b[\x33 q",
+            CurShape::Underline => "\x1b[\x34 q",
+            CurShape::BlinkingBar => "\x1b[\x35 q",
+            CurShape::Bar => "\x1b[\x36 q",
         }
     }
 }
@@ -313,18 +256,5 @@ pub(crate) fn get_termios() -> Termios {
         }
 
         t
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn color_roundtrip() {
-        let s = "#FF9E3B";
-        let c: Color = s.try_into().unwrap();
-
-        assert_eq!(c.as_rgb_hex_string(), s);
     }
 }

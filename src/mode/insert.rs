@@ -5,7 +5,7 @@ use crate::{
     key::{Arrow::*, Input::*},
     keymap,
     mode::Mode,
-    term::CurShape,
+    ui::style::CurShape,
 };
 
 pub(crate) fn insert_mode() -> (Mode, Vec<(String, &'static str)>) {

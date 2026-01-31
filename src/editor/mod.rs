@@ -13,8 +13,7 @@ use crate::{
     mode::{Mode, modes},
     plumb::PlumbingRules,
     system::{DefaultSystem, System},
-    term::CurShape,
-    ui::{Layout, SCRATCH_ID, StateChange, Ui, UserInterface},
+    ui::{Layout, SCRATCH_ID, StateChange, Ui, UserInterface, style::CurShape},
 };
 use ad_event::Source;
 use std::{

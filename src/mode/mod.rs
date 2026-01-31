@@ -3,8 +3,8 @@ use crate::{
     config::KeyBindings,
     editor::Actions,
     key::Input,
-    term::CurShape,
     trie::{QueryResult, Trie},
+    ui::style::CurShape,
 };
 use std::fmt;
 use tracing::error;

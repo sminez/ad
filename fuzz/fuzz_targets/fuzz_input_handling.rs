@@ -6,8 +6,7 @@ use ad_editor::{
     input::Event,
     key::Input,
     system::System,
-    term::CurShape,
-    ui::{Layout, StateChange, UserInterface},
+    ui::{Layout, StateChange, UserInterface, style::CurShape},
 };
 use arbitrary::Arbitrary;
 use assert_fs::{

@@ -11,13 +11,14 @@ use crate::{
     restore_terminal_state,
     syntax::{LineIter, RangeToken},
     term::{
-        CurShape, Cursor, RESET_STYLE, Style, Styles, clear_screen, enable_alternate_screen,
-        enable_bracketed_paste, enable_mouse_support, enable_raw_mode, get_termios, get_termsize,
-        register_signal_handler, win_size_changed,
+        Cursor, RESET_STYLE, Style, clear_screen, enable_alternate_screen, enable_bracketed_paste,
+        enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
+        win_size_changed,
     },
     ui::{
         Layout, StateChange, UserInterface,
         layout::{Column, Scratch, Window},
+        style::{CurShape, Styles},
     },
     ziplist,
 };
@@ -289,7 +290,7 @@ impl<W: Write> UserInterface for GenericTui<W> {
     }
 
     fn set_cursor_shape(&mut self, cur_shape: CurShape) {
-        if let Err(e) = self.stdout.write_all(cur_shape.to_string().as_bytes()) {
+        if let Err(e) = self.stdout.write_all(cur_shape.as_ansi().as_bytes()) {
             // In this situation we're probably not going to be able to do all that much
             // but we might as well try
             die!("Unable to write to stdout: {e}");
@@ -503,6 +504,7 @@ impl Frame {
                         bg: Some(bg),
                         ..Default::default()
                     }
+                    .as_ansi()
                 );
 
                 render_chars(
@@ -906,7 +908,7 @@ fn render_line<'a>(
         let style_str = match style_cache.get(tk.tag) {
             Some(s) => s,
             None => {
-                let s = cs.styles_for(tk.tag).to_string();
+                let s = cs.styles_for(tk.tag).as_ansi();
                 style_cache.insert(tk.tag.to_string(), s);
                 style_cache.get(tk.tag).unwrap()
             }

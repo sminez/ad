@@ -6,7 +6,7 @@ use crate::{
         LspConfig, TsConfig,
     },
     syntax::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
-    term::{Color, Styles},
+    ui::style::{Color, Styles},
 };
 use serde::{Deserialize, de::DeserializeOwned};
 use std::{

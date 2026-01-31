@@ -9,8 +9,7 @@ use ad_editor::{
     input::Event,
     key::Input,
     system::DefaultSystem,
-    term::CurShape,
-    ui::{Layout, StateChange, UserInterface},
+    ui::{Layout, StateChange, UserInterface, style::CurShape},
 };
 use assert_fs::TempDir;
 use ninep::sync::client::UnixClient;
