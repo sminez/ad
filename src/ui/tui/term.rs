@@ -13,8 +13,13 @@ use std::{
     fmt,
     io::{self, Write},
     mem, ptr,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::{
+        OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
+
+pub(crate) static ORIGINAL_TERMIOS: OnceLock<Termios> = OnceLock::new();
 
 // ANSI escape codes:
 //   https://vt100.net/docs/vt100-ug/chapter3.html
@@ -66,6 +71,18 @@ pub unsafe fn register_signal_handler() {
     }
 }
 
+/// Restore the terminal state to what we had originally before starting our UI.
+pub(crate) fn restore_terminal_state(so: &mut impl Write) {
+    disable_alternate_screen(so);
+    disable_mouse_support(so);
+    disable_bracketed_paste(so);
+    let t = match ORIGINAL_TERMIOS.get() {
+        Some(t) => t,
+        None => return,
+    };
+    set_termios(*t);
+}
+
 impl Styles {
     pub fn as_ansi(&self) -> String {
         [
@@ -82,6 +99,7 @@ impl Styles {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Style {
     Fg(Color),

@@ -1,6 +1,5 @@
 //! A terminal UI for ad
 use crate::{
-    ORIGINAL_TERMIOS,
     buffer::{Buffer, Chars, GapBuffer},
     config::{ColorScheme, Config},
     config_handle, die,
@@ -8,13 +7,7 @@ use crate::{
     editor::{Click, MiniBufferState},
     input::Event,
     key::{Input, MouseButton, MouseEvent},
-    restore_terminal_state,
     syntax::{LineIter, RangeToken},
-    term::{
-        Cursor, RESET_STYLE, Style, clear_screen, enable_alternate_screen, enable_bracketed_paste,
-        enable_mouse_support, enable_raw_mode, get_termios, get_termsize, register_signal_handler,
-        win_size_changed,
-    },
     ui::{
         Layout, StateChange, UserInterface,
         layout::{Column, Scratch, Window},
@@ -36,6 +29,14 @@ use std::{
 };
 use tracing::debug;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+pub mod term;
+
+use term::{
+    Cursor, ORIGINAL_TERMIOS, RESET_STYLE, Style, clear_screen, enable_alternate_screen,
+    enable_bracketed_paste, enable_mouse_support, enable_raw_mode, get_termios, get_termsize,
+    register_signal_handler, restore_terminal_state, win_size_changed,
+};
 
 // If the screen dimensions drop below these values then we disable rendering
 const MIN_COLS: usize = 20;
