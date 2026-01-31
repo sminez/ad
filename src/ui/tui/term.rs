@@ -86,11 +86,11 @@ pub(crate) fn restore_terminal_state(so: &mut impl Write) {
 impl Styles {
     pub fn as_ansi(&self) -> String {
         [
-            self.fg.as_ref().map(|fg| Style::Fg(*fg).as_ansi()),
-            self.bg.as_ref().map(|bg| Style::Bg(*bg).as_ansi()),
-            self.bold.then(|| Style::Bold.as_ansi()),
-            self.italic.then(|| Style::Italic.as_ansi()),
-            self.underline.then(|| Style::Underline.as_ansi()),
+            self.fg.as_ref().map(|fg| AnsiStyle::Fg(*fg).as_ansi()),
+            self.bg.as_ref().map(|bg| AnsiStyle::Bg(*bg).as_ansi()),
+            self.bold.then(|| AnsiStyle::Bold.as_ansi()),
+            self.italic.then(|| AnsiStyle::Italic.as_ansi()),
+            self.underline.then(|| AnsiStyle::Underline.as_ansi()),
         ]
         .iter()
         .flatten()
@@ -101,7 +101,7 @@ impl Styles {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Style {
+pub enum AnsiStyle {
     Fg(Color),
     Bg(Color),
     Bold,
@@ -115,10 +115,10 @@ pub enum Style {
     Reset,
 }
 
-impl Style {
+impl AnsiStyle {
     // https://gist.github.com/fnky/458719343aabd01cfb17a3a4f7296797#8-16-colors
     pub fn as_ansi(&self) -> Cow<'static, str> {
-        use Style::*;
+        use AnsiStyle::*;
 
         match self {
             Fg(Color { r, b, g }) => Cow::Owned(format!("\x1b[38;2;{r};{g};{b}m")),
@@ -136,14 +136,14 @@ impl Style {
     }
 }
 
-impl fmt::Display for Style {
+impl fmt::Display for AnsiStyle {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_ansi())
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Cursor {
+pub(crate) enum CursorAction {
     To(usize, usize),
     ToStart,
     Hide,
@@ -151,19 +151,19 @@ pub(crate) enum Cursor {
     ClearRight,
 }
 
-impl Cursor {
+impl CursorAction {
     pub fn as_ansi(&self) -> Cow<'static, str> {
         match self {
-            Cursor::To(x, y) => Cow::Owned(format!("\x1b[{y};{x}H")),
-            Cursor::ToStart => Cow::Borrowed("\x1b[H"),
-            Cursor::Hide => Cow::Borrowed("\x1b[?25l"),
-            Cursor::Show => Cow::Borrowed("\x1b[?25h"),
-            Cursor::ClearRight => Cow::Borrowed("\x1b[K"),
+            CursorAction::To(x, y) => Cow::Owned(format!("\x1b[{y};{x}H")),
+            CursorAction::ToStart => Cow::Borrowed("\x1b[H"),
+            CursorAction::Hide => Cow::Borrowed("\x1b[?25l"),
+            CursorAction::Show => Cow::Borrowed("\x1b[?25h"),
+            CursorAction::ClearRight => Cow::Borrowed("\x1b[K"),
         }
     }
 }
 
-impl fmt::Display for Cursor {
+impl fmt::Display for CursorAction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_ansi())
     }
@@ -217,7 +217,7 @@ fn write_control_seq(seq: &str, desc: &str, stdout: &mut impl Write) {
 
 pub(crate) fn clear_screen(stdout: &mut impl Write) {
     write_control_seq(
-        &format!("{CLEAR_SCREEN}{}", Cursor::ToStart),
+        &format!("{CLEAR_SCREEN}{}", CursorAction::ToStart),
         "clear screen",
         stdout,
     )
