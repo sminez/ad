@@ -307,15 +307,13 @@ impl TryFrom<Data> for Vec<RawStat> {
 
     fn try_from(Data(bytes): Data) -> Result<Self, io::Error> {
         let mut buf = Vec::new();
-        let mut bytes = bytes.as_slice();
-        let n = size_of::<RawStat>();
+        let mut bytes = io::Cursor::new(bytes);
         let sb = SharedBuf::default();
 
         loop {
             match RawStat::read_from(&sb, &mut bytes) {
                 Ok(rs) => {
                     buf.push(rs);
-                    bytes = &bytes[n..];
                 }
                 Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
                 Err(e) => return Err(e),
@@ -362,7 +360,7 @@ impl NineP for Data {
 
 /// A machine-independent directory entry
 /// <http://man.cat-v.org/plan_9/5/stat>
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct RawStat {
     /// `size[2]`      total byte count of the following data
     pub size: u16,
@@ -456,7 +454,7 @@ impl NineP for RawStat {
 
 /// A qid represents the server's unique identification for the file being accessed: two files
 /// on the same server hierarchy are the same if and only if their qids are the same.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub struct Qid {
     /// `qid.type[1]` the type of the file (directory, etc.), represented as a bit vector
     /// corresponding to the high 8 bits of the file's mode word.
@@ -1104,5 +1102,25 @@ mod tests {
                 },
             }),
         }
+    }
+
+    #[test]
+    fn raw_stats_from_data_works() {
+        let mut bytes = Vec::new();
+
+        for name in ["a", "bb", "ccc"] {
+            let rs = RawStat {
+                name: name.to_string(),
+                ..Default::default()
+            };
+            bytes.extend(rs.write_9p_bytes().unwrap());
+        }
+
+        let stats = Vec::<RawStat>::try_from(Data(bytes)).unwrap();
+
+        assert_eq!(stats.len(), 3);
+        assert_eq!(stats[0].name, "a");
+        assert_eq!(stats[1].name, "bb");
+        assert_eq!(stats[2].name, "ccc");
     }
 }
