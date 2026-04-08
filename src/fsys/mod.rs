@@ -33,7 +33,7 @@
 use crate::{editor::Action, input::Event, ui::SCRATCH_ID};
 use ninep::{
     Result,
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat},
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
     sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
 use std::{
@@ -456,12 +456,12 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
         trace!(?cid, %qid, %uname, "handling write stat request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
-        if stat.n_bytes == 0 {
+        if wstat.n_bytes == Some(0) {
             trace!(%qid, %uname, "stat n_bytes=0, truncating file");
             match qid {
                 MOUNT_ROOT_QID | CONTROL_FILE_QID | MINIBUFFER_QID | LOG_FILE_QID => (),

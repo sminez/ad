@@ -4,7 +4,7 @@
 //!  [1]: tokio::io::AsyncWrite
 use crate::{
     Result,
-    fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat},
+    fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
         protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
         server::{
@@ -185,7 +185,7 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         &self,
         cid: ClientId,
         qid: u64,
-        stat: Stat,
+        wstat: WStat,
         uname: &str,
     ) -> impl Future<Output = Result<()>> + Send;
 }
@@ -435,10 +435,10 @@ where
     }
 
     async fn handle_wstat_async(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
-        let stat: Stat = raw_stat.try_into()?;
+        let wstat: WStat = raw_stat.into();
         let fm = self.try_file_meta(fid)?;
         self.s
-            .write_stat(self.client_id, fm.qid, stat, &self.state.uname)
+            .write_stat(self.client_id, fm.qid, wstat, &self.state.uname)
             .await?;
 
         Ok(Rdata::Wstat {})
