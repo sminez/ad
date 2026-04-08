@@ -8,6 +8,8 @@ transparent and language agnostic ‘API’.
 
 The section 5 man pages from plan 9 cover the [protocol](http://man.cat-v.org/plan_9/5/).
 
+The 9fans man pages also cover the [protocol](https://9fans.github.io/plan9port/man/man9/).
+
 
 ## A simple demo
 
