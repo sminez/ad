@@ -1,0 +1,19 @@
+Test that unbinding a key sequence frees up the prefix for new bindings.
+The default <space> b binding (SelectBuffer) is removed, allowing
+<space> b n and <space> b p to be bound as new sequences.
+
+-- config --
+path: tests/data/config/with-unbindings.toml
+-- file-new.txt --
+-- actions --
+# Type <space> b n - should insert N (not trigger SelectBuffer)
+type:  bn
+
+# Type <space> b p - should insert P
+type:  bp
+-- buffer-list --
+1    * new.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+NP

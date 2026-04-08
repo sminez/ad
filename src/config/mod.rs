@@ -266,21 +266,32 @@ impl LspConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize)]
 pub struct KeyBindings {
-    #[serde(default, deserialize_with = "de_serde_trie")]
-    pub normal: Trie<Input, Actions>,
-    #[serde(default, deserialize_with = "de_serde_trie")]
-    pub insert: Trie<Input, Actions>,
+    #[serde(default, deserialize_with = "de_serde_keymap_overrides")]
+    pub normal: KeymapOverrides,
+    #[serde(default, deserialize_with = "de_serde_keymap_overrides")]
+    pub insert: KeymapOverrides,
 }
 
-impl Default for KeyBindings {
-    fn default() -> Self {
-        KeyBindings {
-            normal: Trie::try_from_iter(Vec::new()).unwrap(),
-            insert: Trie::try_from_iter(Vec::new()).unwrap(),
-        }
-    }
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct KeymapOverrides {
+    pub additional: Trie<Input, Actions>,
+    pub removed: Vec<Vec<Input>>,
+}
+
+// The deny_unknown_fields is loadbearing here: we need this to ONLY deserialize from an empty TOML
+// table in order to correctly fall through to KeyAction when attempting to deserialize
+// KeyBindingItem below.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Unbind {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(untagged)]
+enum KeybindingItem {
+    Unbind(Unbind),
+    Bind(KeyAction),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -371,25 +382,34 @@ fn try_input_from_str_template(s: &str) -> Result<Input, String> {
     }
 }
 
-fn de_serde_trie<'de, D>(deserializer: D) -> Result<Trie<Input, Actions>, D::Error>
+fn de_serde_keymap_overrides<'de, D>(deserializer: D) -> Result<KeymapOverrides, D::Error>
 where
     D: Deserializer<'de>,
 {
-    let raw_map: HashMap<String, KeyAction> = Deserialize::deserialize(deserializer)?;
+    let raw_map: HashMap<String, KeybindingItem> = Deserialize::deserialize(deserializer)?;
     if raw_map.is_empty() {
         return Err(de::Error::custom("empty key map"));
     }
 
-    let raw = raw_map
-        .into_iter()
-        .map(|(k, action)| {
-            Inputs::try_from(k)
-                .map(|Inputs(keys)| (keys, action.into_actions()))
-                .map_err(de::Error::custom)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let mut additional = Vec::new();
+    let mut removed = Vec::new();
 
-    Trie::try_from_iter(raw).map_err(de::Error::custom)
+    for (k, item) in raw_map {
+        let keys = Inputs::try_from(k).map_err(de::Error::custom)?.0;
+        match item {
+            KeybindingItem::Unbind(_) => removed.push(keys),
+            KeybindingItem::Bind(action) => additional.push((keys, action.into_actions())),
+        }
+    }
+
+    if additional.is_empty() && removed.is_empty() {
+        return Err(de::Error::custom("empty key map"));
+    }
+
+    Ok(KeymapOverrides {
+        additional: Trie::try_from_iter(additional).map_err(de::Error::custom)?,
+        removed,
+    })
 }
 
 #[cfg(test)]
@@ -442,5 +462,51 @@ mod tests {
     fn parsing_an_empty_keymap_errors() {
         let res: Result<KeyBindings, _> = toml::from_str("[normal]");
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn parsing_unbind_action_works() {
+        let toml = r#"
+[normal]
+"<space> b" = {}
+"a" = { run = "test" }
+"#;
+        let keys: KeyBindings = toml::from_str(toml).unwrap();
+
+        assert_eq!(
+            keys.normal.removed,
+            vec![vec![Input::Char(' '), Input::Char('b')]]
+        );
+        assert_eq!(keys.normal.additional.len(), 1);
+    }
+
+    #[test]
+    fn parsing_unbind_only_keymap_works() {
+        let toml = r#"
+[normal]
+"<space> b" = {}
+"<space> l" = {}
+"#;
+        let keys: KeyBindings = toml::from_str(toml).unwrap();
+
+        assert_eq!(keys.normal.removed.len(), 2);
+        assert!(keys.normal.additional.is_empty());
+    }
+
+    #[test]
+    fn parsing_mixed_bindings_and_unbinds_works() {
+        let toml = r#"
+[normal]
+"<space> b" = {}
+"<space> b n" = { run = "next-buffer" }
+"<space> b p" = { run = "prev-buffer" }
+"#;
+        let keys: KeyBindings = toml::from_str(toml).unwrap();
+
+        assert_eq!(
+            keys.normal.removed,
+            vec![vec![Input::Char(' '), Input::Char('b')]]
+        );
+        assert_eq!(keys.normal.additional.len(), 2);
     }
 }

@@ -1,6 +1,6 @@
 //! Modal editing support.
 use crate::{
-    config::KeyBindings,
+    config::{KeyBindings, KeymapOverrides},
     editor::Actions,
     key::Input,
     trie::{QueryResult, Trie},
@@ -59,8 +59,12 @@ impl Mode {
         }
     }
 
-    fn with_overrides(&mut self, overrides: Trie<Input, Actions>) -> Result<(), &'static str> {
-        self.keymap = self.keymap.clone().merge_overriding(overrides)?;
+    fn with_overrides(&mut self, parsed: KeymapOverrides) -> Result<(), &'static str> {
+        self.keymap = self
+            .keymap
+            .clone()
+            .without_prefixes(&parsed.removed)
+            .merge_overriding(parsed.additional)?;
 
         Ok(())
     }

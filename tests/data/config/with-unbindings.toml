@@ -1,0 +1,20 @@
+[editor]
+show_splash = true
+expand_tab = true
+tabstop = 4
+match_indent = true
+status_timeout = 3
+double_click_ms = 200
+minibuffer_lines = 8
+find_command = "fd -t f"
+
+[filesystem]
+enabled = false
+auto_mount = false
+
+[keys.normal]
+# Unbind <space> b (normally SelectBuffer) to free the prefix
+"<space> b" = {}
+# Now we can bind sequences under that prefix
+"<space> b n" = { send_keys = "i N <esc>" }
+"<space> b p" = { send_keys = "i P <esc>" }
