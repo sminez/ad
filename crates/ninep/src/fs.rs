@@ -205,6 +205,104 @@ impl TryFrom<RawStat> for Stat {
     }
 }
 
+/// An update to a known [Stat].
+///
+/// Optional fields with a [None] value denote leaving the field in the existing [Stat] unchanged.
+/// The [WStat::try_apply] method can be used to update the existing stat with the corresponding
+/// `qid`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct WStat {
+    /// The server Qid for this entry
+    pub qid: Qid,
+    /// The name of the entry
+    pub name: Option<String>,
+    /// Permissions
+    pub perms: Option<Perm>,
+    /// Size in bytes
+    pub n_bytes: Option<u64>,
+    /// Timestamp of last access
+    pub last_accesses: Option<SystemTime>,
+    /// Timestamp of last modification
+    pub last_modified: Option<SystemTime>,
+    /// Group
+    pub group: Option<String>,
+    /// User who last modified this entry
+    pub last_modified_by: Option<String>,
+}
+
+impl WStat {
+    /// Try to apply this wstat update to an existing [Stat].
+    ///
+    /// Returns `Ok` after applying set fields if the [Qid] of this update and the provided stat
+    /// are equal, otherwise `Err`.
+    pub fn try_apply(self, stat: &Stat) -> Result<Stat, Box<WStat>> {
+        let mode = Mode::new(self.qid.ty);
+        if (self.qid.path != stat.fm.qid) || (mode != Mode::from(stat.fm.ty)) {
+            return Err(Box::new(self));
+        }
+
+        let mut stat = stat.clone();
+
+        stat.fm.name = self.name.unwrap_or(stat.fm.name);
+        stat.perms = self.perms.unwrap_or(stat.perms);
+        stat.n_bytes = self.n_bytes.unwrap_or(stat.n_bytes);
+        stat.last_accesses = self.last_accesses.unwrap_or(stat.last_accesses);
+        stat.last_modified = self.last_modified.unwrap_or(stat.last_modified);
+        stat.group = self.group.unwrap_or(stat.group);
+        stat.last_modified_by = self.last_modified_by.unwrap_or(stat.last_modified_by);
+
+        Ok(stat)
+    }
+}
+
+// From the spec: https://9fans.github.io/plan9port/man/man9/stat.html
+//
+// A wstat request can avoid modifying some properties of the file by providing explicit “don’t
+// touch” values in the stat data that is sent: zero-length strings for text values and the maximum
+// unsigned value of appropriate size for integral values. As a special case, if all the elements
+// of the directory entry in a Twstat message are “don’t touch” values, the server may interpret it
+// as a request to guarantee that the contents of the associated file are committed to stable
+// storage before the Rwstat message is returned. (Consider the message to mean, “make the state of
+// the file exactly what it claims to be.”)
+impl From<RawStat> for WStat {
+    fn from(r: RawStat) -> Self {
+        Self {
+            qid: r.qid,
+            name: if r.name.is_empty() {
+                None
+            } else {
+                Some(r.name)
+            },
+            perms: if r.mode == u32::MAX {
+                None
+            } else {
+                Some(Perm::new(r.mode & 0x0000FFFF))
+            },
+            n_bytes: if r.length == u64::MAX {
+                None
+            } else {
+                Some(r.length)
+            },
+            last_accesses: if r.atime == u32::MAX {
+                None
+            } else {
+                Some(systime_from_u32(r.atime))
+            },
+            last_modified: if r.mtime == u32::MAX {
+                None
+            } else {
+                Some(systime_from_u32(r.mtime))
+            },
+            group: if r.gid.is_empty() { None } else { Some(r.gid) },
+            last_modified_by: if r.muid.is_empty() {
+                None
+            } else {
+                Some(r.muid)
+            },
+        }
+    }
+}
+
 /// Supported filetypes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileType {
@@ -320,4 +418,107 @@ fn systime_as_u32(t: SystemTime) -> u32 {
 
 fn systime_from_u32(t: u32) -> SystemTime {
     UNIX_EPOCH + Duration::from_secs(t as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sansio::protocol::Qid;
+    use simple_test_case::test_case;
+    use std::time::{Duration, UNIX_EPOCH};
+
+    const TEST_QID: u64 = 42;
+    const TEST_MODE: Mode = Mode::FILE;
+
+    fn stat() -> Stat {
+        Stat {
+            fm: FileMeta {
+                name: "test".to_string(),
+                ty: FileType::Regular,
+                qid: TEST_QID,
+            },
+            perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+            n_bytes: 100,
+            last_accesses: UNIX_EPOCH,
+            last_modified: UNIX_EPOCH,
+            owner: "owner".to_string(),
+            group: "group".to_string(),
+            last_modified_by: "modifier".to_string(),
+        }
+    }
+
+    fn wstat() -> WStat {
+        WStat {
+            qid: Qid {
+                ty: TEST_MODE.bits(),
+                version: 0,
+                path: TEST_QID,
+            },
+            name: None,
+            perms: None,
+            n_bytes: None,
+            last_accesses: None,
+            last_modified: None,
+            group: None,
+            last_modified_by: None,
+        }
+    }
+
+    #[test_case(99, Mode::FILE; "path mismatch")]
+    #[test_case(42, Mode::DIR; "type mismatch")]
+    #[test_case(99, Mode::DIR; "path and type mismatch")]
+    #[test]
+    fn try_apply_qid_mismatch_returns_err(path: u64, mode: Mode) {
+        let wstat = WStat {
+            qid: Qid {
+                ty: mode.bits(),
+                version: 0,
+                path,
+            },
+            ..Default::default()
+        };
+
+        assert!(wstat.try_apply(&stat()).is_err());
+    }
+
+    #[test_case(wstat(), stat(); "unchanged")]
+    #[test_case(
+        WStat { name: Some("foo".into()), ..wstat() },
+        { let mut s = stat(); s.fm.name = "foo".into(); s };
+        "name"
+    )]
+    #[test_case(
+        WStat { perms: Some(Perm::OWNER_READ), ..wstat() },
+        Stat { perms: Perm::OWNER_READ, ..stat() };
+        "perms"
+    )]
+    #[test_case(
+        WStat { n_bytes: Some(200), ..wstat() },
+        Stat { n_bytes: 200, ..stat() };
+        "n_bytes"
+    )]
+    #[test_case(
+        WStat { last_accesses: Some(UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
+        Stat { last_accesses: UNIX_EPOCH + Duration::from_secs(1), ..stat() };
+        "last_accesses"
+    )]
+    #[test_case(
+        WStat { last_modified: Some(UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
+        Stat { last_modified: UNIX_EPOCH + Duration::from_secs(1), ..stat() };
+        "last_modified"
+    )]
+    #[test_case(
+        WStat { last_modified_by: Some("new_modifier".into()), ..wstat() },
+        Stat { last_modified_by: "new_modifier".into(), ..stat() };
+        "last_modified_by"
+    )]
+    #[test_case(
+        WStat { group: Some("new_group".into()), ..wstat() },
+        Stat { group: "new_group".into(), ..stat() };
+        "group"
+    )]
+    #[test]
+    fn try_apply_updated_expected_fields(wstat: WStat, expected: Stat) {
+        assert_eq!(wstat.try_apply(&stat()), Ok(expected));
+    }
 }

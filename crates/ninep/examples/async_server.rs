@@ -24,7 +24,7 @@
 //! ```
 use ninep::{
     Result,
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat},
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
     tokio::server::{AsyncServe9p, ClientId, ReadOutcome, Server},
 };
 use std::{
@@ -103,7 +103,7 @@ impl AsyncServe9p for EchoServer {
     }
 
     #[allow(unused_variables)]
-    async fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()> {
+    async fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
         Err("write_stat not supported".to_string())
     }
 

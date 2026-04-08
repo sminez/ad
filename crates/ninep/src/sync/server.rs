@@ -4,7 +4,7 @@
 //!  [1]: std::io::Write
 use crate::{
     Result,
-    fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat},
+    fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
         protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
@@ -157,7 +157,7 @@ pub trait Serve9p: Send + Sync + 'static {
     fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat>;
 
     /// Attempt to set the machine independent "directory entry" for the given resource.
-    fn write_stat(&self, cid: ClientId, qid: u64, stat: Stat, uname: &str) -> Result<()>;
+    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()>;
 }
 
 impl<S> Server<S>
@@ -384,10 +384,10 @@ where
     }
 
     fn handle_wstat(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
-        let stat: Stat = raw_stat.try_into()?;
+        let wstat: WStat = raw_stat.into();
         let fm = self.try_file_meta(fid)?;
         self.s
-            .write_stat(self.client_id, fm.qid, stat, &self.state.uname)?;
+            .write_stat(self.client_id, fm.qid, wstat, &self.state.uname)?;
 
         Ok(Rdata::Wstat {})
     }
