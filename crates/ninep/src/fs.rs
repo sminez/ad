@@ -423,7 +423,7 @@ fn systime_from_u32(t: u32) -> SystemTime {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sansio::protocol::Qid;
+    use crate::sansio::protocol::{Qid, RawStat};
     use simple_test_case::test_case;
     use std::time::{Duration, UNIX_EPOCH};
 
@@ -520,5 +520,60 @@ mod tests {
     #[test]
     fn try_apply_updated_expected_fields(wstat: WStat, expected: Stat) {
         assert_eq!(wstat.try_apply(&stat()), Ok(expected));
+    }
+
+    #[test]
+    fn wstat_sentinel_values_are_correctly_handled() {
+        let raw = RawStat {
+            name: String::new(),
+            mode: u32::MAX,
+            length: u64::MAX,
+            atime: u32::MAX,
+            mtime: u32::MAX,
+            gid: String::new(),
+            muid: String::new(),
+            ..Default::default()
+        };
+
+        let wstat = WStat::from(raw);
+
+        assert!(wstat.name.is_none(), "name");
+        assert!(wstat.perms.is_none(), "perms");
+        assert!(wstat.n_bytes.is_none(), "n_bytes");
+        assert!(wstat.last_accesses.is_none(), "last_accessed");
+        assert!(wstat.last_modified.is_none(), "last_modified");
+        assert!(wstat.group.is_none(), "group");
+        assert!(wstat.last_modified_by.is_none(), "last_modified_by");
+    }
+
+    #[test]
+    fn rawstat_to_stat_strips_filetype_bits_from_perms() {
+        let raw = RawStat {
+            qid: Qid {
+                ty: Mode::FILE.bits(),
+                ..Qid::default()
+            },
+            mode: (Perm::DIR | Perm::OWNER_READ | Perm::OWNER_WRITE).bits(),
+            ..RawStat::default()
+        };
+        let s = Stat::try_from(raw).unwrap();
+        assert_eq!(s.perms, Perm::OWNER_READ | Perm::OWNER_WRITE);
+    }
+
+    #[test_case(FileType::Regular; "regular file")]
+    #[test_case(FileType::Directory; "directory")]
+    #[test_case(FileType::AppendOnly; "append only")]
+    #[test_case(FileType::Exclusive; "exclusive")]
+    #[test]
+    fn stat_to_rawstat_file_type_encoding_works(ty: FileType) {
+        let user_perms = Perm::OWNER_READ | Perm::OWNER_WRITE;
+        let mut s = stat();
+        s.fm.ty = ty;
+        s.perms = user_perms;
+
+        let raw = RawStat::from(s);
+
+        assert_eq!(raw.qid.ty, Mode::from(ty).bits());
+        assert_eq!(raw.mode, (Perm::from(ty) | user_perms).bits());
     }
 }
