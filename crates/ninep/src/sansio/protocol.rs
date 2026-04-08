@@ -454,7 +454,7 @@ impl NineP for RawStat {
 
 /// A qid represents the server's unique identification for the file being accessed: two files
 /// on the same server hierarchy are the same if and only if their qids are the same.
-#[derive(Default, Debug, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Qid {
     /// `qid.type[1]` the type of the file (directory, etc.), represented as a bit vector
     /// corresponding to the high 8 bits of the file's mode word.

@@ -121,16 +121,19 @@ where
 /// Marker trait for implementing a type state for Session
 pub(crate) trait SessionType: Send {}
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Unattached {
+    /// Whether or not we have seen a successful Version Tmessage
     pub(crate) seen_version: bool,
 }
 
 impl SessionType for Unattached {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Attached {
+    /// uname of the attached user
     pub(crate) uname: String,
+    /// Map of client fids to server qids
     pub(crate) fids: BTreeMap<u32, u64>,
 }
 impl SessionType for Attached {}
@@ -381,7 +384,7 @@ where
     /// Once the protocol is complete, the same afid is presented in the attach message for the
     /// user, granting entry. The same validated afid may be used for multiple attach messages with
     /// the same uname and aname.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     pub(crate) fn handle_auth(&mut self, afid: u32, uname: String, aname: String) -> Result<Rdata> {
         // TODO: handle auth
         // let aqid = self.s.lock().unwrap().auth(afid, &uname, &aname)?;
@@ -506,5 +509,343 @@ where
         let aqid = self.qid(root_qid).expect("to have root qid");
 
         Ok((st, aqid))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fs::{FileMeta, Mode, Perm, Stat};
+    use crate::sansio::protocol::{MAX_DATA_LEN, NineP, RawStat, Rdata, Tdata, Tmessage};
+    use simple_coro::CoroState;
+    use simple_test_case::test_case;
+    use std::time::SystemTime;
+
+    fn attached_session_state() -> SessionState<Attached> {
+        SessionState {
+            client_id: ClientId(0),
+            msize: MAX_DATA_LEN as u32,
+            roots: BTreeMap::from([("".to_string(), QID_ROOT)]),
+            qids: BTreeMap::from([(QID_ROOT, FileMeta::dir("", QID_ROOT))]),
+            state: Attached {
+                uname: "testuser".to_string(),
+                fids: BTreeMap::from([(0, QID_ROOT)]),
+            },
+        }
+    }
+
+    fn test_stat(name: &str, qid: u64) -> Stat {
+        Stat {
+            fm: FileMeta::dir(name, qid),
+            perms: Perm::DIR,
+            n_bytes: 0,
+            last_accesses: SystemTime::UNIX_EPOCH,
+            last_modified: SystemTime::UNIX_EPOCH,
+            owner: "owner".to_string(),
+            group: "group".to_string(),
+            last_modified_by: "owner".to_string(),
+        }
+    }
+
+    #[test_case(SUPPORTED_VERSION, MAX_DATA_LEN  / 2, MAX_DATA_LEN  / 2, SUPPORTED_VERSION; "client msize smaller than server")]
+    #[test_case(SUPPORTED_VERSION, MAX_DATA_LEN  + 1, MAX_DATA_LEN , SUPPORTED_VERSION; "client msize larger than server")]
+    #[test_case("12345", MAX_DATA_LEN  / 2, MAX_DATA_LEN  / 2, UNKNOWN_VERSION; "unknown version still negotiates msize")]
+    #[test]
+    fn handle_version_returns_expected_response(
+        version: &str,
+        client_msize: usize,
+        expected_msize: usize,
+        expected_version: &str,
+    ) {
+        let mut session = Server::new(()).new_session(());
+        let resp = session.handle_version(client_msize as u32, version.into());
+
+        assert_eq!(
+            resp,
+            Rdata::Version {
+                msize: expected_msize as u32,
+                version: expected_version.into()
+            }
+        );
+    }
+
+    #[test]
+    fn unsupported_version_does_not_set_seen_version() {
+        let mut session = Server::new(()).new_session(());
+
+        session.handle_tmessage_unattached(Tmessage::new(
+            u16::MAX,
+            Tdata::Version {
+                msize: MAX_DATA_LEN as u32,
+                version: "12345".into(),
+            },
+        ));
+
+        assert!(
+            !session.state.seen_version,
+            "seen_version should not be set"
+        );
+    }
+
+    #[test]
+    fn handle_attach_with_unknown_root_returns_err() {
+        let mut session = Server::new(()).new_session(());
+        let result = session.handle_attach(0, AFID_NO_AUTH, "user".into(), "unknown aname".into());
+
+        assert_eq!(result.unwrap_err(), E_UNKNOWN_ROOT);
+    }
+
+    #[test]
+    fn handle_attach_with_valid_root_initialises_state() {
+        let mut session = Server::new(()).new_session(());
+        assert!(
+            session.roots.contains_key(""),
+            "expected default root is not present"
+        );
+
+        let (attached, qid) = session
+            .handle_attach(5, AFID_NO_AUTH, "testuser".into(), "".into())
+            .unwrap();
+
+        assert_eq!(attached.fids, BTreeMap::from([(5, QID_ROOT)]));
+        assert_eq!(attached.uname, "testuser");
+        assert_eq!(qid.ty, Mode::DIR.bits());
+        assert_eq!(qid.path, QID_ROOT);
+    }
+
+    #[test]
+    fn attach_before_version_returns_error() {
+        let mut session = Server::new(()).new_session(());
+
+        let resp = session.handle_tmessage_unattached(Tmessage::new(
+            0,
+            Tdata::Attach {
+                fid: 0,
+                afid: AFID_NO_AUTH,
+                uname: "user".into(),
+                aname: "".into(),
+            },
+        ));
+
+        match resp {
+            Either::L((_, Err(e))) => assert_eq!(e, E_NO_VERSION_MESSAGE),
+            other => panic!("expected E_NO_VERSION, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn attach_with_unknown_root_propagates_error() {
+        let mut session = Server::new(()).new_session(());
+        session.state.seen_version = true;
+
+        let resp = session.handle_tmessage_unattached(Tmessage::new(
+            0,
+            Tdata::Attach {
+                fid: 0,
+                afid: AFID_NO_AUTH,
+                uname: "user".into(),
+                aname: "unknown aname".into(),
+            },
+        ));
+
+        match resp {
+            Either::L((_, Err(e))) => assert_eq!(e, E_UNKNOWN_ROOT),
+            other => panic!("expected E_UNKNOWN_ROOT, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn valid_attach_returns_expected_qid() {
+        let mut session = Server::new(()).new_session(());
+        session.state.seen_version = true;
+
+        let resp = session.handle_tmessage_unattached(Tmessage::new(
+            0,
+            Tdata::Attach {
+                fid: 0,
+                afid: AFID_NO_AUTH,
+                uname: "user".into(),
+                aname: "".into(),
+            },
+        ));
+
+        match resp {
+            Either::R((0, _, qid)) => assert_eq!(qid.path, QID_ROOT),
+            other => panic!("expected root qid, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn walk_empty_wnames_binds_new_fid_to_root() {
+        let mut ss = attached_session_state();
+        let result = ss.handle_attached_walk(0, 1, &[]).resume().unwrap();
+
+        match result.unwrap() {
+            Rdata::Walk { wqids } => assert!(wqids.is_empty(), "expected empty wqids: {wqids:?}"),
+            other => panic!("expected Walk, got: {other:?}"),
+        }
+
+        assert_eq!(
+            ss.state.fids.get(&1),
+            Some(&QID_ROOT),
+            "new_fid should be bound to root"
+        );
+    }
+
+    #[test]
+    fn walk_duplicate_new_fid_returns_error() {
+        let mut ss = attached_session_state();
+        ss.state.fids.insert(1, 99);
+
+        let result = ss
+            .handle_attached_walk(0, 1, &["child".to_string()])
+            .resume()
+            .unwrap();
+
+        assert_eq!(result.unwrap_err(), E_DUPLICATE_FID);
+    }
+
+    #[test]
+    fn walk_unknown_fid_returns_error() {
+        let mut ss = attached_session_state();
+        let result = ss
+            .handle_attached_walk(99, 1, &["child".to_string()])
+            .resume()
+            .unwrap();
+
+        assert_eq!(result.unwrap_err(), E_UNKNOWN_FID);
+    }
+
+    #[test]
+    fn walk_non_dir_returns_error() {
+        let mut ss = attached_session_state();
+        ss.qids.insert(1, FileMeta::file("file.txt", 1));
+        ss.state.fids.insert(2, 1);
+
+        let result = ss
+            .handle_attached_walk(2, 3, &["child".to_string()])
+            .resume()
+            .unwrap();
+
+        assert_eq!(result.unwrap_err(), E_WALK_NON_DIR);
+    }
+
+    #[test]
+    fn walk_full_walk_binds_new_fid() {
+        let mut ss = attached_session_state();
+        let wnames = vec!["child".to_string()];
+        let child_qid = 42;
+
+        let mut coro = ss.handle_attached_walk(0, 1, &wnames);
+        coro = coro.resume().unwrap_pending(|(parent_qid, name, _uname)| {
+            assert_eq!(parent_qid, QID_ROOT, "should walk from root");
+            assert_eq!(name, "child", "should request child name");
+            FileMeta::file("child", child_qid)
+        });
+
+        let wqids = match coro.resume().unwrap() {
+            Ok(Rdata::Walk { wqids }) => wqids,
+            other => panic!("expected Walk, got: {other:?}"),
+        };
+
+        assert_eq!(wqids.len(), 1, "expected one wqid");
+        assert_eq!(wqids[0].path, child_qid, "wqid path should match child qid");
+        assert_eq!(
+            ss.state.fids.get(&1),
+            Some(&child_qid),
+            "new_fid should be bound to child"
+        );
+    }
+
+    #[test]
+    fn read_regular_file_yields_file_read_request() {
+        let mut ss = attached_session_state();
+        ss.qids.insert(1, FileMeta::file("file.txt", 1));
+        ss.state.fids.insert(2, 1);
+
+        let coro = ss.handle_attached_read(2, 0, 1024);
+
+        match coro.resume() {
+            CoroState::Pending(_, Either::R((qid, _))) => assert_eq!(qid, 1, "wrong qid"),
+            CoroState::Pending(_, s) => panic!("unexpected pending coro state: {s:?}"),
+            CoroState::Complete(res) => panic!("unexpected complete coro result: {res:?}"),
+        }
+    }
+
+    // Helper for readdir tests below
+    fn handle_readdir(
+        ss: &mut SessionState<Attached>,
+        stats: &[Stat],
+        offset: u64,
+        count: u32,
+    ) -> Vec<RawStat> {
+        let mut coro = ss.handle_attached_read(0, offset, count);
+        coro = coro.resume().unwrap_pending(|_| stats.to_vec());
+
+        let data = match coro.resume().unwrap() {
+            Ok(Some(Rdata::Read { data })) => data,
+            other => panic!("expected Read, got: {other:?}"),
+        };
+
+        Vec::<RawStat>::try_from(data).unwrap()
+    }
+
+    #[test]
+    fn read_dir_returns_serialized_stats() {
+        let mut ss = attached_session_state();
+        let expected = test_stat("child", 1);
+
+        let raw_stats = handle_readdir(&mut ss, std::slice::from_ref(&expected), 0, 4096);
+        let expected_raw: RawStat = expected.into();
+
+        assert_eq!(raw_stats, vec![expected_raw]);
+    }
+
+    #[test]
+    fn read_dir_valid_offset_skips_entries() {
+        let mut ss = attached_session_state();
+        let stat1 = test_stat("a", 1);
+        let stat2 = test_stat("b", 2);
+        let stat1_len = RawStat::from(stat1.clone()).n_bytes();
+
+        let raw_stats = handle_readdir(&mut ss, &[stat1, stat2.clone()], stat1_len as u64, 4096);
+        let expected_raw: RawStat = stat2.into();
+
+        assert_eq!(raw_stats, vec![expected_raw]);
+    }
+
+    #[test]
+    fn read_dir_invalid_offset_returns_error() {
+        let mut ss = attached_session_state();
+        let stat = test_stat("child", 1);
+        let stat_len = RawStat::from(stat.clone()).n_bytes();
+        let invalid_offset = (stat_len - 1) as u64; // not aligned to a stat boundary
+
+        let coro = ss.handle_attached_read(0, invalid_offset, 4096);
+        let res = match coro.resume() {
+            CoroState::Pending(c, Either::L(_)) => c.send(vec![stat]).resume().unwrap(),
+            _ => panic!("expected Pending with Either::L"),
+        };
+
+        assert_eq!(res.unwrap_err(), E_INVALID_OFFSET);
+    }
+
+    /// The user can specify a count for the number of bytes to be read back. This is almost always
+    /// not exactly aligned with the boundaries between individual stat entries, so we should
+    /// truncate to only return stats that fit within the requested number of bytes.
+    #[test]
+    fn read_dir_with_unaligned_count_truncates() {
+        let mut ss = attached_session_state();
+        let stat1 = test_stat("a", 1);
+        let stat2 = test_stat("b", 2);
+
+        // Ensure that we fit the first entry but not the second
+        let stat_len = RawStat::from(stat1.clone()).n_bytes();
+        let count = (stat_len + 1) as u32;
+
+        let raw_stats = handle_readdir(&mut ss, &[stat1.clone(), stat2], 0, count);
+        let expected_raw: RawStat = stat1.into();
+
+        assert_eq!(raw_stats, vec![expected_raw]);
     }
 }
