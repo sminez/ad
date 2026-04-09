@@ -403,8 +403,8 @@ where
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let fm = self.s.walk(client_id, qid, name, uname).await?;
-                    c.send(fm)
+                    let res = self.s.walk(client_id, qid, name, uname).await;
+                    c.send(res)
                 }
             };
         }

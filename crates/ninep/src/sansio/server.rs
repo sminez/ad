@@ -27,6 +27,7 @@ pub(crate) const E_ALREADY_ATTACHED: &str = "session is already attached";
 pub(crate) const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
 pub(crate) const E_DUPLICATE_FID: &str = "duplicate fid";
 pub(crate) const E_UNKNOWN_FID: &str = "unknown fid";
+pub(crate) const E_UNKNOWN_FILE: &str = "unknown file";
 pub(crate) const E_UNKNOWN_ROOT: &str = "unknown root directory";
 pub(crate) const E_WALK_NON_DIR: &str = "walk in non-directory";
 pub(crate) const E_CREATE_NON_DIR: &str = "create in non-directory";
@@ -181,6 +182,7 @@ impl SessionState<Attached> {
         opt.ok_or_else(|| E_UNKNOWN_FID.to_string())
     }
 
+    #[expect(clippy::type_complexity)]
     pub(crate) fn handle_attached_walk<'a, 's: 'a>(
         &'s mut self,
         fid: u32,
@@ -188,12 +190,12 @@ impl SessionState<Attached> {
         wnames: &'a [String],
     ) -> ReadyCoro<
         (u64, &'a str, &'a str),
-        FileMeta,
+        Result<FileMeta>,
         Result<Rdata>,
         impl Future<Output = Result<Rdata>> + use<'s, 'a>,
     > {
         Coro::from(
-            move |handle: Handle<(u64, &'a str, &'a str), FileMeta>| async move {
+            move |handle: Handle<(u64, &'a str, &'a str), Result<FileMeta>>| async move {
                 if new_fid != fid && self.state.fids.contains_key(&new_fid) {
                     return Err(E_DUPLICATE_FID.to_string());
                 }
@@ -211,12 +213,22 @@ impl SessionState<Attached> {
                 let mut qid = fm.qid;
 
                 for name in wnames.iter() {
-                    let fm = handle.yield_value((qid, name, &self.state.uname)).await;
-                    qid = fm.qid;
-                    wqids.push(fm.as_qid());
-                    self.qids.insert(qid, fm);
+                    match handle.yield_value((qid, name, &self.state.uname)).await {
+                        Ok(fm) => {
+                            qid = fm.qid;
+                            wqids.push(fm.as_qid());
+                            self.qids.insert(qid, fm);
+                        }
+                        Err(_) => break,
+                    }
                 }
 
+                // Spec: first element failure must be Rerror, not Rwalk with zero qids
+                if wqids.is_empty() {
+                    return Err(E_UNKNOWN_FILE.to_string());
+                }
+
+                // new_fid is only bound when all elements were walked successfully
                 if wqids.len() == wnames.len() {
                     let qid = wqids.last().expect("empty was handled above").path;
                     self.state.fids.insert(new_fid, qid);
@@ -227,7 +239,7 @@ impl SessionState<Attached> {
         )
     }
 
-    #[allow(clippy::type_complexity)]
+    #[expect(clippy::type_complexity)]
     pub(crate) fn handle_attached_read<'a, 's: 'a>(
         &'s mut self,
         fid: u32,
@@ -590,9 +602,9 @@ mod tests {
     #[test]
     fn handle_attach_with_unknown_root_returns_err() {
         let mut session = Server::new(()).new_session(());
-        let result = session.handle_attach(0, AFID_NO_AUTH, "user".into(), "unknown aname".into());
+        let res = session.handle_attach(0, AFID_NO_AUTH, "user".into(), "unknown aname".into());
 
-        assert_eq!(result.unwrap_err(), E_UNKNOWN_ROOT);
+        assert_eq!(res.unwrap_err(), E_UNKNOWN_ROOT);
     }
 
     #[test]
@@ -678,9 +690,9 @@ mod tests {
     #[test]
     fn walk_empty_wnames_binds_new_fid_to_root() {
         let mut ss = attached_session_state();
-        let result = ss.handle_attached_walk(0, 1, &[]).resume().unwrap();
+        let res = ss.handle_attached_walk(0, 1, &[]).resume().unwrap();
 
-        match result.unwrap() {
+        match res.unwrap() {
             Rdata::Walk { wqids } => assert!(wqids.is_empty(), "expected empty wqids: {wqids:?}"),
             other => panic!("expected Walk, got: {other:?}"),
         }
@@ -697,23 +709,23 @@ mod tests {
         let mut ss = attached_session_state();
         ss.state.fids.insert(1, 99);
 
-        let result = ss
+        let res = ss
             .handle_attached_walk(0, 1, &["child".to_string()])
             .resume()
             .unwrap();
 
-        assert_eq!(result.unwrap_err(), E_DUPLICATE_FID);
+        assert_eq!(res.unwrap_err(), E_DUPLICATE_FID);
     }
 
     #[test]
     fn walk_unknown_fid_returns_error() {
         let mut ss = attached_session_state();
-        let result = ss
+        let res = ss
             .handle_attached_walk(99, 1, &["child".to_string()])
             .resume()
             .unwrap();
 
-        assert_eq!(result.unwrap_err(), E_UNKNOWN_FID);
+        assert_eq!(res.unwrap_err(), E_UNKNOWN_FID);
     }
 
     #[test]
@@ -722,12 +734,12 @@ mod tests {
         ss.qids.insert(1, FileMeta::file("file.txt", 1));
         ss.state.fids.insert(2, 1);
 
-        let result = ss
+        let res = ss
             .handle_attached_walk(2, 3, &["child".to_string()])
             .resume()
             .unwrap();
 
-        assert_eq!(result.unwrap_err(), E_WALK_NON_DIR);
+        assert_eq!(res.unwrap_err(), E_WALK_NON_DIR);
     }
 
     #[test]
@@ -740,7 +752,7 @@ mod tests {
         coro = coro.resume().unwrap_pending(|(parent_qid, name, _uname)| {
             assert_eq!(parent_qid, QID_ROOT, "should walk from root");
             assert_eq!(name, "child", "should request child name");
-            FileMeta::file("child", child_qid)
+            Ok(FileMeta::file("child", child_qid))
         });
 
         let wqids = match coro.resume().unwrap() {
@@ -755,6 +767,49 @@ mod tests {
             Some(&child_qid),
             "new_fid should be bound to child"
         );
+    }
+
+    #[test]
+    fn walk_first_element_failure_returns_error() {
+        let mut ss = attached_session_state();
+        let wnames = &["missing".to_string()];
+
+        let mut coro = ss.handle_attached_walk(0, 1, wnames);
+        coro = coro
+            .resume()
+            .unwrap_pending(|_| Err("not found".to_string()));
+
+        let res = coro.resume().unwrap();
+        assert!(res.is_err(), "expected Rerror");
+        assert_eq!(ss.state.fids.get(&1), None, "new_fid was bound");
+    }
+
+    #[test]
+    fn walk_partial_walk_returns_partial_qids_and_does_not_bind_new_fid() {
+        let mut ss = attached_session_state();
+        let wnames = &["a".to_string(), "b".to_string()];
+        let a_qid = 10;
+
+        let mut coro = ss.handle_attached_walk(0, 1, wnames);
+
+        // First step of the walk succeeds
+        coro = coro
+            .resume()
+            .unwrap_pending(|(_, _, _)| Ok(FileMeta::dir("a", a_qid)));
+
+        // Second step fails
+        coro = coro
+            .resume()
+            .unwrap_pending(|(_, _, _)| Err("not found".to_string()));
+
+        let wqids = match coro.resume().unwrap() {
+            Ok(Rdata::Walk { wqids }) => wqids,
+            other => panic!("expected partial Walk, got: {other:?}"),
+        };
+
+        assert_eq!(wqids.len(), 1, "expected partial qid list");
+        assert_eq!(wqids[0].path, a_qid, "partial qid should be for 'a'");
+        assert_eq!(ss.state.fids.get(&1), None, "new_fid was bound");
     }
 
     #[test]
