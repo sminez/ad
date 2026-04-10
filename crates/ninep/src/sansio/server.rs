@@ -82,7 +82,7 @@ where
     /// Create a new file server with a single anonymous root (name will be "") and
     /// qid of [QID_ROOT].
     pub fn new(s: S) -> Self {
-        Self::new_with_roots(s, [("".to_string(), QID_ROOT)].into_iter().collect())
+        Self::new_with_roots(s, [("/".to_string(), QID_ROOT)].into_iter().collect())
     }
 
     /// Create a new file server with the given roots for clients to attach to.
