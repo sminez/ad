@@ -660,7 +660,7 @@ dependencies = [
 
 [[package]]
 name = "ninep"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bitflags 2.10.0",
  "simple_coro",

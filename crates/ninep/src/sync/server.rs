@@ -8,8 +8,8 @@ use crate::{
     sansio::{
         protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
-            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_UNKNOWN_FID, Either, Session,
-            SessionType, Unattached,
+            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME, E_UNKNOWN_FID,
+            Either, Session, SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
@@ -406,6 +406,10 @@ where
     }
 
     fn handle_create(&mut self, fid: u32, name: String, perm: Perm, mode: Mode) -> Result<Rdata> {
+        if name == "." || name == ".." {
+            return Err(E_ILLEGAL_CREATE_NAME.to_string());
+        }
+
         let fm = self.try_file_meta(fid)?;
         if fm.ty != FileType::Directory {
             return Err(E_CREATE_NON_DIR.to_string());

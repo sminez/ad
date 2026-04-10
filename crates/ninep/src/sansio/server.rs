@@ -80,7 +80,7 @@ impl<S> Server<S>
 where
     S: Send,
 {
-    /// Create a new file server with a single anonymous root (name will be "") and
+    /// Create a new file server with a single anonymous root (name will be "/") and
     /// qid of [QID_ROOT].
     pub fn new(s: S) -> Self {
         Self::new_with_roots(s, [("/".to_string(), QID_ROOT)].into_iter().collect())
@@ -536,7 +536,7 @@ mod tests {
         SessionState {
             client_id: ClientId(0),
             msize: DEFAULT_MSIZE,
-            roots: BTreeMap::from([("".to_string(), QID_ROOT)]),
+            roots: BTreeMap::from([("/".to_string(), QID_ROOT)]),
             qids: BTreeMap::from([(QID_ROOT, FileMeta::dir("", QID_ROOT))]),
             state: Attached {
                 uname: "testuser".to_string(),
@@ -610,12 +610,12 @@ mod tests {
     fn handle_attach_with_valid_root_initialises_state() {
         let mut session = Server::new(()).new_session(());
         assert!(
-            session.roots.contains_key(""),
+            session.roots.contains_key("/"),
             "expected default root is not present"
         );
 
         let (attached, qid) = session
-            .handle_attach(5, AFID_NO_AUTH, "testuser".into(), "".into())
+            .handle_attach(5, AFID_NO_AUTH, "testuser".into(), "/".into())
             .unwrap();
 
         assert_eq!(attached.fids, BTreeMap::from([(5, QID_ROOT)]));
@@ -676,7 +676,7 @@ mod tests {
                 fid: 0,
                 afid: AFID_NO_AUTH,
                 uname: "user".into(),
-                aname: "".into(),
+                aname: "/".into(),
             },
         ));
 
