@@ -37,6 +37,7 @@ pub(crate) const UNKNOWN_VERSION: &str = "unknown";
 pub(crate) const SUPPORTED_VERSION: &str = "9P2000";
 
 const DEFAULT_DISPLAY_VALUE: &str = ":0";
+const DEFAULT_MSIZE: u32 = MAX_DATA_LEN as u32;
 
 /// Determine the 9p socket directory based on the USER and DISPLAY environment variables
 pub fn socket_dir() -> PathBuf {
@@ -70,7 +71,6 @@ where
     S: Send,
 {
     pub(crate) s: Arc<S>,
-    pub(crate) msize: u32,
     pub(crate) roots: BTreeMap<String, u64>,
     pub(crate) qids: BTreeMap<u64, FileMeta>,
     pub(crate) next_client_id: u64,
@@ -95,7 +95,6 @@ where
 
         Self {
             s: Arc::new(s),
-            msize: MAX_DATA_LEN as u32,
             roots,
             qids,
             next_client_id: 0,
@@ -106,7 +105,6 @@ where
     pub(crate) fn new_session<U>(&mut self, stream: U) -> Session<Unattached, S, U> {
         let session = Session::new_unattached(
             ClientId(self.next_client_id),
-            self.msize,
             self.roots.clone(),
             self.s.clone(),
             self.qids.clone(),
@@ -378,8 +376,10 @@ where
             SUPPORTED_VERSION
         };
 
+        self.msize = min(DEFAULT_MSIZE, msize);
+
         Rdata::Version {
-            msize: min(self.msize, msize),
+            msize: self.msize,
             version: server_version.to_string(),
         }
     }
@@ -412,7 +412,6 @@ where
 {
     fn new_unattached(
         client_id: ClientId,
-        msize: u32,
         roots: BTreeMap<String, u64>,
         s: Arc<S>,
         qids: BTreeMap<u64, FileMeta>,
@@ -425,7 +424,7 @@ where
             session_state: SessionState {
                 client_id,
                 state: Unattached::default(),
-                msize,
+                msize: DEFAULT_MSIZE,
                 roots,
                 qids,
             },
@@ -528,7 +527,7 @@ where
 mod tests {
     use super::*;
     use crate::fs::{FileMeta, Mode, Perm, Stat};
-    use crate::sansio::protocol::{MAX_DATA_LEN, NineP, RawStat, Rdata, Tdata, Tmessage};
+    use crate::sansio::protocol::{NineP, RawStat, Rdata, Tdata, Tmessage};
     use simple_coro::CoroState;
     use simple_test_case::test_case;
     use std::time::SystemTime;
@@ -536,7 +535,7 @@ mod tests {
     fn attached_session_state() -> SessionState<Attached> {
         SessionState {
             client_id: ClientId(0),
-            msize: MAX_DATA_LEN as u32,
+            msize: DEFAULT_MSIZE,
             roots: BTreeMap::from([("".to_string(), QID_ROOT)]),
             qids: BTreeMap::from([(QID_ROOT, FileMeta::dir("", QID_ROOT))]),
             state: Attached {
@@ -559,23 +558,23 @@ mod tests {
         }
     }
 
-    #[test_case(SUPPORTED_VERSION, MAX_DATA_LEN  / 2, MAX_DATA_LEN  / 2, SUPPORTED_VERSION; "client msize smaller than server")]
-    #[test_case(SUPPORTED_VERSION, MAX_DATA_LEN  + 1, MAX_DATA_LEN , SUPPORTED_VERSION; "client msize larger than server")]
-    #[test_case("12345", MAX_DATA_LEN  / 2, MAX_DATA_LEN  / 2, UNKNOWN_VERSION; "unknown version still negotiates msize")]
+    #[test_case(SUPPORTED_VERSION, DEFAULT_MSIZE  / 2, DEFAULT_MSIZE  / 2, SUPPORTED_VERSION; "client msize smaller than server")]
+    #[test_case(SUPPORTED_VERSION, DEFAULT_MSIZE  + 1, DEFAULT_MSIZE , SUPPORTED_VERSION; "client msize larger than server")]
+    #[test_case("12345", DEFAULT_MSIZE  / 2, DEFAULT_MSIZE  / 2, UNKNOWN_VERSION; "unknown version still negotiates msize")]
     #[test]
     fn handle_version_returns_expected_response(
         version: &str,
-        client_msize: usize,
-        expected_msize: usize,
+        client_msize: u32,
+        expected_msize: u32,
         expected_version: &str,
     ) {
         let mut session = Server::new(()).new_session(());
-        let resp = session.handle_version(client_msize as u32, version.into());
+        let resp = session.handle_version(client_msize, version.into());
 
         assert_eq!(
             resp,
             Rdata::Version {
-                msize: expected_msize as u32,
+                msize: expected_msize,
                 version: expected_version.into()
             }
         );
@@ -588,7 +587,7 @@ mod tests {
         session.handle_tmessage_unattached(Tmessage::new(
             u16::MAX,
             Tdata::Version {
-                msize: MAX_DATA_LEN as u32,
+                msize: DEFAULT_MSIZE,
                 version: "12345".into(),
             },
         ));
