@@ -21,17 +21,18 @@ use std::{
 pub const AFID_NO_AUTH: u32 = u32::MAX;
 
 // Error messages
-pub(crate) const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
-pub(crate) const E_UNATTACHED: &str = "session is not attached";
 pub(crate) const E_ALREADY_ATTACHED: &str = "session is already attached";
 pub(crate) const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
+pub(crate) const E_CREATE_NON_DIR: &str = "create in non-directory";
 pub(crate) const E_DUPLICATE_FID: &str = "duplicate fid";
+pub(crate) const E_ILLEGAL_CREATE_NAME: &str = "creating files named '.' or '..' is not allowed";
+pub(crate) const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
+pub(crate) const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
+pub(crate) const E_UNATTACHED: &str = "session is not attached";
 pub(crate) const E_UNKNOWN_FID: &str = "unknown fid";
 pub(crate) const E_UNKNOWN_FILE: &str = "unknown file";
 pub(crate) const E_UNKNOWN_ROOT: &str = "unknown root directory";
 pub(crate) const E_WALK_NON_DIR: &str = "walk in non-directory";
-pub(crate) const E_CREATE_NON_DIR: &str = "create in non-directory";
-pub(crate) const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 
 pub(crate) const UNKNOWN_VERSION: &str = "unknown";
 pub(crate) const SUPPORTED_VERSION: &str = "9P2000";
