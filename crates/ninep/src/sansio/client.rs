@@ -214,7 +214,7 @@ impl State {
             let sb = SharedBuf::default();
 
             loop {
-                match RawStat::read_from(&sb, &mut buf) {
+                match RawStat::read_from(self.msize, &sb, &mut buf) {
                     Ok(rs) => match rs.try_into() {
                         Ok(s) => stats.push(s),
                         Err(e) => return err(e),

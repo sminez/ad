@@ -6,7 +6,7 @@ use crate::{
     Result,
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
-        protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
+        protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
             Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_UNKNOWN_FID, Either, Session,
             SessionType, Unattached,
@@ -211,7 +211,8 @@ where
     U: SyncStream,
 {
     fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
+        let mut r: Rmessage = (tag, resp).into();
+        r.clamp(self.msize);
         let _ = r.write_to(&mut self.stream);
     }
 }
@@ -223,7 +224,7 @@ where
 {
     fn handle_connection(mut self) {
         loop {
-            let t = match Tmessage::read_from(&self.buf, &mut self.stream) {
+            let t = match Tmessage::read_from(DEFAULT_MSIZE, &self.buf, &mut self.stream) {
                 Ok(t) => t,
                 Err(_) => return,
             };
@@ -256,7 +257,7 @@ where
         use Tdata::*;
 
         loop {
-            let t = match Tmessage::read_from(&self.buf, &mut self.stream) {
+            let t = match Tmessage::read_from(self.msize, &self.buf, &mut self.stream) {
                 Ok(t) => t,
                 Err(_) => return self.clunk_and_clear(),
             };

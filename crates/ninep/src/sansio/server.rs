@@ -3,7 +3,7 @@ use crate::{
     Result,
     fs::{FileMeta, FileType, QID_ROOT, Stat},
     sansio::protocol::{
-        Data, MAX_DATA_LEN, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
+        DEFAULT_MSIZE, Data, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -37,7 +37,6 @@ pub(crate) const UNKNOWN_VERSION: &str = "unknown";
 pub(crate) const SUPPORTED_VERSION: &str = "9P2000";
 
 const DEFAULT_DISPLAY_VALUE: &str = ":0";
-const DEFAULT_MSIZE: u32 = MAX_DATA_LEN as u32;
 
 /// Determine the 9p socket directory based on the USER and DISPLAY environment variables
 pub fn socket_dir() -> PathBuf {

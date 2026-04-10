@@ -16,14 +16,13 @@ use std::{
 pub const MAX_SIZE_FIELD: usize = u16::MAX as usize;
 /// For data fields in read/write messages the size field is 32bits not 16
 pub const MAX_DATA_SIZE_FIELD: usize = u32::MAX as usize;
-/// The maximum number of bytes we allow in a Data buffer: a client attempting
-/// to use more than this is an error.
-pub const MAX_DATA_LEN: usize = 32 * 1024 * 1024;
+/// The default message size supported
+pub const DEFAULT_MSIZE: u32 = 32 * 1024 * 1024;
 
 /// Non IO related errors that can occur when attempting to serialize a [NineP] type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteError {
-    /// The maximum number of bytes we allow in a Data buffer is [MAX_DATA_LEN]: a client
+    /// The maximum number of bytes we allow in a Data buffer is [MAX_DATA_SIZE_FIELD]: a client
     /// attempting to use more than this is an error.
     DataLength(usize),
     /// The size of variable length data is denoted using a u16 so anything longer
@@ -40,6 +39,18 @@ impl fmt::Display for WriteError {
             ),
             Self::FieldLength(len) => write!(f, "string too long: max={MAX_SIZE_FIELD} len={len}"),
         }
+    }
+}
+
+#[inline(always)]
+pub(crate) fn validate_msize(requested: u32, msize: u32) -> io::Result<()> {
+    if requested > msize {
+        Err(io::Error::new(
+            io::ErrorKind::FileTooLarge,
+            format!("requested data ({requested}) is larger than msize ({msize})"),
+        ))
+    } else {
+        Ok(())
     }
 }
 
@@ -107,18 +118,34 @@ impl SharedBuf {
         }
     }
 
+    unsafe fn remaining(&self) -> usize {
+        // SAFETY: the caller must guarantee that no concurrent access takes place
+        let inner = unsafe { &*self.0.get() };
+        inner.buf.len() - inner.pos
+    }
+
     /// Helper for reading a single [NineP] value from a [SharedBuf] that has already been filled with
     /// the correct number of bytes for parsing the entire message without any further IO.
     ///
     /// # Safety
     /// The caller must guarantee that no concurrent access to the inner buffer takes place while
     /// this reference is held.
-    unsafe fn parse_from_buffer<T: NineP>(&self) -> io::Result<T> {
-        let mut coro = T::read_9p_coro(self);
+    unsafe fn parse_from_buffer<T: NineP>(&self, msize: u32) -> io::Result<T> {
+        let mut coro = T::read_9p_coro(msize, self);
 
         loop {
             coro = match coro.resume() {
-                CoroState::Pending(c, _) => c.send(()),
+                CoroState::Pending(c, n) => {
+                    // SAFETY: the caller must guarantee that no concurrent access takes place
+                    if n > unsafe { self.remaining() } {
+                        return Err(io::Error::new(
+                            ErrorKind::UnexpectedEof,
+                            "message content shorter than declared field lengths",
+                        ));
+                    }
+
+                    c.send(())
+                }
                 CoroState::Complete(res) => return res,
             };
         }
@@ -149,6 +176,7 @@ pub trait NineP: Sized {
     /// This is not a normal async function. It is used to set up a sans-io state machine that
     /// can be driven by a concrete implementation.
     fn read_9p(
+        msize: u32,
         buf: &SharedBuf,
         handle: Handle<usize>,
     ) -> impl Future<Output = io::Result<Self>> + Send;
@@ -156,9 +184,10 @@ pub trait NineP: Sized {
     /// Create a new [Coro] that reads from a [SharedBuf] to parse 9p protocol messages with
     /// minimal allocation.
     fn read_9p_coro(
+        msize: u32,
         buf: &SharedBuf,
     ) -> ReadyCoro<usize, (), io::Result<Self>, impl Future<Output = io::Result<Self>> + Send> {
-        Coro::from(async move |handle: Handle<usize>| Self::read_9p(buf, handle).await)
+        Coro::from(async move |handle: Handle<usize>| Self::read_9p(msize, buf, handle).await)
     }
 }
 
@@ -185,7 +214,7 @@ macro_rules! impl_u {
                     Ok(())
                 }
 
-                async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<$ty> {
+                async fn read_9p(_msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<$ty> {
                     let n = size_of::<$ty>();
                     handle.yield_value(n).await;
 
@@ -225,12 +254,13 @@ impl NineP for String {
         Ok(())
     }
 
-    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
-        let len = u16::read_9p(buf, handle).await? as usize;
-        handle.yield_value(len).await;
+    async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let n = u16::read_9p(msize, buf, handle).await? as usize;
+        validate_msize(n as u32, msize)?;
+        handle.yield_value(n).await;
 
         // SAFETY: this is the only read we are doing and it matches the data we requested
-        let data = unsafe { buf.as_slice_to(len).to_vec() };
+        let data = unsafe { buf.as_slice_to(n).to_vec() };
 
         String::from_utf8(data).map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))
     }
@@ -263,11 +293,11 @@ impl<T: NineP + fmt::Debug + Send> NineP for Vec<T> {
         Ok(())
     }
 
-    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
-        let len = u16::read_9p(buf, handle).await? as usize;
+    async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let len = u16::read_9p(msize, buf, handle).await? as usize;
         let mut elems = Vec::with_capacity(len);
         for _ in 0..len {
-            elems.push(T::read_9p(buf, handle).await?);
+            elems.push(T::read_9p(msize, buf, handle).await?);
         }
 
         Ok(elems)
@@ -311,7 +341,7 @@ impl TryFrom<Data> for Vec<RawStat> {
         let sb = SharedBuf::default();
 
         loop {
-            match RawStat::read_from(&sb, &mut bytes) {
+            match RawStat::read_from(u32::MAX, &sb, &mut bytes) {
                 Ok(rs) => {
                     buf.push(rs);
                 }
@@ -341,18 +371,13 @@ impl NineP for Data {
         Ok(())
     }
 
-    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
-        let len = u32::read_9p(buf, handle).await? as usize;
-        if len > MAX_DATA_LEN {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("data field too long: max={MAX_DATA_LEN} len={len}"),
-            ));
-        }
-        handle.yield_value(len).await;
+    async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let n = u32::read_9p(msize, buf, handle).await? as usize;
+        validate_msize(n as u32, msize)?;
+        handle.yield_value(n).await;
 
         // SAFETY: this is the only read we are doing and it matches the data we requested
-        let data = unsafe { buf.as_slice_to(len).to_vec() };
+        let data = unsafe { buf.as_slice_to(n).to_vec() };
 
         Ok(Data(data))
     }
@@ -415,8 +440,10 @@ impl NineP for RawStat {
         )
     }
 
-    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+    async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
         // Request the fixed sized data before the strings in one block up front
+        // -> Strictly speaking we should validate against msize here but if msize is < 41 then we
+        //    will have already errored at the point of parsing the message
         handle.yield_value(41).await;
 
         // SAFETY: this is the only read we are doing and it matches the data we requested
@@ -430,10 +457,10 @@ impl NineP for RawStat {
         let atime = from_le_bytes!(u32, &bytes[25..]);
         let mtime = from_le_bytes!(u32, &bytes[29..]);
         let length = from_le_bytes!(u64, &bytes[33..]);
-        let name = String::read_9p(buf, handle).await?;
-        let uid = String::read_9p(buf, handle).await?;
-        let gid = String::read_9p(buf, handle).await?;
-        let muid = String::read_9p(buf, handle).await?;
+        let name = String::read_9p(msize, buf, handle).await?;
+        let uid = String::read_9p(msize, buf, handle).await?;
+        let gid = String::read_9p(msize, buf, handle).await?;
+        let muid = String::read_9p(msize, buf, handle).await?;
 
         Ok(RawStat {
             size,
@@ -485,10 +512,10 @@ impl NineP for Qid {
         write_fields!(buf, self, ty, version, path)
     }
 
-    async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
-        let ty = u8::read_9p(buf, handle).await?;
-        let version = u32::read_9p(buf, handle).await?;
-        let path = u64::read_9p(buf, handle).await?;
+    async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let ty = u8::read_9p(msize, buf, handle).await?;
+        let version = u32::read_9p(msize, buf, handle).await?;
+        let path = u64::read_9p(msize, buf, handle).await?;
 
         Ok(Qid { ty, version, path })
     }
@@ -601,9 +628,20 @@ macro_rules! impl_message_format {
             }
 
             #[allow(unused_assignments, unused_unsafe)]
-            async fn read_9p(buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
-                let len = u32::read_9p(buf, handle).await? as usize;
-                handle.yield_value(len-4).await;
+            async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+                let len = u32::read_9p(msize, buf, handle).await?;
+
+                // Guard against messages that are over the negotiated msize and smaller than the
+                // minimum message header size so we don't panic when we
+                validate_msize(len, msize)?;
+                if len < 7 {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!("minimum valid message size is 7 bytes, got {len}"),
+                    ));
+                }
+
+                handle.yield_value((len - 4) as usize).await;
 
                 // SAFETY: this is inside a running coro so the outer code is unable to take a
                 //         reference to buf while we update `pos` and read from the inner buffer
@@ -615,7 +653,7 @@ macro_rules! impl_message_format {
                     let content = match MessageType(ty) {
                         $(
                             MessageType::$message_variant => $enum_ty::$enum_variant {
-                                $($field: buf.parse_from_buffer::<$ty>()?),*
+                                $($field: buf.parse_from_buffer::<$ty>(msize)?),*
                             },
                         )+
 
@@ -841,6 +879,26 @@ pub struct Rmessage {
     pub content: Rdata,
 }
 
+impl Rmessage {
+    /// Construct a new [Rmessage]
+    pub const fn new(tag: u16, content: Rdata) -> Self {
+        Self { tag, content }
+    }
+
+    /// Replace `self.content` with an [Rdata::Error] this message's serialized size exceeds `msize`.
+    pub(crate) fn clamp(&mut self, msize: u32) {
+        let n = self.n_bytes() as u32;
+
+        if n > msize {
+            self.content = Rdata::Error {
+                ename: format!(
+                    "request generated a response of {n} bytes which is larger than msize ({msize})",
+                ),
+            };
+        }
+    }
+}
+
 /// Generate the Rdata enum along with the wrapped R-message types
 /// and their implementations of Format9p
 macro_rules! impl_rdata {
@@ -978,15 +1036,21 @@ mod tests {
         let buf: Vec<u8> = vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
         let sb = SharedBuf::default();
 
-        assert_eq!(0x01, u8::read_from(&sb, &mut buf.as_slice()).unwrap());
-        assert_eq!(0x2301, u16::read_from(&sb, &mut buf.as_slice()).unwrap());
+        assert_eq!(
+            0x01,
+            u8::read_from(DEFAULT_MSIZE, &sb, &mut buf.as_slice()).unwrap()
+        );
+        assert_eq!(
+            0x2301,
+            u16::read_from(DEFAULT_MSIZE, &sb, &mut buf.as_slice()).unwrap()
+        );
         assert_eq!(
             0x67452301,
-            u32::read_from(&sb, &mut buf.as_slice()).unwrap()
+            u32::read_from(DEFAULT_MSIZE, &sb, &mut buf.as_slice()).unwrap()
         );
         assert_eq!(
             0xefcdab8967452301,
-            u64::read_from(&sb, &mut buf.as_slice()).unwrap()
+            u64::read_from(DEFAULT_MSIZE, &sb, &mut buf.as_slice()).unwrap()
         );
     }
 
@@ -1027,7 +1091,7 @@ mod tests {
     {
         let buf = t1.write_9p_bytes().unwrap();
         let sb = SharedBuf::default();
-        let t2 = T::read_from(&sb, &mut buf.as_slice()).unwrap();
+        let t2 = T::read_from(DEFAULT_MSIZE, &sb, &mut buf.as_slice()).unwrap();
 
         assert_eq!(t1, t2);
     }
@@ -1104,6 +1168,112 @@ mod tests {
         }
     }
 
+    #[test_case(0, ErrorKind::InvalidData; "zero")]
+    #[test_case(4, ErrorKind::InvalidData; "just the size field itself")]
+    #[test_case(6, ErrorKind::InvalidData; "one less than valid header")]
+    #[test_case(9, ErrorKind::FileTooLarge; "valid header but larger than msize")]
+    #[test]
+    fn invalid_tmessage_size_errors(len: u32, expected_kind: ErrorKind) {
+        let bytes = len.to_le_bytes();
+        let err = Tmessage::read_from(8, &SharedBuf::default(), &mut bytes.as_slice()).unwrap_err();
+
+        assert_eq!(err.kind(), expected_kind, "size={len}");
+    }
+
+    // A well-formed 9p message header with an unrecognized type byte for both T and R messages
+    // size[4]=7, type[1]=0xFF, tag[2]=0
+    const UNKNOWN_TYPE_BYTES: [u8; 7] = [7, 0, 0, 0, 0xFF, 0, 0];
+
+    #[test]
+    fn tmessage_with_unknown_type_returns_invalid_data() {
+        let err = Tmessage::read_from(
+            DEFAULT_MSIZE,
+            &SharedBuf::default(),
+            &mut UNKNOWN_TYPE_BYTES.as_slice(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn rmessage_with_unknown_type_returns_invalid_data() {
+        let err = Rmessage::read_from(
+            DEFAULT_MSIZE,
+            &SharedBuf::default(),
+            &mut UNKNOWN_TYPE_BYTES.as_slice(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test_case(1; "one byte missing from body")]
+    #[test_case(4; "entire body missing")]
+    #[test_case(5; "body and one size byte missing")]
+    #[test_case(10; "only first size byte present")]
+    #[test]
+    fn truncated_tmessage_returns_unexpected_eof(truncate_by: usize) {
+        let msg = Tmessage::new(1, Tdata::Clunk { fid: 42 });
+        let mut bytes = msg.write_9p_bytes().unwrap();
+        bytes.truncate(bytes.len() - truncate_by);
+
+        let err = Tmessage::read_from(DEFAULT_MSIZE, &SharedBuf::default(), &mut bytes.as_slice())
+            .unwrap_err();
+
+        assert_eq!(
+            err.kind(),
+            ErrorKind::UnexpectedEof,
+            "truncate_by={truncate_by}"
+        );
+    }
+
+    #[test_case(1; "one byte missing from body")]
+    #[test_case(4; "entire body missing")]
+    #[test_case(5; "body and one size byte missing")]
+    #[test_case(10; "only first size byte present")]
+    #[test]
+    fn truncated_rmessage_returns_unexpected_eof(truncate_by: usize) {
+        let msg = Rmessage::new(1, Rdata::Write { count: 42 });
+        let mut bytes = msg.write_9p_bytes().unwrap();
+        bytes.truncate(bytes.len() - truncate_by);
+
+        let err = Rmessage::read_from(DEFAULT_MSIZE, &SharedBuf::default(), &mut bytes.as_slice())
+            .unwrap_err();
+
+        assert_eq!(
+            err.kind(),
+            ErrorKind::UnexpectedEof,
+            "truncate_by={truncate_by}"
+        );
+    }
+
+    // Exceeding both msize and the size claimed by the header should just trigger the standard
+    // error around exceeding msize.
+    #[test_case(50, ErrorKind::FileTooLarge; "larger than message size and msize")]
+    // Not requesting enough data to exceed msize but still requesting more than the size claimed
+    // by the header should result in an unexpected EOF as we should read the header stated size
+    // into a buffer and then attempt to parse the message from there.
+    #[test_case(DEFAULT_MSIZE, ErrorKind::UnexpectedEof; "larger than message size")]
+    #[test]
+    fn malicious_inner_field_size_errors(msize: u32, expected_kind: ErrorKind) {
+        // A Twalk where the outer message size correctly matches the total length of the payload
+        // but the inner string length field claims an additional 100 bytes of content will follow.
+        //
+        //   size[4]=19  type[1]=110(Twalk)  tag[2]=0
+        //   fid[4]=0  new_fid[4]=1  nwname[2]=1  str_len[2]=100
+        let malicious_bytes = [19, 0, 0, 0, 110, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 100, 0];
+
+        let err = Tmessage::read_from(
+            msize,
+            &SharedBuf::default(),
+            &mut malicious_bytes.as_slice(),
+        )
+        .unwrap_err();
+
+        assert_eq!(err.kind(), expected_kind);
+    }
+
     #[test]
     fn raw_stats_from_data_works() {
         let mut bytes = Vec::new();
@@ -1122,5 +1292,74 @@ mod tests {
         assert_eq!(stats[0].name, "a");
         assert_eq!(stats[1].name, "bb");
         assert_eq!(stats[2].name, "ccc");
+    }
+
+    #[test_case(-1, Some(ErrorKind::FileTooLarge); "msg larger than msize")]
+    #[test_case(1, None; "msg smaller than msize")]
+    #[test_case(0, None; "msg equals msize")]
+    #[test]
+    fn tmessage_read_from_respects_msize(delta: i32, expected_error: Option<ErrorKind>) {
+        let msg = Tmessage::new(1, Tdata::Clunk { fid: 42 });
+        let bytes = msg.write_9p_bytes().unwrap();
+        let msize = (bytes.len() as i32 + delta) as u32;
+
+        let res = Tmessage::read_from(msize, &SharedBuf::default(), &mut bytes.as_slice());
+
+        match expected_error {
+            Some(kind) => assert_eq!(res.unwrap_err().kind(), kind, "expected error"),
+            None => assert!(res.is_ok(), "{res:?}"),
+        }
+    }
+
+    #[test_case(-1, Some(ErrorKind::FileTooLarge); "msg larger than msize")]
+    #[test_case(1, None; "msg smaller than msize")]
+    #[test_case(0, None; "msg equals msize")]
+    #[test]
+    fn rmessage_read_from_respects_msize(delta: i32, expected_error: Option<ErrorKind>) {
+        let msg = Rmessage::new(1, Rdata::Write { count: 42 });
+        let bytes = msg.write_9p_bytes().unwrap();
+        let msize = (bytes.len() as i32 + delta) as u32;
+
+        let res = Rmessage::read_from(msize, &SharedBuf::default(), &mut bytes.as_slice());
+
+        match expected_error {
+            Some(kind) => assert_eq!(res.unwrap_err().kind(), kind, "expected error"),
+            None => assert!(res.is_ok(), "{res:?}"),
+        }
+    }
+
+    #[test]
+    fn string_read_from_errors_when_larger_than_msize() {
+        let s = "a".repeat(1024);
+        let bytes = s.write_9p_bytes().unwrap();
+
+        let err = String::read_from(512, &SharedBuf::default(), &mut bytes.as_slice()).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::FileTooLarge);
+    }
+
+    #[test]
+    fn data_read_from_errors_when_larger_than_msize() {
+        let data = Data(vec![1; 1024]);
+        let bytes = data.write_9p_bytes().unwrap();
+
+        let err = Data::read_from(512, &SharedBuf::default(), &mut bytes.as_slice()).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::FileTooLarge);
+    }
+
+    #[test_case(-1, true; "oversized reply is replaced with Rerror")]
+    #[test_case(0, false; "reply at exactly msize is sent unchanged")]
+    #[test_case(1, false; "undersized reply is sent unchanged")]
+    #[test]
+    fn rmessage_clamp_replaces_with_an_error_when_exceeding_msize(delta: i32, expect_error: bool) {
+        let mut r = Rmessage::new(1, Rdata::Write { count: 42 });
+        let msize = (r.n_bytes() as i32 + delta) as u32;
+
+        r.clamp(msize);
+
+        if expect_error {
+            assert!(matches!(r.content, Rdata::Error { .. }), "expected Error",);
+        } else {
+            assert_eq!(r.content, Rdata::Write { count: 42 }, "expected Write");
+        }
     }
 }

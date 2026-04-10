@@ -1,7 +1,7 @@
 //! Tokio based asynchronous implementation of 9p Servers and Clients
 use crate::{
     Result,
-    sansio::protocol::{NineP, Rdata, Rmessage, SharedBuf},
+    sansio::protocol::{NineP, Rdata, Rmessage, SharedBuf, validate_msize},
 };
 use simple_coro::CoroState;
 use std::{future::Future, io, marker::Unpin};
@@ -24,11 +24,15 @@ pub trait AsyncNineP: NineP + Send + Sync {
     }
 
     /// Decode self from 9p protocol bytes coming from the given [AsyncRead].
-    fn read_from<R>(buf: &SharedBuf, r: &mut R) -> impl Future<Output = io::Result<Self>> + Send
+    fn read_from<R>(
+        msize: u32,
+        buf: &SharedBuf,
+        r: &mut R,
+    ) -> impl Future<Output = io::Result<Self>> + Send
     where
         R: AsyncRead + Unpin + Send,
     {
-        read_from(buf, r)
+        read_from(msize, buf, r)
     }
 }
 
@@ -51,15 +55,20 @@ where
 }
 
 #[inline(always)]
-async fn read_from<T, R>(buf: &SharedBuf, r: &mut R) -> io::Result<T>
+async fn read_from<T, R>(msize: u32, buf: &SharedBuf, r: &mut R) -> io::Result<T>
 where
     T: NineP + Send,
     R: AsyncRead + Unpin + Send,
 {
-    let mut coro = T::read_9p_coro(buf);
+    let mut coro = T::read_9p_coro(msize, buf);
+    let mut total_bytes: u32 = 0;
+
     loop {
         coro = match coro.resume() {
             CoroState::Pending(c, n) => {
+                total_bytes = total_bytes.saturating_add(n as u32);
+                validate_msize(total_bytes, msize)?;
+
                 // SAFETY: coro is currently suspended and unable to take a reference to buf
                 let mut_buf = unsafe { buf.as_inner_mut() };
                 mut_buf.resize(n, 0);
@@ -77,8 +86,9 @@ where
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + Sized + 'static {
     /// Reply to the specified tag with a given Result. Err's will be converted to 9p error
     /// messages automatically.
-    async fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
+    async fn reply(&mut self, msize: u32, tag: u16, resp: Result<Rdata>) {
+        let mut r: Rmessage = (tag, resp).into();
+        r.clamp(msize);
         let _ = r.write_to(self).await;
     }
 }

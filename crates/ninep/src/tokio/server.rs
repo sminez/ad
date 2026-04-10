@@ -241,7 +241,7 @@ where
     U: AsyncStream,
 {
     async fn reply_async(&mut self, tag: u16, resp: Result<Rdata>) {
-        self.stream.reply(tag, resp).await
+        self.stream.reply(self.session_state.msize, tag, resp).await
     }
 }
 
@@ -252,7 +252,7 @@ where
 {
     async fn handle_connection_async(mut self) {
         loop {
-            let t = match Tmessage::read_from(&self.buf, &mut self.stream).await {
+            let t = match Tmessage::read_from(self.msize, &self.buf, &mut self.stream).await {
                 Ok(t) => t,
                 Err(_) => return,
             };
@@ -290,11 +290,11 @@ where
                 // Blocked read came through so send it to the client
                 Some((tag, data)) = rx.recv() => {
                     self.stream
-                        .reply(tag, Ok(Rdata::Read { data: Data(data) }))
+                        .reply(self.msize, tag, Ok(Rdata::Read { data: Data(data) }))
                         .await;
                     continue;
                 },
-                res = Tmessage::read_from(&self.buf, &mut self.stream) => match res {
+                res = Tmessage::read_from(self.msize, &self.buf, &mut self.stream) => match res {
                     Ok(t) => t,
                     Err(_) => return self.clunk_and_clear_async().await,
                 },

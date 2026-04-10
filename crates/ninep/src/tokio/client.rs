@@ -23,6 +23,7 @@ pub struct Client<S> {
     state: Arc<Mutex<State>>,
     stream: Arc<Mutex<S>>,
     buf: SharedBuf,
+    msize: u32,
 }
 
 impl<S> Clone for Client<S> {
@@ -31,6 +32,7 @@ impl<S> Clone for Client<S> {
             state: Arc::clone(&self.state),
             stream: Arc::clone(&self.stream),
             buf: SharedBuf::default(),
+            msize: self.msize,
         }
     }
 }
@@ -45,6 +47,7 @@ impl<S> Client<S> {
             })),
             stream: Arc::new(Mutex::new(stream)),
             buf: SharedBuf::default(),
+            msize: MSIZE,
         }
     }
 }
@@ -111,6 +114,7 @@ macro_rules! run_9p_coro {
     ($self:ident, $method:ident, $($arg:expr),*) => {
         {
             let mut state = $self.state.lock().await;
+            let msize = state.msize;
             let mut coro = state.$method($($arg),*);
             loop {
                 coro = match coro.resume() {
@@ -119,7 +123,7 @@ macro_rules! run_9p_coro {
                         let mut stream = $self.stream.lock().await;
                         t.write_to(&mut *stream).await?;
 
-                        match Rmessage::read_from(&$self.buf, &mut *stream).await? {
+                        match Rmessage::read_from(msize, &$self.buf, &mut *stream).await? {
                             Rmessage {
                                 content: Rdata::Error { ename },
                                 ..
@@ -141,7 +145,7 @@ where
         let mut stream = self.stream.lock().await;
         Tmessage { tag, content }.write_to(&mut *stream).await?;
 
-        match Rmessage::read_from(&self.buf, &mut *stream).await? {
+        match Rmessage::read_from(self.msize, &self.buf, &mut *stream).await? {
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
@@ -156,7 +160,11 @@ where
         uname: impl Into<String>,
         aname: impl Into<String>,
     ) -> io::Result<()> {
-        run_9p_coro!(self, handle_connect, uname.into(), aname.into())
+        run_9p_coro!(self, handle_connect, uname.into(), aname.into())?;
+        let msize = self.state.lock().await.msize;
+        self.msize = msize;
+
+        Ok(())
     }
 
     /// Associate the given path with a new fid.

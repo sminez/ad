@@ -1,7 +1,7 @@
 //! A synchronous implementation of 9p Servers and Clients
 use crate::{
     Result,
-    sansio::protocol::{NineP, SharedBuf},
+    sansio::protocol::{NineP, SharedBuf, validate_msize},
 };
 use simple_coro::CoroState;
 use std::{
@@ -25,11 +25,16 @@ pub trait SyncNineP: NineP {
     }
 
     /// Decode self from 9p protocol bytes coming from the given [SyncStream].
-    fn read_from<R: Read>(buf: &SharedBuf, r: &mut R) -> io::Result<Self> {
-        let mut coro = Self::read_9p_coro(buf);
+    fn read_from<R: Read>(msize: u32, buf: &SharedBuf, r: &mut R) -> io::Result<Self> {
+        let mut coro = Self::read_9p_coro(msize, buf);
+        let mut total_bytes: u32 = 0;
+
         loop {
             coro = match coro.resume() {
                 CoroState::Pending(c, n) => {
+                    total_bytes = total_bytes.saturating_add(n as u32);
+                    validate_msize(total_bytes, msize)?;
+
                     // SAFETY: coro is currently suspended and unable to take a reference to buf
                     let mut_buf = unsafe { buf.as_inner_mut() };
                     mut_buf.resize(n, 0);
