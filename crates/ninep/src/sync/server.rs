@@ -6,7 +6,7 @@ use crate::{
     Result,
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
-        protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
+        protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
         server::{
             Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
             E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta,
@@ -23,7 +23,11 @@ use std::{
     net::TcpListener,
     os::unix::net::UnixListener,
     path::PathBuf,
-    sync::mpsc::Receiver,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+        mpsc::{Receiver, Sender, channel},
+    },
     thread::{JoinHandle, spawn},
 };
 
@@ -38,6 +42,13 @@ pub enum ReadOutcome {
     /// No response should be sent until data is received on the provided channel
     Blocked(Receiver<Vec<u8>>),
 }
+
+/// Tri-state of the three cases we need to process in the event loop for handling an ongoing
+/// connection:
+/// 1. Tmessage from the client
+/// 2. Blocked read resolving
+/// 3. Error on the client stream (None)
+type Event = Option<Either<Tmessage, (u16, Vec<u8>)>>;
 
 #[derive(Debug)]
 struct Socket {
@@ -254,22 +265,59 @@ where
         self.state.fids.clear();
     }
 
+    fn spawn_reader(&self, tx: Sender<Event>, msize: Arc<AtomicU32>) -> Option<JoinHandle<()>>
+    where
+        U: SyncServerStream,
+    {
+        let mut stream = self.stream.try_clone().ok()?;
+        let h = spawn(move || {
+            let buf = SharedBuf::default();
+            loop {
+                let msize = msize.load(Ordering::Relaxed);
+                let t = match Tmessage::read_from(msize, &buf, &mut stream) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        _ = tx.send(None);
+                        return;
+                    }
+                };
+
+                if tx.send(Some(Either::L(t))).is_err() {
+                    return;
+                }
+            }
+        });
+
+        Some(h)
+    }
+
     fn handle_connection(mut self) {
         use Tdata::*;
 
-        loop {
-            let t = match Tmessage::read_from(self.msize, &self.buf, &mut self.stream) {
-                Ok(t) => t,
-                Err(_) => return self.clunk_and_clear(),
-            };
+        let current_msize = Arc::new(AtomicU32::new(self.msize));
+        let (tx, rx) = channel();
 
-            let Tmessage { tag, content } = t;
+        let _handle = match self.spawn_reader(tx.clone(), current_msize.clone()) {
+            None => return self.clunk_and_clear(),
+            Some(h) => h,
+        };
+
+        loop {
+            let (tag, content) = match rx.recv() {
+                Ok(Some(Either::L(Tmessage { tag, content }))) => (tag, content),
+                Ok(Some(Either::R((tag, data)))) => {
+                    self.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                    continue;
+                }
+                Ok(None) | Err(_) => return self.clunk_and_clear(),
+            };
 
             let resp = match content {
                 Auth { .. } | Attach { .. } => Err(E_ALREADY_ATTACHED.into()),
                 Flush { .. } => Ok(Rdata::Flush {}),
                 Version { msize, version } => {
                     let rdata = self.handle_version(msize, version);
+                    current_msize.store(self.msize, Ordering::Relaxed);
                     self.clunk_and_clear();
 
                     Ok(rdata)
@@ -289,11 +337,14 @@ where
                     perm,
                     mode,
                 } => self.handle_create(fid, name, Perm::new(perm), Mode::new(mode)),
-                Read { fid, offset, count } => match self.handle_read(tag, fid, offset, count) {
-                    Ok(Some(resp)) => Ok(resp),
-                    Err(err) => Err(err),
-                    Ok(None) => continue,
-                },
+                Read { fid, offset, count } => {
+                    let res = self.handle_read(tag, fid, offset, count, &tx);
+                    match res {
+                        Ok(Some(resp)) => Ok(resp),
+                        Err(err) => Err(err),
+                        Ok(None) => continue,
+                    }
+                }
                 Write { fid, offset, data } => self.handle_write(fid, offset, data.0),
                 Remove { fid } => self.handle_remove(fid),
                 Wstat { fid, stat, .. } => self.handle_wstat(fid, stat),
@@ -461,6 +512,7 @@ where
         fid: u32,
         offset: u64,
         count: u32,
+        tx: &Sender<Event>,
     ) -> Result<Option<Rdata>> {
         let cid = self.client_id;
         let coro = self.session_state.handle_attached_read(fid, offset, count);
@@ -477,12 +529,10 @@ where
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(chan) => {
-                        let mut stream = self.stream.try_clone()?;
+                        let tx = tx.clone();
                         spawn(move || {
                             let data = chan.recv().unwrap_or_default();
-                            let resp = Ok(Rdata::Read { data: Data(data) });
-                            let r: Rmessage = (tag, resp).into();
-                            let _ = r.write_to(&mut stream);
+                            _ = tx.send(Some(Either::R((tag, data))));
                         });
 
                         Ok(None)
