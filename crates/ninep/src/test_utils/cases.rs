@@ -114,6 +114,7 @@ macro_rules! generate_test_suite {
             clunk_unknown_fid_returns_error,
             connection_close_clunks_all_open_fids,
             create_in_directory_returns_rcreate,
+            create_masks_permissions_before_call,
             create_on_non_directory_returns_error,
             create_with_dot_name_returns_error,
             create_with_double_dot_name_returns_error,
@@ -372,14 +373,17 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
             E_WALK_OPEN_FID,
         ),
         Step::AssertCalls {
-            calls: vec![Call::create(
-                ClientId(0),
-                ROOT_QID,
-                "new.txt",
-                perm,
-                Mode::new(0),
-                "user",
-            )],
+            calls: vec![
+                Call::stat(ClientId(0), ROOT_QID, "user"),
+                Call::create(
+                    ClientId(0),
+                    ROOT_QID,
+                    "new.txt",
+                    Perm::OWNER_READ,
+                    Mode::new(0),
+                    "user",
+                ),
+            ],
         },
     ]
 }
@@ -620,14 +624,56 @@ pub(crate) fn create_in_directory_returns_rcreate() -> TestCase {
             },
         },
         Step::AssertCalls {
-            calls: vec![Call::create(
-                ClientId(0),
-                ROOT_QID,
-                "new.txt",
-                perm,
-                Mode::new(0),
-                "user",
-            )],
+            calls: vec![
+                Call::stat(ClientId(0), ROOT_QID, "user"),
+                Call::create(
+                    ClientId(0),
+                    ROOT_QID,
+                    "new.txt",
+                    Perm::OWNER_READ,
+                    Mode::new(0),
+                    "user",
+                ),
+            ],
+        },
+    ]
+}
+
+pub(crate) fn create_masks_permissions_before_call() -> TestCase {
+    let requested = Perm::OWNER_READ
+        | Perm::OWNER_WRITE
+        | Perm::GROUP_READ
+        | Perm::GROUP_WRITE
+        | Perm::OTHER_READ
+        | Perm::OTHER_WRITE;
+
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::Request {
+            req: Tdata::Create {
+                fid: 0,
+                name: "masked.txt".to_string(),
+                perm: requested.bits(),
+                mode: 0,
+            },
+            resp: Rdata::Create {
+                qid: file_qid(CREATED_QID),
+                iounit: TEST_IOUNIT,
+            },
+        },
+        Step::AssertCalls {
+            calls: vec![
+                Call::stat(ClientId(0), ROOT_QID, "user"),
+                Call::create(
+                    ClientId(0),
+                    ROOT_QID,
+                    "masked.txt",
+                    Perm::OWNER_READ,
+                    Mode::new(0),
+                    "user",
+                ),
+            ],
         },
     ]
 }

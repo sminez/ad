@@ -582,9 +582,20 @@ where
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
+        let parent = self
+            .s
+            .stat(self.client_id, fm.qid, &self.state.uname)
+            .await?;
         let (fm, iounit) = self
             .s
-            .create(self.client_id, fm.qid, &name, perm, mode, &self.state.uname)
+            .create(
+                self.client_id,
+                fm.qid,
+                &name,
+                perm.apply_create_mask(parent.perms),
+                mode,
+                &self.state.uname,
+            )
             .await?;
 
         // fid is now changed to point to the newly created file rather than the parent

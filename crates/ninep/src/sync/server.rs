@@ -426,9 +426,15 @@ where
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
-        let (fm, iounit) =
-            self.s
-                .create(self.client_id, fm.qid, &name, perm, mode, &self.state.uname)?;
+        let parent = self.s.stat(self.client_id, fm.qid, &self.state.uname)?;
+        let (fm, iounit) = self.s.create(
+            self.client_id,
+            fm.qid,
+            &name,
+            perm.apply_create_mask(parent.perms),
+            mode,
+            &self.state.uname,
+        )?;
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
