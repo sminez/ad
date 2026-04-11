@@ -12,13 +12,14 @@ use crate::{
             SessionType, Unattached,
         },
     },
+    sync::server::Serve9p,
     tokio::{AsyncNineP, AsyncStream},
 };
 use simple_coro::CoroState;
 use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
     net::{TcpListener, UnixListener},
-    sync::mpsc::{Receiver, UnboundedSender, unbounded_channel},
+    sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel},
     task::{JoinHandle, spawn},
 };
 
@@ -189,6 +190,102 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         wstat: WStat,
         uname: &str,
     ) -> impl Future<Output = Result<()>> + Send;
+}
+
+/// Helper trait for auto-implementing [AsyncServe9p] using an existing synchronous [Serve9p]
+/// implementation.
+///
+/// Each method will implemented by delegating to the existing synchronous implementation.
+pub trait AsyncServe9pFromSync: Serve9p {}
+
+impl<T> AsyncServe9p for T
+where
+    T: AsyncServe9pFromSync,
+{
+    async fn walk(
+        &self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta> {
+        <T as Serve9p>::walk(self, cid, parent_qid, child, uname)
+    }
+
+    async fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+        <T as Serve9p>::open(self, cid, qid, mode, uname)
+    }
+
+    async fn clunk(&self, cid: ClientId, qid: u64) {
+        <T as Serve9p>::clunk(self, cid, qid);
+    }
+
+    async fn create(
+        &self,
+        cid: ClientId,
+        parent: u64,
+        name: &str,
+        perm: Perm,
+        mode: Mode,
+        uname: &str,
+    ) -> Result<(FileMeta, IoUnit)> {
+        <T as Serve9p>::create(self, cid, parent, name, perm, mode, uname)
+    }
+
+    async fn read(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        count: usize,
+        uname: &str,
+    ) -> Result<ReadOutcome> {
+        use crate::sync::server::ReadOutcome as SyncReadOutcome;
+
+        let ro = match <T as Serve9p>::read(self, cid, qid, offset, count, uname)? {
+            SyncReadOutcome::Immediate(data) => ReadOutcome::Immediate(data),
+            SyncReadOutcome::Blocked(srx) => {
+                let (tx, rx) = channel(1);
+
+                tokio::spawn(async move {
+                    if let Ok(data) = srx.recv() {
+                        _ = tx.send(data).await;
+                    }
+                });
+
+                ReadOutcome::Blocked(rx)
+            }
+        };
+
+        Ok(ro)
+    }
+
+    async fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+        <T as Serve9p>::read_dir(self, cid, qid, uname)
+    }
+
+    async fn write(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        data: Vec<u8>,
+        uname: &str,
+    ) -> Result<usize> {
+        <T as Serve9p>::write(self, cid, qid, offset, data, uname)
+    }
+
+    async fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
+        <T as Serve9p>::remove(self, cid, qid, uname)
+    }
+
+    async fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
+        <T as Serve9p>::stat(self, cid, qid, uname)
+    }
+
+    async fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
+        <T as Serve9p>::write_stat(self, cid, qid, wstat, uname)
+    }
 }
 
 impl<S> Server<S>
