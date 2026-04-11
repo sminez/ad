@@ -518,9 +518,9 @@ mod tests {
             let mut client = SyncTestClient::new(client_stream);
             let mut server = Server::new(fs);
 
-            let handle = thread::spawn(move || {
+            let mut handle = Some(thread::spawn(move || {
                 server.new_session(server_stream).handle_connection();
-            });
+            }));
 
             // Run the test case
             let mut next_tag = 0;
@@ -540,6 +540,9 @@ mod tests {
 
                     Step::CloseStream => {
                         let _ = client.stream.shutdown(Shutdown::Both);
+                        if let Some(h) = handle.take() {
+                            h.join().expect("server thread join failed");
+                        }
                         did_shutdown = true;
                     }
                 }
@@ -550,7 +553,9 @@ mod tests {
             }
 
             // wait for the server to shutdown
-            handle.join().expect("server thread join failed");
+            if let Some(h) = handle.take() {
+                h.join().expect("server thread join failed");
+            }
         };
     }
 

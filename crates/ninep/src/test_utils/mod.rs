@@ -1,9 +1,8 @@
 //! Shared test infrastructure for sync and tokio server tests.
-#![allow(dead_code)]
 use crate::{
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
-        client::{MSIZE, State as ClientState},
+        client::MSIZE,
         protocol::{Rmessage, SharedBuf, Tdata, Tmessage},
         server::ClientId,
     },
@@ -14,10 +13,9 @@ use crate::{
     tokio::{AsyncNineP, server::AsyncServe9pFromSync},
 };
 use std::{
-    collections::HashMap,
     io, mem,
     os::unix::net::UnixStream,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::SystemTime,
 };
 use tokio::io::DuplexStream;
@@ -27,9 +25,11 @@ pub(crate) mod cases;
 pub(crate) const ROOT_QID: u64 = 0;
 pub(crate) const HELLO_QID: u64 = 1;
 pub(crate) const SUBDIR_QID: u64 = 2;
+pub(crate) const BLOCKED_QID: u64 = 3;
 pub(crate) const CREATED_QID: u64 = 99;
 
 pub(crate) const HELLO_CONTENT: &[u8] = b"hello world";
+pub(crate) const BLOCKED_CONTENT: &[u8] = b"delayed";
 pub(crate) const TEST_IOUNIT: IoUnit = 8192;
 
 #[derive(Debug, Default, Clone)]
@@ -60,6 +60,7 @@ impl Serve9p for TestFs {
         match (parent_qid, child) {
             (ROOT_QID, "hello") => Ok(FileMeta::file("hello", HELLO_QID)),
             (ROOT_QID, "subdir") => Ok(FileMeta::dir("subdir", SUBDIR_QID)),
+            (ROOT_QID, "blocked") => Ok(FileMeta::file("blocked", BLOCKED_QID)),
             _ => Err(format!("not found: {child}")),
         }
     }
@@ -103,6 +104,14 @@ impl Serve9p for TestFs {
             HELLO_QID => {
                 let src = HELLO_CONTENT.get(offset..).unwrap_or(&[]);
                 Ok(ReadOutcome::Immediate(src[..count.min(src.len())].to_vec()))
+            }
+            BLOCKED_QID => {
+                let (tx, rx) = mpsc::channel();
+                let data = BLOCKED_CONTENT.to_vec();
+                std::thread::spawn(move || {
+                    let _ = tx.send(data);
+                });
+                Ok(ReadOutcome::Blocked(rx))
             }
             _ => Err(format!("unreadable qid: {qid}")),
         }
@@ -165,7 +174,6 @@ impl AsyncServe9pFromSync for TestFs {}
 /// Unlike the sync/tokio clients exported by the main crate, this client is a simple wrapper
 /// around the lower level 9p protocol to facilitate testing.
 pub(crate) struct TestClient<S> {
-    pub(crate) state: ClientState,
     pub(crate) stream: S,
     pub(crate) buf: SharedBuf,
     pub(crate) msize: u32,
@@ -174,11 +182,6 @@ pub(crate) struct TestClient<S> {
 impl<S> TestClient<S> {
     pub fn new(stream: S) -> Self {
         Self {
-            state: ClientState {
-                msize: MSIZE,
-                fids: HashMap::from([(String::new(), 0)]),
-                next_fid: 1,
-            },
             stream,
             buf: SharedBuf::default(),
             msize: MSIZE,

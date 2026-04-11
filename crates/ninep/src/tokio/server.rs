@@ -683,12 +683,12 @@ mod tests {
             let mut client = AsyncTestClient::new(client_stream);
             let mut server = Server::new(fs);
 
-            let handle = task::spawn(async move {
+            let mut handle = Some(task::spawn(async move {
                 server
                     .new_session(server_stream)
                     .handle_connection_async()
                     .await;
-            });
+            }));
 
             // Run the test case
             let mut next_tag = 0;
@@ -708,6 +708,9 @@ mod tests {
 
                     Step::CloseStream => {
                         let _ = client.stream.shutdown().await;
+                        if let Some(h) = handle.take() {
+                            h.await.expect("server task join failed");
+                        }
                         did_shutdown = true;
                     }
                 }
@@ -717,7 +720,9 @@ mod tests {
                 let _ = client.stream.shutdown().await;
             }
 
-            handle.await.expect("server task join failed");
+            if let Some(h) = handle.take() {
+                h.await.expect("server task join failed");
+            }
         };
     }
 
