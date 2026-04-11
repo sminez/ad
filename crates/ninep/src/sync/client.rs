@@ -45,7 +45,7 @@ impl<S> Client<S> {
         Self {
             state: Arc::new(Mutex::new(State {
                 msize: MSIZE,
-                fids: HashMap::from([(String::new(), 0)]),
+                fids: HashMap::from([("/".into(), 0)]),
                 next_fid: 1,
             })),
             stream: Arc::new(Mutex::new(stream)),
