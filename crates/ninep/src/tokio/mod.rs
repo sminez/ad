@@ -6,7 +6,7 @@ use crate::{
 use simple_coro::CoroState;
 use std::{future::Future, io, marker::Unpin};
 use tokio::{
-    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, DuplexStream},
     net::{TcpStream, UnixStream},
 };
 
@@ -93,5 +93,6 @@ pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + Sized + 'static {
     }
 }
 
+impl AsyncStream for DuplexStream {}
 impl AsyncStream for UnixStream {}
 impl AsyncStream for TcpStream {}
