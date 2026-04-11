@@ -660,3 +660,66 @@ where
         Ok(Rdata::Remove {})
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_test_suite,
+        sansio::protocol::Rmessage,
+        test_utils::{AsyncTestClient, TestFs, cases::Step},
+    };
+    use tokio::{
+        io::{AsyncWriteExt, duplex},
+        task,
+    };
+
+    macro_rules! run_one {
+        ($case:expr) => {
+            // Setup the client and server
+            let fs = TestFs::default();
+            let recorded = fs.calls();
+            let (client_stream, server_stream) = duplex(8192);
+            let mut client = AsyncTestClient::new(client_stream);
+            let mut server = Server::new(fs);
+
+            let handle = task::spawn(async move {
+                server
+                    .new_session(server_stream)
+                    .handle_connection_async()
+                    .await;
+            });
+
+            // Run the test case
+            let mut next_tag = 0;
+            let mut did_shutdown = false;
+
+            for step in $case {
+                match step {
+                    Step::Request { req, resp } => {
+                        let tag = next_tag;
+                        next_tag += 1;
+
+                        let rmsg = client.send_async(tag, req).await.unwrap();
+                        assert_eq!(rmsg, Rmessage { tag, content: resp });
+                    }
+
+                    Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),
+
+                    Step::CloseStream => {
+                        let _ = client.stream.shutdown().await;
+                        did_shutdown = true;
+                    }
+                }
+            }
+
+            if !did_shutdown {
+                let _ = client.stream.shutdown().await;
+            }
+
+            handle.await.expect("server task join failed");
+        };
+    }
+
+    generate_test_suite!(tokio, run_one);
+}

@@ -499,3 +499,60 @@ where
         Ok(Rdata::Remove {})
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_test_suite,
+        test_utils::{SyncTestClient, TestFs, cases::Step},
+    };
+    use std::{net::Shutdown, os::unix::net::UnixStream, thread};
+
+    macro_rules! run_one {
+        ($case:expr) => {
+            // Setup the client and server
+            let fs = TestFs::default();
+            let recorded = fs.calls();
+            let (client_stream, server_stream) = UnixStream::pair().unwrap();
+            let mut client = SyncTestClient::new(client_stream);
+            let mut server = Server::new(fs);
+
+            let handle = thread::spawn(move || {
+                server.new_session(server_stream).handle_connection();
+            });
+
+            // Run the test case
+            let mut next_tag = 0;
+            let mut did_shutdown = false;
+
+            for step in $case {
+                match step {
+                    Step::Request { req, resp } => {
+                        let tag = next_tag;
+                        next_tag += 1;
+
+                        let rmsg = client.send_sync(tag, req).unwrap();
+                        assert_eq!(rmsg, Rmessage { tag, content: resp });
+                    }
+
+                    Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),
+
+                    Step::CloseStream => {
+                        let _ = client.stream.shutdown(Shutdown::Both);
+                        did_shutdown = true;
+                    }
+                }
+            }
+
+            if !did_shutdown {
+                let _ = client.stream.shutdown(Shutdown::Both);
+            }
+
+            // wait for the server to shutdown
+            handle.join().expect("server thread join failed");
+        };
+    }
+
+    generate_test_suite!(sync, run_one);
+}
