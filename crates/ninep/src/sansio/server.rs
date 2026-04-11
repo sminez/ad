@@ -26,6 +26,7 @@ pub(crate) const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
 pub(crate) const E_CREATE_NON_DIR: &str = "create in non-directory";
 pub(crate) const E_DUPLICATE_FID: &str = "duplicate fid";
 pub(crate) const E_ILLEGAL_CREATE_NAME: &str = "creating files named '.' or '..' is not allowed";
+pub(crate) const E_ILLEGAL_DIRECTORY_WRITE: &str = "illegal write to directory";
 pub(crate) const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 pub(crate) const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
 pub(crate) const E_UNATTACHED: &str = "session is not attached";

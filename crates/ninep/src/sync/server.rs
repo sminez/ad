@@ -8,8 +8,8 @@ use crate::{
     sansio::{
         protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
-            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME, E_UNKNOWN_FID,
-            Either, Session, SessionType, Unattached,
+            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
+            E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, Session, SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
@@ -477,7 +477,10 @@ where
 
     fn handle_write(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
-        if offset > u32::MAX as u64 {
+
+        if fm.ty == FileType::Directory {
+            return Err(E_ILLEGAL_DIRECTORY_WRITE.to_string());
+        } else if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
@@ -494,7 +497,11 @@ where
 
     fn handle_remove(&mut self, fid: u32) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
-        self.s.remove(self.client_id, fm.qid, &self.state.uname)?;
+        let res = self.s.remove(self.client_id, fm.qid, &self.state.uname);
+
+        // ensure that we clunk before erroring
+        self.s.clunk(self.client_id, fm.qid);
+        res?;
 
         Ok(Rdata::Remove {})
     }

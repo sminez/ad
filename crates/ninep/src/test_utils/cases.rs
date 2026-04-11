@@ -70,12 +70,10 @@ impl Step {
         }
     }
 
-    fn err(req: Tdata, msg: &str) -> Step {
+    fn err(req: Tdata, msg: impl Into<String>) -> Step {
         Step::Request {
             req,
-            resp: Rdata::Error {
-                ename: msg.to_string(),
-            },
+            resp: Rdata::Error { ename: msg.into() },
         }
     }
 }
@@ -108,33 +106,34 @@ macro_rules! generate_test_suite {
         generate_test_suite!(
             @cases $mode, $run_one;
             // Test cases
-            version_sets_negotiated_msize,
-            attach_before_version_returns_error,
             attach_after_version_succeeds,
-            duplicate_attach_returns_error,
-            version_while_attached_clunks_all_open_fids,
-            connection_close_clunks_all_open_fids,
-            flush_returns_rflush,
-            walk_to_known_child_returns_qids,
-            walk_first_element_missing_returns_error,
-            walk_partial_returns_partial_qids,
-            walk_unknown_fid_returns_error,
+            attach_before_version_returns_error,
+            blocked_read_delivers_response_later,
             clunk_known_fid_returns_rclunk_and_calls_serve9p,
             clunk_unknown_fid_returns_error,
-            open_known_fid_returns_ropen,
-            open_unknown_fid_returns_error,
-            read_file_returns_data,
-            read_dir_returns_serialized_stats,
-            write_to_file_returns_byte_count,
-            write_with_oversized_offset_returns_error,
-            stat_known_fid_returns_rstat,
-            stat_unknown_fid_returns_error,
+            connection_close_clunks_all_open_fids,
             create_in_directory_returns_rcreate,
+            create_on_non_directory_returns_error,
             create_with_dot_name_returns_error,
             create_with_double_dot_name_returns_error,
-            create_on_non_directory_returns_error,
+            duplicate_attach_returns_error,
+            flush_returns_rflush,
+            open_known_fid_returns_ropen,
+            open_unknown_fid_returns_error,
+            read_dir_returns_serialized_stats,
+            read_file_returns_data,
             remove_known_fid_returns_rremove,
-            blocked_read_delivers_response_later,
+            stat_known_fid_returns_rstat,
+            stat_unknown_fid_returns_error,
+            version_sets_negotiated_msize,
+            version_while_attached_clunks_all_open_fids,
+            walk_first_element_missing_returns_error,
+            walk_partial_returns_partial_qids,
+            walk_to_known_child_returns_qids,
+            walk_unknown_fid_returns_error,
+            write_to_directory_returns_error,
+            write_to_file_returns_byte_count,
+            write_with_oversized_offset_returns_error,
         );
     };
 
@@ -172,17 +171,15 @@ pub(crate) fn version_sets_negotiated_msize() -> TestCase {
 
 pub(crate) fn attach_before_version_returns_error() -> TestCase {
     vec![
-        Step::Request {
-            req: Tdata::Attach {
+        Step::err(
+            Tdata::Attach {
                 fid: 0,
                 afid: AFID_NO_AUTH,
                 uname: "user".to_string(),
                 aname: "/".to_string(),
             },
-            resp: Rdata::Error {
-                ename: E_NO_VERSION_MESSAGE.to_string(),
-            },
-        },
+            E_NO_VERSION_MESSAGE,
+        ),
         Step::AssertCalls { calls: vec![] },
     ]
 }
@@ -466,16 +463,14 @@ pub(crate) fn write_with_oversized_offset_returns_error() -> TestCase {
         Step::version_req(),
         Step::attach_req(),
         Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
-        Step::Request {
-            req: Tdata::Write {
+        Step::err(
+            Tdata::Write {
                 fid: 1,
                 offset,
                 data: Data(vec![1]),
             },
-            resp: Rdata::Error {
-                ename: format!("offset too large: {offset} > {}", u32::MAX),
-            },
-        },
+            format!("offset too large: {offset} > {}", u32::MAX),
+        ),
         Step::AssertCalls {
             calls: vec![Call::walk(ClientId(0), ROOT_QID, "hello", "user")],
         },
@@ -616,6 +611,7 @@ pub(crate) fn remove_known_fid_returns_rremove() -> TestCase {
             calls: vec![
                 Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
                 Call::remove(ClientId(0), HELLO_QID, "user"),
+                Call::clunk(ClientId(0), HELLO_QID),
             ],
         },
     ]
@@ -642,5 +638,21 @@ pub(crate) fn blocked_read_delivers_response_later() -> TestCase {
                 Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "user"),
             ],
         },
+    ]
+}
+
+pub(crate) fn write_to_directory_returns_error() -> TestCase {
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::err(
+            Tdata::Write {
+                fid: 0,
+                offset: 0,
+                data: Data(vec![1]),
+            },
+            "illegal write to directory",
+        ),
+        Step::AssertCalls { calls: vec![] },
     ]
 }
