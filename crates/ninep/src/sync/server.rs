@@ -8,8 +8,9 @@ use crate::{
     sansio::{
         protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
         server::{
-            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
-            E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, Session, SessionType, Unattached,
+            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
+            E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta,
+            Session, SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
@@ -247,8 +248,8 @@ where
 {
     /// Explicitly clunk all
     fn clunk_and_clear(&mut self) {
-        for &qid in self.state.fids.values() {
-            self.s.clunk(self.client_id, qid);
+        for meta in self.state.fids.values() {
+            self.s.clunk(self.client_id, meta.qid);
         }
         self.state.fids.clear();
     }
@@ -366,8 +367,8 @@ where
     fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
         match self.state.fids.entry(fid) {
             Entry::Occupied(ent) => {
-                let qid = ent.remove();
-                self.s.clunk(self.client_id, qid);
+                let meta = ent.remove();
+                self.s.clunk(self.client_id, meta.qid);
 
                 Ok(Rdata::Clunk {})
             }
@@ -394,10 +395,20 @@ where
     }
 
     fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
+        if self.try_fid_meta(fid)?.is_open {
+            return Err(E_FID_ALREADY_OPEN.to_string());
+        }
+
         let fm = self.try_file_meta(fid)?;
         let iounit = self
             .s
             .open(self.client_id, fm.qid, mode, &self.state.uname)?;
+
+        self.state
+            .fids
+            .get_mut(&fid)
+            .expect("known fid after try_file_meta")
+            .is_open = true;
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -421,7 +432,7 @@ where
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
-        self.state.fids.insert(fid, fm.qid);
+        self.state.fids.insert(fid, FidMeta::open(fm.qid));
         self.qids.entry(fm.qid).or_insert(fm);
 
         Ok(Rdata::Create { qid, iounit })

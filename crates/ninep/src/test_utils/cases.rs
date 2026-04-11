@@ -3,8 +3,9 @@ use crate::{
     sansio::{
         protocol::{DEFAULT_MSIZE, Data, NineP, Qid, RawStat, Rdata, Tdata},
         server::{
-            AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
-            E_NO_VERSION_MESSAGE, E_UNKNOWN_FID, E_UNKNOWN_FILE, SUPPORTED_VERSION,
+            AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
+            E_ILLEGAL_CREATE_NAME, E_NO_VERSION_MESSAGE, E_UNKNOWN_FID, E_UNKNOWN_FILE,
+            E_WALK_OPEN_FID, SUPPORTED_VERSION,
         },
     },
     test_utils::{
@@ -119,6 +120,7 @@ macro_rules! generate_test_suite {
             duplicate_attach_returns_error,
             flush_returns_rflush,
             open_known_fid_returns_ropen,
+            open_open_fid_returns_error,
             open_unknown_fid_returns_error,
             read_dir_returns_serialized_stats,
             read_file_returns_data,
@@ -129,6 +131,8 @@ macro_rules! generate_test_suite {
             version_while_attached_clunks_all_open_fids,
             walk_first_element_missing_returns_error,
             walk_partial_returns_partial_qids,
+            walk_open_fid_returns_error_after_create,
+            walk_open_fid_returns_error_after_open,
             walk_to_known_child_returns_qids,
             walk_unknown_fid_returns_error,
             write_to_directory_returns_error,
@@ -312,6 +316,74 @@ pub(crate) fn walk_partial_returns_partial_qids() -> TestCase {
     ]
 }
 
+pub(crate) fn walk_open_fid_returns_error_after_open() -> TestCase {
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::Request {
+            req: Tdata::Open { fid: 1, mode: 0 },
+            resp: Rdata::Open {
+                qid: file_qid(HELLO_QID),
+                iounit: TEST_IOUNIT,
+            },
+        },
+        Step::err(
+            Tdata::Walk {
+                fid: 1,
+                new_fid: 2,
+                wnames: vec![],
+            },
+            E_WALK_OPEN_FID,
+        ),
+        Step::AssertCalls {
+            calls: vec![
+                Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
+                Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            ],
+        },
+    ]
+}
+
+pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
+    let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
+
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::Request {
+            req: Tdata::Create {
+                fid: 0,
+                name: "new.txt".to_string(),
+                perm: perm.bits(),
+                mode: 0,
+            },
+            resp: Rdata::Create {
+                qid: file_qid(CREATED_QID),
+                iounit: TEST_IOUNIT,
+            },
+        },
+        Step::err(
+            Tdata::Walk {
+                fid: 0,
+                new_fid: 1,
+                wnames: vec![],
+            },
+            E_WALK_OPEN_FID,
+        ),
+        Step::AssertCalls {
+            calls: vec![Call::create(
+                ClientId(0),
+                ROOT_QID,
+                "new.txt",
+                perm,
+                Mode::new(0),
+                "user",
+            )],
+        },
+    ]
+}
+
 pub(crate) fn walk_unknown_fid_returns_error() -> TestCase {
     vec![
         Step::version_req(),
@@ -367,6 +439,28 @@ pub(crate) fn open_known_fid_returns_ropen() -> TestCase {
                 iounit: TEST_IOUNIT,
             },
         },
+        Step::AssertCalls {
+            calls: vec![
+                Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
+                Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            ],
+        },
+    ]
+}
+
+pub(crate) fn open_open_fid_returns_error() -> TestCase {
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::Request {
+            req: Tdata::Open { fid: 1, mode: 0 },
+            resp: Rdata::Open {
+                qid: file_qid(HELLO_QID),
+                iounit: TEST_IOUNIT,
+            },
+        },
+        Step::err(Tdata::Open { fid: 1, mode: 0 }, E_FID_ALREADY_OPEN),
         Step::AssertCalls {
             calls: vec![
                 Call::walk(ClientId(0), ROOT_QID, "hello", "user"),

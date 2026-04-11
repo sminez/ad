@@ -25,6 +25,7 @@ pub(crate) const E_ALREADY_ATTACHED: &str = "session is already attached";
 pub(crate) const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
 pub(crate) const E_CREATE_NON_DIR: &str = "create in non-directory";
 pub(crate) const E_DUPLICATE_FID: &str = "duplicate fid";
+pub(crate) const E_FID_ALREADY_OPEN: &str = "fid already open";
 pub(crate) const E_ILLEGAL_CREATE_NAME: &str = "creating files named '.' or '..' is not allowed";
 pub(crate) const E_ILLEGAL_DIRECTORY_WRITE: &str = "illegal write to directory";
 pub(crate) const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
@@ -34,6 +35,7 @@ pub(crate) const E_UNATTACHED: &str = "session is not attached";
 pub(crate) const E_UNKNOWN_FID: &str = "unknown fid";
 pub(crate) const E_UNKNOWN_FILE: &str = "unknown file";
 pub(crate) const E_UNKNOWN_ROOT: &str = "unknown root directory";
+pub(crate) const E_WALK_OPEN_FID: &str = "cannot clone open fid";
 pub(crate) const E_WALK_NON_DIR: &str = "walk in non-directory";
 
 pub(crate) const UNKNOWN_VERSION: &str = "unknown";
@@ -134,8 +136,8 @@ impl SessionType for Unattached {}
 pub(crate) struct Attached {
     /// uname of the attached user
     pub(crate) uname: String,
-    /// Map of client fids to server qids
-    pub(crate) fids: BTreeMap<u32, u64>,
+    /// Map of client fids to server file metadata
+    pub(crate) fids: BTreeMap<u32, FidMeta>,
 }
 impl SessionType for Attached {}
 
@@ -143,7 +145,29 @@ impl Attached {
     fn new(uname: String, root_fid: u32, root_qid: u64) -> Self {
         Self {
             uname,
-            fids: [(root_fid, root_qid)].into_iter().collect(),
+            fids: [(root_fid, FidMeta::closed(root_qid))]
+                .into_iter()
+                .collect(),
+        }
+    }
+}
+
+/// Internal metadata for known fids
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FidMeta {
+    pub(crate) qid: u64,
+    pub(crate) is_open: bool,
+}
+
+impl FidMeta {
+    pub(crate) fn open(qid: u64) -> Self {
+        Self { qid, is_open: true }
+    }
+
+    pub(crate) fn closed(qid: u64) -> Self {
+        Self {
+            qid,
+            is_open: false,
         }
     }
 }
@@ -173,9 +197,17 @@ where
 }
 
 impl SessionState<Attached> {
+    pub(crate) fn try_fid_meta(&self, fid: u32) -> Result<FidMeta> {
+        self.state
+            .fids
+            .get(&fid)
+            .copied()
+            .ok_or_else(|| E_UNKNOWN_FID.to_string())
+    }
+
     pub(crate) fn try_file_meta(&self, fid: u32) -> Result<FileMeta> {
         let opt = match self.state.fids.get(&fid) {
-            Some(&qid) => self.qids.get(&qid).cloned(),
+            Some(meta) => self.qids.get(&meta.qid).cloned(),
             None => None,
         };
 
@@ -202,10 +234,14 @@ impl SessionState<Attached> {
                     return Err(E_DUPLICATE_FID.to_string());
                 }
 
+                if self.try_fid_meta(fid)?.is_open {
+                    return Err(E_WALK_OPEN_FID.to_string());
+                }
+
                 let fm = self.try_file_meta(fid)?;
 
                 if wnames.is_empty() {
-                    self.state.fids.insert(new_fid, fm.qid);
+                    self.state.fids.insert(new_fid, FidMeta::closed(fm.qid));
                     return Ok(Rdata::Walk { wqids: vec![] });
                 } else if matches!(fm.ty, FileType::Regular) {
                     return Err(E_WALK_NON_DIR.to_string());
@@ -233,7 +269,7 @@ impl SessionState<Attached> {
                 // new_fid is only bound when all elements were walked successfully
                 if wqids.len() == wnames.len() {
                     let qid = wqids.last().expect("empty was handled above").path;
-                    self.state.fids.insert(new_fid, qid);
+                    self.state.fids.insert(new_fid, FidMeta::closed(qid));
                 }
 
                 Ok(Rdata::Walk { wqids })
@@ -544,7 +580,7 @@ mod tests {
             qids: BTreeMap::from([(QID_ROOT, FileMeta::dir("", QID_ROOT))]),
             state: Attached {
                 uname: "testuser".to_string(),
-                fids: BTreeMap::from([(0, QID_ROOT)]),
+                fids: BTreeMap::from([(0, FidMeta::closed(QID_ROOT))]),
             },
         }
     }
@@ -622,7 +658,10 @@ mod tests {
             .handle_attach(5, AFID_NO_AUTH, "testuser".into(), "/".into())
             .unwrap();
 
-        assert_eq!(attached.fids, BTreeMap::from([(5, QID_ROOT)]));
+        assert_eq!(
+            attached.fids,
+            BTreeMap::from([(5, FidMeta::closed(QID_ROOT))])
+        );
         assert_eq!(attached.uname, "testuser");
         assert_eq!(qid.ty, Mode::DIR.bits());
         assert_eq!(qid.path, QID_ROOT);
@@ -702,7 +741,7 @@ mod tests {
 
         assert_eq!(
             ss.state.fids.get(&1),
-            Some(&QID_ROOT),
+            Some(&FidMeta::closed(QID_ROOT)),
             "new_fid should be bound to root"
         );
     }
@@ -710,7 +749,7 @@ mod tests {
     #[test]
     fn walk_duplicate_new_fid_returns_error() {
         let mut ss = attached_session_state();
-        ss.state.fids.insert(1, 99);
+        ss.state.fids.insert(1, FidMeta::closed(99));
 
         let res = ss
             .handle_attached_walk(0, 1, &["child".to_string()])
@@ -735,7 +774,7 @@ mod tests {
     fn walk_non_dir_returns_error() {
         let mut ss = attached_session_state();
         ss.qids.insert(1, FileMeta::file("file.txt", 1));
-        ss.state.fids.insert(2, 1);
+        ss.state.fids.insert(2, FidMeta::closed(1));
 
         let res = ss
             .handle_attached_walk(2, 3, &["child".to_string()])
@@ -767,7 +806,7 @@ mod tests {
         assert_eq!(wqids[0].path, child_qid, "wqid path should match child qid");
         assert_eq!(
             ss.state.fids.get(&1),
-            Some(&child_qid),
+            Some(&FidMeta::closed(child_qid)),
             "new_fid should be bound to child"
         );
     }
@@ -832,7 +871,7 @@ mod tests {
     fn read_regular_file_yields_file_read_request() {
         let mut ss = attached_session_state();
         ss.qids.insert(1, FileMeta::file("file.txt", 1));
-        ss.state.fids.insert(2, 1);
+        ss.state.fids.insert(2, FidMeta::closed(1));
 
         let coro = ss.handle_attached_read(2, 0, 1024);
 
