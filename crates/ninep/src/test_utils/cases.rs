@@ -131,6 +131,7 @@ macro_rules! generate_test_suite {
             stat_unknown_fid_returns_error,
             create_in_directory_returns_rcreate,
             create_with_dot_name_returns_error,
+            create_with_double_dot_name_returns_error,
             create_on_non_directory_returns_error,
             remove_known_fid_returns_rremove,
             blocked_read_delivers_response_later,
@@ -552,6 +553,25 @@ pub(crate) fn create_with_dot_name_returns_error() -> TestCase {
             Tdata::Create {
                 fid: 0,
                 name: ".".to_string(),
+                perm: perm.bits(),
+                mode: 0,
+            },
+            E_ILLEGAL_CREATE_NAME,
+        ),
+        Step::AssertCalls { calls: vec![] },
+    ]
+}
+
+pub(crate) fn create_with_double_dot_name_returns_error() -> TestCase {
+    let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
+
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::err(
+            Tdata::Create {
+                fid: 0,
+                name: "..".to_string(),
                 perm: perm.bits(),
                 mode: 0,
             },
