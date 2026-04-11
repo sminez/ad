@@ -3,7 +3,7 @@ use crate::{
     Result,
     fs::{FileMeta, FileType, QID_ROOT, Stat},
     sansio::protocol::{
-        DEFAULT_MSIZE, Data, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
+        DEFAULT_MSIZE, Data, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -29,6 +29,7 @@ pub(crate) const E_ILLEGAL_CREATE_NAME: &str = "creating files named '.' or '..'
 pub(crate) const E_ILLEGAL_DIRECTORY_WRITE: &str = "illegal write to directory";
 pub(crate) const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 pub(crate) const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
+pub(crate) const E_OVER_MAXWELEM: &str = "too many walk elements";
 pub(crate) const E_UNATTACHED: &str = "session is not attached";
 pub(crate) const E_UNKNOWN_FID: &str = "unknown fid";
 pub(crate) const E_UNKNOWN_FILE: &str = "unknown file";
@@ -195,7 +196,9 @@ impl SessionState<Attached> {
     > {
         Coro::from(
             move |handle: Handle<(u64, &'a str, &'a str), Result<FileMeta>>| async move {
-                if new_fid != fid && self.state.fids.contains_key(&new_fid) {
+                if wnames.len() > MAXWELEM {
+                    return Err(E_OVER_MAXWELEM.to_string());
+                } else if new_fid != fid && self.state.fids.contains_key(&new_fid) {
                     return Err(E_DUPLICATE_FID.to_string());
                 }
 
@@ -809,6 +812,19 @@ mod tests {
 
         assert_eq!(wqids.len(), 1, "expected partial qid list");
         assert_eq!(wqids[0].path, a_qid, "partial qid should be for 'a'");
+        assert_eq!(ss.state.fids.get(&1), None, "new_fid was bound");
+    }
+
+    #[test]
+    fn walk_over_maxwelem_returns_error() {
+        let mut ss = attached_session_state();
+        let wnames = (0..=MAXWELEM)
+            .map(|i| format!("n{i}"))
+            .collect::<Vec<String>>();
+
+        let res = ss.handle_attached_walk(0, 1, &wnames).resume().unwrap();
+
+        assert_eq!(res.unwrap_err(), E_OVER_MAXWELEM);
         assert_eq!(ss.state.fids.get(&1), None, "new_fid was bound");
     }
 

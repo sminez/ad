@@ -101,7 +101,7 @@ impl Client<TcpStream> {
     ) -> io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
         let mut fids = HashMap::new();
-        fids.insert(String::new(), 0);
+        fids.insert("/".to_string(), 0);
 
         let mut client = Self::new(fids, stream);
         client.connect(uname, aname).await?;

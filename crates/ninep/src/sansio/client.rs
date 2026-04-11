@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p client
 use crate::{
     fs::{Mode, Perm, Stat},
-    sansio::protocol::{Data, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
+    sansio::protocol::{Data, MAXWELEM, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
     sync::SyncNineP,
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -102,28 +102,61 @@ impl State {
         path: String,
     ) -> Coro9p<u32, impl Future<Output = io::Result<u32>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            let new_fid = {
-                if let Some(fid) = self.fids.get(&path) {
-                    return Ok(*fid);
+            if let Some(fid) = self.fids.get(&path) {
+                return Ok(*fid);
+            }
+
+            let wnames: Vec<String> = path
+                .split('/')
+                .filter(|name| !name.is_empty())
+                .map(Into::into)
+                .collect();
+
+            if wnames.is_empty() {
+                // walk to root
+                self.fids.insert(path, 0);
+                return Ok(0);
+            }
+
+            let mut intermediate_fids = Vec::new();
+            let mut fid = 0;
+
+            for chunk in wnames.chunks(MAXWELEM) {
+                let new_fid = self.next_fid();
+                let rmessage = handle
+                    .yield_value(Tmessage::new(
+                        0,
+                        Tdata::Walk {
+                            fid,
+                            new_fid,
+                            wnames: chunk.to_vec(),
+                        },
+                    ))
+                    .await;
+                let wqids = expect_rmessage!(rmessage, Walk { wqids });
+
+                if wqids.len() != chunk.len() {
+                    for fid in intermediate_fids.into_iter().rev() {
+                        _ = handle
+                            .yield_value(Tmessage::new(0, Tdata::Clunk { fid }))
+                            .await;
+                    }
+
+                    return err("walk failed before reaching full path");
                 }
 
-                self.next_fid()
-            };
+                intermediate_fids.push(new_fid);
+                fid = new_fid;
+            }
 
-            // If the walk succeeds then we've successfully associated our new fid with this path
-            // and we don't currently do anything with the qids for each of the path elements
-            handle
-                .yield_value(Tmessage::new(
-                    0,
-                    Tdata::Walk {
-                        fid: 0,
-                        new_fid,
-                        wnames: path.split('/').map(Into::into).collect(),
-                    },
-                ))
-                .await;
-
+            let new_fid = intermediate_fids.pop().unwrap();
             self.fids.insert(path, new_fid);
+
+            for fid in intermediate_fids {
+                _ = handle
+                    .yield_value(Tmessage::new(0, Tdata::Clunk { fid }))
+                    .await;
+            }
 
             Ok(new_fid)
         })
@@ -309,5 +342,89 @@ impl State {
 
             Ok(())
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sansio::protocol::Qid;
+    use std::collections::HashMap;
+
+    #[test]
+    fn handle_walk_chunks_requests_to_maxwelem() {
+        let parts: Vec<String> = (0..=MAXWELEM).map(|i| format!("n{i}")).collect();
+        let full_path = parts.join("/");
+
+        let mut state = State {
+            msize: MSIZE,
+            fids: HashMap::new(),
+            next_fid: 1,
+        };
+
+        let mut coro = state.handle_walk(full_path.clone());
+
+        // first walk should be MAXWELEM elements
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(
+                content,
+                Tdata::Walk {
+                    fid: 0,
+                    new_fid: 1,
+                    wnames: parts[0..MAXWELEM].to_vec()
+                }
+            );
+
+            Rmessage::new(
+                tag,
+                Rdata::Walk {
+                    wqids: vec![Qid::default(); MAXWELEM],
+                },
+            )
+        });
+
+        // second walk should contain the 17th element only
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(
+                content,
+                Tdata::Walk {
+                    fid: 1,
+                    new_fid: 2,
+                    wnames: parts[MAXWELEM..].to_vec()
+                }
+            );
+
+            Rmessage::new(
+                tag,
+                Rdata::Walk {
+                    wqids: vec![Qid::default()],
+                },
+            )
+        });
+
+        // after the walks we should clunk the intermediate fid
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(content, Tdata::Clunk { fid: 1 });
+            Rmessage::new(tag, Rdata::Clunk {})
+        });
+
+        // the provided fid for the walk should now be bound to the full path
+        let fid = coro.resume().unwrap().unwrap();
+        assert_eq!(fid, 2);
+        assert_eq!(state.fids.get(&full_path), Some(&2));
+    }
+
+    #[test]
+    fn handle_walk_empty_path_returns_root_without_messages() {
+        let mut state = State {
+            msize: MSIZE,
+            fids: HashMap::from([("/".to_string(), 0)]),
+            next_fid: 1,
+        };
+
+        let coro = state.handle_walk(String::new());
+        let fid = coro.resume().unwrap().unwrap();
+
+        assert_eq!(fid, 0);
     }
 }
