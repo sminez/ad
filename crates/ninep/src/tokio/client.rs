@@ -8,13 +8,15 @@ use crate::{
     tokio::{AsyncNineP, AsyncStream},
 };
 use simple_coro::CoroState;
-use std::{env, io, mem, path::Path, sync::Arc};
+use std::{env, mem, path::Path, sync::Arc};
 use tokio::{
     net::{TcpStream, ToSocketAddrs, UnixStream},
     sync::Mutex,
 };
 
-/// A 9p client.
+pub use crate::sansio::client::{Error, Result};
+
+/// An asynchronous 9p client.
 ///
 /// Support for each of the operations exposed by this client is determined by the server
 /// implementation that it is connected to.
@@ -60,7 +62,7 @@ impl Client<UnixStream> {
         uname: impl Into<String>,
         path: impl AsRef<Path>,
         aname: impl Into<String>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let stream = UnixStream::connect(path.as_ref()).await?;
         let mut client = Self::new(stream);
         client.connect(uname, aname).await?;
@@ -72,7 +74,7 @@ impl Client<UnixStream> {
     /// namespace.
     ///
     /// The default namespace is located in /tmp/ns.$USER.$DISPLAY/
-    pub async fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> io::Result<Self> {
+    pub async fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> Result<Self> {
         let ns = ns.into();
         let uname = match env::var("USER") {
             Ok(s) => s,
@@ -91,7 +93,7 @@ impl Client<TcpStream> {
         uname: impl Into<String>,
         addr: impl ToSocketAddrs,
         aname: impl Into<String>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let stream = TcpStream::connect(addr).await?;
         let mut client = Self::new(stream);
         client.connect(uname, aname).await?;
@@ -131,7 +133,7 @@ impl<S> Client<S>
 where
     S: AsyncStream,
 {
-    async fn send(&mut self, tag: u16, content: Tdata) -> io::Result<Rmessage> {
+    async fn send(&mut self, tag: u16, content: Tdata) -> Result<Rmessage> {
         let mut stream = self.stream.lock().await;
         Tmessage { tag, content }.write_to(&mut *stream).await?;
 
@@ -145,11 +147,7 @@ where
     }
 
     /// Establish our connection to the target 9p server and begin the session.
-    async fn connect(
-        &mut self,
-        uname: impl Into<String>,
-        aname: impl Into<String>,
-    ) -> io::Result<()> {
+    async fn connect(&mut self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_connect, uname.into(), aname.into())?;
         let msize = self.state.lock().await.msize;
         self.msize = msize;
@@ -158,14 +156,14 @@ where
     }
 
     /// Associate the given path with a new fid.
-    pub async fn walk(&mut self, path: impl Into<String>) -> io::Result<u32> {
+    pub async fn walk(&mut self, path: impl Into<String>) -> Result<u32> {
         run_9p_coro!(self, handle_walk, path.into())
     }
 
     /// Free server side state for the given fid.
     ///
     /// Clunks of the root fid (0) will be ignored
-    pub async fn clunk(&mut self, fid: u32) -> io::Result<()> {
+    pub async fn clunk(&mut self, fid: u32) -> Result<()> {
         if fid != 0 {
             self.send(0, Tdata::Clunk { fid }).await?;
             self.state.lock().await.fids.retain(|_, v| *v != fid);
@@ -175,7 +173,7 @@ where
     }
 
     /// Free server side state for the given path.
-    pub async fn clunk_path(&mut self, path: impl Into<String>) -> io::Result<()> {
+    pub async fn clunk_path(&mut self, path: impl Into<String>) -> Result<()> {
         let fid = match self.state.lock().await.fids.get(&path.into()) {
             Some(fid) => *fid,
             None => return Ok(()),
@@ -185,17 +183,17 @@ where
     }
 
     /// Request the current [Stat] of the file or directory identified by the given path.
-    pub async fn stat(&mut self, path: impl Into<String>) -> io::Result<Stat> {
+    pub async fn stat(&mut self, path: impl Into<String>) -> Result<Stat> {
         run_9p_coro!(self, handle_stat, path.into())
     }
 
     /// Read the full contents of the file at `path` as bytes.
-    pub async fn read(&mut self, path: impl Into<String>) -> io::Result<Vec<u8>> {
+    pub async fn read(&mut self, path: impl Into<String>) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read, path.into())
     }
 
     /// Read the full contents of the file at `path` as utf-8 encoded text.
-    pub async fn read_str(&mut self, path: impl Into<String>) -> io::Result<String> {
+    pub async fn read_str(&mut self, path: impl Into<String>) -> Result<String> {
         let bytes = run_9p_coro!(self, handle_read, path.into())?;
         let s = match String::from_utf8(bytes) {
             Ok(s) => s,
@@ -206,7 +204,7 @@ where
     }
 
     /// Read the directory listing of the directory at `path`.
-    pub async fn read_dir(&mut self, path: impl Into<String>) -> io::Result<Vec<Stat>> {
+    pub async fn read_dir(&mut self, path: impl Into<String>) -> Result<Vec<Stat>> {
         run_9p_coro!(self, handle_read_dir, path.into())
     }
 
@@ -216,7 +214,7 @@ where
         path: impl Into<String>,
         offset: u64,
         content: &[u8],
-    ) -> io::Result<usize> {
+    ) -> Result<usize> {
         run_9p_coro!(self, handle_write, path.into(), offset, content)
     }
 
@@ -226,7 +224,7 @@ where
         path: impl Into<String>,
         offset: u64,
         content: &str,
-    ) -> io::Result<usize> {
+    ) -> Result<usize> {
         run_9p_coro!(self, handle_write, path.into(), offset, content.as_bytes())
     }
 
@@ -237,12 +235,12 @@ where
         name: impl Into<String>,
         perms: Perm,
         mode: Mode,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         run_9p_coro!(self, handle_create, dir.into(), name.into(), perms, mode)
     }
 
     /// Attempt to remove a file from the connected filesystem.
-    pub async fn remove(&mut self, path: impl Into<String>) -> io::Result<()> {
+    pub async fn remove(&mut self, path: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_remove, path.into())
     }
 
@@ -253,7 +251,7 @@ where
     ///
     /// The [ChunkStream] returned by this method provides an asynchronous `next` method that can
     /// be called to await the next chunk.
-    pub async fn stream_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkStream<S>> {
+    pub async fn stream_chunks(&mut self, path: impl Into<String>) -> Result<ChunkStream<S>> {
         let fid = self.walk(path).await?;
         let mode = Mode::FILE.bits();
         let count = self.state.lock().await.msize;
@@ -271,7 +269,7 @@ where
     ///
     /// The [ReadLineStream] returned by this method provides an asynchronous `next` method that can
     /// be called to await the next chunk.
-    pub async fn stream_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineStream<S>> {
+    pub async fn stream_lines(&mut self, path: impl Into<String>) -> Result<ReadLineStream<S>> {
         let fid = self.walk(path).await?;
         let mode = Mode::FILE.bits();
         let count = self.state.lock().await.msize;
@@ -287,7 +285,7 @@ where
         })
     }
 
-    async fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> io::Result<Vec<u8>> {
+    async fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read_count, fid, offset, count)
     }
 }

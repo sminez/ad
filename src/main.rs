@@ -3,7 +3,10 @@ use ad_editor::{
     ParsedArgs, PlumbingRules, Program, USAGE, VERSION, buffer::GapBuffer, exec::SystemRunner,
     regex::CachingStream,
 };
-use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
+use ninep::{
+    sansio::server::socket_dir,
+    sync::client::{self, UnixClient},
+};
 use std::{
     env, fmt, fs,
     io::{self, Read, stdin},
@@ -167,7 +170,7 @@ fn run_9p_command(action: Cmd9p, path: &str, mut client: UnixClient) -> io::Resu
 
 /// Depending on the requested namespace and the presence or absence of an "AD_PID" env var we may
 /// need to adjust the ns to include an ad PID
-fn client_for_ns(ns: &str, aname: String) -> io::Result<UnixClient> {
+fn client_for_ns(ns: &str, aname: String) -> client::Result<UnixClient> {
     if ns != "ad" {
         return UnixClient::new_unix(ns, aname);
     }

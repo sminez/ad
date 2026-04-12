@@ -1,27 +1,95 @@
 //! Traits and structs for implementing a 9p client
 use crate::{
     fs::{Mode, Perm, Stat},
-    sansio::protocol::{Data, MAXWELEM, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
+    sansio::{
+        protocol::{Data, MAXWELEM, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
+        server::AFID_NO_AUTH,
+    },
     sync::SyncNineP,
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
-use std::{cmp::min, collections::HashMap, future::Future, io};
+use std::{cmp::min, collections::HashMap, fmt, future::Future, io};
+
+/// Alias for a [Result][std::result::Result] containing a 9p client [Error].
+pub type Result<T> = std::result::Result<T, Error>;
+
+/// An error that can be encountered by a 9p client.
+#[derive(Debug)]
+pub enum Error {
+    /// An unexpected response was received for a message sent by the client
+    ProtocolViolation {
+        /// The expected response type
+        expected: String,
+        /// The response data received
+        received: Box<Rdata>,
+    },
+    /// The server returned an error
+    Rerror {
+        /// The error string returned by the server
+        ename: String,
+    },
+    /// An IO error was encountered
+    Io(io::Error),
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::ProtocolViolation { expected, received } => write!(
+                f,
+                "9p protocol violation: expected {expected}, but received {received:?}"
+            ),
+            Self::Rerror { ename } => write!(f, "9p error: {ename}"),
+            Self::Io(inner) => write!(f, "IO error: {inner}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(inner) => Some(inner),
+            _ => None,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
+}
+
+impl From<Error> for io::Error {
+    fn from(error: Error) -> Self {
+        match error {
+            Error::Io(inner) => inner,
+            e => io::Error::other(e.to_string()),
+        }
+    }
+}
 
 macro_rules! expect_rmessage {
     ($resp:expr, $variant:ident { $($field:ident),+, .. }) => {
         match $resp.content {
-            Rdata::$variant { $($field),+, .. } => ($($field),+),
-            Rdata::Error { ename } => return err(ename),
-            m => return err(format!("unexpected response: {m:?}")),
+            Rdata::$variant { $($field),+, .. } => Ok(($($field),+)),
+            Rdata::Error { ename } => Err(Error::Rerror { ename }),
+            m => Err(Error::ProtocolViolation {
+                expected: stringify!($variant).to_string(),
+                received: Box::new(m)
+            }),
         }
 
     };
 
     ($resp:expr, $variant:ident { $($field:ident),+ }) => {
         match $resp.content {
-            Rdata::$variant { $($field),+ } => ($($field),+),
-            Rdata::Error { ename } => return err(ename),
-            m => return err(format!("unexpected response: {m:?}")),
+            Rdata::$variant { $($field),+ } => Ok(($($field),+)),
+            Rdata::Error { ename } => Err(Error::Rerror { ename }),
+            m => Err(Error::ProtocolViolation {
+                expected: stringify!($variant).to_string(),
+                received: Box::new(m)
+            }),
         }
 
     };
@@ -30,13 +98,13 @@ macro_rules! expect_rmessage {
 pub(crate) const MSIZE: u32 = u16::MAX as u32;
 pub(crate) const VERSION: &str = "9P2000";
 
-type Coro9p<T, F> = ReadyCoro<Tmessage, Rmessage, io::Result<T>, F>;
+type Coro9p<T, F> = ReadyCoro<Tmessage, Rmessage, Result<T>, F>;
 
-pub(crate) fn err<T, E>(e: E) -> io::Result<T>
+pub(crate) fn err<T, E>(e: E) -> Result<T>
 where
     E: Into<Box<dyn std::error::Error + Send + Sync>>,
 {
-    Err(io::Error::other(e))
+    Err(Error::Io(io::Error::other(e)))
 }
 
 /// Internal sans-IO state for a 9p client implementation that can be used along with an I/O stream
@@ -71,7 +139,7 @@ impl State {
         &mut self,
         uname: String,
         aname: String,
-    ) -> Coro9p<(), impl Future<Output = io::Result<()>> + use<'_>> {
+    ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let rmessage = handle
                 .yield_value(Tmessage::new(
@@ -83,23 +151,24 @@ impl State {
                 ))
                 .await;
 
-            let (msize, version) = expect_rmessage!(rmessage, Version { msize, version });
+            let (msize, version) = expect_rmessage!(rmessage, Version { msize, version })?;
             if version != VERSION {
                 return err("server version not supported");
             }
 
-            handle
+            let rmessage = handle
                 .yield_value(Tmessage::new(
                     0,
                     Tdata::Attach {
                         fid: 0,
-                        afid: u32::MAX, // no auth
+                        afid: AFID_NO_AUTH,
                         uname,
                         aname,
                     },
                 ))
                 .await;
 
+            expect_rmessage!(rmessage, Attach { aqid })?;
             self.msize = msize;
 
             Ok(())
@@ -110,7 +179,7 @@ impl State {
     pub(crate) fn handle_walk(
         &mut self,
         path: String,
-    ) -> Coro9p<u32, impl Future<Output = io::Result<u32>> + use<'_>> {
+    ) -> Coro9p<u32, impl Future<Output = Result<u32>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             if let Some(fid) = self.fids.get(&path) {
                 return Ok(*fid);
@@ -143,7 +212,7 @@ impl State {
                         },
                     ))
                     .await;
-                let wqids = expect_rmessage!(rmessage, Walk { wqids });
+                let wqids = expect_rmessage!(rmessage, Walk { wqids })?;
 
                 if wqids.len() != chunk.len() {
                     for fid in intermediate_fids.into_iter().rev() {
@@ -176,14 +245,14 @@ impl State {
     pub(crate) fn handle_stat(
         &mut self,
         path: String,
-    ) -> Coro9p<Stat, impl Future<Output = io::Result<Stat>> + use<'_>> {
+    ) -> Coro9p<Stat, impl Future<Output = Result<Stat>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             let rmessage = handle
                 .yield_value(Tmessage::new(0, Tdata::Stat { fid }))
                 .await;
 
-            let raw_stat = expect_rmessage!(rmessage, Stat { stat, .. });
+            let raw_stat = expect_rmessage!(rmessage, Stat { stat, .. })?;
             match raw_stat.try_into() {
                 Ok(s) => Ok(s),
                 Err(e) => err(e),
@@ -196,12 +265,12 @@ impl State {
         fid: u32,
         offset: u64,
         count: u32,
-    ) -> Coro9p<Vec<u8>, impl Future<Output = io::Result<Vec<u8>>> + use<'_>> {
+    ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let rmessage = handle
                 .yield_value(Tmessage::new(0, Tdata::Read { fid, offset, count }))
                 .await;
-            let Data(data) = expect_rmessage!(rmessage, Read { data });
+            let Data(data) = expect_rmessage!(rmessage, Read { data })?;
 
             Ok(data)
         })
@@ -211,7 +280,7 @@ impl State {
         &mut self,
         path: String,
         mode: Mode,
-    ) -> Coro9p<Vec<u8>, impl Future<Output = io::Result<Vec<u8>>> + use<'_>> {
+    ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             let mode = mode.bits();
@@ -241,7 +310,7 @@ impl State {
     pub(crate) fn handle_read(
         &mut self,
         path: String,
-    ) -> Coro9p<Vec<u8>, impl Future<Output = io::Result<Vec<u8>>> + use<'_>> {
+    ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         self._read_all(path, Mode::FILE)
     }
 
@@ -249,7 +318,7 @@ impl State {
     pub(crate) fn handle_read_dir(
         &mut self,
         path: String,
-    ) -> Coro9p<Vec<Stat>, impl Future<Output = io::Result<Vec<Stat>>> + use<'_>> {
+    ) -> Coro9p<Vec<Stat>, impl Future<Output = Result<Vec<Stat>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let bytes = handle.yield_from(self._read_all(path, Mode::DIR)).await?;
             let mut buf = io::Cursor::new(bytes);
@@ -263,7 +332,7 @@ impl State {
                         Err(e) => return err(e),
                     },
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
-                    Err(e) => return Err(e),
+                    Err(e) => return Err(Error::Io(e)),
                 }
             }
 
@@ -277,7 +346,7 @@ impl State {
         path: String,
         mut offset: u64,
         content: &'a [u8],
-    ) -> Coro9p<usize, impl Future<Output = io::Result<usize>> + use<'a, 's>> {
+    ) -> Coro9p<usize, impl Future<Output = Result<usize>> + use<'a, 's>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             let len = content.len();
@@ -297,7 +366,7 @@ impl State {
                         },
                     ))
                     .await;
-                let n = expect_rmessage!(rmessage, Write { count });
+                let n = expect_rmessage!(rmessage, Write { count })?;
                 if n == 0 {
                     break;
                 }
@@ -320,7 +389,7 @@ impl State {
         name: String,
         perms: Perm,
         mode: Mode,
-    ) -> Coro9p<(), impl Future<Output = io::Result<()>> + use<'_>> {
+    ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(dir)).await?;
             handle
@@ -343,7 +412,7 @@ impl State {
     pub(crate) fn handle_remove(
         &mut self,
         path: String,
-    ) -> Coro9p<(), impl Future<Output = io::Result<()>> + use<'_>> {
+    ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             handle

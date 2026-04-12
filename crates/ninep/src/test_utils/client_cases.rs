@@ -23,7 +23,7 @@ macro_rules! generate_client_test_suite {
     ($mode:ident, $run_one:ident) => {
         generate_client_test_suite!(
             @cases $mode, $run_one;
-            connect_succeeds,
+            connect_to_known_aname_succeeds,
         );
     };
 
@@ -44,7 +44,7 @@ macro_rules! generate_client_test_suite {
 
 // Test cases for use with the generate_client_test_suite macro above
 
-pub(crate) fn connect_succeeds() -> TestCase {
+pub(crate) fn connect_to_known_aname_succeeds() -> TestCase {
     vec![
         Step::Connect {
             uname: "user".to_string(),
