@@ -859,6 +859,13 @@ impl_tdata! {
     }
 }
 
+impl Tdata {
+    /// Whether or not this is a flush message
+    pub fn is_flush(&self) -> bool {
+        matches!(self, Tdata::Flush { .. })
+    }
+}
+
 /// The Plan 9 File Protocol, 9P, is used for messages between clients and servers. A client
 /// transmits requests (T- messages) to a server, which subsequently returns replies (R-messages)
 /// to the client. The combined acts of transmitting (receiving) a request of a particular type,

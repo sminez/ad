@@ -120,6 +120,7 @@ macro_rules! generate_test_suite {
             create_with_double_dot_name_returns_error,
             duplicate_attach_returns_error,
             flush_returns_rflush,
+            flush_waits_for_blocked_read,
             open_known_fid_returns_ropen,
             open_open_fid_returns_error,
             open_unknown_fid_returns_error,
@@ -271,6 +272,34 @@ pub(crate) fn flush_returns_rflush() -> TestCase {
             resp: Rdata::Flush {},
         },
         Step::AssertCalls { calls: vec![] },
+    ]
+}
+
+pub(crate) fn flush_waits_for_blocked_read() -> TestCase {
+    vec![
+        Step::version_req(),
+        Step::attach_req(),
+        Step::walk_req(0, 1, vec!["blocked"], vec![file_qid(BLOCKED_QID)]),
+        Step::Request {
+            req: Tdata::Read {
+                fid: 1,
+                offset: 0,
+                count: 4096,
+            },
+            resp: Rdata::Read {
+                data: Data(BLOCKED_CONTENT.to_vec()),
+            },
+        },
+        Step::Request {
+            req: Tdata::Flush { old_tag: 3 },
+            resp: Rdata::Flush {},
+        },
+        Step::AssertCalls {
+            calls: vec![
+                Call::walk(ClientId(0), ROOT_QID, "blocked", "user"),
+                Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "user"),
+            ],
+        },
     ]
 }
 

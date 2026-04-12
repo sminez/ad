@@ -9,7 +9,7 @@ use crate::{
 use simple_coro::{Coro, Handle, ReadyCoro};
 use std::{
     cmp::min,
-    collections::btree_map::BTreeMap,
+    collections::{BTreeMap, VecDeque},
     env,
     future::Future,
     ops::{Deref, DerefMut},
@@ -152,26 +152,6 @@ impl Attached {
     }
 }
 
-/// Internal metadata for known fids
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct FidMeta {
-    pub(crate) qid: u64,
-    pub(crate) is_open: bool,
-}
-
-impl FidMeta {
-    pub(crate) fn open(qid: u64) -> Self {
-        Self { qid, is_open: true }
-    }
-
-    pub(crate) fn closed(qid: u64) -> Self {
-        Self {
-            qid,
-            is_open: false,
-        }
-    }
-}
-
 /// Internal state for a running client session other than the user provided filesystem
 /// implementation. We keep this separate in order to allow for splitting borrows between this
 /// state and the filesystem impl when creating coroutine based helper methods.
@@ -215,19 +195,19 @@ impl SessionState<Attached> {
     }
 
     #[expect(clippy::type_complexity)]
-    pub(crate) fn handle_attached_walk<'a, 's: 'a>(
+    pub(crate) fn handle_attached_walk<'s>(
         &'s mut self,
         fid: u32,
         new_fid: u32,
-        wnames: &'a [String],
+        wnames: Vec<String>,
     ) -> ReadyCoro<
-        (u64, &'a str, &'a str),
+        (u64, String, String),
         Result<FileMeta>,
         Result<Rdata>,
-        impl Future<Output = Result<Rdata>> + use<'s, 'a>,
+        impl Future<Output = Result<Rdata>> + use<'s>,
     > {
         Coro::from(
-            move |handle: Handle<(u64, &'a str, &'a str), Result<FileMeta>>| async move {
+            move |handle: Handle<(u64, String, String), Result<FileMeta>>| async move {
                 if wnames.len() > MAXWELEM {
                     return Err(E_OVER_MAXWELEM.to_string());
                 } else if new_fid != fid && self.state.fids.contains_key(&new_fid) {
@@ -249,9 +229,10 @@ impl SessionState<Attached> {
 
                 let mut wqids = Vec::with_capacity(wnames.len());
                 let mut qid = fm.qid;
+                let uname = self.state.uname.clone();
 
                 for name in wnames.iter() {
-                    match handle.yield_value((qid, name, &self.state.uname)).await {
+                    match handle.yield_value((qid, name.clone(), uname.clone())).await {
                         Ok(fm) => {
                             qid = fm.qid;
                             wqids.push(fm.as_qid());
@@ -278,19 +259,19 @@ impl SessionState<Attached> {
     }
 
     #[expect(clippy::type_complexity)]
-    pub(crate) fn handle_attached_read<'a, 's: 'a>(
+    pub(crate) fn handle_attached_read<'s>(
         &'s mut self,
         fid: u32,
         offset: u64,
         count: u32,
     ) -> ReadyCoro<
-        Either<(u64, &'a str), (u64, &'a str)>, // L=read_dir R=read
+        Either<(u64, String), (u64, String)>, // L=read_dir R=read
         Vec<Stat>, // we never send or use a value in response to a read, only read-dir
         Result<Option<Rdata>>,
-        impl Future<Output = Result<Option<Rdata>>> + use<'s, 'a>,
+        impl Future<Output = Result<Option<Rdata>>> + use<'s>,
     > {
         Coro::from(
-            move |handle: Handle<Either<(u64, &'a str), (u64, &'a str)>, Vec<Stat>>| async move {
+            move |handle: Handle<Either<(u64, String), (u64, String)>, Vec<Stat>>| async move {
                 use FileType::*;
 
                 let fm = self.try_file_meta(fid)?;
@@ -301,14 +282,14 @@ impl SessionState<Attached> {
                 let stats = match fm.ty {
                     Regular | AppendOnly | Exclusive => {
                         handle
-                            .yield_value(Either::R((fm.qid, &self.state.uname)))
+                            .yield_value(Either::R((fm.qid, self.state.uname.clone())))
                             .await;
                         return Ok(None); // processing of the ReadOutcome is handled by the caller
                     }
 
                     Directory => {
                         handle
-                            .yield_value(Either::L((fm.qid, &self.state.uname)))
+                            .yield_value(Either::L((fm.qid, self.state.uname.clone())))
                             .await
                     }
                 };
@@ -563,6 +544,78 @@ where
     }
 }
 
+/// Internal metadata for known fids
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FidMeta {
+    pub(crate) qid: u64,
+    pub(crate) is_open: bool,
+}
+
+impl FidMeta {
+    pub(crate) fn open(qid: u64) -> Self {
+        Self { qid, is_open: true }
+    }
+
+    pub(crate) fn closed(qid: u64) -> Self {
+        Self {
+            qid,
+            is_open: false,
+        }
+    }
+}
+
+/// We track in-flight messages so we can associate flush messages against their target `old_tag`.
+/// https://9fans.github.io/plan9port/man/man9/flush.html
+#[derive(Debug, Default)]
+pub(crate) struct FlushHandle {
+    /// Map of message tag to queued flush tags that came in while that message was being processed
+    pending_flushes: BTreeMap<u16, Vec<u16>>,
+}
+
+impl FlushHandle {
+    /// Mark `tag` as being pending so we are able to associate future flush messages with it.
+    pub(crate) fn mark_pending(&mut self, tag: u16) {
+        self.pending_flushes.entry(tag).or_default();
+    }
+
+    /// Build a coroutine that will either request that the caller immediately respond to the
+    /// provided flush tag or chain it behind an existing flush.
+    pub(crate) fn flush_or_chain<'s>(
+        &'s mut self,
+        flush_tag: u16,
+        old_tag: u16,
+    ) -> ReadyCoro<(), (), (), impl Future<Output = ()> + use<'s>> {
+        Coro::from(move |handle: Handle<(), ()>| async move {
+            let should_flush_now =
+                flush_tag == old_tag || !self.pending_flushes.contains_key(&old_tag);
+
+            if should_flush_now {
+                handle.yield_value(()).await;
+            } else {
+                self.mark_pending(flush_tag);
+                if let Some(pending) = self.pending_flushes.get_mut(&old_tag) {
+                    pending.push(flush_tag);
+                }
+            }
+        })
+    }
+
+    /// Collapse any chained flushes for this tag into the complete list of all outstanding flush
+    /// messages that now need to have their responses sent.
+    pub(crate) fn pending_flush_tags(&mut self, tag: u16) -> Vec<u16> {
+        let mut flushed = Vec::new();
+        let mut to_flush: VecDeque<u16> =
+            self.pending_flushes.remove(&tag).unwrap_or_default().into();
+
+        while let Some(flush_tag) = to_flush.pop_front() {
+            flushed.push(flush_tag);
+            to_flush.extend(self.pending_flushes.remove(&flush_tag).unwrap_or_default());
+        }
+
+        flushed
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -732,7 +785,7 @@ mod tests {
     #[test]
     fn walk_empty_wnames_binds_new_fid_to_root() {
         let mut ss = attached_session_state();
-        let res = ss.handle_attached_walk(0, 1, &[]).resume().unwrap();
+        let res = ss.handle_attached_walk(0, 1, vec![]).resume().unwrap();
 
         match res.unwrap() {
             Rdata::Walk { wqids } => assert!(wqids.is_empty(), "expected empty wqids: {wqids:?}"),
@@ -752,7 +805,7 @@ mod tests {
         ss.state.fids.insert(1, FidMeta::closed(99));
 
         let res = ss
-            .handle_attached_walk(0, 1, &["child".to_string()])
+            .handle_attached_walk(0, 1, vec!["child".to_string()])
             .resume()
             .unwrap();
 
@@ -763,7 +816,7 @@ mod tests {
     fn walk_unknown_fid_returns_error() {
         let mut ss = attached_session_state();
         let res = ss
-            .handle_attached_walk(99, 1, &["child".to_string()])
+            .handle_attached_walk(99, 1, vec!["child".to_string()])
             .resume()
             .unwrap();
 
@@ -777,7 +830,7 @@ mod tests {
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let res = ss
-            .handle_attached_walk(2, 3, &["child".to_string()])
+            .handle_attached_walk(2, 3, vec!["child".to_string()])
             .resume()
             .unwrap();
 
@@ -790,7 +843,7 @@ mod tests {
         let wnames = vec!["child".to_string()];
         let child_qid = 42;
 
-        let mut coro = ss.handle_attached_walk(0, 1, &wnames);
+        let mut coro = ss.handle_attached_walk(0, 1, wnames);
         coro = coro.resume().unwrap_pending(|(parent_qid, name, _uname)| {
             assert_eq!(parent_qid, QID_ROOT, "should walk from root");
             assert_eq!(name, "child", "should request child name");
@@ -814,7 +867,7 @@ mod tests {
     #[test]
     fn walk_first_element_failure_returns_error() {
         let mut ss = attached_session_state();
-        let wnames = &["missing".to_string()];
+        let wnames = vec!["missing".to_string()];
 
         let mut coro = ss.handle_attached_walk(0, 1, wnames);
         coro = coro
@@ -829,7 +882,7 @@ mod tests {
     #[test]
     fn walk_partial_walk_returns_partial_qids_and_does_not_bind_new_fid() {
         let mut ss = attached_session_state();
-        let wnames = &["a".to_string(), "b".to_string()];
+        let wnames = vec!["a".to_string(), "b".to_string()];
         let a_qid = 10;
 
         let mut coro = ss.handle_attached_walk(0, 1, wnames);
@@ -861,7 +914,7 @@ mod tests {
             .map(|i| format!("n{i}"))
             .collect::<Vec<String>>();
 
-        let res = ss.handle_attached_walk(0, 1, &wnames).resume().unwrap();
+        let res = ss.handle_attached_walk(0, 1, wnames).resume().unwrap();
 
         assert_eq!(res.unwrap_err(), E_OVER_MAXWELEM);
         assert_eq!(ss.state.fids.get(&1), None, "new_fid was bound");

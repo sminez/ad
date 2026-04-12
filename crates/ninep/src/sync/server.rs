@@ -10,14 +10,13 @@ use crate::{
         server::{
             Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
             E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta,
-            Session, SessionType, Unattached,
+            FlushHandle, Session, SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
 };
 use simple_coro::CoroState;
 use std::{
-    collections::btree_map::Entry,
     fs,
     mem::size_of,
     net::TcpListener,
@@ -265,6 +264,12 @@ where
         self.state.fids.clear();
     }
 
+    fn flush_waiters(&mut self, flush_handle: &mut FlushHandle, tag: u16) {
+        for tag in flush_handle.pending_flush_tags(tag) {
+            self.reply(tag, Ok(Rdata::Flush {}));
+        }
+    }
+
     fn spawn_reader(&self, tx: Sender<Event>, msize: Arc<AtomicU32>) -> Option<JoinHandle<()>>
     where
         U: SyncServerStream,
@@ -296,6 +301,7 @@ where
 
         let current_msize = Arc::new(AtomicU32::new(self.msize));
         let (tx, rx) = channel();
+        let mut flush_handle = FlushHandle::default();
 
         let _handle = match self.spawn_reader(tx.clone(), current_msize.clone()) {
             None => return self.clunk_and_clear(),
@@ -307,14 +313,18 @@ where
                 Ok(Some(Either::L(Tmessage { tag, content }))) => (tag, content),
                 Ok(Some(Either::R((tag, data)))) => {
                     self.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                    self.flush_waiters(&mut flush_handle, tag);
                     continue;
                 }
                 Ok(None) | Err(_) => return self.clunk_and_clear(),
             };
 
+            if !matches!(content, Flush { .. }) {
+                flush_handle.mark_pending(tag);
+            }
+
             let resp = match content {
                 Auth { .. } | Attach { .. } => Err(E_ALREADY_ATTACHED.into()),
-                Flush { .. } => Ok(Rdata::Flush {}),
                 Version { msize, version } => {
                     let rdata = self.handle_version(msize, version);
                     current_msize.store(self.msize, Ordering::Relaxed);
@@ -348,9 +358,17 @@ where
                 Write { fid, offset, data } => self.handle_write(fid, offset, data.0),
                 Remove { fid } => self.handle_remove(fid),
                 Wstat { fid, stat, .. } => self.handle_wstat(fid, stat),
+                Flush { old_tag } => {
+                    flush_handle
+                        .flush_or_chain(tag, old_tag)
+                        .run_sync(|_| self.reply(tag, Ok(Rdata::Flush {})));
+
+                    continue;
+                }
             };
 
             self.reply(tag, resp);
+            self.flush_waiters(&mut flush_handle, tag);
         }
     }
 
@@ -402,13 +420,13 @@ where
         let client_id = self.client_id;
         let mut coro = self
             .session_state
-            .handle_attached_walk(fid, new_fid, &wnames);
+            .handle_attached_walk(fid, new_fid, wnames);
 
         loop {
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let res = self.s.walk(client_id, qid, name, uname);
+                    let res = self.s.walk(client_id, qid, &name, &uname);
                     c.send(res)
                 }
             };
@@ -416,14 +434,13 @@ where
     }
 
     fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
-        match self.state.fids.entry(fid) {
-            Entry::Occupied(ent) => {
-                let meta = ent.remove();
+        match self.state.fids.remove(&fid) {
+            Some(meta) => {
                 self.s.clunk(self.client_id, meta.qid);
 
                 Ok(Rdata::Clunk {})
             }
-            Entry::Vacant(_) => Err(E_UNKNOWN_FID.to_string()),
+            None => Err(E_UNKNOWN_FID.to_string()),
         }
     }
 
@@ -521,11 +538,11 @@ where
         match coro.resume() {
             CoroState::Complete(res) => res,
             CoroState::Pending(c, Either::L((qid, uname))) => {
-                let stats = self.s.read_dir(cid, qid, uname)?;
+                let stats = self.s.read_dir(cid, qid, &uname)?;
                 c.send(stats).resume().unwrap()
             }
             CoroState::Pending(_, Either::R((qid, uname))) => {
-                let outcome = self.s.read(cid, qid, offset, count, uname)?;
+                let outcome = self.s.read(cid, qid, offset, count, &uname)?;
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(chan) => {

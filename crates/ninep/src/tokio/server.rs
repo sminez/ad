@@ -9,15 +9,15 @@ use crate::{
         protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
         server::{
             Attached, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN, E_ILLEGAL_CREATE_NAME,
-            E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta, Session, SessionType,
-            Unattached,
+            E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta, FlushHandle, Session,
+            SessionType, Unattached,
         },
     },
     sync::server::Serve9p,
     tokio::{AsyncNineP, AsyncStream},
 };
 use simple_coro::CoroState;
-use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of, path::PathBuf};
+use std::{fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
     net::{TcpListener, UnixListener},
     sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel},
@@ -380,9 +380,16 @@ where
         self.state.fids.clear();
     }
 
+    async fn flush_waiters_async(&mut self, flush_handle: &mut FlushHandle, tag: u16) {
+        for tag in flush_handle.pending_flush_tags(tag) {
+            self.reply_async(tag, Ok(Rdata::Flush {})).await;
+        }
+    }
+
     async fn handle_connection_async(mut self) {
         use Tdata::*;
         let (tx, mut rx) = unbounded_channel();
+        let mut flush_handle = FlushHandle::default();
 
         loop {
             let Tmessage { tag, content } = tokio::select! {
@@ -391,6 +398,7 @@ where
                     self.stream
                         .reply(self.msize, tag, Ok(Rdata::Read { data: Data(data) }))
                         .await;
+                    self.flush_waiters_async(&mut flush_handle, tag).await;
                     continue;
                 },
                 res = Tmessage::read_from(self.msize, &self.buf, &mut self.stream) => match res {
@@ -400,6 +408,10 @@ where
                 else => continue,
             };
 
+            if !content.is_flush() {
+                flush_handle.mark_pending(tag);
+            }
+
             let resp = match content {
                 Version { msize, version } => {
                     let resp = self.handle_version(msize, version);
@@ -408,7 +420,6 @@ where
                     Ok(resp)
                 }
                 Auth { .. } | Attach { .. } => Err("session is already attached".into()),
-                Flush { .. } => Ok(Rdata::Flush {}),
 
                 Walk {
                     fid,
@@ -437,9 +448,24 @@ where
                 Write { fid, offset, data } => self.handle_write_async(fid, offset, data.0).await,
                 Remove { fid } => self.handle_remove_async(fid).await,
                 Wstat { fid, stat, .. } => self.handle_wstat_async(fid, stat).await,
+                Flush { old_tag } => {
+                    let mut coro = flush_handle.flush_or_chain(tag, old_tag);
+                    loop {
+                        coro = match coro.resume() {
+                            CoroState::Pending(c, _) => {
+                                self.reply_async(tag, Ok(Rdata::Flush {})).await;
+                                c.send(())
+                            }
+                            CoroState::Complete(_) => break,
+                        }
+                    }
+
+                    continue;
+                }
             };
 
             self.reply_async(tag, resp).await;
+            self.flush_waiters_async(&mut flush_handle, tag).await;
         }
     }
 
@@ -496,13 +522,13 @@ where
         let client_id = self.client_id;
         let mut coro = self
             .session_state
-            .handle_attached_walk(fid, new_fid, &wnames);
+            .handle_attached_walk(fid, new_fid, wnames);
 
         loop {
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let res = self.s.walk(client_id, qid, name, uname).await;
+                    let res = self.s.walk(client_id, qid, &name, &uname).await;
                     c.send(res)
                 }
             };
@@ -510,14 +536,13 @@ where
     }
 
     async fn handle_clunk_async(&mut self, fid: u32) -> Result<Rdata> {
-        match self.state.fids.entry(fid) {
-            Entry::Occupied(ent) => {
-                let meta = ent.remove();
+        match self.state.fids.remove(&fid) {
+            Some(meta) => {
                 self.s.clunk(self.client_id, meta.qid).await;
 
                 Ok(Rdata::Clunk {})
             }
-            Entry::Vacant(_) => Err(E_UNKNOWN_FID.to_string()),
+            None => Err(E_UNKNOWN_FID.to_string()),
         }
     }
 
@@ -632,11 +657,11 @@ where
         match coro.resume() {
             CoroState::Complete(res) => res,
             CoroState::Pending(c, Either::L((qid, uname))) => {
-                let stats = self.s.read_dir(cid, qid, uname).await?;
+                let stats = self.s.read_dir(cid, qid, &uname).await?;
                 c.send(stats).resume().unwrap()
             }
             CoroState::Pending(_, Either::R((qid, uname))) => {
-                let outcome = self.s.read(cid, qid, offset, count, uname).await?;
+                let outcome = self.s.read(cid, qid, offset, count, &uname).await?;
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(mut chan) => {
