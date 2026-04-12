@@ -112,7 +112,13 @@ pub trait Serve9p: Send + Sync + 'static {
     /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
     /// for each element of that path in order, stopping either when the target is reached or some
     /// element of the path returns an error.
-    fn walk(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta>;
+    fn walk_one(
+        &self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta>;
 
     /// Open an existing file for subsequent I/O via [read](Serve9p::read) and
     /// [write](Serve9p::write) messages.
@@ -496,7 +502,7 @@ where
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let res = self.s.walk(client_id, qid, &name, &uname);
+                    let res = self.s.walk_one(client_id, qid, &name, &uname);
                     c.send(res)
                 }
             };

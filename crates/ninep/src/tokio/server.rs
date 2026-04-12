@@ -99,7 +99,7 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
     /// for each element of that path in order, stopping either when the target is reached or some
     /// element of the path returns an error.
-    fn walk(
+    fn walk_one(
         &self,
         cid: ClientId,
         parent_qid: u64,
@@ -271,14 +271,14 @@ impl<T> AsyncServe9p for T
 where
     T: AsyncServe9pFromSync,
 {
-    async fn walk(
+    async fn walk_one(
         &self,
         cid: ClientId,
         parent_qid: u64,
         child: &str,
         uname: &str,
     ) -> Result<FileMeta> {
-        <T as Serve9p>::walk(self, cid, parent_qid, child, uname)
+        <T as Serve9p>::walk_one(self, cid, parent_qid, child, uname)
     }
 
     async fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
@@ -605,7 +605,7 @@ where
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let res = self.s.walk(client_id, qid, &name, &uname).await;
+                    let res = self.s.walk_one(client_id, qid, &name, &uname).await;
                     c.send(res)
                 }
             };

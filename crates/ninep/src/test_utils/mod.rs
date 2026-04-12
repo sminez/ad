@@ -16,6 +16,7 @@ use std::{
     io, mem,
     os::unix::net::UnixStream,
     sync::{Arc, Mutex, mpsc},
+    thread::{sleep, spawn},
     time::{Duration, SystemTime},
 };
 use tokio::io::DuplexStream;
@@ -48,7 +49,7 @@ impl TestFs {
 }
 
 impl Serve9p for TestFs {
-    fn walk(
+    fn walk_one(
         &self,
         cid: ClientId,
         parent_qid: u64,
@@ -112,10 +113,11 @@ impl Serve9p for TestFs {
             BLOCKED_QID => {
                 let (tx, rx) = mpsc::channel();
                 let data = BLOCKED_CONTENT.to_vec();
-                std::thread::spawn(move || {
-                    std::thread::sleep(Duration::from_millis(25));
+                spawn(move || {
+                    sleep(Duration::from_millis(25));
                     let _ = tx.send(data);
                 });
+
                 Ok(ReadOutcome::Blocked(rx))
             }
             _ => Err(format!("unreadable qid: {qid}")),
@@ -236,17 +238,17 @@ impl RecordedCalls {
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Call {
-    Clunk { cid: ClientId, qid: u64, },
-    Create { cid: ClientId, parent: u64, name: String, perm: Perm, mode: Mode, uname: String, },
-    Flush { cid: ClientId, old_tag: u16, },
-    Open { cid: ClientId, qid: u64, mode: Mode, uname: String, },
-    Read { cid: ClientId, qid: u64, offset: usize, count: usize, uname: String, },
-    ReadDir { cid: ClientId, qid: u64, uname: String, },
-    Remove { cid: ClientId, qid: u64, uname: String, },
-    Stat { cid: ClientId, qid: u64, uname: String, },
-    Walk { cid: ClientId, parent_qid: u64, child: String, uname: String, },
-    Write { cid: ClientId, qid: u64, offset: usize, data: Vec<u8>, uname: String, },
-    WriteStat { cid: ClientId, qid: u64, wstat: WStat, uname: String, },
+    Clunk { cid: ClientId, qid: u64 },
+    Create { cid: ClientId, parent: u64, name: String, perm: Perm, mode: Mode, uname: String },
+    Flush { cid: ClientId, old_tag: u16 },
+    Open { cid: ClientId, qid: u64, mode: Mode, uname: String },
+    Read { cid: ClientId, qid: u64, offset: usize, count: usize, uname: String },
+    ReadDir { cid: ClientId, qid: u64, uname: String },
+    Remove { cid: ClientId, qid: u64, uname: String },
+    Stat { cid: ClientId, qid: u64, uname: String },
+    Walk { cid: ClientId, parent_qid: u64, child: String, uname: String },
+    Write { cid: ClientId, qid: u64, offset: usize, data: Vec<u8>, uname: String },
+    WriteStat { cid: ClientId, qid: u64, wstat: WStat, uname: String },
 }
 
 impl Call {
