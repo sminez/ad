@@ -9,7 +9,6 @@ use crate::{
 };
 use simple_coro::CoroState;
 use std::{
-    collections::HashMap,
     env, io, mem,
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
@@ -43,11 +42,7 @@ impl<S> Clone for Client<S> {
 impl<S> Client<S> {
     fn new(stream: S) -> Self {
         Self {
-            state: Arc::new(Mutex::new(State {
-                msize: MSIZE,
-                fids: HashMap::from([("/".into(), 0)]),
-                next_fid: 1,
-            })),
+            state: Default::default(),
             stream: Arc::new(Mutex::new(stream)),
             buf: SharedBuf::default(),
             msize: MSIZE,

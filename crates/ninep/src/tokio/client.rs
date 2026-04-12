@@ -8,7 +8,7 @@ use crate::{
     tokio::{AsyncNineP, AsyncStream},
 };
 use simple_coro::CoroState;
-use std::{collections::HashMap, env, io, mem, path::Path, sync::Arc};
+use std::{env, io, mem, path::Path, sync::Arc};
 use tokio::{
     net::{TcpStream, ToSocketAddrs, UnixStream},
     sync::Mutex,
@@ -38,13 +38,9 @@ impl<S> Clone for Client<S> {
 }
 
 impl<S> Client<S> {
-    fn new(fids: HashMap<String, u32>, stream: S) -> Self {
+    fn new(stream: S) -> Self {
         Self {
-            state: Arc::new(Mutex::new(State {
-                msize: MSIZE,
-                fids,
-                next_fid: 1,
-            })),
+            state: Default::default(),
             stream: Arc::new(Mutex::new(stream)),
             buf: SharedBuf::default(),
             msize: MSIZE,
@@ -66,10 +62,7 @@ impl Client<UnixStream> {
         aname: impl Into<String>,
     ) -> io::Result<Self> {
         let stream = UnixStream::connect(path.as_ref()).await?;
-        let mut fids = HashMap::new();
-        fids.insert(String::new(), 0);
-
-        let mut client = Self::new(fids, stream);
+        let mut client = Self::new(stream);
         client.connect(uname, aname).await?;
 
         Ok(client)
@@ -100,10 +93,7 @@ impl Client<TcpStream> {
         aname: impl Into<String>,
     ) -> io::Result<Self> {
         let stream = TcpStream::connect(addr).await?;
-        let mut fids = HashMap::new();
-        fids.insert("/".to_string(), 0);
-
-        let mut client = Self::new(fids, stream);
+        let mut client = Self::new(stream);
         client.connect(uname, aname).await?;
 
         Ok(client)
@@ -423,7 +413,7 @@ mod tests {
         let fs = TestFs::default();
         let mut server = Server::new(fs);
         let (client_stream, server_stream) = tokio::io::duplex(8192);
-        let mut client = Client::new(HashMap::from([("/".to_string(), 0)]), client_stream);
+        let mut client = Client::new(client_stream);
         let handle = task::spawn(async move {
             server.handle_single_test_stream_async(server_stream).await;
         });

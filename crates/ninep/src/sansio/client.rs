@@ -48,6 +48,16 @@ pub(crate) struct State {
     pub(crate) next_fid: u32,
 }
 
+impl Default for State {
+    fn default() -> Self {
+        State {
+            msize: MSIZE,
+            fids: HashMap::from([("/".into(), 0)]),
+            next_fid: 1,
+        }
+    }
+}
+
 impl State {
     fn next_fid(&mut self) -> u32 {
         let fid = self.next_fid;
