@@ -634,7 +634,8 @@ macro_rules! impl_message_format {
                 let len = u32::read_9p(msize, buf, handle).await?;
 
                 // Guard against messages that are over the negotiated msize and smaller than the
-                // minimum message header size so we don't panic when we
+                // minimum message header size so we don't panic when we attempt to slice out the
+                // header below.
                 validate_msize(len, msize)?;
                 if len < 7 {
                     return Err(io::Error::new(
@@ -894,7 +895,7 @@ impl Rmessage {
         Self { tag, content }
     }
 
-    /// Replace `self.content` with an [Rdata::Error] this message's serialized size exceeds `msize`.
+    /// Replace `self.content` with an [Rdata::Error] if this message's serialized size exceeds `msize`.
     pub(crate) fn clamp(&mut self, msize: u32) {
         let n = self.n_bytes() as u32;
 
