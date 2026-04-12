@@ -16,7 +16,7 @@ use std::{
     io, mem,
     os::unix::net::UnixStream,
     sync::{Arc, Mutex, mpsc},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 use tokio::io::DuplexStream;
 
@@ -75,6 +75,10 @@ impl Serve9p for TestFs {
         self.calls.push(Call::clunk(cid, qid));
     }
 
+    fn flush(&self, cid: ClientId, old_tag: u16) {
+        self.calls.push(Call::flush(cid, old_tag));
+    }
+
     fn create(
         &self,
         cid: ClientId,
@@ -109,6 +113,7 @@ impl Serve9p for TestFs {
                 let (tx, rx) = mpsc::channel();
                 let data = BLOCKED_CONTENT.to_vec();
                 std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(25));
                     let _ = tx.send(data);
                 });
                 Ok(ReadOutcome::Blocked(rx))
@@ -233,6 +238,7 @@ impl RecordedCalls {
 pub(crate) enum Call {
     Clunk { cid: ClientId, qid: u64, },
     Create { cid: ClientId, parent: u64, name: String, perm: Perm, mode: Mode, uname: String, },
+    Flush { cid: ClientId, old_tag: u16, },
     Open { cid: ClientId, qid: u64, mode: Mode, uname: String, },
     Read { cid: ClientId, qid: u64, offset: usize, count: usize, uname: String, },
     ReadDir { cid: ClientId, qid: u64, uname: String, },
@@ -264,6 +270,10 @@ impl Call {
             mode,
             uname: uname.into(),
         }
+    }
+
+    pub(crate) fn flush(cid: ClientId, old_tag: u16) -> Self {
+        Self::Flush { cid, old_tag }
     }
 
     pub(crate) fn open(cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Self {

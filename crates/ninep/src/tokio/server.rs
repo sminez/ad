@@ -123,8 +123,22 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     ) -> impl Future<Output = Result<IoUnit>> + Send;
 
     /// Clunk a currently open file.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn clunk(&self, cid: ClientId, qid: u64) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+
+    /// Handle "best effort" cancellation of an in-flight message identified by `old_tag`.
+    ///
+    /// Invoked when the server receives a flush message for a message that is still pending. As
+    /// per the 9p spec, this is a hint _only_: the server is still permitted to complete any
+    /// outstanding work and send a response to the original message being flushed.
+    ///
+    /// Clients are permitted to send multiple flush messages for the same tag. As such,
+    /// implementations of this method should be resilient to being called multiple times with the
+    /// same arguments. (The default implementation is a no-op.)
+    #[expect(unused_variables)]
+    fn flush(&self, cid: ClientId, old_tag: u16) -> impl Future<Output = ()> + Send {
         async {}
     }
 
@@ -219,6 +233,10 @@ where
 
     async fn clunk(&self, cid: ClientId, qid: u64) {
         <T as Serve9p>::clunk(self, cid, qid);
+    }
+
+    async fn flush(&self, cid: ClientId, old_tag: u16) {
+        <T as Serve9p>::flush(self, cid, old_tag);
     }
 
     async fn create(
@@ -456,7 +474,12 @@ where
                                 self.reply_async(tag, Ok(Rdata::Flush {})).await;
                                 c.send(())
                             }
-                            CoroState::Complete(_) => break,
+                            CoroState::Complete(sent_flush) => {
+                                if !sent_flush {
+                                    self.s.flush(self.client_id, old_tag).await;
+                                }
+                                break;
+                            }
                         }
                     }
 
@@ -721,7 +744,7 @@ mod tests {
     use super::*;
     use crate::{
         generate_test_suite,
-        sansio::protocol::Rmessage,
+        sansio::protocol::{Rmessage, Tmessage},
         test_utils::{AsyncTestClient, TestFs, cases::Step},
     };
     use tokio::{
@@ -746,17 +769,30 @@ mod tests {
             }));
 
             // Run the test case
-            let mut next_tag = 0;
             let mut did_shutdown = false;
 
             for step in $case {
                 match step {
-                    Step::Request { req, resp } => {
-                        let tag = next_tag;
-                        next_tag += 1;
-
+                    Step::Request { tag, req, resp } => {
                         let rmsg = client.send_async(tag, req).await.unwrap();
                         assert_eq!(rmsg, Rmessage { tag, content: resp });
+                    }
+
+                    Step::Send { tag, req } => {
+                        AsyncNineP::write_to(&Tmessage::new(tag, req), &mut client.stream)
+                            .await
+                            .unwrap();
+                    }
+
+                    Step::Receive { tag, resp } => {
+                        let rmsg = <Rmessage as AsyncNineP>::read_from(
+                            client.msize,
+                            &client.buf,
+                            &mut client.stream,
+                        )
+                        .await
+                        .unwrap();
+                        assert_eq!(rmsg, Rmessage::new(tag, resp));
                     }
 
                     Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),

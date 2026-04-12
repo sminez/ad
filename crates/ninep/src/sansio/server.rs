@@ -584,18 +584,20 @@ impl FlushHandle {
         &'s mut self,
         flush_tag: u16,
         old_tag: u16,
-    ) -> ReadyCoro<(), (), (), impl Future<Output = ()> + use<'s>> {
+    ) -> ReadyCoro<(), (), bool, impl Future<Output = bool> + use<'s>> {
         Coro::from(move |handle: Handle<(), ()>| async move {
             let should_flush_now =
                 flush_tag == old_tag || !self.pending_flushes.contains_key(&old_tag);
 
             if should_flush_now {
                 handle.yield_value(()).await;
+                true
             } else {
                 self.mark_pending(flush_tag);
                 if let Some(pending) = self.pending_flushes.get_mut(&old_tag) {
                     pending.push(flush_tag);
                 }
+                false
             }
         })
     }

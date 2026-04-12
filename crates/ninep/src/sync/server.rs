@@ -124,8 +124,20 @@ pub trait Serve9p: Send + Sync + 'static {
     fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
     /// Clunk a currently open file.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn clunk(&self, cid: ClientId, qid: u64) {}
+
+    /// Handle "best effort" cancellation of an in-flight message identified by `old_tag`.
+    ///
+    /// Invoked when the server receives a flush message for a message that is still pending. As
+    /// per the 9p spec, this is a hint _only_: the server is still permitted to complete any
+    /// outstanding work and send a response to the original message being flushed.
+    ///
+    /// Clients are permitted to send multiple flush messages for the same tag. As such,
+    /// implementations of this method should be resilient to being called multiple times with the
+    /// same arguments. (The default implementation is a no-op.)
+    #[expect(unused_variables)]
+    fn flush(&self, cid: ClientId, old_tag: u16) {}
 
     /// Create a new file in the given parent directory.
     fn create(
@@ -359,9 +371,13 @@ where
                 Remove { fid } => self.handle_remove(fid),
                 Wstat { fid, stat, .. } => self.handle_wstat(fid, stat),
                 Flush { old_tag } => {
-                    flush_handle
-                        .flush_or_chain(tag, old_tag)
-                        .run_sync(|_| self.reply(tag, Ok(Rdata::Flush {})));
+                    let sent_flush = flush_handle.flush_or_chain(tag, old_tag).run_sync(|_| {
+                        self.reply(tag, Ok(Rdata::Flush {}));
+                    });
+
+                    if !sent_flush {
+                        self.s.flush(self.client_id, old_tag);
+                    }
 
                     continue;
                 }
@@ -596,6 +612,7 @@ mod tests {
     use super::*;
     use crate::{
         generate_test_suite,
+        sansio::protocol::Tmessage,
         test_utils::{SyncTestClient, TestFs, cases::Step},
     };
     use std::{net::Shutdown, os::unix::net::UnixStream, thread};
@@ -614,17 +631,29 @@ mod tests {
             }));
 
             // Run the test case
-            let mut next_tag = 0;
             let mut did_shutdown = false;
 
             for step in $case {
                 match step {
-                    Step::Request { req, resp } => {
-                        let tag = next_tag;
-                        next_tag += 1;
-
+                    Step::Request { tag, req, resp } => {
                         let rmsg = client.send_sync(tag, req).unwrap();
                         assert_eq!(rmsg, Rmessage { tag, content: resp });
+                    }
+
+                    Step::Send { tag, req } => {
+                        Tmessage::new(tag, req)
+                            .write_to(&mut client.stream)
+                            .unwrap();
+                    }
+
+                    Step::Receive { tag, resp } => {
+                        let rmsg = <Rmessage as SyncNineP>::read_from(
+                            client.msize,
+                            &client.buf,
+                            &mut client.stream,
+                        )
+                        .unwrap();
+                        assert_eq!(rmsg, Rmessage::new(tag, resp));
                     }
 
                     Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),

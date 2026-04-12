@@ -21,16 +21,23 @@ pub(crate) type TestCase = Vec<Step>;
 ///
 /// Corresponds to an action to take and possibly a paired assertion.
 #[derive(Debug)]
-#[expect(clippy::large_enum_variant)]
 pub(crate) enum Step {
-    Request { req: Tdata, resp: Rdata },
+    /// Blocking request -> assert expected response
+    Request { tag: u16, req: Tdata, resp: Rdata },
+    /// Submit request without waiting for response
+    Send { tag: u16, req: Tdata },
+    /// Assert expected response
+    Receive { tag: u16, resp: Rdata },
+    /// Assert state of TestFs method calls
     AssertCalls { calls: Vec<Call> },
+    /// Close client connection stream
     CloseStream,
 }
 
 impl Step {
-    fn version_req() -> Step {
+    fn version_req(tag: u16) -> Step {
         Step::Request {
+            tag,
             req: Tdata::Version {
                 msize: DEFAULT_MSIZE,
                 version: SUPPORTED_VERSION.to_string(),
@@ -42,8 +49,9 @@ impl Step {
         }
     }
 
-    fn attach_req() -> Step {
+    fn attach_req(tag: u16) -> Step {
         Step::Request {
+            tag,
             req: Tdata::Attach {
                 fid: 0,
                 afid: AFID_NO_AUTH,
@@ -60,8 +68,9 @@ impl Step {
         }
     }
 
-    fn walk_req(fid: u32, new_fid: u32, wnames: Vec<&str>, wqids: Vec<Qid>) -> Step {
+    fn walk_req(tag: u16, fid: u32, new_fid: u32, wnames: Vec<&str>, wqids: Vec<Qid>) -> Step {
         Step::Request {
+            tag,
             req: Tdata::Walk {
                 fid,
                 new_fid,
@@ -71,8 +80,9 @@ impl Step {
         }
     }
 
-    fn err(req: Tdata, msg: impl Into<String>) -> Step {
+    fn err(tag: u16, req: Tdata, msg: impl Into<String>) -> Step {
         Step::Request {
+            tag,
             req,
             resp: Rdata::Error { ename: msg.into() },
         }
@@ -120,6 +130,7 @@ macro_rules! generate_test_suite {
             create_with_double_dot_name_returns_error,
             duplicate_attach_returns_error,
             flush_returns_rflush,
+            flush_pending_request_calls_filesystem_flush,
             flush_waits_for_blocked_read,
             open_known_fid_returns_ropen,
             open_open_fid_returns_error,
@@ -164,6 +175,7 @@ macro_rules! generate_test_suite {
 
 pub(crate) fn version_sets_negotiated_msize() -> TestCase {
     vec![Step::Request {
+        tag: 0,
         req: Tdata::Version {
             msize: DEFAULT_MSIZE / 2,
             version: SUPPORTED_VERSION.to_string(),
@@ -178,6 +190,7 @@ pub(crate) fn version_sets_negotiated_msize() -> TestCase {
 pub(crate) fn attach_before_version_returns_error() -> TestCase {
     vec![
         Step::err(
+            0,
             Tdata::Attach {
                 fid: 0,
                 afid: AFID_NO_AUTH,
@@ -192,17 +205,18 @@ pub(crate) fn attach_before_version_returns_error() -> TestCase {
 
 pub(crate) fn attach_after_version_succeeds() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::AssertCalls { calls: vec![] },
     ]
 }
 
 pub(crate) fn duplicate_attach_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::err(
+            2,
             Tdata::Attach {
                 fid: 1,
                 afid: AFID_NO_AUTH,
@@ -217,17 +231,18 @@ pub(crate) fn duplicate_attach_returns_error() -> TestCase {
 
 pub(crate) fn version_while_attached_clunks_all_open_fids() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Open { fid: 1, mode: 0 },
             resp: Rdata::Open {
                 qid: file_qid(HELLO_QID),
                 iounit: TEST_IOUNIT,
             },
         },
-        Step::version_req(),
+        Step::version_req(4),
         Step::AssertCalls {
             calls: vec![
                 Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
@@ -241,10 +256,11 @@ pub(crate) fn version_while_attached_clunks_all_open_fids() -> TestCase {
 
 pub(crate) fn connection_close_clunks_all_open_fids() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Open { fid: 1, mode: 0 },
             resp: Rdata::Open {
                 qid: file_qid(HELLO_QID),
@@ -265,9 +281,10 @@ pub(crate) fn connection_close_clunks_all_open_fids() -> TestCase {
 
 pub(crate) fn flush_returns_rflush() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::Request {
+            tag: 2,
             req: Tdata::Flush { old_tag: 123 },
             resp: Rdata::Flush {},
         },
@@ -277,10 +294,11 @@ pub(crate) fn flush_returns_rflush() -> TestCase {
 
 pub(crate) fn flush_waits_for_blocked_read() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["blocked"], vec![file_qid(BLOCKED_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["blocked"], vec![file_qid(BLOCKED_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Read {
                 fid: 1,
                 offset: 0,
@@ -291,6 +309,7 @@ pub(crate) fn flush_waits_for_blocked_read() -> TestCase {
             },
         },
         Step::Request {
+            tag: 4,
             req: Tdata::Flush { old_tag: 3 },
             resp: Rdata::Flush {},
         },
@@ -303,11 +322,48 @@ pub(crate) fn flush_waits_for_blocked_read() -> TestCase {
     ]
 }
 
+pub(crate) fn flush_pending_request_calls_filesystem_flush() -> TestCase {
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["blocked"], vec![file_qid(BLOCKED_QID)]),
+        Step::Send {
+            tag: 3,
+            req: Tdata::Read {
+                fid: 1,
+                offset: 0,
+                count: 4096,
+            },
+        },
+        Step::Send {
+            tag: 4,
+            req: Tdata::Flush { old_tag: 3 },
+        },
+        Step::Receive {
+            tag: 3,
+            resp: Rdata::Read {
+                data: Data(BLOCKED_CONTENT.to_vec()),
+            },
+        },
+        Step::Receive {
+            tag: 4,
+            resp: Rdata::Flush {},
+        },
+        Step::AssertCalls {
+            calls: vec![
+                Call::walk(ClientId(0), ROOT_QID, "blocked", "user"),
+                Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "user"),
+                Call::flush(ClientId(0), 3),
+            ],
+        },
+    ]
+}
+
 pub(crate) fn walk_to_known_child_returns_qids() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::AssertCalls {
             calls: vec![Call::walk(ClientId(0), ROOT_QID, "hello", "user")],
         },
@@ -316,9 +372,10 @@ pub(crate) fn walk_to_known_child_returns_qids() -> TestCase {
 
 pub(crate) fn walk_first_element_missing_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::err(
+            2,
             Tdata::Walk {
                 fid: 0,
                 new_fid: 1,
@@ -334,9 +391,15 @@ pub(crate) fn walk_first_element_missing_returns_error() -> TestCase {
 
 pub(crate) fn walk_partial_returns_partial_qids() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["subdir", "missing"], vec![dir_qid(SUBDIR_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(
+            2,
+            0,
+            1,
+            vec!["subdir", "missing"],
+            vec![dir_qid(SUBDIR_QID)],
+        ),
         Step::AssertCalls {
             calls: vec![
                 Call::walk(ClientId(0), ROOT_QID, "subdir", "user"),
@@ -348,10 +411,11 @@ pub(crate) fn walk_partial_returns_partial_qids() -> TestCase {
 
 pub(crate) fn walk_open_fid_returns_error_after_open() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Open { fid: 1, mode: 0 },
             resp: Rdata::Open {
                 qid: file_qid(HELLO_QID),
@@ -359,6 +423,7 @@ pub(crate) fn walk_open_fid_returns_error_after_open() -> TestCase {
             },
         },
         Step::err(
+            4,
             Tdata::Walk {
                 fid: 1,
                 new_fid: 2,
@@ -379,9 +444,10 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
     let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::Request {
+            tag: 2,
             req: Tdata::Create {
                 fid: 0,
                 name: "new.txt".to_string(),
@@ -394,6 +460,7 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
             },
         },
         Step::err(
+            3,
             Tdata::Walk {
                 fid: 0,
                 new_fid: 1,
@@ -419,9 +486,10 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
 
 pub(crate) fn walk_unknown_fid_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::err(
+            2,
             Tdata::Walk {
                 fid: 99,
                 new_fid: 1,
@@ -435,10 +503,11 @@ pub(crate) fn walk_unknown_fid_returns_error() -> TestCase {
 
 pub(crate) fn clunk_known_fid_returns_rclunk_and_calls_serve9p() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Clunk { fid: 1 },
             resp: Rdata::Clunk {},
         },
@@ -453,19 +522,20 @@ pub(crate) fn clunk_known_fid_returns_rclunk_and_calls_serve9p() -> TestCase {
 
 pub(crate) fn clunk_unknown_fid_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::err(Tdata::Clunk { fid: 99 }, E_UNKNOWN_FID),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::err(2, Tdata::Clunk { fid: 99 }, E_UNKNOWN_FID),
         Step::AssertCalls { calls: vec![] },
     ]
 }
 
 pub(crate) fn open_known_fid_returns_ropen() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Open { fid: 1, mode: 0 },
             resp: Rdata::Open {
                 qid: file_qid(HELLO_QID),
@@ -483,17 +553,18 @@ pub(crate) fn open_known_fid_returns_ropen() -> TestCase {
 
 pub(crate) fn open_open_fid_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Open { fid: 1, mode: 0 },
             resp: Rdata::Open {
                 qid: file_qid(HELLO_QID),
                 iounit: TEST_IOUNIT,
             },
         },
-        Step::err(Tdata::Open { fid: 1, mode: 0 }, E_FID_ALREADY_OPEN),
+        Step::err(4, Tdata::Open { fid: 1, mode: 0 }, E_FID_ALREADY_OPEN),
         Step::AssertCalls {
             calls: vec![
                 Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
@@ -505,19 +576,20 @@ pub(crate) fn open_open_fid_returns_error() -> TestCase {
 
 pub(crate) fn open_unknown_fid_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::err(Tdata::Open { fid: 99, mode: 0 }, E_UNKNOWN_FID),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::err(2, Tdata::Open { fid: 99, mode: 0 }, E_UNKNOWN_FID),
         Step::AssertCalls { calls: vec![] },
     ]
 }
 
 pub(crate) fn read_file_returns_data() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Read {
                 fid: 1,
                 offset: 0,
@@ -543,9 +615,10 @@ pub(crate) fn read_dir_returns_serialized_stats() -> TestCase {
     buf.extend(s2.write_9p_bytes().unwrap());
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::Request {
+            tag: 2,
             req: Tdata::Read {
                 fid: 0,
                 offset: 0,
@@ -563,10 +636,11 @@ pub(crate) fn write_to_file_returns_byte_count() -> TestCase {
     let payload = b"abc".to_vec();
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Write {
                 fid: 1,
                 offset: 0,
@@ -587,10 +661,11 @@ pub(crate) fn write_with_oversized_offset_returns_error() -> TestCase {
     let offset = u64::from(u32::MAX) + 1;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::err(
+            3,
             Tdata::Write {
                 fid: 1,
                 offset,
@@ -609,10 +684,11 @@ pub(crate) fn stat_known_fid_returns_rstat() -> TestCase {
     let size = stat.n_bytes() as u16;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Stat { fid: 1 },
             resp: Rdata::Stat { size, stat },
         },
@@ -627,9 +703,9 @@ pub(crate) fn stat_known_fid_returns_rstat() -> TestCase {
 
 pub(crate) fn stat_unknown_fid_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::err(Tdata::Stat { fid: 99 }, E_UNKNOWN_FID),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::err(2, Tdata::Stat { fid: 99 }, E_UNKNOWN_FID),
         Step::AssertCalls { calls: vec![] },
     ]
 }
@@ -638,9 +714,10 @@ pub(crate) fn create_in_directory_returns_rcreate() -> TestCase {
     let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::Request {
+            tag: 2,
             req: Tdata::Create {
                 fid: 0,
                 name: "new.txt".to_string(),
@@ -677,9 +754,10 @@ pub(crate) fn create_masks_permissions_before_call() -> TestCase {
         | Perm::OTHER_WRITE;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::Request {
+            tag: 2,
             req: Tdata::Create {
                 fid: 0,
                 name: "masked.txt".to_string(),
@@ -711,9 +789,10 @@ pub(crate) fn create_with_dot_name_returns_error() -> TestCase {
     let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::err(
+            2,
             Tdata::Create {
                 fid: 0,
                 name: ".".to_string(),
@@ -730,9 +809,10 @@ pub(crate) fn create_with_double_dot_name_returns_error() -> TestCase {
     let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::err(
+            2,
             Tdata::Create {
                 fid: 0,
                 name: "..".to_string(),
@@ -749,10 +829,11 @@ pub(crate) fn create_on_non_directory_returns_error() -> TestCase {
     let perm = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ;
 
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::err(
+            3,
             Tdata::Create {
                 fid: 1,
                 name: "child".to_string(),
@@ -769,10 +850,11 @@ pub(crate) fn create_on_non_directory_returns_error() -> TestCase {
 
 pub(crate) fn remove_known_fid_returns_rremove() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["hello"], vec![file_qid(HELLO_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Remove { fid: 1 },
             resp: Rdata::Remove {},
         },
@@ -788,10 +870,11 @@ pub(crate) fn remove_known_fid_returns_rremove() -> TestCase {
 
 pub(crate) fn blocked_read_delivers_response_later() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
-        Step::walk_req(0, 1, vec!["blocked"], vec![file_qid(BLOCKED_QID)]),
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, vec!["blocked"], vec![file_qid(BLOCKED_QID)]),
         Step::Request {
+            tag: 3,
             req: Tdata::Read {
                 fid: 1,
                 offset: 0,
@@ -812,9 +895,10 @@ pub(crate) fn blocked_read_delivers_response_later() -> TestCase {
 
 pub(crate) fn write_to_directory_returns_error() -> TestCase {
     vec![
-        Step::version_req(),
-        Step::attach_req(),
+        Step::version_req(0),
+        Step::attach_req(1),
         Step::err(
+            2,
             Tdata::Write {
                 fid: 0,
                 offset: 0,
