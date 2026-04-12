@@ -1,9 +1,9 @@
-//! Shared test infrastructure for sync and tokio server tests.
+//! Shared test infrastructure for sync and tokio tests.
 use crate::{
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
         client::MSIZE,
-        protocol::{Rmessage, SharedBuf, Tdata, Tmessage},
+        protocol::{Qid, Rmessage, SharedBuf, Tdata, Tmessage},
         server::ClientId,
     },
     sync::{
@@ -21,7 +21,7 @@ use std::{
 };
 use tokio::io::DuplexStream;
 
-pub(crate) mod cases;
+pub(crate) mod server_cases;
 
 pub(crate) const ROOT_QID: u64 = 0;
 pub(crate) const HELLO_QID: u64 = 1;
@@ -32,6 +32,22 @@ pub(crate) const CREATED_QID: u64 = 99;
 pub(crate) const HELLO_CONTENT: &[u8] = b"hello world";
 pub(crate) const BLOCKED_CONTENT: &[u8] = b"delayed";
 pub(crate) const TEST_IOUNIT: IoUnit = 8192;
+
+fn dir_qid(path: u64) -> Qid {
+    Qid {
+        ty: Mode::DIR.bits(),
+        version: 0,
+        path,
+    }
+}
+
+fn file_qid(path: u64) -> Qid {
+    Qid {
+        ty: Mode::FILE.bits(),
+        version: 0,
+        path,
+    }
+}
 
 #[derive(Debug, Default, Clone)]
 pub(crate) struct TestFs {

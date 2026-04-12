@@ -403,6 +403,14 @@ where
             }
         })
     }
+
+    #[cfg(test)]
+    pub(crate) async fn handle_single_test_stream_async<U>(&mut self, stream: U)
+    where
+        U: AsyncStream,
+    {
+        self.new_session(stream).handle_connection_async().await;
+    }
 }
 
 impl<T, S, U> Session<T, S, U>
@@ -797,79 +805,95 @@ where
 mod tests {
     use super::*;
     use crate::{
-        generate_test_suite,
+        generate_server_test_suite,
         sansio::protocol::{Rmessage, Tmessage},
-        test_utils::{AsyncTestClient, TestFs, cases::Step},
+        test_utils::{
+            AsyncTestClient, RecordedCalls, TestFs,
+            server_cases::{Step, TestCase},
+        },
     };
     use tokio::{
         io::{AsyncWriteExt, duplex},
-        task,
+        task::{self, JoinHandle},
     };
 
-    macro_rules! run_one {
-        ($case:expr) => {
-            // Setup the client and server
-            let fs = TestFs::default();
-            let recorded = fs.calls();
-            let (client_stream, server_stream) = duplex(8192);
-            let mut client = AsyncTestClient::new(client_stream);
-            let mut server = Server::new(fs);
+    // We stamp out the test suite using this helper macro rather than using simple_test_case in
+    // order to ensure that both the sync and tokio implementations run exactly the same cases
+    // without needing to define that set of cases in two places.
+    generate_server_test_suite!(tokio, run_one);
 
-            let mut handle = Some(task::spawn(async move {
-                server
-                    .new_session(server_stream)
-                    .handle_connection_async()
-                    .await;
-            }));
+    async fn run_one(case: TestCase) {
+        // Setup the client and server
+        let fs = TestFs::default();
+        let recorded = fs.calls();
+        let (client_stream, server_stream) = duplex(8192);
+        let mut client = AsyncTestClient::new(client_stream);
+        let mut server = Server::new(fs);
 
-            // Run the test case
-            let mut did_shutdown = false;
+        let mut handle = Some(task::spawn(async move {
+            server
+                .new_session(server_stream)
+                .handle_connection_async()
+                .await;
+        }));
 
-            for step in $case {
-                match step {
-                    Step::Request { tag, req, resp } => {
-                        let rmsg = client.send_async(tag, req).await.unwrap();
-                        assert_eq!(rmsg, Rmessage { tag, content: resp });
-                    }
+        // Run the test case
+        let mut did_shutdown = false;
 
-                    Step::Send { tag, req } => {
-                        AsyncNineP::write_to(&Tmessage::new(tag, req), &mut client.stream)
-                            .await
-                            .unwrap();
-                    }
+        for (i, step) in case.into_iter().enumerate() {
+            did_shutdown = handle_step(i, step, &mut client, &recorded, &mut handle).await;
+        }
 
-                    Step::Receive { tag, resp } => {
-                        let rmsg = <Rmessage as AsyncNineP>::read_from(
-                            client.msize,
-                            &client.buf,
-                            &mut client.stream,
-                        )
-                        .await
-                        .unwrap();
-                        assert_eq!(rmsg, Rmessage::new(tag, resp));
-                    }
+        if !did_shutdown {
+            let _ = client.stream.shutdown().await;
+        }
 
-                    Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),
-
-                    Step::CloseStream => {
-                        let _ = client.stream.shutdown().await;
-                        if let Some(h) = handle.take() {
-                            h.await.expect("server task join failed");
-                        }
-                        did_shutdown = true;
-                    }
-                }
-            }
-
-            if !did_shutdown {
-                let _ = client.stream.shutdown().await;
-            }
-
-            if let Some(h) = handle.take() {
-                h.await.expect("server task join failed");
-            }
-        };
+        if let Some(h) = handle.take() {
+            h.await.expect("server task join failed");
+        }
     }
 
-    generate_test_suite!(tokio, run_one);
+    async fn handle_step(
+        i: usize,
+        step: Step,
+        client: &mut AsyncTestClient,
+        recorded: &RecordedCalls,
+        handle: &mut Option<JoinHandle<()>>,
+    ) -> bool {
+        match step {
+            Step::Request { tag, req, resp } => {
+                let rmsg = client.send_async(tag, req).await.unwrap();
+                assert_eq!(rmsg, Rmessage { tag, content: resp }, "step {i}");
+            }
+
+            Step::Send { tag, req } => {
+                AsyncNineP::write_to(&Tmessage::new(tag, req), &mut client.stream)
+                    .await
+                    .unwrap();
+            }
+
+            Step::Receive { tag, resp } => {
+                let rmsg = <Rmessage as AsyncNineP>::read_from(
+                    client.msize,
+                    &client.buf,
+                    &mut client.stream,
+                )
+                .await
+                .unwrap();
+                assert_eq!(rmsg, Rmessage::new(tag, resp), "step {i}");
+            }
+
+            Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls, "step {i}"),
+
+            Step::CloseStream => {
+                let _ = client.stream.shutdown().await;
+                if let Some(h) = handle.take() {
+                    h.await.expect("server task join failed");
+                }
+                return true;
+            }
+        }
+
+        false
+    }
 }

@@ -10,7 +10,7 @@ use crate::{
     },
     test_utils::{
         BLOCKED_CONTENT, BLOCKED_QID, CREATED_QID, Call, HELLO_CONTENT, HELLO_QID, ROOT_QID,
-        SUBDIR_QID, TEST_IOUNIT,
+        SUBDIR_QID, TEST_IOUNIT, dir_qid, file_qid,
     },
 };
 
@@ -89,32 +89,16 @@ impl Step {
     }
 }
 
-fn dir_qid(path: u64) -> Qid {
-    Qid {
-        ty: Mode::DIR.bits(),
-        version: 0,
-        path,
-    }
-}
-
-fn file_qid(path: u64) -> Qid {
-    Qid {
-        ty: Mode::FILE.bits(),
-        version: 0,
-        path,
-    }
-}
-
 /// Helper for generating shared behavioural tests of both the sync and tokio server
 /// implementations.
 #[macro_export]
-macro_rules! generate_test_suite {
+macro_rules! generate_server_test_suite {
     // Public entrypoint used by sync/tokio test modules.
     //
     // As new cases are added to the suite below, they MUST be added here in order to actually be
     // run as part of the sync/tokio test suites.
     ($mode:ident, $run_one:ident) => {
-        generate_test_suite!(
+        generate_server_test_suite!(
             @cases $mode, $run_one;
             // Test cases
             attach_after_version_succeeds,
@@ -158,7 +142,7 @@ macro_rules! generate_test_suite {
     (@cases sync, $run_one:ident; $($case:ident),+ $(,)?) => {
         $(
             #[test]
-            fn $case() { $run_one!($crate::test_utils::cases::$case()); }
+            fn $case() { $run_one($crate::test_utils::server_cases::$case()); }
         )+
     };
 
@@ -166,12 +150,12 @@ macro_rules! generate_test_suite {
     (@cases tokio, $run_one:ident; $($case:ident),+ $(,)?) => {
         $(
             #[tokio::test]
-            async fn $case() { $run_one!($crate::test_utils::cases::$case()); }
+            async fn $case() { $run_one($crate::test_utils::server_cases::$case()).await; }
         )+
     };
 }
 
-// Test cases for use with the generate_test_suite macro above
+// Test cases for use with the generate_server_test_suite macro above
 
 pub(crate) fn version_sets_negotiated_msize() -> TestCase {
     vec![Step::Request {
