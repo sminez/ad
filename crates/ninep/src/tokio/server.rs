@@ -93,14 +93,12 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     //     async { Err("authentication not required".to_string()) }
     // }
 
-    /// Lookup a child node under a known parent directory by name.
+    /// Lookup the [FileMeta] for `child` under the directory represented by `parent_qid`.
     ///
-    /// `9p` Twalk messages received by the server will specify a full path from a known parent
-    /// to a target child. This method is called for each element of that path in sequence in order,
-    /// stopping either when the target is reached or some element of the path returns an error.
-    ///
-    /// [Server] will ensure that this method is only called for known parents who have previously
-    /// been identified has having [FileType::Directory].
+    /// `9p` walk messages received by the [Server] will specify a full path from a known parent
+    /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
+    /// for each element of that path in order, stopping either when the target is reached or some
+    /// element of the path returns an error.
     fn walk(
         &self,
         cid: ClientId,
@@ -109,11 +107,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<FileMeta>> + Send;
 
-    /// Open an existing file in the requested mode for subsequent I/O via [read](AsyncServe9p::read) and
-    /// [write](AsyncServe9p::write) calls.
+    /// Open an existing file for subsequent I/O via [read](AsyncServe9p::read) and
+    /// [write](AsyncServe9p::write) messages.
+    ///
+    /// [Server] calls this only for known, currently-closed fids. On success, [Server] marks the
+    /// fid as open with further `walk`, `open` and `create` messages using that fid being rejected
+    /// until the fid is clunked (either [explicitly](AsyncServe9p::clunk) or via session reset).
     ///
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
-    /// bytes that will be supported per read/write call on this resource.
+    /// bytes that will be supported per read/write call on this resource. An `Err` should be
+    /// returned if access is denied, mode is unsupported, or the target cannot be opened.
     fn open(
         &self,
         cid: ClientId,
@@ -122,7 +125,15 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<IoUnit>> + Send;
 
-    /// Clunk a currently open file.
+    /// Release client specific server-side resources associated with with provided qid.
+    ///
+    /// [Server] calls this when a fid is discarded (i.e. [clunk](AsyncServe9p::clunk), successful
+    /// or failed [remove](AsyncServe9p::remove), `version` session reset, or connection close). It
+    /// is possible that the provided qid may represent a file that was never opened for I/O in
+    /// this session.
+    ///
+    /// Implementations should be resilient to repeated calls for the same qid. (The default
+    /// implementation is a no-op.)
     #[expect(unused_variables)]
     fn clunk(&self, cid: ClientId, qid: u64) -> impl Future<Output = ()> + Send {
         async {}
@@ -130,11 +141,11 @@ pub trait AsyncServe9p: Send + Sync + 'static {
 
     /// Handle "best effort" cancellation of an in-flight message identified by `old_tag`.
     ///
-    /// Invoked when the server receives a flush message for a message that is still pending. As
-    /// per the 9p spec, this is a hint _only_: the server is still permitted to complete any
+    /// Invoked when the server receives a `flush` message for a message that is still pending. As
+    /// per the `9p` spec, this is a hint _only_: the server is still permitted to complete any
     /// outstanding work and send a response to the original message being flushed.
     ///
-    /// Clients are permitted to send multiple flush messages for the same tag. As such,
+    /// Clients are permitted to send multiple `flush` messages for the same tag. As such,
     /// implementations of this method should be resilient to being called multiple times with the
     /// same arguments. (The default implementation is a no-op.)
     #[expect(unused_variables)]
@@ -142,7 +153,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         async {}
     }
 
-    /// Create a new file in the given parent directory.
+    /// Create a new entry in `parent`, returning its [metadata][FileMeta] and [IoUnit].
+    ///
+    /// [Server] ensures that this method is only called when the target fid is known, pointing to
+    /// a directory and not currently open for I/O. [Server] also handles rejecting `.` and `..` as
+    /// invalid entry names, and applying `9p` permission masking before this call, meaning `perm`
+    /// is already normalized against the parent directory's permissions.
+    ///
+    /// On success, [Server] rebinds the creating fid to the qid found in the returned [FileMeta]
+    /// and marks it as open for I/O. Implementations should return `Err` if `name` already exists
+    /// or creation cannot be completed for any reason.
     fn create(
         &self,
         cid: ClientId,
@@ -153,7 +173,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<(FileMeta, IoUnit)>> + Send;
 
-    /// Read `count` bytes from the requested file starting from the given `offset`.
+    /// Read up to `count` bytes from `qid` starting at `offset`.
+    ///
+    /// [Server] calls this for non-directory files only; directory reads are routed through
+    /// [read_dir](AsyncServe9p::read_dir). The returned [ReadOutcome] controls how the response is
+    /// sent to the client: [Immediate][ReadOutcome::Immediate] is send directly to the client on
+    /// completion of this method, while [blocked][ReadOutcome::Blocked] spawns a background task
+    /// to wait for data to become available before responding.
+    ///
+    /// Implementations should tolerate flush hints while blocked (see
+    /// [flush](AsyncServe9p::flush)) and must respect client specified byte `count` limit.
     fn read(
         &self,
         cid: ClientId,
@@ -163,7 +192,12 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<ReadOutcome>> + Send;
 
-    /// List the contents of the given directory.
+    /// List [Stat] entries for a given client's view of a directory.
+    ///
+    /// [Server] calls this for `read` requests on a directory, handling read offsets and count
+    /// limits automatically (unlike [read][AsyncServe9p::read]). Implementations should return the
+    /// full logical entry list in stable order for the client's view of the directory (as
+    /// identified by `cid`).
     fn read_dir(
         &self,
         cid: ClientId,
@@ -171,7 +205,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<Vec<Stat>>> + Send;
 
-    /// Write the given `data` to the requested file starting at `offset`
+    /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
+    /// `offset`.
+    ///
+    /// [Server] ensures that this is only called for entries of type [file][FileType::Regular].
+    ///
+    /// Returns the number of bytes written. Returning `n < data.len()` is permitted and is treated
+    /// as a short write which may result in further `write` messages from the client.
+    ///
+    /// Implementations are required to enforce mode/permission rules and return `Err` when writes
+    /// are not permitted.
     fn write(
         &self,
         cid: ClientId,
@@ -181,7 +224,11 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<usize>> + Send;
 
-    /// Remove the requested file from the filesystem.
+    /// Remove the entry identified by `qid` from the filesystem.
+    ///
+    /// [Server] calls this for each `remove` message received from the client followed by
+    /// [clunking][AsyncServe9p::clunk] the `qid` regardless of success. Implementations should
+    /// return `Err` when removal is not permitted or fails.
     fn remove(
         &self,
         cid: ClientId,
@@ -189,7 +236,10 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Request a machine independent "directory entry" for the given resource.
+    /// Fetch the current [Stat] metadata for the filesystem entry identified by `qid`.
+    ///
+    /// [Server] uses this for client `stat` messages and internally for
+    /// [create][AsyncServe9p::create] permission masking against parent directories.
     fn stat(
         &self,
         cid: ClientId,
@@ -197,7 +247,11 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<Stat>> + Send;
 
-    /// Attempt to set the machine independent "directory entry" for the given resource.
+    /// Apply a [WStat] update to the [Stat] of the filesystem entry identified by `qid`.
+    ///
+    /// [Server] validates fid/qid identity before calling this and passes a [WStat] containing
+    /// only caller-requested field changes. Implementations must enforce authorization and
+    /// supported field semantics, returning `Err` for invalid or disallowed changes.
     fn write_stat(
         &self,
         cid: ClientId,
