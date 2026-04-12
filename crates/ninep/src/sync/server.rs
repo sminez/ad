@@ -6,23 +6,27 @@ use crate::{
     Result,
     fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
-        protocol::{Data, RawStat, Rdata, Rmessage, Tdata, Tmessage},
+        protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
         server::{
-            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_UNKNOWN_FID, Either, Session,
-            SessionType, Unattached,
+            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
+            E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta,
+            FlushHandle, Session, SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
 };
 use simple_coro::CoroState;
 use std::{
-    collections::btree_map::Entry,
     fs,
     mem::size_of,
     net::TcpListener,
     os::unix::net::UnixListener,
     path::PathBuf,
-    sync::mpsc::Receiver,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+        mpsc::{Receiver, Sender, channel},
+    },
     thread::{JoinHandle, spawn},
 };
 
@@ -37,6 +41,13 @@ pub enum ReadOutcome {
     /// No response should be sent until data is received on the provided channel
     Blocked(Receiver<Vec<u8>>),
 }
+
+/// Tri-state of the three cases we need to process in the event loop for handling an ongoing
+/// connection:
+/// 1. Tmessage from the client
+/// 2. Blocked read resolving
+/// 3. Error on the client stream (None)
+type Event = Option<Either<Tmessage, (u16, Vec<u8>)>>;
 
 #[derive(Debug)]
 struct Socket {
@@ -95,28 +106,66 @@ pub trait Serve9p: Send + Sync + 'static {
     //     Err("authentication not required".to_string())
     // }
 
-    /// Lookup a child node under a known parent directory by name.
+    /// Lookup the [FileMeta] for `child` under the directory represented by `parent_qid`.
     ///
-    /// `9p` Twalk messages received by the server will specify a full path from a known parent
-    /// to a target child. This method is called for each element of that path in sequence in order,
-    /// stopping either when the target is reached or some element of the path returns an error.
-    ///
-    /// [Server] will ensure that this method is only called for known parents who have previously
-    /// been identified has having [FileType::Directory].
-    fn walk(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta>;
+    /// `9p` walk messages received by the [Server] will specify a full path from a known parent
+    /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
+    /// for each element of that path in order, stopping either when the target is reached or some
+    /// element of the path returns an error.
+    fn walk_one(
+        &self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta>;
 
-    /// Open an existing file in the requested mode for subsequent I/O via [read](Serve9p::read) and
-    /// [write](Serve9p::write) calls.
+    /// Open an existing file for subsequent I/O via [read](Serve9p::read) and
+    /// [write](Serve9p::write) messages.
+    ///
+    /// [Server] calls this only for known, currently-closed fids. On success, [Server] marks the
+    /// fid as open with further `walk`, `open` and `create` messages using that fid being rejected
+    /// until the fid is clunked (either [explicitly](Serve9p::clunk) or via session reset).
     ///
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
-    /// bytes that will be supported per read/write call on this resource.
+    /// bytes that will be supported per read/write call on this resource. An `Err` should be
+    /// returned if access is denied, mode is unsupported, or the target cannot be opened.
     fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
 
-    /// Clunk a currently open file.
-    #[allow(unused_variables)]
+    /// Release client specific server-side resources associated with with provided qid.
+    ///
+    /// [Server] calls this when a fid is discarded (i.e. [clunk](Serve9p::clunk), successful or
+    /// failed [remove](Serve9p::remove), `version` session reset, or connection close). It is
+    /// possible that the provided qid may represent a file that was never opened for I/O in this
+    /// session.
+    ///
+    /// Implementations should be resilient to repeated calls for the same qid. (The default
+    /// implementation is a no-op.)
+    #[expect(unused_variables)]
     fn clunk(&self, cid: ClientId, qid: u64) {}
 
-    /// Create a new file in the given parent directory.
+    /// Handle "best effort" cancellation of an in-flight message identified by `old_tag`.
+    ///
+    /// Invoked when the server receives a `flush` message for a message that is still pending. As
+    /// per the `9p` spec, this is a hint _only_: the server is still permitted to complete any
+    /// outstanding work and send a response to the original message being flushed.
+    ///
+    /// Clients are permitted to send multiple `flush` messages for the same tag. As such,
+    /// implementations of this method should be resilient to being called multiple times with the
+    /// same arguments. (The default implementation is a no-op.)
+    #[expect(unused_variables)]
+    fn flush(&self, cid: ClientId, old_tag: u16) {}
+
+    /// Create a new entry in `parent`, returning its [metadata][FileMeta] and [IoUnit].
+    ///
+    /// [Server] ensures that this method is only called when the target fid is known, pointing to
+    /// a directory and not currently open for I/O. [Server] also handles rejecting `.` and `..` as
+    /// invalid entry names, and applying `9p` permission masking before this call, meaning `perm`
+    /// is already normalized against the parent directory's permissions.
+    ///
+    /// On success, [Server] rebinds the creating fid to the qid found in the returned [FileMeta]
+    /// and marks it as open for I/O. Implementations should return `Err` if `name` already exists
+    /// or creation cannot be completed for any reason.
     fn create(
         &self,
         cid: ClientId,
@@ -127,7 +176,16 @@ pub trait Serve9p: Send + Sync + 'static {
         uname: &str,
     ) -> Result<(FileMeta, IoUnit)>;
 
-    /// Read `count` bytes from the requested file starting from the given `offset`.
+    /// Read up to `count` bytes from `qid` starting at `offset`.
+    ///
+    /// [Server] calls this for non-directory files only; directory reads are routed through
+    /// [read_dir](Serve9p::read_dir). The returned [ReadOutcome] controls how the response is sent
+    /// to the client: [Immediate][ReadOutcome::Immediate] is send directly to the client on
+    /// completion of this method, while [blocked][ReadOutcome::Blocked] spawns a background task
+    /// to wait for data to become available before responding.
+    ///
+    /// Implementations should tolerate flush hints while blocked (see [flush](Serve9p::flush)) and
+    /// must respect client specified byte `count` limit.
     fn read(
         &self,
         cid: ClientId,
@@ -137,10 +195,24 @@ pub trait Serve9p: Send + Sync + 'static {
         uname: &str,
     ) -> Result<ReadOutcome>;
 
-    /// List the contents of the given directory.
+    /// List [Stat] entries for a given client's view of a directory.
+    ///
+    /// [Server] calls this for `read` requests on a directory, handling read offsets and count
+    /// limits automatically (unlike [read][Serve9p::read]). Implementations should return the full
+    /// logical entry list in stable order for the client's view of the directory (as identified by
+    /// `cid`).
     fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>>;
 
-    /// Write the given `data` to the requested file starting at `offset`
+    /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
+    /// `offset`.
+    ///
+    /// [Server] ensures that this is only called for entries of type [file][FileType::Regular].
+    ///
+    /// Returns the number of bytes written. Returning `n < data.len()` is permitted and is treated
+    /// as a short write which may result in further `write` messages from the client.
+    ///
+    /// Implementations are required to enforce mode/permission rules and return `Err` when writes
+    /// are not permitted.
     fn write(
         &self,
         cid: ClientId,
@@ -150,13 +222,24 @@ pub trait Serve9p: Send + Sync + 'static {
         uname: &str,
     ) -> Result<usize>;
 
-    /// Remove the requested file from the filesystem.
+    /// Remove the entry identified by `qid` from the filesystem.
+    ///
+    /// [Server] calls this for each `remove` request received from the client followed by
+    /// [clunking][Serve9p::clunk] the `qid` regardless of success. Implementations should return
+    /// `Err` when removal is not permitted or fails.
     fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()>;
 
-    /// Request a machine independent "directory entry" for the given resource.
+    /// Fetch the current [Stat] metadata for the filesystem entry identified by `qid`.
+    ///
+    /// [Server] uses this for client `stat` messages and internally for [create][Serve9p::create]
+    /// permission masking against parent directories.
     fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat>;
 
-    /// Attempt to set the machine independent "directory entry" for the given resource.
+    /// Apply a [WStat] update to the [Stat] of the filesystem entry identified by `qid`.
+    ///
+    /// [Server] validates fid/qid identity before calling this and passes a [WStat] containing
+    /// only caller-requested field changes. Implementations must enforce authorization and
+    /// supported field semantics, returning `Err` for invalid or disallowed changes.
     fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()>;
 }
 
@@ -211,7 +294,8 @@ where
     U: SyncStream,
 {
     fn reply(&mut self, tag: u16, resp: Result<Rdata>) {
-        let r: Rmessage = (tag, resp).into();
+        let mut r: Rmessage = (tag, resp).into();
+        r.clamp(self.msize);
         let _ = r.write_to(&mut self.stream);
     }
 }
@@ -223,7 +307,7 @@ where
 {
     fn handle_connection(mut self) {
         loop {
-            let t = match Tmessage::read_from(&self.buf, &mut self.stream) {
+            let t = match Tmessage::read_from(DEFAULT_MSIZE, &self.buf, &mut self.stream) {
                 Ok(t) => t,
                 Err(_) => return,
             };
@@ -246,28 +330,76 @@ where
 {
     /// Explicitly clunk all
     fn clunk_and_clear(&mut self) {
-        for &qid in self.state.fids.values() {
-            self.s.clunk(self.client_id, qid);
+        for meta in self.state.fids.values() {
+            self.s.clunk(self.client_id, meta.qid);
         }
         self.state.fids.clear();
+    }
+
+    fn flush_waiters(&mut self, flush_handle: &mut FlushHandle, tag: u16) {
+        for tag in flush_handle.pending_flush_tags(tag) {
+            self.reply(tag, Ok(Rdata::Flush {}));
+        }
+    }
+
+    fn spawn_reader(&self, tx: Sender<Event>, msize: Arc<AtomicU32>) -> Option<JoinHandle<()>>
+    where
+        U: SyncServerStream,
+    {
+        let mut stream = self.stream.try_clone().ok()?;
+        let h = spawn(move || {
+            let buf = SharedBuf::default();
+            loop {
+                let msize = msize.load(Ordering::Relaxed);
+                let t = match Tmessage::read_from(msize, &buf, &mut stream) {
+                    Ok(t) => t,
+                    Err(_) => {
+                        _ = tx.send(None);
+                        return;
+                    }
+                };
+
+                if tx.send(Some(Either::L(t))).is_err() {
+                    return;
+                }
+            }
+        });
+
+        Some(h)
     }
 
     fn handle_connection(mut self) {
         use Tdata::*;
 
+        let current_msize = Arc::new(AtomicU32::new(self.msize));
+        let (tx, rx) = channel();
+        let mut flush_handle = FlushHandle::default();
+
+        let _handle = match self.spawn_reader(tx.clone(), current_msize.clone()) {
+            None => return self.clunk_and_clear(),
+            Some(h) => h,
+        };
+
         loop {
-            let t = match Tmessage::read_from(&self.buf, &mut self.stream) {
-                Ok(t) => t,
-                Err(_) => return self.clunk_and_clear(),
+            let (tag, content) = match rx.recv() {
+                Ok(Some(Either::L(Tmessage { tag, content }))) => (tag, content),
+                Ok(Some(Either::R((tag, data)))) => {
+                    self.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                    self.flush_waiters(&mut flush_handle, tag);
+                    continue;
+                }
+                Ok(None) | Err(_) => return self.clunk_and_clear(),
             };
 
-            let Tmessage { tag, content } = t;
+            if !matches!(content, Flush { .. }) {
+                flush_handle.mark_pending(tag);
+            }
 
             let resp = match content {
                 Auth { .. } | Attach { .. } => Err(E_ALREADY_ATTACHED.into()),
-                Flush { .. } => Ok(Rdata::Flush {}),
                 Version { msize, version } => {
                     let rdata = self.handle_version(msize, version);
+                    current_msize.store(self.msize, Ordering::Relaxed);
                     self.clunk_and_clear();
 
                     Ok(rdata)
@@ -287,17 +419,32 @@ where
                     perm,
                     mode,
                 } => self.handle_create(fid, name, Perm::new(perm), Mode::new(mode)),
-                Read { fid, offset, count } => match self.handle_read(tag, fid, offset, count) {
-                    Ok(Some(resp)) => Ok(resp),
-                    Err(err) => Err(err),
-                    Ok(None) => continue,
-                },
+                Read { fid, offset, count } => {
+                    let res = self.handle_read(tag, fid, offset, count, &tx);
+                    match res {
+                        Ok(Some(resp)) => Ok(resp),
+                        Err(err) => Err(err),
+                        Ok(None) => continue,
+                    }
+                }
                 Write { fid, offset, data } => self.handle_write(fid, offset, data.0),
                 Remove { fid } => self.handle_remove(fid),
                 Wstat { fid, stat, .. } => self.handle_wstat(fid, stat),
+                Flush { old_tag } => {
+                    let sent_flush = flush_handle.flush_or_chain(tag, old_tag).run_sync(|_| {
+                        self.reply(tag, Ok(Rdata::Flush {}));
+                    });
+
+                    if !sent_flush {
+                        self.s.flush(self.client_id, old_tag);
+                    }
+
+                    continue;
+                }
             };
 
             self.reply(tag, resp);
+            self.flush_waiters(&mut flush_handle, tag);
         }
     }
 
@@ -349,28 +496,27 @@ where
         let client_id = self.client_id;
         let mut coro = self
             .session_state
-            .handle_attached_walk(fid, new_fid, &wnames);
+            .handle_attached_walk(fid, new_fid, wnames);
 
         loop {
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let fm = self.s.walk(client_id, qid, name, uname)?;
-                    c.send(fm)
+                    let res = self.s.walk_one(client_id, qid, &name, &uname);
+                    c.send(res)
                 }
             };
         }
     }
 
     fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
-        match self.state.fids.entry(fid) {
-            Entry::Occupied(ent) => {
-                let qid = ent.remove();
-                self.s.clunk(self.client_id, qid);
+        match self.state.fids.remove(&fid) {
+            Some(meta) => {
+                self.s.clunk(self.client_id, meta.qid);
 
                 Ok(Rdata::Clunk {})
             }
-            Entry::Vacant(_) => Err(E_UNKNOWN_FID.to_string()),
+            None => Err(E_UNKNOWN_FID.to_string()),
         }
     }
 
@@ -393,10 +539,20 @@ where
     }
 
     fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
+        if self.try_fid_meta(fid)?.is_open {
+            return Err(E_FID_ALREADY_OPEN.to_string());
+        }
+
         let fm = self.try_file_meta(fid)?;
         let iounit = self
             .s
             .open(self.client_id, fm.qid, mode, &self.state.uname)?;
+
+        self.state
+            .fids
+            .get_mut(&fid)
+            .expect("known fid after try_file_meta")
+            .is_open = true;
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -405,18 +561,28 @@ where
     }
 
     fn handle_create(&mut self, fid: u32, name: String, perm: Perm, mode: Mode) -> Result<Rdata> {
+        if name == "." || name == ".." {
+            return Err(E_ILLEGAL_CREATE_NAME.to_string());
+        }
+
         let fm = self.try_file_meta(fid)?;
         if fm.ty != FileType::Directory {
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
-        let (fm, iounit) =
-            self.s
-                .create(self.client_id, fm.qid, &name, perm, mode, &self.state.uname)?;
+        let parent = self.s.stat(self.client_id, fm.qid, &self.state.uname)?;
+        let (fm, iounit) = self.s.create(
+            self.client_id,
+            fm.qid,
+            &name,
+            perm.apply_create_mask(parent.perms),
+            mode,
+            &self.state.uname,
+        )?;
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
-        self.state.fids.insert(fid, fm.qid);
+        self.state.fids.insert(fid, FidMeta::open(fm.qid));
         self.qids.entry(fm.qid).or_insert(fm);
 
         Ok(Rdata::Create { qid, iounit })
@@ -439,6 +605,7 @@ where
         fid: u32,
         offset: u64,
         count: u32,
+        tx: &Sender<Event>,
     ) -> Result<Option<Rdata>> {
         let cid = self.client_id;
         let coro = self.session_state.handle_attached_read(fid, offset, count);
@@ -447,20 +614,18 @@ where
         match coro.resume() {
             CoroState::Complete(res) => res,
             CoroState::Pending(c, Either::L((qid, uname))) => {
-                let stats = self.s.read_dir(cid, qid, uname)?;
+                let stats = self.s.read_dir(cid, qid, &uname)?;
                 c.send(stats).resume().unwrap()
             }
             CoroState::Pending(_, Either::R((qid, uname))) => {
-                let outcome = self.s.read(cid, qid, offset, count, uname)?;
+                let outcome = self.s.read(cid, qid, offset, count, &uname)?;
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(chan) => {
-                        let mut stream = self.stream.try_clone()?;
+                        let tx = tx.clone();
                         spawn(move || {
                             let data = chan.recv().unwrap_or_default();
-                            let resp = Ok(Rdata::Read { data: Data(data) });
-                            let r: Rmessage = (tag, resp).into();
-                            let _ = r.write_to(&mut stream);
+                            _ = tx.send(Some(Either::R((tag, data))));
                         });
 
                         Ok(None)
@@ -472,7 +637,10 @@ where
 
     fn handle_write(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
-        if offset > u32::MAX as u64 {
+
+        if fm.ty == FileType::Directory {
+            return Err(E_ILLEGAL_DIRECTORY_WRITE.to_string());
+        } else if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
@@ -489,8 +657,87 @@ where
 
     fn handle_remove(&mut self, fid: u32) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
-        self.s.remove(self.client_id, fm.qid, &self.state.uname)?;
+        let res = self.s.remove(self.client_id, fm.qid, &self.state.uname);
+
+        // ensure that we clunk before erroring
+        self.s.clunk(self.client_id, fm.qid);
+        res?;
 
         Ok(Rdata::Remove {})
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_test_suite,
+        sansio::protocol::Tmessage,
+        test_utils::{SyncTestClient, TestFs, cases::Step},
+    };
+    use std::{net::Shutdown, os::unix::net::UnixStream, thread};
+
+    macro_rules! run_one {
+        ($case:expr) => {
+            // Setup the client and server
+            let fs = TestFs::default();
+            let recorded = fs.calls();
+            let (client_stream, server_stream) = UnixStream::pair().unwrap();
+            let mut client = SyncTestClient::new(client_stream);
+            let mut server = Server::new(fs);
+
+            let mut handle = Some(thread::spawn(move || {
+                server.new_session(server_stream).handle_connection();
+            }));
+
+            // Run the test case
+            let mut did_shutdown = false;
+
+            for step in $case {
+                match step {
+                    Step::Request { tag, req, resp } => {
+                        let rmsg = client.send_sync(tag, req).unwrap();
+                        assert_eq!(rmsg, Rmessage { tag, content: resp });
+                    }
+
+                    Step::Send { tag, req } => {
+                        Tmessage::new(tag, req)
+                            .write_to(&mut client.stream)
+                            .unwrap();
+                    }
+
+                    Step::Receive { tag, resp } => {
+                        let rmsg = <Rmessage as SyncNineP>::read_from(
+                            client.msize,
+                            &client.buf,
+                            &mut client.stream,
+                        )
+                        .unwrap();
+                        assert_eq!(rmsg, Rmessage::new(tag, resp));
+                    }
+
+                    Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),
+
+                    Step::CloseStream => {
+                        let _ = client.stream.shutdown(Shutdown::Both);
+                        if let Some(h) = handle.take() {
+                            h.join().expect("server thread join failed");
+                        }
+                        did_shutdown = true;
+                    }
+                }
+            }
+
+            if !did_shutdown {
+                let _ = client.stream.shutdown(Shutdown::Both);
+            }
+
+            // wait for the server to shutdown
+            if let Some(h) = handle.take() {
+                h.join().expect("server thread join failed");
+            }
+        };
+    }
+
+    generate_test_suite!(sync, run_one);
 }

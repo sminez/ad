@@ -119,6 +119,30 @@ impl Perm {
     pub fn new(bits: u32) -> Self {
         Perm::from_bits_truncate(bits)
     }
+
+    /// Apply the appropriate 9P create permission mask based on the parent directory's
+    /// permissions:
+    ///
+    /// The create request asks the file server to create a new file with the name supplied, in the
+    /// directory (dir) represented by fid, and requires write permission in the directory. The
+    /// owner of the file is the implied user id of the request, the group of the file is the same
+    /// as dir, and the permissions are the value of
+    ///   perm & (~0666 | (dir.perm & 0666))
+    /// if a regular file is being created and
+    ///   perm & (~0777 | (dir.perm & 0777))
+    /// if a directory is being created. This means, for example, that if the create allows read
+    /// permission to others, but the containing directory does not, then the created file will not
+    /// allow others to read the file.
+    pub fn apply_create_mask(&self, parent_perms: Perm) -> Perm {
+        let mask = if self.contains(Perm::DIR) {
+            0o777
+        } else {
+            0o666
+        };
+        let bits = self.bits() & (!mask | (parent_perms.bits() & mask));
+
+        Perm::new(bits)
+    }
 }
 
 /// <http://p9f.org/magic/man2html/2/iounit>

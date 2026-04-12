@@ -8,16 +8,19 @@ use crate::{
     sansio::{
         protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
         server::{
-            Attached, E_CREATE_NON_DIR, E_UNKNOWN_FID, Either, Session, SessionType, Unattached,
+            Attached, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN, E_ILLEGAL_CREATE_NAME,
+            E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta, FlushHandle, Session,
+            SessionType, Unattached,
         },
     },
+    sync::server::Serve9p,
     tokio::{AsyncNineP, AsyncStream},
 };
 use simple_coro::CoroState;
-use std::{collections::btree_map::Entry, fs, future::Future, mem::size_of, path::PathBuf};
+use std::{fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
     net::{TcpListener, UnixListener},
-    sync::mpsc::{Receiver, UnboundedSender, unbounded_channel},
+    sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel},
     task::{JoinHandle, spawn},
 };
 
@@ -90,15 +93,13 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     //     async { Err("authentication not required".to_string()) }
     // }
 
-    /// Lookup a child node under a known parent directory by name.
+    /// Lookup the [FileMeta] for `child` under the directory represented by `parent_qid`.
     ///
-    /// `9p` Twalk messages received by the server will specify a full path from a known parent
-    /// to a target child. This method is called for each element of that path in sequence in order,
-    /// stopping either when the target is reached or some element of the path returns an error.
-    ///
-    /// [Server] will ensure that this method is only called for known parents who have previously
-    /// been identified has having [FileType::Directory].
-    fn walk(
+    /// `9p` walk messages received by the [Server] will specify a full path from a known parent
+    /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
+    /// for each element of that path in order, stopping either when the target is reached or some
+    /// element of the path returns an error.
+    fn walk_one(
         &self,
         cid: ClientId,
         parent_qid: u64,
@@ -106,11 +107,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<FileMeta>> + Send;
 
-    /// Open an existing file in the requested mode for subsequent I/O via [read](AsyncServe9p::read) and
-    /// [write](AsyncServe9p::write) calls.
+    /// Open an existing file for subsequent I/O via [read](AsyncServe9p::read) and
+    /// [write](AsyncServe9p::write) messages.
+    ///
+    /// [Server] calls this only for known, currently-closed fids. On success, [Server] marks the
+    /// fid as open with further `walk`, `open` and `create` messages using that fid being rejected
+    /// until the fid is clunked (either [explicitly](AsyncServe9p::clunk) or via session reset).
     ///
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
-    /// bytes that will be supported per read/write call on this resource.
+    /// bytes that will be supported per read/write call on this resource. An `Err` should be
+    /// returned if access is denied, mode is unsupported, or the target cannot be opened.
     fn open(
         &self,
         cid: ClientId,
@@ -119,13 +125,44 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<IoUnit>> + Send;
 
-    /// Clunk a currently open file.
-    #[allow(unused_variables)]
+    /// Release client specific server-side resources associated with with provided qid.
+    ///
+    /// [Server] calls this when a fid is discarded (i.e. [clunk](AsyncServe9p::clunk), successful
+    /// or failed [remove](AsyncServe9p::remove), `version` session reset, or connection close). It
+    /// is possible that the provided qid may represent a file that was never opened for I/O in
+    /// this session.
+    ///
+    /// Implementations should be resilient to repeated calls for the same qid. (The default
+    /// implementation is a no-op.)
+    #[expect(unused_variables)]
     fn clunk(&self, cid: ClientId, qid: u64) -> impl Future<Output = ()> + Send {
         async {}
     }
 
-    /// Create a new file in the given parent directory.
+    /// Handle "best effort" cancellation of an in-flight message identified by `old_tag`.
+    ///
+    /// Invoked when the server receives a `flush` message for a message that is still pending. As
+    /// per the `9p` spec, this is a hint _only_: the server is still permitted to complete any
+    /// outstanding work and send a response to the original message being flushed.
+    ///
+    /// Clients are permitted to send multiple `flush` messages for the same tag. As such,
+    /// implementations of this method should be resilient to being called multiple times with the
+    /// same arguments. (The default implementation is a no-op.)
+    #[expect(unused_variables)]
+    fn flush(&self, cid: ClientId, old_tag: u16) -> impl Future<Output = ()> + Send {
+        async {}
+    }
+
+    /// Create a new entry in `parent`, returning its [metadata][FileMeta] and [IoUnit].
+    ///
+    /// [Server] ensures that this method is only called when the target fid is known, pointing to
+    /// a directory and not currently open for I/O. [Server] also handles rejecting `.` and `..` as
+    /// invalid entry names, and applying `9p` permission masking before this call, meaning `perm`
+    /// is already normalized against the parent directory's permissions.
+    ///
+    /// On success, [Server] rebinds the creating fid to the qid found in the returned [FileMeta]
+    /// and marks it as open for I/O. Implementations should return `Err` if `name` already exists
+    /// or creation cannot be completed for any reason.
     fn create(
         &self,
         cid: ClientId,
@@ -136,7 +173,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<(FileMeta, IoUnit)>> + Send;
 
-    /// Read `count` bytes from the requested file starting from the given `offset`.
+    /// Read up to `count` bytes from `qid` starting at `offset`.
+    ///
+    /// [Server] calls this for non-directory files only; directory reads are routed through
+    /// [read_dir](AsyncServe9p::read_dir). The returned [ReadOutcome] controls how the response is
+    /// sent to the client: [Immediate][ReadOutcome::Immediate] is send directly to the client on
+    /// completion of this method, while [blocked][ReadOutcome::Blocked] spawns a background task
+    /// to wait for data to become available before responding.
+    ///
+    /// Implementations should tolerate flush hints while blocked (see
+    /// [flush](AsyncServe9p::flush)) and must respect client specified byte `count` limit.
     fn read(
         &self,
         cid: ClientId,
@@ -146,7 +192,12 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<ReadOutcome>> + Send;
 
-    /// List the contents of the given directory.
+    /// List [Stat] entries for a given client's view of a directory.
+    ///
+    /// [Server] calls this for `read` requests on a directory, handling read offsets and count
+    /// limits automatically (unlike [read][AsyncServe9p::read]). Implementations should return the
+    /// full logical entry list in stable order for the client's view of the directory (as
+    /// identified by `cid`).
     fn read_dir(
         &self,
         cid: ClientId,
@@ -154,7 +205,16 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<Vec<Stat>>> + Send;
 
-    /// Write the given `data` to the requested file starting at `offset`
+    /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
+    /// `offset`.
+    ///
+    /// [Server] ensures that this is only called for entries of type [file][FileType::Regular].
+    ///
+    /// Returns the number of bytes written. Returning `n < data.len()` is permitted and is treated
+    /// as a short write which may result in further `write` messages from the client.
+    ///
+    /// Implementations are required to enforce mode/permission rules and return `Err` when writes
+    /// are not permitted.
     fn write(
         &self,
         cid: ClientId,
@@ -164,7 +224,11 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<usize>> + Send;
 
-    /// Remove the requested file from the filesystem.
+    /// Remove the entry identified by `qid` from the filesystem.
+    ///
+    /// [Server] calls this for each `remove` message received from the client followed by
+    /// [clunking][AsyncServe9p::clunk] the `qid` regardless of success. Implementations should
+    /// return `Err` when removal is not permitted or fails.
     fn remove(
         &self,
         cid: ClientId,
@@ -172,7 +236,10 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<()>> + Send;
 
-    /// Request a machine independent "directory entry" for the given resource.
+    /// Fetch the current [Stat] metadata for the filesystem entry identified by `qid`.
+    ///
+    /// [Server] uses this for client `stat` messages and internally for
+    /// [create][AsyncServe9p::create] permission masking against parent directories.
     fn stat(
         &self,
         cid: ClientId,
@@ -180,7 +247,11 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         uname: &str,
     ) -> impl Future<Output = Result<Stat>> + Send;
 
-    /// Attempt to set the machine independent "directory entry" for the given resource.
+    /// Apply a [WStat] update to the [Stat] of the filesystem entry identified by `qid`.
+    ///
+    /// [Server] validates fid/qid identity before calling this and passes a [WStat] containing
+    /// only caller-requested field changes. Implementations must enforce authorization and
+    /// supported field semantics, returning `Err` for invalid or disallowed changes.
     fn write_stat(
         &self,
         cid: ClientId,
@@ -188,6 +259,106 @@ pub trait AsyncServe9p: Send + Sync + 'static {
         wstat: WStat,
         uname: &str,
     ) -> impl Future<Output = Result<()>> + Send;
+}
+
+/// Helper trait for auto-implementing [AsyncServe9p] using an existing synchronous [Serve9p]
+/// implementation.
+///
+/// Each method will implemented by delegating to the existing synchronous implementation.
+pub trait AsyncServe9pFromSync: Serve9p {}
+
+impl<T> AsyncServe9p for T
+where
+    T: AsyncServe9pFromSync,
+{
+    async fn walk_one(
+        &self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta> {
+        <T as Serve9p>::walk_one(self, cid, parent_qid, child, uname)
+    }
+
+    async fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
+        <T as Serve9p>::open(self, cid, qid, mode, uname)
+    }
+
+    async fn clunk(&self, cid: ClientId, qid: u64) {
+        <T as Serve9p>::clunk(self, cid, qid);
+    }
+
+    async fn flush(&self, cid: ClientId, old_tag: u16) {
+        <T as Serve9p>::flush(self, cid, old_tag);
+    }
+
+    async fn create(
+        &self,
+        cid: ClientId,
+        parent: u64,
+        name: &str,
+        perm: Perm,
+        mode: Mode,
+        uname: &str,
+    ) -> Result<(FileMeta, IoUnit)> {
+        <T as Serve9p>::create(self, cid, parent, name, perm, mode, uname)
+    }
+
+    async fn read(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        count: usize,
+        uname: &str,
+    ) -> Result<ReadOutcome> {
+        use crate::sync::server::ReadOutcome as SyncReadOutcome;
+
+        let ro = match <T as Serve9p>::read(self, cid, qid, offset, count, uname)? {
+            SyncReadOutcome::Immediate(data) => ReadOutcome::Immediate(data),
+            SyncReadOutcome::Blocked(srx) => {
+                let (tx, rx) = channel(1);
+
+                tokio::spawn(async move {
+                    if let Ok(data) = srx.recv() {
+                        _ = tx.send(data).await;
+                    }
+                });
+
+                ReadOutcome::Blocked(rx)
+            }
+        };
+
+        Ok(ro)
+    }
+
+    async fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
+        <T as Serve9p>::read_dir(self, cid, qid, uname)
+    }
+
+    async fn write(
+        &self,
+        cid: ClientId,
+        qid: u64,
+        offset: usize,
+        data: Vec<u8>,
+        uname: &str,
+    ) -> Result<usize> {
+        <T as Serve9p>::write(self, cid, qid, offset, data, uname)
+    }
+
+    async fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
+        <T as Serve9p>::remove(self, cid, qid, uname)
+    }
+
+    async fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
+        <T as Serve9p>::stat(self, cid, qid, uname)
+    }
+
+    async fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
+        <T as Serve9p>::write_stat(self, cid, qid, wstat, uname)
+    }
 }
 
 impl<S> Server<S>
@@ -241,7 +412,7 @@ where
     U: AsyncStream,
 {
     async fn reply_async(&mut self, tag: u16, resp: Result<Rdata>) {
-        self.stream.reply(tag, resp).await
+        self.stream.reply(self.session_state.msize, tag, resp).await
     }
 }
 
@@ -252,7 +423,7 @@ where
 {
     async fn handle_connection_async(mut self) {
         loop {
-            let t = match Tmessage::read_from(&self.buf, &mut self.stream).await {
+            let t = match Tmessage::read_from(self.msize, &self.buf, &mut self.stream).await {
                 Ok(t) => t,
                 Err(_) => return,
             };
@@ -275,31 +446,43 @@ where
 {
     /// Explicitly clunk all
     async fn clunk_and_clear_async(&mut self) {
-        for &qid in self.state.fids.values() {
-            self.s.clunk(self.client_id, qid).await;
+        for meta in self.state.fids.values() {
+            self.s.clunk(self.client_id, meta.qid).await;
         }
         self.state.fids.clear();
+    }
+
+    async fn flush_waiters_async(&mut self, flush_handle: &mut FlushHandle, tag: u16) {
+        for tag in flush_handle.pending_flush_tags(tag) {
+            self.reply_async(tag, Ok(Rdata::Flush {})).await;
+        }
     }
 
     async fn handle_connection_async(mut self) {
         use Tdata::*;
         let (tx, mut rx) = unbounded_channel();
+        let mut flush_handle = FlushHandle::default();
 
         loop {
             let Tmessage { tag, content } = tokio::select! {
                 // Blocked read came through so send it to the client
                 Some((tag, data)) = rx.recv() => {
                     self.stream
-                        .reply(tag, Ok(Rdata::Read { data: Data(data) }))
+                        .reply(self.msize, tag, Ok(Rdata::Read { data: Data(data) }))
                         .await;
+                    self.flush_waiters_async(&mut flush_handle, tag).await;
                     continue;
                 },
-                res = Tmessage::read_from(&self.buf, &mut self.stream) => match res {
+                res = Tmessage::read_from(self.msize, &self.buf, &mut self.stream) => match res {
                     Ok(t) => t,
                     Err(_) => return self.clunk_and_clear_async().await,
                 },
                 else => continue,
             };
+
+            if !content.is_flush() {
+                flush_handle.mark_pending(tag);
+            }
 
             let resp = match content {
                 Version { msize, version } => {
@@ -309,7 +492,6 @@ where
                     Ok(resp)
                 }
                 Auth { .. } | Attach { .. } => Err("session is already attached".into()),
-                Flush { .. } => Ok(Rdata::Flush {}),
 
                 Walk {
                     fid,
@@ -338,9 +520,29 @@ where
                 Write { fid, offset, data } => self.handle_write_async(fid, offset, data.0).await,
                 Remove { fid } => self.handle_remove_async(fid).await,
                 Wstat { fid, stat, .. } => self.handle_wstat_async(fid, stat).await,
+                Flush { old_tag } => {
+                    let mut coro = flush_handle.flush_or_chain(tag, old_tag);
+                    loop {
+                        coro = match coro.resume() {
+                            CoroState::Pending(c, _) => {
+                                self.reply_async(tag, Ok(Rdata::Flush {})).await;
+                                c.send(())
+                            }
+                            CoroState::Complete(sent_flush) => {
+                                if !sent_flush {
+                                    self.s.flush(self.client_id, old_tag).await;
+                                }
+                                break;
+                            }
+                        }
+                    }
+
+                    continue;
+                }
             };
 
             self.reply_async(tag, resp).await;
+            self.flush_waiters_async(&mut flush_handle, tag).await;
         }
     }
 
@@ -397,28 +599,27 @@ where
         let client_id = self.client_id;
         let mut coro = self
             .session_state
-            .handle_attached_walk(fid, new_fid, &wnames);
+            .handle_attached_walk(fid, new_fid, wnames);
 
         loop {
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res,
                 CoroState::Pending(c, (qid, name, uname)) => {
-                    let fm = self.s.walk(client_id, qid, name, uname).await?;
-                    c.send(fm)
+                    let res = self.s.walk_one(client_id, qid, &name, &uname).await;
+                    c.send(res)
                 }
             };
         }
     }
 
     async fn handle_clunk_async(&mut self, fid: u32) -> Result<Rdata> {
-        match self.state.fids.entry(fid) {
-            Entry::Occupied(ent) => {
-                let qid = ent.remove();
-                self.s.clunk(self.client_id, qid).await;
+        match self.state.fids.remove(&fid) {
+            Some(meta) => {
+                self.s.clunk(self.client_id, meta.qid).await;
 
                 Ok(Rdata::Clunk {})
             }
-            Entry::Vacant(_) => Err(E_UNKNOWN_FID.to_string()),
+            None => Err(E_UNKNOWN_FID.to_string()),
         }
     }
 
@@ -445,11 +646,21 @@ where
     }
 
     async fn handle_open_async(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
+        if self.try_fid_meta(fid)?.is_open {
+            return Err(E_FID_ALREADY_OPEN.to_string());
+        }
+
         let fm = self.try_file_meta(fid)?;
         let iounit = self
             .s
             .open(self.client_id, fm.qid, mode, &self.state.uname)
             .await?;
+
+        self.state
+            .fids
+            .get_mut(&fid)
+            .expect("known fid after try_file_meta")
+            .is_open = true;
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -464,19 +675,34 @@ where
         perm: Perm,
         mode: Mode,
     ) -> Result<Rdata> {
+        if name == "." || name == ".." {
+            return Err(E_ILLEGAL_CREATE_NAME.to_string());
+        }
+
         let fm = self.try_file_meta(fid)?;
         if fm.ty != FileType::Directory {
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
+        let parent = self
+            .s
+            .stat(self.client_id, fm.qid, &self.state.uname)
+            .await?;
         let (fm, iounit) = self
             .s
-            .create(self.client_id, fm.qid, &name, perm, mode, &self.state.uname)
+            .create(
+                self.client_id,
+                fm.qid,
+                &name,
+                perm.apply_create_mask(parent.perms),
+                mode,
+                &self.state.uname,
+            )
             .await?;
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
-        self.state.fids.insert(fid, fm.qid);
+        self.state.fids.insert(fid, FidMeta::open(fm.qid));
         self.qids.entry(fm.qid).or_insert(fm);
 
         Ok(Rdata::Create { qid, iounit })
@@ -508,11 +734,11 @@ where
         match coro.resume() {
             CoroState::Complete(res) => res,
             CoroState::Pending(c, Either::L((qid, uname))) => {
-                let stats = self.s.read_dir(cid, qid, uname).await?;
+                let stats = self.s.read_dir(cid, qid, &uname).await?;
                 c.send(stats).resume().unwrap()
             }
             CoroState::Pending(_, Either::R((qid, uname))) => {
-                let outcome = self.s.read(cid, qid, offset, count, uname).await?;
+                let outcome = self.s.read(cid, qid, offset, count, &uname).await?;
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(mut chan) => {
@@ -530,11 +756,14 @@ where
     }
 
     async fn handle_write_async(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
-        if offset > u32::MAX as u64 {
+        let fm = self.try_file_meta(fid)?;
+
+        if fm.ty == FileType::Directory {
+            return Err(E_ILLEGAL_DIRECTORY_WRITE.to_string());
+        } else if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
-        let fm = self.try_file_meta(fid)?;
         let count = self
             .s
             .write(
@@ -551,10 +780,96 @@ where
 
     async fn handle_remove_async(&mut self, fid: u32) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
-        self.s
+        let res = self
+            .s
             .remove(self.client_id, fm.qid, &self.state.uname)
-            .await?;
+            .await;
+
+        // ensure that we clunk before erroring
+        self.s.clunk(self.client_id, fm.qid).await;
+        res?;
 
         Ok(Rdata::Remove {})
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_test_suite,
+        sansio::protocol::{Rmessage, Tmessage},
+        test_utils::{AsyncTestClient, TestFs, cases::Step},
+    };
+    use tokio::{
+        io::{AsyncWriteExt, duplex},
+        task,
+    };
+
+    macro_rules! run_one {
+        ($case:expr) => {
+            // Setup the client and server
+            let fs = TestFs::default();
+            let recorded = fs.calls();
+            let (client_stream, server_stream) = duplex(8192);
+            let mut client = AsyncTestClient::new(client_stream);
+            let mut server = Server::new(fs);
+
+            let mut handle = Some(task::spawn(async move {
+                server
+                    .new_session(server_stream)
+                    .handle_connection_async()
+                    .await;
+            }));
+
+            // Run the test case
+            let mut did_shutdown = false;
+
+            for step in $case {
+                match step {
+                    Step::Request { tag, req, resp } => {
+                        let rmsg = client.send_async(tag, req).await.unwrap();
+                        assert_eq!(rmsg, Rmessage { tag, content: resp });
+                    }
+
+                    Step::Send { tag, req } => {
+                        AsyncNineP::write_to(&Tmessage::new(tag, req), &mut client.stream)
+                            .await
+                            .unwrap();
+                    }
+
+                    Step::Receive { tag, resp } => {
+                        let rmsg = <Rmessage as AsyncNineP>::read_from(
+                            client.msize,
+                            &client.buf,
+                            &mut client.stream,
+                        )
+                        .await
+                        .unwrap();
+                        assert_eq!(rmsg, Rmessage::new(tag, resp));
+                    }
+
+                    Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),
+
+                    Step::CloseStream => {
+                        let _ = client.stream.shutdown().await;
+                        if let Some(h) = handle.take() {
+                            h.await.expect("server task join failed");
+                        }
+                        did_shutdown = true;
+                    }
+                }
+            }
+
+            if !did_shutdown {
+                let _ = client.stream.shutdown().await;
+            }
+
+            if let Some(h) = handle.take() {
+                h.await.expect("server task join failed");
+            }
+        };
+    }
+
+    generate_test_suite!(tokio, run_one);
 }

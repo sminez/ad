@@ -1,6 +1,6 @@
 [package]
 name = "ninep"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 authors = ["sminez <innes.andersonmorrison@gmail.com>"]
 license = "MIT"
@@ -20,7 +20,7 @@ tokio = ["dep:tokio"]
 [dependencies]
 bitflags = "2"
 tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync"], optional = true }
-simple_coro = "0.1"
+simple_coro = "0.1.5"
 
 [dev-dependencies]
 simple_test_case = "1"

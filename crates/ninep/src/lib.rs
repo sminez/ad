@@ -18,5 +18,8 @@ pub mod sync;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
+#[cfg(test)]
+pub(crate) mod test_utils;
+
 /// A simple result type for errors returned from this crate
 pub type Result<T> = std::result::Result<T, String>;

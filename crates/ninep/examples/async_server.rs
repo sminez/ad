@@ -107,7 +107,7 @@ impl AsyncServe9p for EchoServer {
         Err("write_stat not supported".to_string())
     }
 
-    async fn walk(
+    async fn walk_one(
         &self,
         _cid: ClientId,
         parent_qid: u64,

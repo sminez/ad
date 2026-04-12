@@ -106,7 +106,13 @@ impl Serve9p for EchoServer {
         Err("write_stat not supported".to_string())
     }
 
-    fn walk(&self, _cid: ClientId, parent_qid: u64, child: &str, _uname: &str) -> Result<FileMeta> {
+    fn walk_one(
+        &self,
+        _cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        _uname: &str,
+    ) -> Result<FileMeta> {
         println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
             (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),

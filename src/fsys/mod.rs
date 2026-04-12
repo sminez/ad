@@ -472,7 +472,13 @@ impl Serve9p for AdFs {
         Ok(())
     }
 
-    fn walk(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<FileMeta> {
+    fn walk_one(
+        &self,
+        cid: ClientId,
+        parent_qid: u64,
+        child: &str,
+        uname: &str,
+    ) -> Result<FileMeta> {
         trace!(?cid, %parent_qid, %child, %uname, "handling walk request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
