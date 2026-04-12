@@ -399,3 +399,61 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_client_test_suite,
+        sync::server::Server,
+        test_utils::{
+            TestFs,
+            client_cases::{Step, TestCase},
+        },
+    };
+    use std::{collections::HashMap, net::Shutdown, os::unix::net::UnixStream, thread};
+
+    // We stamp out the test suite using this helper macro rather than using simple_test_case in
+    // order to ensure that both the sync and tokio implementations run exactly the same cases
+    // without needing to define that set of cases in two places.
+    generate_client_test_suite!(sync, run_one);
+
+    fn run_one(case: TestCase) {
+        let fs = TestFs::default();
+        let mut server = Server::new(fs);
+        let (client_stream, server_stream) = UnixStream::pair().unwrap();
+        let mut client = Client::new(client_stream);
+        let handle = thread::spawn(move || {
+            server.handle_single_test_stream_sync(server_stream);
+        });
+
+        for (i, step) in case.into_iter().enumerate() {
+            handle_step(i, step, &mut client);
+        }
+
+        let _ = client.stream().shutdown(Shutdown::Both);
+        handle.join().expect("server thread join failed");
+    }
+
+    fn handle_step(i: usize, step: Step, client: &mut UnixClient) {
+        match step {
+            Step::Connect { uname, aname } => {
+                if let Err(e) = client.connect(uname, aname) {
+                    panic!("(step {i}) failed to connect: {e}");
+                }
+            }
+
+            Step::AssertState {
+                msize,
+                next_fid,
+                fids,
+            } => {
+                let st = client.state();
+                assert_eq!(st.msize, msize, "step {i}");
+                assert_eq!(st.next_fid, next_fid, "step {i}");
+                let expected: HashMap<String, u32> = fids.into_iter().collect();
+                assert_eq!(st.fids, expected, "step {i}");
+            }
+        }
+    }
+}

@@ -21,6 +21,7 @@ use std::{
 };
 use tokio::io::DuplexStream;
 
+pub(crate) mod client_cases;
 pub(crate) mod server_cases;
 
 pub(crate) const ROOT_QID: u64 = 0;

@@ -396,3 +396,65 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        generate_client_test_suite,
+        test_utils::{
+            TestFs,
+            client_cases::{Step, TestCase},
+        },
+        tokio::server::Server,
+    };
+    use std::collections::HashMap;
+    use tokio::{
+        io::{AsyncWriteExt, DuplexStream},
+        task,
+    };
+
+    // We stamp out the test suite using this helper macro rather than using simple_test_case in
+    // order to ensure that both the sync and tokio implementations run exactly the same cases
+    // without needing to define that set of cases in two places.
+    generate_client_test_suite!(tokio, run_one);
+
+    async fn run_one(case: TestCase) {
+        let fs = TestFs::default();
+        let mut server = Server::new(fs);
+        let (client_stream, server_stream) = tokio::io::duplex(8192);
+        let mut client = Client::new(HashMap::from([("/".to_string(), 0)]), client_stream);
+        let handle = task::spawn(async move {
+            server.handle_single_test_stream_async(server_stream).await;
+        });
+
+        for (i, step) in case.into_iter().enumerate() {
+            handle_step(i, step, &mut client).await;
+        }
+
+        let _ = client.stream.lock().await.shutdown().await;
+        handle.await.expect("server task join failed");
+    }
+
+    async fn handle_step(i: usize, step: Step, client: &mut Client<DuplexStream>) {
+        match step {
+            Step::Connect { uname, aname } => {
+                if let Err(e) = client.connect(uname, aname).await {
+                    panic!("(step {i}) failed to connect: {e}");
+                }
+            }
+
+            Step::AssertState {
+                msize,
+                next_fid,
+                fids,
+            } => {
+                let st = client.state.lock().await;
+                assert_eq!(st.msize, msize, "step {i}");
+                assert_eq!(st.next_fid, next_fid, "step {i}");
+                let expected: HashMap<String, u32> = fids.into_iter().collect();
+                assert_eq!(st.fids, expected, "step {i}");
+            }
+        }
+    }
+}
