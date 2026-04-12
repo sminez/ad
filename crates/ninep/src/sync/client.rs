@@ -134,14 +134,7 @@ macro_rules! run_9p_coro {
                 CoroState::Pending(c, t) => {
                     let mut stream = $self.stream();
                     t.write_to(&mut *stream)?;
-
-                    match Rmessage::read_from(msize, &$self.buf, &mut *stream)? {
-                        Rmessage {
-                            content: Rdata::Error { ename },
-                            ..
-                        } => return err(ename),
-                        rmessage => c.send(rmessage),
-                    }
+                    c.send(Rmessage::read_from(msize, &$self.buf, &mut *stream)?)
                 }
             }
         }
@@ -397,7 +390,7 @@ where
 mod tests {
     use super::*;
     use crate::{
-        generate_client_test_suite,
+        assert_9p_client_result, generate_client_test_suite,
         sync::server::Server,
         test_utils::{
             TestFs,
@@ -430,10 +423,9 @@ mod tests {
 
     fn handle_step(i: usize, step: Step, client: &mut UnixClient) {
         match step {
-            Step::Connect { uname, aname } => {
-                if let Err(e) = client.connect(uname, aname) {
-                    panic!("(step {i}) failed to connect: {e}");
-                }
+            Step::Connect { uname, aname, res } => {
+                let actual = client.connect(uname, aname);
+                assert_9p_client_result!(i, actual, res);
             }
 
             Step::AssertState {
