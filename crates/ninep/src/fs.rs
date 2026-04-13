@@ -193,8 +193,8 @@ impl From<Stat> for RawStat {
 
         RawStat {
             size,
-            ty: 0,
-            dev: 0,
+            ty: u16::MAX,
+            dev: u32::MAX,
             qid,
             mode: (Perm::from(s.fm.ty) | s.perms).bits(),
             atime: systime_as_u32(s.last_accesses),
@@ -323,6 +323,43 @@ impl From<RawStat> for WStat {
             } else {
                 Some(r.muid)
             },
+        }
+    }
+}
+
+impl From<WStat> for RawStat {
+    fn from(w: WStat) -> Self {
+        let name = w.name.unwrap_or_default();
+        let uid = String::new();
+        let gid = w.group.unwrap_or_default();
+        let muid = w.last_modified_by.unwrap_or_default();
+        let mode = w.perms.map_or(u32::MAX, |p| p.bits() & 0x0000FFFF);
+        let atime = w.last_accesses.map_or(u32::MAX, systime_as_u32);
+        let mtime = w.last_modified.map_or(u32::MAX, systime_as_u32);
+        let length = w.n_bytes.unwrap_or(u64::MAX);
+
+        let size = (size_of::<u16>()
+            + size_of::<u32>() * 4
+            + w.qid.n_bytes()
+            + length.n_bytes()
+            + name.n_bytes()
+            + uid.n_bytes()
+            + gid.n_bytes()
+            + muid.n_bytes()) as u16;
+
+        RawStat {
+            size,
+            ty: u16::MAX,
+            dev: u32::MAX,
+            qid: w.qid,
+            mode,
+            atime,
+            mtime,
+            length,
+            name,
+            uid,
+            gid,
+            muid,
         }
     }
 }
@@ -599,5 +636,24 @@ mod tests {
 
         assert_eq!(raw.qid.ty, Mode::from(ty).bits());
         assert_eq!(raw.mode, (Perm::from(ty) | user_perms).bits());
+    }
+
+    #[test_case(wstat(); "all fields unset")]
+    #[test_case(
+        WStat {
+            name: Some("renamed".into()),
+            perms: Some(Perm::OWNER_READ | Perm::OWNER_WRITE),
+            n_bytes: Some(1_337),
+            last_accesses: Some(UNIX_EPOCH + Duration::from_secs(10)),
+            last_modified: Some(UNIX_EPOCH + Duration::from_secs(20)),
+            group: Some("wheel".into()),
+            last_modified_by: Some("alice".into()),
+            ..wstat()
+        };
+        "all writable fields set"
+    )]
+    #[test]
+    fn wstat_rawstat_round_trip(w: WStat) {
+        assert_eq!(WStat::from(RawStat::from(w.clone())), w);
     }
 }
