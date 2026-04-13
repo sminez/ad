@@ -389,7 +389,6 @@ mod tests {
         },
         tokio::server::Server,
     };
-    use std::collections::HashMap;
     use tokio::{
         io::{AsyncWriteExt, DuplexStream},
         task,
@@ -421,19 +420,18 @@ mod tests {
         match step {
             Step::Connect { uname, aname, res } => {
                 let actual = client.connect(uname, aname).await;
-                assert_9p_client_result!(i, actual, res);
+                assert_9p_client_result!("connect", i, actual, res);
             }
 
-            Step::AssertState {
-                msize,
-                next_fid,
-                fids,
-            } => {
+            Step::Walk { path, res } => {
+                let actual = client.walk(path).await;
+                assert_9p_client_result!("walk", i, actual, res);
+            }
+
+            Step::AssertState { next_fid, fids } => {
                 let st = client.state.lock().await;
-                assert_eq!(st.msize, msize, "step {i}");
-                assert_eq!(st.next_fid, next_fid, "step {i}");
-                let expected: HashMap<String, u32> = fids.into_iter().collect();
-                assert_eq!(st.fids, expected, "step {i}");
+                assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
+                assert_eq!(st.fids, fids, "(step {i}) fids");
             }
         }
     }

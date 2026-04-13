@@ -397,7 +397,7 @@ mod tests {
             client_cases::{Step, TestCase},
         },
     };
-    use std::{collections::HashMap, net::Shutdown, os::unix::net::UnixStream, thread};
+    use std::{net::Shutdown, os::unix::net::UnixStream, thread};
 
     // We stamp out the test suite using this helper macro rather than using simple_test_case in
     // order to ensure that both the sync and tokio implementations run exactly the same cases
@@ -425,19 +425,18 @@ mod tests {
         match step {
             Step::Connect { uname, aname, res } => {
                 let actual = client.connect(uname, aname);
-                assert_9p_client_result!(i, actual, res);
+                assert_9p_client_result!("connect", i, actual, res);
             }
 
-            Step::AssertState {
-                msize,
-                next_fid,
-                fids,
-            } => {
+            Step::Walk { path, res } => {
+                let actual = client.walk(path);
+                assert_9p_client_result!("walk", i, actual, res);
+            }
+
+            Step::AssertState { next_fid, fids } => {
                 let st = client.state();
-                assert_eq!(st.msize, msize, "step {i}");
-                assert_eq!(st.next_fid, next_fid, "step {i}");
-                let expected: HashMap<String, u32> = fids.into_iter().collect();
-                assert_eq!(st.fids, expected, "step {i}");
+                assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
+                assert_eq!(st.fids, fids, "(step {i}) fids");
             }
         }
     }

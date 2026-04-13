@@ -391,6 +391,7 @@ impl State {
         mode: Mode,
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
+            let path = format!("{dir}/{name}");
             let fid = handle.yield_from(self.handle_walk(dir)).await?;
             handle
                 .yield_value(Tmessage::new(
@@ -403,6 +404,8 @@ impl State {
                     },
                 ))
                 .await;
+
+            self.fids.insert(path, fid);
 
             Ok(())
         })
