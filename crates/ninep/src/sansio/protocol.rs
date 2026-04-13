@@ -1,7 +1,7 @@
 //! Sans-io 9p protocol implementation
 //!
 //!   <http://man.cat-v.org/plan_9/5/>
-use crate::sync::SyncNineP;
+use crate::{fs::WStat, sync::SyncNineP};
 use simple_coro::{Coro, CoroState, Handle, ReadyCoro};
 use std::{
     cell::UnsafeCell,
@@ -706,10 +706,10 @@ impl Tmessage {
 macro_rules! impl_tdata {
     ($(
         $(#[$docs:meta])+
-        $enum_variant:ident => $message_variant:ident {
+        $enum_variant:ident => $message_variant:ident, $constructor:ident {
             $(
                 $(#[$field_docs:meta])+
-                $field:ident: $ty:ty,
+                $field:ident: $ty:ty, $cty:ty;
             )*
         }
     )+) => {
@@ -720,6 +720,14 @@ macro_rules! impl_tdata {
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum Tdata {
             $( $(#[$docs])+ $enum_variant { $($(#[$field_docs])+ $field: $ty,)* }, )+
+        }
+
+        impl Tdata {
+            $($(#[$docs])+ pub fn $constructor($($field: $cty),*) -> Self {
+                Self::$enum_variant {
+                    $($field: $field.into()),*
+                }
+            })+
         }
 
         impl_message_format!(
@@ -734,129 +742,129 @@ macro_rules! impl_tdata {
 impl_tdata! {
     /// <http://man.cat-v.org/plan_9/5/version>
     /// `size[4] Tversion tag[2] | msize[4] version[s]`
-    Version => Tversion {
+    Version => Tversion, version {
         /// The requested message size
-        msize: u32,
+        msize: u32, u32;
         /// The requested protocol version
-        version: String,
+        version: String, impl Into<String>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/attach>
     /// `size[4] Tauth tag[2] | afid[4] uname[s] aname[s]`
-    Auth => Tauth {
+    Auth => Tauth, auth {
         /// The fid to authenticate against
-        afid: u32,
+        afid: u32, u32;
         /// The user authenticating
-        uname: String,
+        uname: String, impl Into<String>;
         /// The filetree to access
-        aname: String,
+        aname: String, impl Into<String>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/attach>
     /// `size[4] Tattach tag[2] | fid[4] afid[4] uname[s] aname[s]`
-    Attach => Tattach {
+    Attach => Tattach, attach {
         /// The fid to attach to
-        fid: u32,
+        fid: u32, u32;
         /// The fid to authenticate against
-        afid: u32,
+        afid: u32, u32;
         /// The user attaching
-        uname: String,
+        uname: String, impl Into<String>;
         /// The filetree to access
-        aname: String,
+        aname: String, impl Into<String>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/flush>
     /// `size[4] Tflush tag[2] | oldtag[2]`
-    Flush => Tflush {
+    Flush => Tflush, flush {
         /// The tag to flush
-        old_tag: u16,
+        old_tag: u16, u16;
     }
 
     /// <http://man.cat-v.org/plan_9/5/walk>
     /// `size[4] Twalk tag[2] | fid[4] newfid[4] nwname[2] nwname*(wname[s])`
-    Walk => Twalk {
+    Walk => Twalk, walk {
         /// The fid to walk from
-        fid: u32,
+        fid: u32, u32;
         /// The fid to associate with the end of the walk
-        new_fid: u32,
+        new_fid: u32, u32;
         /// Path segments to walk from fid to new_fid
-        wnames: Vec<String>,
+        wnames: Vec<String>, impl Into<Vec<String>>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/open>
     /// `size[4] Topen tag[2] | fid[4] mode[1]`
-    Open => Topen {
+    Open => Topen, open {
         /// The fid to open
-        fid: u32,
+        fid: u32, u32;
         /// The mode to open the resource in
-        mode: u8,
+        mode: u8, u8;
     }
 
     /// <http://man.cat-v.org/plan_9/5/open>
     /// `size[4] Tcreate tag[2] | fid[4] name[s] perm[4] mode[1]`
-    Create => Tcreate {
+    Create => Tcreate, create {
         /// The fid to associate with the directory where the file should be created
-        fid: u32,
+        fid: u32, u32;
         /// The name of the new file
-        name: String,
+        name: String, impl Into<String>;
         /// The permissions to use
-        perm: u32,
+        perm: u32, u32;
         /// The mode to use
-        mode: u8,
+        mode: u8, u8;
     }
 
     /// <http://man.cat-v.org/plan_9/5/read>
     /// `size[4] Tread tag[2] | fid[4] offset[8] count[4]`
-    Read => Tread {
+    Read => Tread, read {
         /// The fid to read
-        fid: u32,
+        fid: u32, u32;
         /// The offset in bytes to start reading at
-        offset: u64,
+        offset: u64, u64;
         /// The number of bytes to read
-        count: u32,
+        count: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/read>
     /// `size[4] Twrite tag[2] | fid[4] offset[8] count[4] data[count]`
-    Write => Twrite {
+    Write => Twrite, write {
         /// The fid to write to
-        fid: u32,
+        fid: u32, u32;
         /// The offset in bytes to start writing at
-        offset: u64,
+        offset: u64, u64;
         /// The data to write
-        data: Data,
+        data: Data, impl Into<Data>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/clunk>
     /// `size[4] Tclunk tag[2] | fid[4]`
-    Clunk => Tclunk {
+    Clunk => Tclunk, clunk {
         /// The fid to be closed
-        fid: u32,
+        fid: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/remove>
     /// `size[4] Tremove tag[2] | fid[4]`
-    Remove => Tremove {
+    Remove => Tremove, remove {
         /// The fid to be removed
-        fid: u32,
+        fid: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/stat>
     /// `size[4] Tstat tag[2] | fid[4]`
-    Stat => Tstat {
+    Stat => Tstat, stat {
         /// The fid to request a stat for
-        fid: u32,
+        fid: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/stat>
     /// `size[4] Twstat tag[2] | fid[4] stat[n]`
-    Wstat => Twstat {
+    Wstat => Twstat, wstat {
         /// The fid to update the stat for
-        fid: u32,
+        fid: u32, u32;
         /// The size of the following stat
-        size: u16,
+        size: u16, u16;
         /// The stat data to be written
-        stat: RawStat,
+        stat: RawStat, WStat;
     }
 }
 
@@ -914,10 +922,10 @@ impl Rmessage {
 macro_rules! impl_rdata {
     ($(
         $(#[$docs:meta])+
-        $enum_variant:ident => $message_variant:ident {
+        $enum_variant:ident => $message_variant:ident, $constructor:ident {
             $(
                 $(#[$field_docs:meta])+
-                $field:ident: $ty:ty,
+                $field:ident: $ty:ty, $cty:ty;
             )*
         }
     )+) => {
@@ -928,6 +936,14 @@ macro_rules! impl_rdata {
         #[derive(Debug, Clone, PartialEq, Eq)]
         pub enum Rdata {
             $( $(#[$docs])+ $enum_variant { $($(#[$field_docs])+ $field: $ty,)* }, )+
+        }
+
+        impl Rdata {
+            $($(#[$docs])+ pub fn $constructor($($field: $cty),*) -> Self {
+                Self::$enum_variant {
+                    $($field: $field.into()),*
+                }
+            })+
         }
 
         impl_message_format!(
@@ -942,97 +958,97 @@ macro_rules! impl_rdata {
 impl_rdata! {
     /// <http://man.cat-v.org/plan_9/5/version>
     /// `size[4] Rversion tag[2] | msize[4] version[s]`
-    Version => Rversion {
+    Version => Rversion, version {
         /// Supported message size
-        msize: u32,
+        msize: u32, u32;
         /// Supported protocol version
-        version: String,
+        version: String, impl Into<String>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/attach>
     /// `size[4] Rauth tag[2] | aqid[13]`
-    Auth => Rauth {
+    Auth => Rauth, auth {
         /// The authenticated Qid of the connected root
-        aqid: Qid,
+        aqid: Qid, Qid;
     }
 
     /// <http://man.cat-v.org/plan_9/5/error>
     /// `size[4] Rerror tag[2] | ename[s]`
-    Error => Rerror {
+    Error => Rerror, error {
         /// The contents of the error being returned
-        ename: String,
+        ename: String, impl Into<String>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/attach>
     /// `size[4] Rattach tag[2] | aquid[13]`
-    Attach => Rattach {
+    Attach => Rattach, attach {
         /// Qid corresponding to the Fid used to attach
-        aqid: Qid,
+        aqid: Qid, Qid;
     }
 
     /// <http://man.cat-v.org/plan_9/5/flush>
     /// `size[4] Rflush tag[2]`
-    Flush => Rflush {}
+    Flush => Rflush, flush {}
 
     /// <http://man.cat-v.org/plan_9/5/walk>
     /// `size[4] Rwalk tag[2] | nwqid[2] nwqid*(wqid[13])`
-    Walk => Rwalk {
+    Walk => Rwalk, walk {
         /// Qids for the path elements walked
-        wqids: Vec<Qid>,
+        wqids: Vec<Qid>, impl Into<Vec<Qid>>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/open>
     /// `size[4] Ropen tag[2] | qid[13] iounit[4]`
-    Open => Ropen {
+    Open => Ropen, open {
         /// Qid of the opened resource
-        qid: Qid,
+        qid: Qid, Qid;
         /// IO unit for subsequent read / write operations
-        iounit: u32,
+        iounit: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/open>
     /// `size[4] Rcreate tag[2] | qid[13] iounit[4]`
-    Create => Rcreate {
+    Create => Rcreate, create {
         /// Qid of the created resource
-        qid: Qid,
+        qid: Qid, Qid;
         /// IO unit for subsequent read / write operations
-        iounit: u32,
+        iounit: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/read>
     /// `size[4] Rread tag[2] | count[4] data[count]`
-    Read => Rread {
+    Read => Rread, read {
         /// The bytes read
-        data: Data,
+        data: Data, impl Into<Data>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/read>
     /// `size[4] Rwrite tag[2] | count[4]`
-    Write => Rwrite {
+    Write => Rwrite, write {
         /// The number of bytes written
-        count: u32,
+        count: u32, u32;
     }
 
     /// <http://man.cat-v.org/plan_9/5/clunk>
     /// `size[4] Rclunk tag[2]`
-    Clunk => Rclunk {}
+    Clunk => Rclunk, clunk {}
 
     /// <http://man.cat-v.org/plan_9/5/remove>
     /// `size[4] Rremove tag[2]`
-    Remove => Rremove {}
+    Remove => Rremove, remove {}
 
     /// <http://man.cat-v.org/plan_9/5/stat>
     /// `size[4] Rstat tag[2] | stat[n]`
-    Stat => Rstat {
+    Stat => Rstat, stat {
         /// The size of the following stat
-        size: u16,
+        size: u16, u16;
         /// The stat data for the requested fid
-        stat: RawStat,
+        stat: RawStat, impl Into<RawStat>;
     }
 
     /// <http://man.cat-v.org/plan_9/5/stat>
     /// `size[4] Rwstat tag[2]`
-    Wstat => Rwstat {}
+    Wstat => Rwstat, wstat {}
 }
 
 #[cfg(test)]

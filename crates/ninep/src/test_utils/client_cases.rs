@@ -23,12 +23,20 @@ pub(crate) enum Step {
 }
 
 impl Step {
-    fn connect_req() -> Self {
+    fn connect_valid() -> Self {
         Step::Connect {
-            uname: "user",
+            uname: "uname",
             aname: "/",
             res: Ok(()),
         }
+    }
+
+    fn connect(uname: &'static str, aname: &'static str, res: Result<()>) -> Self {
+        Step::Connect { uname, aname, res }
+    }
+
+    fn walk(path: &'static str, res: Result<u32>) -> Self {
+        Step::Walk { path, res }
     }
 
     fn assert_state(next_fid: u32, fids: &[(&str, u32)]) -> Self {
@@ -85,40 +93,34 @@ macro_rules! generate_client_test_suite {
 // Test cases for use with the generate_client_test_suite macro above
 
 pub(crate) fn connect_to_known_aname_succeeds() -> TestCase {
-    vec![Step::connect_req(), Step::assert_state(1, &[("/", 0)])]
+    vec![Step::connect_valid(), Step::assert_state(1, &[("/", 0)])]
 }
 
 pub(crate) fn connect_to_unknown_aname_errors() -> TestCase {
     vec![
-        Step::Connect {
-            uname: "user",
-            aname: "unknown",
-            res: Err(Error::Rerror {
+        Step::connect(
+            "user",
+            "unknown",
+            Err(Error::Rerror {
                 ename: "unknown root directory".to_string(),
             }),
-        },
+        ),
         Step::assert_state(1, &[("/", 0)]),
     ]
 }
 
 pub(crate) fn walk_to_known_file_succeeds() -> TestCase {
     vec![
-        Step::connect_req(),
-        Step::Walk {
-            path: "/hello",
-            res: Ok(1),
-        },
+        Step::connect_valid(),
+        Step::walk("/hello", Ok(1)),
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]
 }
 
 pub(crate) fn walk_to_root_succeeds() -> TestCase {
     vec![
-        Step::connect_req(),
-        Step::Walk {
-            path: "/",
-            res: Ok(0),
-        },
+        Step::connect_valid(),
+        Step::walk("/", Ok(0)),
         // shouldn't alter next_fid
         Step::assert_state(1, &[("/", 0)]),
     ]
@@ -126,17 +128,11 @@ pub(crate) fn walk_to_root_succeeds() -> TestCase {
 
 pub(crate) fn walk_same_path_doesnt_alter_next_fid() -> TestCase {
     vec![
-        Step::connect_req(),
-        Step::Walk {
-            path: "/hello",
-            res: Ok(1),
-        },
+        Step::connect_valid(),
+        Step::walk("/hello", Ok(1)),
         // fid=1 now bound for /hello
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
-        Step::Walk {
-            path: "/hello",
-            res: Ok(1),
-        },
+        Step::walk("/hello", Ok(1)),
         // should have read from cache
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]
@@ -144,13 +140,13 @@ pub(crate) fn walk_same_path_doesnt_alter_next_fid() -> TestCase {
 
 pub(crate) fn walk_to_unknown_entry_errors() -> TestCase {
     vec![
-        Step::connect_req(),
-        Step::Walk {
-            path: "/missing",
-            res: Err(Error::Rerror {
+        Step::connect_valid(),
+        Step::walk(
+            "/missing",
+            Err(Error::Rerror {
                 ename: "unknown file".into(),
             }),
-        },
+        ),
         Step::assert_state(2, &[("/", 0)]),
     ]
 }
