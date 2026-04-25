@@ -134,7 +134,7 @@ where
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
-            } => err(ename),
+            } => Err(Error::Rerror { ename }),
             msg => Ok(msg),
         }
     }
@@ -421,6 +421,11 @@ mod tests {
             Step::Connect { uname, aname, res } => {
                 let actual = client.connect(uname, aname).await;
                 assert_9p_client_result!("connect", i, actual, res);
+            }
+
+            Step::Clunk { fid, res } => {
+                let actual = client.clunk(fid).await;
+                assert_9p_client_result!("clunk", i, actual, res);
             }
 
             Step::Walk { path, res } => {

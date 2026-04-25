@@ -16,6 +16,10 @@ pub(crate) enum Step {
         aname: &'static str,
         res: Result<()>,
     },
+    Clunk {
+        fid: u32,
+        res: Result<()>,
+    },
     Walk {
         path: &'static str,
         res: Result<u32>,
@@ -45,6 +49,10 @@ impl Step {
 
     fn connect(uname: &'static str, aname: &'static str, res: Result<()>) -> Self {
         Step::Connect { uname, aname, res }
+    }
+
+    fn clunk(fid: u32, res: Result<()>) -> Self {
+        Step::Clunk { fid, res }
     }
 
     fn walk(path: &'static str, res: Result<u32>) -> Self {
@@ -86,6 +94,8 @@ macro_rules! generate_client_test_suite {
     ($mode:ident, $run_one:ident) => {
         generate_client_test_suite!(
             @cases $mode, $run_one;
+            clunk_open_file_clears_fid_cache,
+            clunk_unknown_file_errors,
             connect_to_known_aname_succeeds,
             connect_to_unknown_aname_errors,
             read_known_file_works,
@@ -93,6 +103,7 @@ macro_rules! generate_client_test_suite {
             read_subdir_works,
             read_unknown_dir_errors,
             read_unknown_file_errors,
+            repeated_read_works,
             walk_dot_is_root,
             walk_empty_path_is_root,
             walk_same_path_doesnt_alter_next_fid,
@@ -200,9 +211,41 @@ pub(crate) fn walk_to_unknown_entry_errors() -> TestCase {
     ]
 }
 
+pub(crate) fn clunk_open_file_clears_fid_cache() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::walk("/hello", Ok(1)),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+        Step::clunk(1, Ok(())),
+        Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn clunk_unknown_file_errors() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::clunk(
+            42,
+            Err(Error::Rerror {
+                ename: "unknown fid".to_string(),
+            }),
+        ),
+        Step::assert_state(1, &[("/", 0)]),
+    ]
+}
+
 pub(crate) fn read_known_file_works() -> TestCase {
     vec![
         Step::connect_valid(),
+        Step::read("/hello", Ok("hello world")),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn repeated_read_works() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read("/hello", Ok("hello world")),
         Step::read("/hello", Ok("hello world")),
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]
