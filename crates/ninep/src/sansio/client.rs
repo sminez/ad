@@ -187,13 +187,12 @@ impl State {
 
             let wnames: Vec<String> = path
                 .split('/')
-                .filter(|name| !name.is_empty())
+                .filter(|elem| !["", "."].contains(elem))
                 .map(Into::into)
                 .collect();
 
             if wnames.is_empty() {
-                // walk to root
-                self.fids.insert(path, 0);
+                // walk to root but don't cache the path
                 return Ok(0);
             }
 

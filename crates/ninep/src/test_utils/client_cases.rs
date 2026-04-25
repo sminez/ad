@@ -68,6 +68,8 @@ macro_rules! generate_client_test_suite {
             @cases $mode, $run_one;
             connect_to_known_aname_succeeds,
             connect_to_unknown_aname_errors,
+            walk_dot_is_root,
+            walk_empty_path_is_root,
             walk_same_path_doesnt_alter_next_fid,
             walk_to_known_file_succeeds,
             walk_to_root_succeeds,
@@ -121,6 +123,28 @@ pub(crate) fn walk_to_root_succeeds() -> TestCase {
     vec![
         Step::connect_valid(),
         Step::walk("/", Ok(0)),
+        // shouldn't alter next_fid
+        Step::assert_state(1, &[("/", 0)]),
+    ]
+}
+
+// From the spec:
+//   It is legal for nwname to be zero, in which case newfid will represent the same file as fid
+//   and the walk will usually succeed; this is equivalent to walking to dot. The rest of this
+//   discussion assumes nwname is greater than zero.
+pub(crate) fn walk_empty_path_is_root() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::walk("", Ok(0)),
+        // shouldn't alter next_fid
+        Step::assert_state(1, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn walk_dot_is_root() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::walk(".", Ok(0)),
         // shouldn't alter next_fid
         Step::assert_state(1, &[("/", 0)]),
     ]
