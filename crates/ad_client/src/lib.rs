@@ -37,7 +37,7 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "")?,
+            inner: UnixClient::new_unix(&ns, "/")?,
             ns,
         })
     }
@@ -51,7 +51,7 @@ impl Client {
         let ns = format!("ad-{pid}");
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "")?,
+            inner: UnixClient::new_unix(&ns, "/")?,
             ns,
         })
     }
