@@ -1,4 +1,8 @@
-use crate::sansio::client::{Error, Result};
+use crate::{
+    fs::{FileMeta, Stat},
+    sansio::client::{Error, Result},
+    test_utils::{HELLO_QID, SUBDIR_QID, SUBFILE_QID},
+};
 use std::collections::HashMap;
 
 /// A test case to be run for a given client implementation.
@@ -15,6 +19,14 @@ pub(crate) enum Step {
     Walk {
         path: &'static str,
         res: Result<u32>,
+    },
+    Read {
+        path: &'static str,
+        res: Result<&'static str>,
+    },
+    ReadDir {
+        path: &'static str,
+        res: Result<Vec<Stat>>,
     },
     AssertState {
         next_fid: u32,
@@ -37,6 +49,14 @@ impl Step {
 
     fn walk(path: &'static str, res: Result<u32>) -> Self {
         Step::Walk { path, res }
+    }
+
+    fn read(path: &'static str, res: Result<&'static str>) -> Self {
+        Step::Read { path, res }
+    }
+
+    fn read_dir(path: &'static str, res: Result<Vec<Stat>>) -> Self {
+        Step::ReadDir { path, res }
     }
 
     fn assert_state(next_fid: u32, fids: &[(&str, u32)]) -> Self {
@@ -68,6 +88,11 @@ macro_rules! generate_client_test_suite {
             @cases $mode, $run_one;
             connect_to_known_aname_succeeds,
             connect_to_unknown_aname_errors,
+            read_known_file_works,
+            read_root_dir_works,
+            read_subdir_works,
+            read_unknown_dir_errors,
+            read_unknown_file_errors,
             walk_dot_is_root,
             walk_empty_path_is_root,
             walk_same_path_doesnt_alter_next_fid,
@@ -167,6 +192,66 @@ pub(crate) fn walk_to_unknown_entry_errors() -> TestCase {
         Step::connect_valid(),
         Step::walk(
             "/missing",
+            Err(Error::Rerror {
+                ename: "unknown file".into(),
+            }),
+        ),
+        Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn read_known_file_works() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read("/hello", Ok("hello world")),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn read_unknown_file_errors() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read(
+            "/not/a/known/file",
+            Err(Error::Rerror {
+                ename: "unknown file".into(),
+            }),
+        ),
+        Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn read_root_dir_works() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_dir(
+            "/",
+            Ok(vec![
+                Stat::stub(FileMeta::file("hello", HELLO_QID)),
+                Stat::stub(FileMeta::dir("subdir", SUBDIR_QID)),
+            ]),
+        ),
+        Step::assert_state(1, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn read_subdir_works() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_dir(
+            "/subdir",
+            Ok(vec![Stat::stub(FileMeta::file("subfile", SUBFILE_QID))]),
+        ),
+        // should have walked to the subdir
+        Step::assert_state(2, &[("/", 0), ("/subdir", 1)]),
+    ]
+}
+
+pub(crate) fn read_unknown_dir_errors() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_dir(
+            "/not-a-dir",
             Err(Error::Rerror {
                 ename: "unknown file".into(),
             }),

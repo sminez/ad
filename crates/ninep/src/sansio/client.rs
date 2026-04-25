@@ -2,7 +2,7 @@
 use crate::{
     fs::{Mode, Perm, Stat},
     sansio::{
-        protocol::{Data, MAXWELEM, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
+        protocol::{Data, IOHDRSZ, MAXWELEM, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
         server::AFID_NO_AUTH,
     },
     sync::SyncNineP,
@@ -287,7 +287,7 @@ impl State {
                 .yield_value(Tmessage::new(0, Tdata::Open { fid, mode }))
                 .await;
 
-            let count = self.msize;
+            let count = self.msize - IOHDRSZ;
             let mut bytes = Vec::new();
             let mut offset = 0;
             loop {
@@ -350,8 +350,7 @@ impl State {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             let len = content.len();
             let mut cur = 0;
-            let header_size = 4 + 8 + 4; // fid + offset + data len
-            let chunk_size = (self.msize - header_size) as usize;
+            let chunk_size = (self.msize - IOHDRSZ) as usize;
 
             while cur < len {
                 let end = min(cur + chunk_size, len);

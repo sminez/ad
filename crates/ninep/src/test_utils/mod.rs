@@ -28,9 +28,11 @@ pub(crate) const ROOT_QID: u64 = 0;
 pub(crate) const HELLO_QID: u64 = 1;
 pub(crate) const SUBDIR_QID: u64 = 2;
 pub(crate) const BLOCKED_QID: u64 = 3;
+pub(crate) const SUBFILE_QID: u64 = 4;
 pub(crate) const CREATED_QID: u64 = 99;
 
 pub(crate) const HELLO_CONTENT: &[u8] = b"hello world";
+pub(crate) const SUBFILE_CONTENT: &[u8] = b"subfile";
 pub(crate) const BLOCKED_CONTENT: &[u8] = b"delayed";
 pub(crate) const TEST_IOUNIT: IoUnit = 8192;
 
@@ -79,6 +81,7 @@ impl Serve9p for TestFs {
             (ROOT_QID, "hello") => Ok(FileMeta::file("hello", HELLO_QID)),
             (ROOT_QID, "subdir") => Ok(FileMeta::dir("subdir", SUBDIR_QID)),
             (ROOT_QID, "blocked") => Ok(FileMeta::file("blocked", BLOCKED_QID)),
+            (SUBDIR_QID, "subfile") => Ok(FileMeta::file("subfile", SUBFILE_QID)),
             _ => Err(format!("not found: {child}")),
         }
     }
@@ -127,6 +130,10 @@ impl Serve9p for TestFs {
                 let src = HELLO_CONTENT.get(offset..).unwrap_or(&[]);
                 Ok(ReadOutcome::Immediate(src[..count.min(src.len())].to_vec()))
             }
+            SUBFILE_QID => {
+                let src = SUBFILE_CONTENT.get(offset..).unwrap_or(&[]);
+                Ok(ReadOutcome::Immediate(src[..count.min(src.len())].to_vec()))
+            }
             BLOCKED_QID => {
                 let (tx, rx) = mpsc::channel();
                 let data = BLOCKED_CONTENT.to_vec();
@@ -149,7 +156,7 @@ impl Serve9p for TestFs {
                 Stat::stub(FileMeta::file("hello", HELLO_QID)),
                 Stat::stub(FileMeta::dir("subdir", SUBDIR_QID)),
             ]),
-            SUBDIR_QID => Ok(vec![]),
+            SUBDIR_QID => Ok(vec![Stat::stub(FileMeta::file("subfile", SUBFILE_QID))]),
             _ => Err(format!("not a directory: {qid}")),
         }
     }
@@ -182,6 +189,7 @@ impl Serve9p for TestFs {
             ROOT_QID => Ok(Stat::stub(FileMeta::dir("", ROOT_QID))),
             HELLO_QID => Ok(Stat::stub(FileMeta::file("hello", HELLO_QID))),
             SUBDIR_QID => Ok(Stat::stub(FileMeta::dir("subdir", SUBDIR_QID))),
+            SUBFILE_QID => Ok(Stat::stub(FileMeta::file("subfile", SUBFILE_QID))),
             _ => Err(format!("unknown qid: {qid}")),
         }
     }
@@ -378,7 +386,7 @@ impl Stat {
     /// Create a new sub [Stat] with default perms and metadata.
     pub(crate) fn stub(fm: FileMeta) -> Stat {
         let perms = if fm.ty == FileType::Directory {
-            Perm::DIR | Perm::OWNER_READ | Perm::OWNER_EXEC
+            Perm::OWNER_READ | Perm::OWNER_EXEC
         } else {
             Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
         };

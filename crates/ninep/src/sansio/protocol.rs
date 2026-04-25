@@ -20,6 +20,8 @@ pub const MAX_DATA_SIZE_FIELD: usize = u32::MAX as usize;
 pub const DEFAULT_MSIZE: u32 = 32 * 1024 * 1024;
 /// Maximum number of walk elements in a single Twalk/Rwalk message.
 pub const MAXWELEM: usize = 16;
+/// Space for Twrite Rread headers
+pub const IOHDRSZ: u32 = 24;
 
 /// Non IO related errors that can occur when attempting to serialize a [NineP] type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

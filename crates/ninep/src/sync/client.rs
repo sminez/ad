@@ -433,6 +433,16 @@ mod tests {
                 assert_9p_client_result!("walk", i, actual, res);
             }
 
+            Step::Read { path, res } => {
+                let actual = client.read_str(path);
+                assert_9p_client_result!("read", i, actual, res);
+            }
+
+            Step::ReadDir { path, res } => {
+                let actual = client.read_dir(path);
+                assert_9p_client_result!("read dir", i, actual, res);
+            }
+
             Step::AssertState { next_fid, fids } => {
                 let st = client.state();
                 assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
