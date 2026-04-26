@@ -17,7 +17,7 @@ use std::{
     os::unix::net::UnixStream,
     sync::{Arc, Mutex, mpsc},
     thread::{sleep, spawn},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 use tokio::io::DuplexStream;
 
@@ -377,29 +377,6 @@ impl Call {
             qid,
             wstat,
             uname: uname.into(),
-        }
-    }
-}
-
-// Test only helper methods on existing structs
-impl Stat {
-    /// Create a new sub [Stat] with default perms and metadata.
-    pub(crate) fn stub(fm: FileMeta) -> Stat {
-        let perms = if fm.ty == FileType::DIRECTORY {
-            Perm::OWNER_READ | Perm::OWNER_EXEC
-        } else {
-            Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
-        };
-
-        Stat {
-            fm,
-            perms,
-            n_bytes: 0,
-            last_accesses: SystemTime::UNIX_EPOCH,
-            last_modified: SystemTime::UNIX_EPOCH,
-            owner: "owner".to_string(),
-            group: "group".to_string(),
-            last_modified_by: "owner".to_string(),
         }
     }
 }

@@ -158,7 +158,7 @@ bitflags::bitflags! {
     ///   - `0x00` ([Mode::READ]): read only
     ///   - `0x01` ([Mode::WRITE]): write only
     ///   - `0x02` ([Mode::READ_WRITE]): both read and write
-    ///   - `0x03` ([Mode::EXECUTE]): read and execute
+    ///   - `0x03` ([Mode::EXECUTE]): execute
     ///
     /// In addition, the following bits can be set to request additional behaviour:
     ///   - `0x10` ([Mode::TRUNCATE]): the file should be truncated before I/O begins. If the
@@ -195,6 +195,27 @@ impl Mode {
     pub fn new(bits: u8) -> Self {
         Mode::from_bits_truncate(bits)
     }
+
+    fn is_illegal_for_dir(&self) -> bool {
+        [
+            Mode::WRITE,
+            Mode::READ_WRITE,
+            Mode::TRUNCATE,
+            Mode::REMOVE_ON_CLOSE,
+        ]
+        .iter()
+        .any(|m| self.contains(*m))
+    }
+
+    fn is_allowed(&self, read: bool, write: bool, exec: bool) -> bool {
+        let m = Mode::new(self.bits() & 0x03); // Mask off the additional truncate and remove bits
+
+        (m == Mode::READ && read)
+            || (m == Mode::WRITE && write)
+            || (m == Mode::READ_WRITE && read && write)
+            || (m == Mode::EXECUTE && exec)
+            || false
+    }
 }
 
 /// <http://p9f.org/magic/man2html/2/iounit>
@@ -224,6 +245,59 @@ pub struct Stat {
     pub group: String,
     /// User who last modified this entry
     pub last_modified_by: String,
+}
+
+impl Stat {
+    /// Whether or not the provided user details are permitted to use the given [Mode] on the file
+    /// described by this [Stat].
+    pub fn check_user_permissions(
+        &self,
+        user: &str,
+        user_groups: &[String],
+        mode: Mode,
+    ) -> PermCheck {
+        let (can_read, can_write, can_exec) =
+            self.user_type(user, user_groups).flags_for_user(self.perms);
+
+        PermCheck::new(
+            mode,
+            self.fm.ty == FileType::DIRECTORY,
+            can_read,
+            can_write,
+            can_exec,
+        )
+    }
+
+    fn user_type(&self, user: &str, user_groups: &[String]) -> UserType {
+        if user == self.owner {
+            UserType::Owner
+        } else if user_groups.iter().any(|g| g == &self.group) {
+            UserType::Group
+        } else {
+            UserType::Other
+        }
+    }
+
+    #[cfg(test)]
+    /// Create a new stub [Stat] with default permissions and metadata.
+    pub(crate) fn stub(fm: FileMeta) -> Stat {
+        let perms = if fm.ty == FileType::DIRECTORY {
+            Perm::OWNER_READ | Perm::OWNER_EXEC
+        } else {
+            Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
+        };
+
+        Stat {
+            fm,
+            perms,
+            n_bytes: 0,
+            last_accesses: SystemTime::UNIX_EPOCH,
+            last_modified: SystemTime::UNIX_EPOCH,
+            owner: "owner".to_string(),
+            group: "group".to_string(),
+            last_modified_by: "owner".to_string(),
+        }
+    }
 }
 
 impl From<Stat> for RawStat {
@@ -278,6 +352,55 @@ impl TryFrom<RawStat> for Stat {
             group: r.gid,
             last_modified_by: r.muid,
         })
+    }
+}
+
+/// The outcome of calling [Stat::check_user_permissions].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermCheck {
+    /// The user is allowed to open / create the file using the requested [Mode].
+    Allowed,
+    /// The user is not allowed to open / create the file using the requested [Mode].
+    Denied,
+    /// The user requires write permissions on the parent directory in order to open / create the
+    /// file using the requested [Mode].
+    NeedWriteOnParent,
+}
+
+impl PermCheck {
+    fn new(mode: Mode, is_dir: bool, can_read: bool, can_write: bool, can_exec: bool) -> Self {
+        if (is_dir && mode.is_illegal_for_dir()) || !mode.is_allowed(can_read, can_write, can_exec)
+        {
+            return PermCheck::Denied;
+        }
+
+        if mode.contains(Mode::REMOVE_ON_CLOSE) {
+            PermCheck::NeedWriteOnParent
+        } else {
+            PermCheck::Allowed
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UserType {
+    Owner,
+    Group,
+    Other,
+}
+
+impl UserType {
+    /// 1. If user == self.owner then use the OWNER_* bits from self.perms
+    /// 2. Else, if user_group == self.group then use the GROUP_* bits from self.perms
+    /// 3. Else, use the OTHER_* bits from self.perms
+    fn flags_for_user(&self, p: Perm) -> (bool, bool, bool) {
+        let (rbit, wbit, ebit) = match self {
+            Self::Owner => (Perm::OWNER_READ, Perm::OWNER_WRITE, Perm::OWNER_EXEC),
+            Self::Group => (Perm::GROUP_READ, Perm::GROUP_WRITE, Perm::GROUP_EXEC),
+            Self::Other => (Perm::OTHER_READ, Perm::OTHER_WRITE, Perm::OTHER_EXEC),
+        };
+
+        (p.contains(rbit), p.contains(wbit), p.contains(ebit))
     }
 }
 
@@ -489,7 +612,10 @@ mod tests {
     use super::*;
     use crate::sansio::protocol::{Qid, RawStat};
     use simple_test_case::test_case;
-    use std::time::{Duration, UNIX_EPOCH};
+    use std::{
+        collections::HashSet,
+        time::{Duration, UNIX_EPOCH},
+    };
 
     const TEST_QID: u64 = 42;
     const TEST_MODE: FileType = FileType::FILE;
@@ -678,5 +804,152 @@ mod tests {
     #[test]
     fn perm_from_file_type_works(ft: FileType, expected: Perm) {
         assert_eq!(Perm::from(ft), expected);
+    }
+
+    #[test_case("owner", &[], UserType::Owner; "owner without groups")]
+    #[test_case("owner", &["group"], UserType::Owner; "owner and group")]
+    #[test_case("owner", &["other"], UserType::Owner; "owner and other group")]
+    #[test_case("bob", &["group"], UserType::Group; "group")]
+    #[test_case("bob", &["other"], UserType::Other; "other group")]
+    #[test_case("bob", &[], UserType::Other; "no group")]
+    #[test]
+    fn stat_user_type_returns_expected_type(user: &str, user_groups: &[&str], expected: UserType) {
+        let stat = Stat::stub(FileMeta::file("", 0));
+        assert_eq!(stat.owner, "owner", "wrong owner from stub");
+        assert_eq!(stat.group, "group", "wrong group from stub");
+
+        let user_groups: Vec<_> = user_groups.iter().map(|s| s.to_string()).collect();
+
+        assert_eq!(stat.user_type(user, &user_groups), expected);
+    }
+
+    // The cases here are a little tricky to read but given that we can exhaustively test all
+    // inputs to Mode::is_allowed, we should.
+
+    #[test_case(
+        Mode::READ,
+        &[
+            (true, false, false),
+            (true, false, true),
+            (true, true, false),
+            (true, true, true)
+        ],
+        &[
+            (false, false, false),
+            (false, false, true),
+            (false, true, false),
+            (false, true, true)
+        ];
+        "read"
+    )]
+    #[test_case(
+        Mode::WRITE,
+        &[
+            (false, true, false),
+            (false, true, true),
+            (true, true, false),
+            (true, true, true),
+        ],
+        &[
+            (false, false, false),
+            (false, false, true),
+            (true, false, false),
+            (true, false, true),
+        ];
+        "write"
+    )]
+    #[test_case(
+        Mode::READ_WRITE,
+        &[
+            (true, true, false),
+            (true, true, true),
+        ],
+        &[
+            (false, false, false),
+            (false, false, true),
+            (false, true, false),
+            (false, true, true),
+            (true, false, false),
+            (true, false, true),
+        ];
+        "read write"
+    )]
+    #[test_case(
+        Mode::EXECUTE,
+        &[
+            (false, false, true),
+            (false, true, true),
+            (true, false, true),
+            (true, true, true),
+        ],
+        &[
+            (false, false, false),
+            (false, true, false),
+            (true, false, false),
+            (true, true, false),
+        ];
+        "execute"
+    )]
+    #[test]
+    fn mode_is_allowed(base: Mode, allowed: &[(bool, bool, bool)], denied: &[(bool, bool, bool)]) {
+        let it = allowed.iter().chain(denied.iter());
+        let all: HashSet<&(bool, bool, bool)> = HashSet::from_iter(it);
+        assert_eq!(
+            all.len(),
+            8,
+            "invalid is_allowed case: must specify all flag combinations"
+        );
+
+        let tagged_modes = [
+            ("base", base),
+            ("truncate", base | Mode::TRUNCATE),
+            ("remove on close", base | Mode::REMOVE_ON_CLOSE),
+            ("both", base | Mode::TRUNCATE | Mode::REMOVE_ON_CLOSE),
+        ];
+
+        for &(r, w, e) in allowed.iter() {
+            for (tag, mode) in tagged_modes.into_iter() {
+                assert!(
+                    mode.is_allowed(r, w, e),
+                    "{tag} allowed (r={r}, w={w}, e={e})"
+                );
+            }
+        }
+
+        for &(r, w, e) in denied.iter() {
+            for (tag, mode) in tagged_modes.into_iter() {
+                assert!(
+                    !mode.is_allowed(r, w, e),
+                    "{tag} denied (r={r}, w={w}, e={e})"
+                );
+            }
+        }
+    }
+
+    #[test_case(Mode::WRITE; "write")]
+    #[test_case(Mode::READ_WRITE; "read write")]
+    #[test_case(Mode::TRUNCATE; "truncate")]
+    #[test_case(Mode::REMOVE_ON_CLOSE; "remove on close")]
+    #[test]
+    fn illegal_dir_modes_are_denied(mode: Mode) {
+        assert!(mode.is_illegal_for_dir(), "non-illegal dir mode");
+        assert_eq!(
+            PermCheck::new(mode, true, true, true, true),
+            PermCheck::Denied
+        )
+    }
+
+    #[test_case(true, PermCheck::NeedWriteOnParent; "with remove on close")]
+    #[test_case(false, PermCheck::Allowed; "without remove on close")]
+    #[test]
+    fn perm_check_for_allowed_mode_respects_remove_on_close(has_roc: bool, expected: PermCheck) {
+        let mode = if has_roc {
+            Mode::READ | Mode::REMOVE_ON_CLOSE
+        } else {
+            Mode::READ
+        };
+
+        // not a dir, only allow read
+        assert_eq!(PermCheck::new(mode, false, true, false, false), expected);
     }
 }
