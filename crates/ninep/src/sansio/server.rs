@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     Result,
-    fs::{FileMeta, FileType, QID_ROOT, Stat},
+    fs::{FileMeta, FileType, Mode, QID_ROOT, Stat},
     sansio::protocol::{
         DEFAULT_MSIZE, Data, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
@@ -214,7 +214,7 @@ impl SessionState<Attached> {
                     return Err(E_DUPLICATE_FID.to_string());
                 }
 
-                if self.try_fid_meta(fid)?.is_open {
+                if self.try_fid_meta(fid)?.is_open() {
                     return Err(E_WALK_OPEN_FID.to_string());
                 }
 
@@ -542,19 +542,23 @@ where
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FidMeta {
     pub(crate) qid: u64,
-    pub(crate) is_open: bool,
+    pub(crate) mode: Option<Mode>,
 }
 
 impl FidMeta {
-    pub(crate) fn open(qid: u64) -> Self {
-        Self { qid, is_open: true }
+    pub(crate) fn open(qid: u64, mode: Mode) -> Self {
+        Self {
+            qid,
+            mode: Some(mode),
+        }
     }
 
     pub(crate) fn closed(qid: u64) -> Self {
-        Self {
-            qid,
-            is_open: false,
-        }
+        Self { qid, mode: None }
+    }
+
+    pub(crate) fn is_open(&self) -> bool {
+        self.mode.is_some()
     }
 }
 

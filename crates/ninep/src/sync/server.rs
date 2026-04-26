@@ -547,7 +547,7 @@ where
     }
 
     fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
-        if self.try_fid_meta(fid)?.is_open {
+        if self.try_fid_meta(fid)?.is_open() {
             return Err(E_FID_ALREADY_OPEN.to_string());
         }
 
@@ -560,7 +560,7 @@ where
             .fids
             .get_mut(&fid)
             .expect("known fid after try_file_meta")
-            .is_open = true;
+            .mode = Some(mode);
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -590,7 +590,7 @@ where
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
-        self.state.fids.insert(fid, FidMeta::open(fm.qid));
+        self.state.fids.insert(fid, FidMeta::open(fm.qid, mode));
         self.qids.entry(fm.qid).or_insert(fm);
 
         Ok(Rdata::Create { qid, iounit })
