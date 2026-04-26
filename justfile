@@ -56,7 +56,7 @@ check-spelling:
 	typos
 
 # Run all check targets
-check-all: check-clippy check-fmt check-docs check-spelling
+check-all: check-spelling check-fmt check-clippy check-docs
 
 # List open GitHub issues using gh
 list-issues:
