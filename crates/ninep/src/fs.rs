@@ -19,30 +19,32 @@ bitflags::bitflags! {
     /// (skipping one bit) QTAUTH, and QTTMP. The name QTFILE, defined to be zero, identifies the value
     /// of the type for a plain file.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct Mode: u8 {
+    pub struct FileType: u8 {
         /// Directory
-        const DIR = 0x80;
+        const DIRECTORY = 0x80;
         /// Append only
-        const APPEND = 0x40;
+        const APPEND_ONLY = 0x40;
         /// Exclusive access
         const EXCLUSIVE = 0x20;
-        /// Mount
-        const MOUNT = 0x10;
         /// Auth
         const AUTH = 0x08;
         /// Temp
         const TMP = 0x04;
-        /// Symlink
-        const SYMLINK = 0x02;
         /// File
         const FILE = 0x00;
     }
 }
 
-impl Mode {
-    /// Create a new [Mode] from a u8 bitmask
+impl FileType {
+    /// Create a new [FileType] from a u8 bitmask
     pub fn new(bits: u8) -> Self {
-        Mode::from_bits_truncate(bits)
+        FileType::from_bits_truncate(bits)
+    }
+}
+
+impl From<FileType> for Perm {
+    fn from(value: FileType) -> Self {
+        Perm::from_bits_truncate((value.bits() as u32) << 24)
     }
 }
 
@@ -65,13 +67,11 @@ bitflags::bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Perm: u32 {
         /// Directory
-        const DIR = 0x80000000;
+        const DIRECTORY = 0x80000000;
         /// Append only
-        const APPEND = 0x40000000;
+        const APPEND_ONLY = 0x40000000;
         /// Exclusive access
         const EXCLUSIVE = 0x20000000;
-        /// File
-        const FILE = 0x00000000;
         /// Mount
         const MOUNT = 0x10000000;
         /// Auth
@@ -80,6 +80,8 @@ bitflags::bitflags! {
         const TMP = 0x04000000;
         /// Symlink
         const SYMLINK = 0x02000000;
+        /// File
+        const FILE = 0x00000000;
         /// Device
         const DEVICE = 0x00800000;
         /// Named pipe
@@ -134,7 +136,7 @@ impl Perm {
     /// permission to others, but the containing directory does not, then the created file will not
     /// allow others to read the file.
     pub fn apply_create_mask(&self, parent_perms: Perm) -> Perm {
-        let mask = if self.contains(Perm::DIR) {
+        let mask = if self.contains(Perm::DIRECTORY) {
             0o777
         } else {
             0o666
@@ -142,6 +144,56 @@ impl Perm {
         let bits = self.bits() & (!mask | (parent_perms.bits() & mask));
 
         Perm::new(bits)
+    }
+}
+
+bitflags::bitflags! {
+    /// Used in `Open` and `Create` requests to request I/O capabilities with the newly opened
+    /// file.
+    ///
+    /// The open request asks the file server to check permissions and prepare a fid for I/O with
+    /// subsequent read and write messages. The provided [Mode] bits determine the type of I/O
+    /// supported on the open `fid` and are checked against the corresponding permissions for the
+    /// file:
+    ///   - `0x00` ([Mode::READ]): read only
+    ///   - `0x01` ([Mode::WRITE]): write only
+    ///   - `0x02` ([Mode::READ_WRITE]): both read and write
+    ///   - `0x03` ([Mode::EXECUTE]): read and execute
+    ///
+    /// In addition, the following bits can be set to request additional behaviour:
+    ///   - `0x10` ([Mode::TRUNCATE]): the file should be truncated before I/O begins. If the
+    ///     file is marked as append only and permission is granted, the open request succeeds but
+    ///     the file will not be truncated.
+    ///   - `0x40` ([Mode::REMOVE_ON_CLOSE]): the file will be removed when closed (requires write
+    ///     permissions on the parent directory).
+    ///
+    /// All other bits in [Mode] should be zero and are ignored. It is illegal to write a
+    /// directory, truncate it or attempt to remove it on close. If a file is marked for exclusive
+    /// use ([Perm::EXCLUSIVE]) then only one client may have it open at any time.
+    ///
+    /// Permissions are checked at the time of the open request; subsequent changes to server side
+    /// file permissions do not affect the ability to read, write or remove an already open file.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct Mode: u8 {
+        /// Open for read
+        const READ = 0x00;
+        /// Open for write
+        const WRITE = 0x01;
+        /// Open for read and write
+        const READ_WRITE = 0x02;
+        /// Open for read and execute
+        const EXECUTE = 0x03;
+        /// Truncate the file before I/O begins
+        const TRUNCATE = 0x10;
+        /// Remove the file when closed
+        const REMOVE_ON_CLOSE = 0x40;
+    }
+}
+
+impl Mode {
+    /// Create a new [Mode] from a u8 bitmask
+    pub fn new(bits: u8) -> Self {
+        Mode::from_bits_truncate(bits)
     }
 }
 
@@ -177,7 +229,7 @@ pub struct Stat {
 impl From<Stat> for RawStat {
     fn from(s: Stat) -> Self {
         let qid = Qid {
-            ty: Mode::from(s.fm.ty).bits(),
+            ty: s.fm.ty.bits(),
             version: 0,
             path: s.fm.qid,
         };
@@ -193,8 +245,8 @@ impl From<Stat> for RawStat {
 
         RawStat {
             size,
-            ty: 0,
-            dev: 0,
+            ty: u16::MAX,
+            dev: u32::MAX,
             qid,
             mode: (Perm::from(s.fm.ty) | s.perms).bits(),
             atime: systime_as_u32(s.last_accesses),
@@ -215,7 +267,7 @@ impl TryFrom<RawStat> for Stat {
         Ok(Stat {
             fm: FileMeta {
                 name: r.name,
-                ty: Mode::new(r.qid.ty).try_into()?,
+                ty: FileType::new(r.qid.ty),
                 qid: r.qid.path,
             },
             perms: Perm::new(r.mode & 0x0000FFFF),
@@ -260,8 +312,8 @@ impl WStat {
     /// Returns `Ok` after applying set fields if the [Qid] of this update and the provided stat
     /// are equal, otherwise `Err`.
     pub fn try_apply(self, stat: &Stat) -> Result<Stat, Box<WStat>> {
-        let mode = Mode::new(self.qid.ty);
-        if (self.qid.path != stat.fm.qid) || (mode != Mode::from(stat.fm.ty)) {
+        let mode = FileType::new(self.qid.ty);
+        if (self.qid.path != stat.fm.qid) || (mode != stat.fm.ty) {
             return Err(Box::new(self));
         }
 
@@ -327,51 +379,39 @@ impl From<RawStat> for WStat {
     }
 }
 
-/// Supported filetypes
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileType {
-    /// Directory
-    Directory,
-    /// Regular
-    Regular,
-    /// Append only
-    AppendOnly,
-    /// Exclusive access
-    Exclusive,
-}
+impl From<WStat> for RawStat {
+    fn from(w: WStat) -> Self {
+        let name = w.name.unwrap_or_default();
+        let uid = String::new();
+        let gid = w.group.unwrap_or_default();
+        let muid = w.last_modified_by.unwrap_or_default();
+        let mode = w.perms.map_or(u32::MAX, |p| p.bits() & 0x0000FFFF);
+        let atime = w.last_accesses.map_or(u32::MAX, systime_as_u32);
+        let mtime = w.last_modified.map_or(u32::MAX, systime_as_u32);
+        let length = w.n_bytes.unwrap_or(u64::MAX);
 
-impl From<FileType> for Mode {
-    fn from(value: FileType) -> Self {
-        match value {
-            FileType::Directory => Mode::DIR,
-            FileType::Regular => Mode::FILE,
-            FileType::AppendOnly => Mode::APPEND,
-            FileType::Exclusive => Mode::EXCLUSIVE,
-        }
-    }
-}
+        let size = (size_of::<u16>()
+            + size_of::<u32>() * 4
+            + w.qid.n_bytes()
+            + length.n_bytes()
+            + name.n_bytes()
+            + uid.n_bytes()
+            + gid.n_bytes()
+            + muid.n_bytes()) as u16;
 
-impl TryFrom<Mode> for FileType {
-    type Error = String;
-
-    fn try_from(value: Mode) -> Result<Self, String> {
-        match value {
-            Mode::DIR => Ok(Self::Directory),
-            Mode::FILE => Ok(Self::Regular),
-            Mode::APPEND => Ok(Self::AppendOnly),
-            Mode::EXCLUSIVE => Ok(Self::Exclusive),
-            m => Err(format!("invalid mode value: {m:o}")),
-        }
-    }
-}
-
-impl From<FileType> for Perm {
-    fn from(value: FileType) -> Self {
-        match value {
-            FileType::Directory => Perm::DIR,
-            FileType::Regular => Perm::FILE,
-            FileType::AppendOnly => Perm::APPEND,
-            FileType::Exclusive => Perm::EXCLUSIVE,
+        RawStat {
+            size,
+            ty: u16::MAX,
+            dev: u32::MAX,
+            qid: w.qid,
+            mode,
+            atime,
+            mtime,
+            length,
+            name,
+            uid,
+            gid,
+            muid,
         }
     }
 }
@@ -390,7 +430,7 @@ pub struct FileMeta {
 impl FileMeta {
     pub(super) fn as_qid(&self) -> Qid {
         Qid {
-            ty: Mode::from(self.ty).bits(),
+            ty: self.ty.bits(),
             version: 0,
             path: self.qid,
         }
@@ -400,7 +440,7 @@ impl FileMeta {
     pub fn dir(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
-            ty: FileType::Directory,
+            ty: FileType::DIRECTORY,
             qid,
         }
     }
@@ -409,7 +449,7 @@ impl FileMeta {
     pub fn file(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
-            ty: FileType::Regular,
+            ty: FileType::FILE,
             qid,
         }
     }
@@ -418,7 +458,7 @@ impl FileMeta {
     pub fn append_only_file(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
-            ty: FileType::AppendOnly,
+            ty: FileType::APPEND_ONLY,
             qid,
         }
     }
@@ -427,7 +467,7 @@ impl FileMeta {
     pub fn exclusive_file(name: impl Into<String>, qid: u64) -> Self {
         Self {
             name: name.into(),
-            ty: FileType::Exclusive,
+            ty: FileType::EXCLUSIVE,
             qid,
         }
     }
@@ -452,13 +492,13 @@ mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
     const TEST_QID: u64 = 42;
-    const TEST_MODE: Mode = Mode::FILE;
+    const TEST_MODE: FileType = FileType::FILE;
 
     fn stat() -> Stat {
         Stat {
             fm: FileMeta {
                 name: "test".to_string(),
-                ty: FileType::Regular,
+                ty: FileType::FILE,
                 qid: TEST_QID,
             },
             perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
@@ -488,11 +528,11 @@ mod tests {
         }
     }
 
-    #[test_case(99, Mode::FILE; "path mismatch")]
-    #[test_case(42, Mode::DIR; "type mismatch")]
-    #[test_case(99, Mode::DIR; "path and type mismatch")]
+    #[test_case(99, FileType::FILE; "path mismatch")]
+    #[test_case(42, FileType::DIRECTORY; "type mismatch")]
+    #[test_case(99, FileType::DIRECTORY; "path and type mismatch")]
     #[test]
-    fn try_apply_qid_mismatch_returns_err(path: u64, mode: Mode) {
+    fn try_apply_qid_mismatch_returns_err(path: u64, mode: FileType) {
         let wstat = WStat {
             qid: Qid {
                 ty: mode.bits(),
@@ -574,20 +614,20 @@ mod tests {
     fn rawstat_to_stat_strips_filetype_bits_from_perms() {
         let raw = RawStat {
             qid: Qid {
-                ty: Mode::FILE.bits(),
+                ty: FileType::FILE.bits(),
                 ..Qid::default()
             },
-            mode: (Perm::DIR | Perm::OWNER_READ | Perm::OWNER_WRITE).bits(),
+            mode: (Perm::DIRECTORY | Perm::OWNER_READ | Perm::OWNER_WRITE).bits(),
             ..RawStat::default()
         };
         let s = Stat::try_from(raw).unwrap();
         assert_eq!(s.perms, Perm::OWNER_READ | Perm::OWNER_WRITE);
     }
 
-    #[test_case(FileType::Regular; "regular file")]
-    #[test_case(FileType::Directory; "directory")]
-    #[test_case(FileType::AppendOnly; "append only")]
-    #[test_case(FileType::Exclusive; "exclusive")]
+    #[test_case(FileType::FILE; "regular file")]
+    #[test_case(FileType::DIRECTORY; "directory")]
+    #[test_case(FileType::APPEND_ONLY; "append only")]
+    #[test_case(FileType::EXCLUSIVE; "exclusive")]
     #[test]
     fn stat_to_rawstat_file_type_encoding_works(ty: FileType) {
         let user_perms = Perm::OWNER_READ | Perm::OWNER_WRITE;
@@ -597,7 +637,46 @@ mod tests {
 
         let raw = RawStat::from(s);
 
-        assert_eq!(raw.qid.ty, Mode::from(ty).bits());
+        assert_eq!(raw.qid.ty, ty.bits());
         assert_eq!(raw.mode, (Perm::from(ty) | user_perms).bits());
+    }
+
+    #[test_case(wstat(); "all fields unset")]
+    #[test_case(
+        WStat {
+            name: Some("renamed".into()),
+            perms: Some(Perm::OWNER_READ | Perm::OWNER_WRITE),
+            n_bytes: Some(1_337),
+            last_accesses: Some(UNIX_EPOCH + Duration::from_secs(10)),
+            last_modified: Some(UNIX_EPOCH + Duration::from_secs(20)),
+            group: Some("wheel".into()),
+            last_modified_by: Some("alice".into()),
+            ..wstat()
+        };
+        "all writable fields set"
+    )]
+    #[test]
+    fn wstat_rawstat_round_trip(w: WStat) {
+        assert_eq!(WStat::from(RawStat::from(w.clone())), w);
+    }
+
+    #[test]
+    fn dir_stat_round_trips() {
+        let stat = Stat::stub(FileMeta::dir("foo", 0));
+        let raw = RawStat::from(stat.clone());
+        let rt_stat = Stat::try_from(raw).unwrap();
+
+        assert_eq!(stat, rt_stat);
+    }
+
+    #[test_case(FileType::DIRECTORY, Perm::DIRECTORY; "directory")]
+    #[test_case(FileType::APPEND_ONLY, Perm::APPEND_ONLY; "append only")]
+    #[test_case(FileType::EXCLUSIVE, Perm::EXCLUSIVE; "exclusive")]
+    #[test_case(FileType::AUTH, Perm::AUTH; "auth")]
+    #[test_case(FileType::TMP, Perm::TMP; "temp")]
+    #[test_case(FileType::FILE, Perm::FILE; "file")]
+    #[test]
+    fn perm_from_file_type_works(ft: FileType, expected: Perm) {
+        assert_eq!(Perm::from(ft), expected);
     }
 }

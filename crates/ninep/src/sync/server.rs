@@ -109,7 +109,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// Lookup the [FileMeta] for `child` under the directory represented by `parent_qid`.
     ///
     /// `9p` walk messages received by the [Server] will specify a full path from a known parent
-    /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
+    /// (of file type [Directory][FileType::DIRECTORY]) to a target `child`. This method is called
     /// for each element of that path in order, stopping either when the target is reached or some
     /// element of the path returns an error.
     fn walk_one(
@@ -206,7 +206,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
     /// `offset`.
     ///
-    /// [Server] ensures that this is only called for entries of type [file][FileType::Regular].
+    /// [Server] ensures that this is only called for entries of type [file][FileType::FILE].
     ///
     /// Returns the number of bytes written. Returning `n < data.len()` is permitted and is treated
     /// as a short write which may result in further `write` messages from the client.
@@ -284,6 +284,14 @@ where
                 spawn(move || session.handle_connection());
             }
         })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn handle_single_test_stream_sync<U>(&mut self, stream: U)
+    where
+        U: SyncServerStream,
+    {
+        self.new_session(stream).handle_connection();
     }
 }
 
@@ -539,7 +547,7 @@ where
     }
 
     fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
-        if self.try_fid_meta(fid)?.is_open {
+        if self.try_fid_meta(fid)?.is_open() {
             return Err(E_FID_ALREADY_OPEN.to_string());
         }
 
@@ -552,7 +560,7 @@ where
             .fids
             .get_mut(&fid)
             .expect("known fid after try_file_meta")
-            .is_open = true;
+            .mode = Some(mode);
 
         Ok(Rdata::Open {
             qid: fm.as_qid(),
@@ -566,7 +574,7 @@ where
         }
 
         let fm = self.try_file_meta(fid)?;
-        if fm.ty != FileType::Directory {
+        if fm.ty != FileType::DIRECTORY {
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
@@ -582,7 +590,7 @@ where
 
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
-        self.state.fids.insert(fid, FidMeta::open(fm.qid));
+        self.state.fids.insert(fid, FidMeta::open(fm.qid, mode));
         self.qids.entry(fm.qid).or_insert(fm);
 
         Ok(Rdata::Create { qid, iounit })
@@ -638,7 +646,7 @@ where
     fn handle_write(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
 
-        if fm.ty == FileType::Directory {
+        if fm.ty == FileType::DIRECTORY {
             return Err(E_ILLEGAL_DIRECTORY_WRITE.to_string());
         } else if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
@@ -671,73 +679,89 @@ where
 mod tests {
     use super::*;
     use crate::{
-        generate_test_suite,
+        generate_server_test_suite,
         sansio::protocol::Tmessage,
-        test_utils::{SyncTestClient, TestFs, cases::Step},
+        test_utils::{
+            RecordedCalls, SyncTestClient, TestFs,
+            server_cases::{Step, TestCase},
+        },
     };
     use std::{net::Shutdown, os::unix::net::UnixStream, thread};
 
-    macro_rules! run_one {
-        ($case:expr) => {
-            // Setup the client and server
-            let fs = TestFs::default();
-            let recorded = fs.calls();
-            let (client_stream, server_stream) = UnixStream::pair().unwrap();
-            let mut client = SyncTestClient::new(client_stream);
-            let mut server = Server::new(fs);
+    // We stamp out the test suite using this helper macro rather than using simple_test_case in
+    // order to ensure that both the sync and tokio implementations run exactly the same cases
+    // without needing to define that set of cases in two places.
+    generate_server_test_suite!(sync, run_one);
 
-            let mut handle = Some(thread::spawn(move || {
-                server.new_session(server_stream).handle_connection();
-            }));
+    fn run_one(case: TestCase) {
+        // Setup the client and server
+        let fs = TestFs::default();
+        let recorded = fs.calls();
+        let (client_stream, server_stream) = UnixStream::pair().unwrap();
+        let mut client = SyncTestClient::new(client_stream);
+        let mut server = Server::new(fs);
 
-            // Run the test case
-            let mut did_shutdown = false;
+        let mut handle = Some(thread::spawn(move || {
+            server.new_session(server_stream).handle_connection();
+        }));
 
-            for step in $case {
-                match step {
-                    Step::Request { tag, req, resp } => {
-                        let rmsg = client.send_sync(tag, req).unwrap();
-                        assert_eq!(rmsg, Rmessage { tag, content: resp });
-                    }
+        // Run the test case
+        let mut did_shutdown = false;
 
-                    Step::Send { tag, req } => {
-                        Tmessage::new(tag, req)
-                            .write_to(&mut client.stream)
-                            .unwrap();
-                    }
+        for (i, step) in case.into_iter().enumerate() {
+            did_shutdown = handle_step(i, step, &mut client, &recorded, &mut handle);
+        }
 
-                    Step::Receive { tag, resp } => {
-                        let rmsg = <Rmessage as SyncNineP>::read_from(
-                            client.msize,
-                            &client.buf,
-                            &mut client.stream,
-                        )
-                        .unwrap();
-                        assert_eq!(rmsg, Rmessage::new(tag, resp));
-                    }
+        if !did_shutdown {
+            let _ = client.stream.shutdown(Shutdown::Both);
+        }
 
-                    Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls),
-
-                    Step::CloseStream => {
-                        let _ = client.stream.shutdown(Shutdown::Both);
-                        if let Some(h) = handle.take() {
-                            h.join().expect("server thread join failed");
-                        }
-                        did_shutdown = true;
-                    }
-                }
-            }
-
-            if !did_shutdown {
-                let _ = client.stream.shutdown(Shutdown::Both);
-            }
-
-            // wait for the server to shutdown
-            if let Some(h) = handle.take() {
-                h.join().expect("server thread join failed");
-            }
-        };
+        // wait for the server to shutdown
+        if let Some(h) = handle.take() {
+            h.join().expect("server thread join failed");
+        }
     }
 
-    generate_test_suite!(sync, run_one);
+    fn handle_step(
+        i: usize,
+        step: Step,
+        client: &mut SyncTestClient,
+        recorded: &RecordedCalls,
+        handle: &mut Option<JoinHandle<()>>,
+    ) -> bool {
+        match step {
+            Step::Request { tag, req, resp } => {
+                let rmsg = client.send_sync(tag, req).unwrap();
+                assert_eq!(rmsg, Rmessage { tag, content: resp }, "step {i}");
+            }
+
+            Step::Send { tag, req } => {
+                Tmessage::new(tag, req)
+                    .write_to(&mut client.stream)
+                    .unwrap();
+            }
+
+            Step::Receive { tag, resp } => {
+                let rmsg = <Rmessage as SyncNineP>::read_from(
+                    client.msize,
+                    &client.buf,
+                    &mut client.stream,
+                )
+                .unwrap();
+                assert_eq!(rmsg, Rmessage::new(tag, resp), "step {i}");
+            }
+
+            Step::AssertCalls { calls } => assert_eq!(recorded.take(), calls, "step {i}"),
+
+            Step::CloseStream => {
+                let _ = client.stream.shutdown(Shutdown::Both);
+                if let Some(h) = handle.take() {
+                    h.join().expect("server thread join failed");
+                }
+                return true;
+            }
+        }
+
+        false
+    }
 }

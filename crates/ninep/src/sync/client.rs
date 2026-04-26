@@ -9,13 +9,15 @@ use crate::{
 };
 use simple_coro::CoroState;
 use std::{
-    collections::HashMap,
-    env, io, mem,
+    env, mem,
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
+
+// re-export
+pub use crate::sansio::client::{Error, Result};
 
 /// A synchronous 9p client.
 ///
@@ -43,11 +45,7 @@ impl<S> Clone for Client<S> {
 impl<S> Client<S> {
     fn new(stream: S) -> Self {
         Self {
-            state: Arc::new(Mutex::new(State {
-                msize: MSIZE,
-                fids: HashMap::from([("/".into(), 0)]),
-                next_fid: 1,
-            })),
+            state: Default::default(),
             stream: Arc::new(Mutex::new(stream)),
             buf: SharedBuf::default(),
             msize: MSIZE,
@@ -83,7 +81,7 @@ impl Client<UnixStream> {
         uname: impl Into<String>,
         path: impl AsRef<Path>,
         aname: impl Into<String>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let stream = UnixStream::connect(path.as_ref())?;
 
         let mut client = Self::new(stream);
@@ -96,7 +94,7 @@ impl Client<UnixStream> {
     /// namespace.
     ///
     /// The default namespace is located in /tmp/ns.$USER.$DISPLAY/
-    pub fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> io::Result<Self> {
+    pub fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> Result<Self> {
         let ns = ns.into();
         let uname = match env::var("USER") {
             Ok(s) => s,
@@ -115,7 +113,7 @@ impl Client<TcpStream> {
         uname: impl Into<String>,
         addr: impl ToSocketAddrs,
         aname: impl Into<String>,
-    ) -> io::Result<Self> {
+    ) -> Result<Self> {
         let stream = TcpStream::connect(addr)?;
 
         let mut client = Self::new(stream);
@@ -136,14 +134,7 @@ macro_rules! run_9p_coro {
                 CoroState::Pending(c, t) => {
                     let mut stream = $self.stream();
                     t.write_to(&mut *stream)?;
-
-                    match Rmessage::read_from(msize, &$self.buf, &mut *stream)? {
-                        Rmessage {
-                            content: Rdata::Error { ename },
-                            ..
-                        } => return err(ename),
-                        rmessage => c.send(rmessage),
-                    }
+                    c.send(Rmessage::read_from(msize, &$self.buf, &mut *stream)?)
                 }
             }
         }
@@ -154,7 +145,7 @@ impl<S> Client<S>
 where
     S: SyncStream,
 {
-    fn send(&mut self, tag: u16, content: Tdata) -> io::Result<Rmessage> {
+    fn send(&mut self, tag: u16, content: Tdata) -> Result<Rmessage> {
         let mut stream = self.stream();
         Tmessage { tag, content }.write_to(&mut *stream)?;
 
@@ -162,13 +153,13 @@ where
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
-            } => err(ename),
+            } => Err(Error::Rerror { ename }),
             msg => Ok(msg),
         }
     }
 
     /// Establish our connection to the target 9p server and begin the session.
-    fn connect(&mut self, uname: impl Into<String>, aname: impl Into<String>) -> io::Result<()> {
+    fn connect(&mut self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_connect, uname.into(), aname.into())?;
         let msize = self.state().msize;
         self.msize = msize;
@@ -177,14 +168,14 @@ where
     }
 
     /// Associate the given path with a new fid.
-    pub fn walk(&mut self, path: impl Into<String>) -> io::Result<u32> {
+    pub fn walk(&mut self, path: impl Into<String>) -> Result<u32> {
         run_9p_coro!(self, handle_walk, path.into())
     }
 
     /// Free server side state for the given fid.
     ///
     /// Clunks of the root fid (0) will be ignored
-    pub fn clunk(&mut self, fid: u32) -> io::Result<()> {
+    pub fn clunk(&mut self, fid: u32) -> Result<()> {
         if fid != 0 {
             self.send(0, Tdata::Clunk { fid })?;
             self.state().fids.retain(|_, v| *v != fid);
@@ -194,7 +185,7 @@ where
     }
 
     /// Free server side state for the given path.
-    pub fn clunk_path(&mut self, path: impl Into<String>) -> io::Result<()> {
+    pub fn clunk_path(&mut self, path: impl Into<String>) -> Result<()> {
         let fid = match self.state().fids.get(&path.into()) {
             Some(fid) => *fid,
             None => return Ok(()),
@@ -204,17 +195,17 @@ where
     }
 
     /// Request the current [Stat] of the file or directory identified by the given path.
-    pub fn stat(&mut self, path: impl Into<String>) -> io::Result<Stat> {
+    pub fn stat(&mut self, path: impl Into<String>) -> Result<Stat> {
         run_9p_coro!(self, handle_stat, path.into())
     }
 
     /// Read the full contents of the file at `path` as bytes.
-    pub fn read(&mut self, path: impl Into<String>) -> io::Result<Vec<u8>> {
+    pub fn read(&mut self, path: impl Into<String>) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read, path.into())
     }
 
     /// Read the full contents of the file at `path` as utf-8 encoded text.
-    pub fn read_str(&mut self, path: impl Into<String>) -> io::Result<String> {
+    pub fn read_str(&mut self, path: impl Into<String>) -> Result<String> {
         let bytes = run_9p_coro!(self, handle_read, path.into())?;
         let s = match String::from_utf8(bytes) {
             Ok(s) => s,
@@ -225,17 +216,12 @@ where
     }
 
     /// Read the directory listing of the directory at `path`.
-    pub fn read_dir(&mut self, path: impl Into<String>) -> io::Result<Vec<Stat>> {
+    pub fn read_dir(&mut self, path: impl Into<String>) -> Result<Vec<Stat>> {
         run_9p_coro!(self, handle_read_dir, path.into())
     }
 
     /// Write the provided data to the file at `path` at the given offset.
-    pub fn write(
-        &mut self,
-        path: impl Into<String>,
-        offset: u64,
-        content: &[u8],
-    ) -> io::Result<usize> {
+    pub fn write(&mut self, path: impl Into<String>, offset: u64, content: &[u8]) -> Result<usize> {
         run_9p_coro!(self, handle_write, path.into(), offset, content)
     }
 
@@ -245,7 +231,7 @@ where
         path: impl Into<String>,
         offset: u64,
         content: &str,
-    ) -> io::Result<usize> {
+    ) -> Result<usize> {
         run_9p_coro!(self, handle_write, path.into(), offset, content.as_bytes())
     }
 
@@ -256,12 +242,12 @@ where
         name: impl Into<String>,
         perms: Perm,
         mode: Mode,
-    ) -> io::Result<()> {
+    ) -> Result<()> {
         run_9p_coro!(self, handle_create, dir.into(), name.into(), perms, mode)
     }
 
     /// Attempt to remove a file from the connected filesystem.
-    pub fn remove(&mut self, path: impl Into<String>) -> io::Result<()> {
+    pub fn remove(&mut self, path: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_remove, path.into())
     }
 
@@ -269,9 +255,9 @@ where
     ///
     /// The size of each chunk is determined by the supported message size of the server replying
     /// to the requests.
-    pub fn iter_chunks(&mut self, path: impl Into<String>) -> io::Result<ChunkIter<S>> {
+    pub fn iter_chunks(&mut self, path: impl Into<String>) -> Result<ChunkIter<S>> {
         let fid = self.walk(path)?;
-        let mode = Mode::FILE.bits();
+        let mode = Mode::READ.bits();
         let count = self.state().msize;
         self.send(0, Tdata::Open { fid, mode })?;
 
@@ -284,9 +270,9 @@ where
     }
 
     /// Iterate over newline delimited lines of utf-8 encoded text from the file at `path`.
-    pub fn iter_lines(&mut self, path: impl Into<String>) -> io::Result<ReadLineIter<S>> {
+    pub fn iter_lines(&mut self, path: impl Into<String>) -> Result<ReadLineIter<S>> {
         let fid = self.walk(path)?;
-        let mode = Mode::FILE.bits();
+        let mode = Mode::READ.bits();
         let count = self.state().msize;
         self.send(0, Tdata::Open { fid, mode })?;
 
@@ -300,7 +286,7 @@ where
         })
     }
 
-    fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> io::Result<Vec<u8>> {
+    fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read_count, fid, offset, count)
     }
 }
@@ -395,6 +381,77 @@ where
                     self.offset += data.len() as u64;
                     self.buf.extend(data);
                 }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        assert_9p_client_result, generate_client_test_suite,
+        sync::server::Server,
+        test_utils::{
+            TestFs,
+            client_cases::{Step, TestCase},
+        },
+    };
+    use std::{net::Shutdown, os::unix::net::UnixStream, thread};
+
+    // We stamp out the test suite using this helper macro rather than using simple_test_case in
+    // order to ensure that both the sync and tokio implementations run exactly the same cases
+    // without needing to define that set of cases in two places.
+    generate_client_test_suite!(sync, run_one);
+
+    fn run_one(case: TestCase) {
+        let fs = TestFs::default();
+        let mut server = Server::new(fs);
+        let (client_stream, server_stream) = UnixStream::pair().unwrap();
+        let mut client = Client::new(client_stream);
+        let handle = thread::spawn(move || {
+            server.handle_single_test_stream_sync(server_stream);
+        });
+
+        for (i, step) in case.into_iter().enumerate() {
+            handle_step(i, step, &mut client);
+        }
+
+        let _ = client.stream().shutdown(Shutdown::Both);
+        handle.join().expect("server thread join failed");
+    }
+
+    fn handle_step(i: usize, step: Step, client: &mut UnixClient) {
+        match step {
+            Step::Connect { uname, aname, res } => {
+                let actual = client.connect(uname, aname);
+                assert_9p_client_result!("connect", i, actual, res);
+            }
+
+            Step::Clunk { fid, res } => {
+                let actual = client.clunk(fid);
+                assert_9p_client_result!("clunk", i, actual, res);
+            }
+
+            Step::Walk { path, res } => {
+                let actual = client.walk(path);
+                assert_9p_client_result!("walk", i, actual, res);
+            }
+
+            Step::Read { path, res } => {
+                let actual = client.read_str(path);
+                assert_9p_client_result!("read", i, actual, res);
+            }
+
+            Step::ReadDir { path, res } => {
+                let actual = client.read_dir(path);
+                assert_9p_client_result!("read dir", i, actual, res);
+            }
+
+            Step::AssertState { next_fid, fids } => {
+                let st = client.state();
+                assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
+                assert_eq!(st.fids, fids, "(step {i}) fids");
             }
         }
     }

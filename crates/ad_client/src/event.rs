@@ -1,6 +1,7 @@
 //! Handling of event filtering
 use crate::Client;
 use ad_event::{FsysEvent, Kind, Source};
+use ninep::sync::client::Result;
 use std::io;
 
 /// Outcome of handling an event within an [EventFilter]
@@ -69,7 +70,7 @@ pub trait EventFilter {
     }
 }
 
-pub(crate) fn run_filter<F>(buffer: &str, mut filter: F, client: &mut Client) -> io::Result<()>
+pub(crate) fn run_filter<F>(buffer: &str, mut filter: F, client: &mut Client) -> Result<()>
 where
     F: EventFilter,
 {
