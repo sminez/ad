@@ -109,7 +109,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// Lookup the [FileMeta] for `child` under the directory represented by `parent_qid`.
     ///
     /// `9p` walk messages received by the [Server] will specify a full path from a known parent
-    /// (of file type [Directory][FileType::Directory]) to a target `child`. This method is called
+    /// (of file type [Directory][FileType::DIRECTORY]) to a target `child`. This method is called
     /// for each element of that path in order, stopping either when the target is reached or some
     /// element of the path returns an error.
     fn walk_one(
@@ -206,7 +206,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
     /// `offset`.
     ///
-    /// [Server] ensures that this is only called for entries of type [file][FileType::Regular].
+    /// [Server] ensures that this is only called for entries of type [file][FileType::FILE].
     ///
     /// Returns the number of bytes written. Returning `n < data.len()` is permitted and is treated
     /// as a short write which may result in further `write` messages from the client.
