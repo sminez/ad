@@ -223,7 +223,7 @@ impl SessionState<Attached> {
                 if wnames.is_empty() {
                     self.state.fids.insert(new_fid, FidMeta::closed(fm.qid));
                     return Ok(Rdata::Walk { wqids: vec![] });
-                } else if matches!(fm.ty, FileType::Regular) {
+                } else if matches!(fm.ty, FileType::FILE) {
                     return Err(E_WALK_NON_DIR.to_string());
                 }
 
@@ -272,26 +272,20 @@ impl SessionState<Attached> {
     > {
         Coro::from(
             move |handle: Handle<Either<(u64, String), (u64, String)>, Vec<Stat>>| async move {
-                use FileType::*;
-
                 let fm = self.try_file_meta(fid)?;
                 if offset > u32::MAX as u64 {
                     return Err(format!("offset too large: {offset} > {}", u32::MAX));
                 }
 
-                let stats = match fm.ty {
-                    Regular | AppendOnly | Exclusive => {
-                        handle
-                            .yield_value(Either::R((fm.qid, self.state.uname.clone())))
-                            .await;
-                        return Ok(None); // processing of the ReadOutcome is handled by the caller
-                    }
-
-                    Directory => {
-                        handle
-                            .yield_value(Either::L((fm.qid, self.state.uname.clone())))
-                            .await
-                    }
+                let stats = if fm.ty == FileType::DIRECTORY {
+                    handle
+                        .yield_value(Either::L((fm.qid, self.state.uname.clone())))
+                        .await
+                } else {
+                    handle
+                        .yield_value(Either::R((fm.qid, self.state.uname.clone())))
+                        .await;
+                    return Ok(None); // processing of the ReadOutcome is handled by the caller
                 };
 
                 let mut buf = Vec::with_capacity(count as usize);
@@ -621,7 +615,7 @@ impl FlushHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::{FileMeta, Mode, Perm, Stat};
+    use crate::fs::{FileMeta, FileType, Perm, Stat};
     use crate::sansio::protocol::{NineP, RawStat, Rdata, Tdata, Tmessage};
     use simple_coro::CoroState;
     use simple_test_case::test_case;
@@ -643,7 +637,7 @@ mod tests {
     fn test_stat(name: &str, qid: u64) -> Stat {
         Stat {
             fm: FileMeta::dir(name, qid),
-            perms: Perm::DIR,
+            perms: Perm::DIRECTORY,
             n_bytes: 0,
             last_accesses: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
@@ -718,7 +712,7 @@ mod tests {
             BTreeMap::from([(5, FidMeta::closed(QID_ROOT))])
         );
         assert_eq!(attached.uname, "testuser");
-        assert_eq!(qid.ty, Mode::DIR.bits());
+        assert_eq!(qid.ty, FileType::DIRECTORY.bits());
         assert_eq!(qid.path, QID_ROOT);
     }
 

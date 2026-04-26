@@ -1,5 +1,5 @@
 use crate::{
-    fs::{FileMeta, Mode, Perm, Stat},
+    fs::{FileMeta, FileType, Mode, Perm, Stat},
     sansio::{
         protocol::{DEFAULT_MSIZE, NineP, Qid, RawStat, Rdata, Tdata},
         server::{
@@ -66,7 +66,7 @@ impl Step {
             tag,
             Tdata::attach(0, AFID_NO_AUTH, "user", "/"),
             Rdata::attach(Qid {
-                ty: Mode::DIR.bits(),
+                ty: FileType::DIRECTORY.bits(),
                 version: 0,
                 path: ROOT_QID,
             }),
@@ -204,7 +204,7 @@ pub(crate) fn version_while_attached_clunks_all_open_fids() -> TestCase {
         Step::version_req(4),
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
             Call::clunk(ClientId(0), ROOT_QID),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
@@ -224,7 +224,7 @@ pub(crate) fn connection_close_clunks_all_open_fids() -> TestCase {
         Step::CloseStream,
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
             Call::clunk(ClientId(0), ROOT_QID),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
@@ -322,7 +322,7 @@ pub(crate) fn walk_open_fid_returns_error_after_open() -> TestCase {
         Step::err(4, Tdata::walk(1, 2, &[]), E_WALK_OPEN_FID),
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
         ]),
     ]
 }
@@ -346,7 +346,7 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
                 ROOT_QID,
                 "new.txt",
                 Perm::OWNER_READ,
-                Mode::new(0),
+                Mode::READ,
                 "user",
             ),
         ]),
@@ -396,7 +396,7 @@ pub(crate) fn open_known_fid_returns_ropen() -> TestCase {
         ),
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
         ]),
     ]
 }
@@ -414,7 +414,7 @@ pub(crate) fn open_open_fid_returns_error() -> TestCase {
         Step::err(4, Tdata::open(1, 0), E_FID_ALREADY_OPEN),
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::new(0), "user"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
         ]),
     ]
 }
@@ -533,7 +533,7 @@ pub(crate) fn create_in_directory_returns_rcreate() -> TestCase {
                 ROOT_QID,
                 "new.txt",
                 Perm::OWNER_READ,
-                Mode::new(0),
+                Mode::READ,
                 "user",
             ),
         ]),
@@ -563,7 +563,7 @@ pub(crate) fn create_masks_permissions_before_call() -> TestCase {
                 ROOT_QID,
                 "masked.txt",
                 Perm::OWNER_READ,
-                Mode::new(0),
+                Mode::READ,
                 "user",
             ),
         ]),

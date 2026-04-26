@@ -246,7 +246,7 @@ where
     /// be called to await the next chunk.
     pub async fn stream_chunks(&mut self, path: impl Into<String>) -> Result<ChunkStream<S>> {
         let fid = self.walk(path).await?;
-        let mode = Mode::FILE.bits();
+        let mode = Mode::READ.bits();
         let count = self.state.lock().await.msize;
         self.send(0, Tdata::Open { fid, mode }).await?;
 
@@ -264,7 +264,7 @@ where
     /// be called to await the next chunk.
     pub async fn stream_lines(&mut self, path: impl Into<String>) -> Result<ReadLineStream<S>> {
         let fid = self.walk(path).await?;
-        let mode = Mode::FILE.bits();
+        let mode = Mode::READ.bits();
         let count = self.state.lock().await.msize;
         self.send(0, Tdata::Open { fid, mode }).await?;
 

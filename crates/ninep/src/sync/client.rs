@@ -257,7 +257,7 @@ where
     /// to the requests.
     pub fn iter_chunks(&mut self, path: impl Into<String>) -> Result<ChunkIter<S>> {
         let fid = self.walk(path)?;
-        let mode = Mode::FILE.bits();
+        let mode = Mode::READ.bits();
         let count = self.state().msize;
         self.send(0, Tdata::Open { fid, mode })?;
 
@@ -272,7 +272,7 @@ where
     /// Iterate over newline delimited lines of utf-8 encoded text from the file at `path`.
     pub fn iter_lines(&mut self, path: impl Into<String>) -> Result<ReadLineIter<S>> {
         let fid = self.walk(path)?;
-        let mode = Mode::FILE.bits();
+        let mode = Mode::READ.bits();
         let count = self.state().msize;
         self.send(0, Tdata::Open { fid, mode })?;
 

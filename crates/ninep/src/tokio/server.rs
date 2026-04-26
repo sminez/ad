@@ -688,7 +688,7 @@ where
         }
 
         let fm = self.try_file_meta(fid)?;
-        if fm.ty != FileType::Directory {
+        if fm.ty != FileType::DIRECTORY {
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
@@ -766,7 +766,7 @@ where
     async fn handle_write_async(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
         let fm = self.try_file_meta(fid)?;
 
-        if fm.ty == FileType::Directory {
+        if fm.ty == FileType::DIRECTORY {
             return Err(E_ILLEGAL_DIRECTORY_WRITE.to_string());
         } else if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));

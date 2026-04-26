@@ -310,7 +310,7 @@ impl State {
         &mut self,
         path: String,
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
-        self._read_all(path, Mode::FILE)
+        self._read_all(path, Mode::READ)
     }
 
     /// Read the directory listing of the directory at `path`.
@@ -319,7 +319,7 @@ impl State {
         path: String,
     ) -> Coro9p<Vec<Stat>, impl Future<Output = Result<Vec<Stat>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            let bytes = handle.yield_from(self._read_all(path, Mode::DIR)).await?;
+            let bytes = handle.yield_from(self._read_all(path, Mode::READ)).await?;
             let mut buf = io::Cursor::new(bytes);
             let mut stats: Vec<Stat> = Vec::new();
             let sb = SharedBuf::default();

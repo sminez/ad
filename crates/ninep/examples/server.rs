@@ -200,8 +200,8 @@ impl Serve9p for EchoServer {
     fn open(&self, _cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
         println!("handling open request: qid={qid} mode={mode:?} uname={uname}");
         match (qid, mode) {
-            (FOO | BAZ | RW | BLOCKING, Mode::FILE) => Ok(8168),
-            (ROOT | BAR, Mode::DIR) => Ok(8168),
+            (FOO | BAZ | RW | BLOCKING, Mode::READ) => Ok(8168),
+            (ROOT | BAR, Mode::READ) => Ok(8168),
             (RW, _) => Ok(8168),
             (qid, mode) => Err(format!("{qid} is not a known qid (mode={mode:?})")),
         }

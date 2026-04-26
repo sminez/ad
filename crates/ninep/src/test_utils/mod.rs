@@ -38,7 +38,7 @@ pub(crate) const TEST_IOUNIT: IoUnit = 8192;
 
 fn dir_qid(path: u64) -> Qid {
     Qid {
-        ty: Mode::DIR.bits(),
+        ty: FileType::DIRECTORY.bits(),
         version: 0,
         path,
     }
@@ -46,7 +46,7 @@ fn dir_qid(path: u64) -> Qid {
 
 fn file_qid(path: u64) -> Qid {
     Qid {
-        ty: Mode::FILE.bits(),
+        ty: FileType::FILE.bits(),
         version: 0,
         path,
     }
@@ -186,7 +186,7 @@ impl Serve9p for TestFs {
         self.calls.push(Call::stat(cid, qid, uname));
 
         match qid {
-            ROOT_QID => Ok(Stat::stub(FileMeta::dir("", ROOT_QID))),
+            ROOT_QID => Ok(Stat::stub(FileMeta::dir("/", ROOT_QID))),
             HELLO_QID => Ok(Stat::stub(FileMeta::file("hello", HELLO_QID))),
             SUBDIR_QID => Ok(Stat::stub(FileMeta::dir("subdir", SUBDIR_QID))),
             SUBFILE_QID => Ok(Stat::stub(FileMeta::file("subfile", SUBFILE_QID))),
@@ -385,7 +385,7 @@ impl Call {
 impl Stat {
     /// Create a new sub [Stat] with default perms and metadata.
     pub(crate) fn stub(fm: FileMeta) -> Stat {
-        let perms = if fm.ty == FileType::Directory {
+        let perms = if fm.ty == FileType::DIRECTORY {
             Perm::OWNER_READ | Perm::OWNER_EXEC
         } else {
             Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
