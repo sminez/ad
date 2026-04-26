@@ -591,7 +591,9 @@ where
         // fid is now changed to point to the newly created file rather than the parent
         let qid = fm.as_qid();
         self.state.fids.insert(fid, FidMeta::open(fm.qid, mode));
-        self.qids.entry(fm.qid).or_insert(fm);
+        self.with_shared_qids_mut(|qids| {
+            qids.entry(fm.qid).or_insert(fm);
+        });
 
         Ok(Rdata::Create { qid, iounit })
     }

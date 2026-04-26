@@ -14,7 +14,7 @@ use std::{
     future::Future,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
 /// Marker afid to denode that auth is not required for establishing connections
@@ -76,7 +76,7 @@ where
 {
     pub(crate) s: Arc<S>,
     pub(crate) roots: BTreeMap<String, u64>,
-    pub(crate) qids: BTreeMap<u64, FileMeta>,
+    pub(crate) qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
     pub(crate) next_client_id: u64,
 }
 
@@ -92,10 +92,12 @@ where
 
     /// Create a new file server with the given roots for clients to attach to.
     pub fn new_with_roots(s: S, roots: BTreeMap<String, u64>) -> Self {
-        let qids = roots
-            .iter()
-            .map(|(p, &qid)| (qid, FileMeta::dir(p.clone(), qid)))
-            .collect();
+        let qids = Arc::new(RwLock::new(
+            roots
+                .iter()
+                .map(|(p, &qid)| (qid, FileMeta::dir(p.clone(), qid)))
+                .collect(),
+        ));
 
         Self {
             s: Arc::new(s),
@@ -164,15 +166,43 @@ where
     pub(crate) client_id: ClientId,
     pub(crate) msize: u32,
     pub(crate) roots: BTreeMap<String, u64>,
-    pub(crate) qids: BTreeMap<u64, FileMeta>,
+    pub(crate) qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
 }
 
 impl<T> SessionState<T>
 where
     T: SessionType,
 {
+    /// Run a closure with access to the shared server-level Qid map.
+    ///
+    /// # WARNING
+    /// Calling this method locks the shared server-level state so closures _must_ be quick to
+    /// execute.
+    pub(crate) fn with_shared_qids<F, U>(&self, f: F) -> U
+    where
+        F: FnOnce(&BTreeMap<u64, FileMeta>) -> U,
+    {
+        f(&self.qids.read().unwrap())
+    }
+
+    /// Run a closure with mutable access to the shared server-level Qid map.
+    ///
+    /// # WARNING
+    /// Calling this method locks the shared server-level state so closures _must_ be quick to
+    /// execute.
+    pub(crate) fn with_shared_qids_mut<F, U>(&self, f: F) -> U
+    where
+        F: FnOnce(&mut BTreeMap<u64, FileMeta>) -> U,
+    {
+        f(&mut self.qids.write().unwrap())
+    }
+
     pub(crate) fn qid(&self, qid: u64) -> Option<Qid> {
-        self.qids.get(&qid).map(|fm| fm.as_qid())
+        self.with_shared_qids(|qids| qids.get(&qid).map(|fm| fm.as_qid()))
+    }
+
+    pub(crate) fn file_meta_for_qid(&self, qid: u64) -> Option<FileMeta> {
+        self.with_shared_qids(|qids| qids.get(&qid).cloned())
     }
 }
 
@@ -187,7 +217,7 @@ impl SessionState<Attached> {
 
     pub(crate) fn try_file_meta(&self, fid: u32) -> Result<FileMeta> {
         let opt = match self.state.fids.get(&fid) {
-            Some(meta) => self.qids.get(&meta.qid).cloned(),
+            Some(meta) => self.file_meta_for_qid(meta.qid),
             None => None,
         };
 
@@ -236,7 +266,7 @@ impl SessionState<Attached> {
                         Ok(fm) => {
                             qid = fm.qid;
                             wqids.push(fm.as_qid());
-                            self.qids.insert(qid, fm);
+                            self.with_shared_qids_mut(|qids| qids.insert(qid, fm));
                         }
                         Err(_) => break,
                     }
@@ -292,7 +322,9 @@ impl SessionState<Attached> {
                 let mut to_skip = offset as usize;
 
                 for stat in stats.into_iter() {
-                    self.qids.entry(stat.fm.qid).or_insert(stat.fm.clone());
+                    self.with_shared_qids_mut(|qids| {
+                        qids.entry(stat.fm.qid).or_insert(stat.fm.clone());
+                    });
                     let rstat: RawStat = stat.into();
                     let tmp = rstat.write_9p_bytes().unwrap();
 
@@ -429,7 +461,7 @@ where
         client_id: ClientId,
         roots: BTreeMap<String, u64>,
         s: Arc<S>,
-        qids: BTreeMap<u64, FileMeta>,
+        qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
         stream: U,
         buf: SharedBuf,
     ) -> Self {
@@ -630,7 +662,10 @@ mod tests {
             client_id: ClientId(0),
             msize: DEFAULT_MSIZE,
             roots: BTreeMap::from([("/".to_string(), QID_ROOT)]),
-            qids: BTreeMap::from([(QID_ROOT, FileMeta::dir("", QID_ROOT))]),
+            qids: Arc::new(RwLock::new(BTreeMap::from([(
+                QID_ROOT,
+                FileMeta::dir("", QID_ROOT),
+            )]))),
             state: Attached {
                 uname: "testuser".to_string(),
                 fids: BTreeMap::from([(0, FidMeta::closed(QID_ROOT))]),
@@ -826,7 +861,7 @@ mod tests {
     #[test]
     fn walk_non_dir_returns_error() {
         let mut ss = attached_session_state();
-        ss.qids.insert(1, FileMeta::file("file.txt", 1));
+        ss.with_shared_qids_mut(|qids| qids.insert(1, FileMeta::file("file.txt", 1)));
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let res = ss
@@ -923,7 +958,7 @@ mod tests {
     #[test]
     fn read_regular_file_yields_file_read_request() {
         let mut ss = attached_session_state();
-        ss.qids.insert(1, FileMeta::file("file.txt", 1));
+        ss.with_shared_qids_mut(|qids| qids.insert(1, FileMeta::file("file.txt", 1)));
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let coro = ss.handle_attached_read(2, 0, 1024);
