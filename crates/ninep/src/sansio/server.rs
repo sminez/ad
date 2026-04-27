@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     Result,
-    fs::{FileMeta, FileType, Mode, QID_ROOT, Stat},
+    fs::{FileMeta, FileType, Mode, PermCheck, QID_ROOT, Stat},
     sansio::protocol::{
         DEFAULT_MSIZE, Data, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
@@ -9,7 +9,7 @@ use crate::{
 use simple_coro::{Coro, Handle, ReadyCoro};
 use std::{
     cmp::min,
-    collections::{BTreeMap, VecDeque},
+    collections::{BTreeMap, HashSet, VecDeque},
     env,
     future::Future,
     ops::{Deref, DerefMut},
@@ -25,12 +25,14 @@ pub(crate) const E_ALREADY_ATTACHED: &str = "session is already attached";
 pub(crate) const E_AUTH_NOT_REQUIRED: &str = "authentication not required";
 pub(crate) const E_CREATE_NON_DIR: &str = "create in non-directory";
 pub(crate) const E_DUPLICATE_FID: &str = "duplicate fid";
-pub(crate) const E_FID_ALREADY_OPEN: &str = "fid already open";
+pub(crate) const E_EXCLUSIVE_ALREADY_OPEN: &str = "exclusive file already open";
+pub(crate) const E_FILE_NOT_OPEN: &str = "file not open";
 pub(crate) const E_ILLEGAL_CREATE_NAME: &str = "creating files named '.' or '..' is not allowed";
 pub(crate) const E_ILLEGAL_DIRECTORY_WRITE: &str = "illegal write to directory";
 pub(crate) const E_INVALID_OFFSET: &str = "invalid offset for read on directory";
 pub(crate) const E_NO_VERSION_MESSAGE: &str = "first message must be Tversion";
 pub(crate) const E_OVER_MAXWELEM: &str = "too many walk elements";
+pub(crate) const E_PERMISSION_DENIED: &str = "permission denied";
 pub(crate) const E_UNATTACHED: &str = "session is not attached";
 pub(crate) const E_UNKNOWN_FID: &str = "unknown fid";
 pub(crate) const E_UNKNOWN_FILE: &str = "unknown file";
@@ -76,7 +78,7 @@ where
 {
     pub(crate) s: Arc<S>,
     pub(crate) roots: BTreeMap<String, u64>,
-    pub(crate) qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+    pub(crate) qids: Arc<RwLock<BTreeMap<u64, QidMeta>>>,
     pub(crate) next_client_id: u64,
 }
 
@@ -95,7 +97,7 @@ where
         let qids = Arc::new(RwLock::new(
             roots
                 .iter()
-                .map(|(p, &qid)| (qid, FileMeta::dir(p.clone(), qid)))
+                .map(|(p, &qid)| (qid, QidMeta::new(FileMeta::dir(p.clone(), qid), None)))
                 .collect(),
         ));
 
@@ -134,22 +136,46 @@ pub(crate) struct Unattached {
 
 impl SessionType for Unattached {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct Attached {
     /// uname of the attached user
     pub(crate) uname: String,
     /// Map of client fids to server file metadata
     pub(crate) fids: BTreeMap<u32, FidMeta>,
+
+    // Copy of SessionState data so we can clean up server level open state on drop
+    client_id: ClientId,
+    qids: Arc<RwLock<BTreeMap<u64, QidMeta>>>,
 }
+
 impl SessionType for Attached {}
 
+impl Drop for Attached {
+    fn drop(&mut self) {
+        let mut guard = self.qids.write().unwrap();
+        for fm in self.fids.values() {
+            if let Some(meta) = guard.get_mut(&fm.qid) {
+                meta.opened_by.remove(&self.client_id);
+            }
+        }
+    }
+}
+
 impl Attached {
-    fn new(uname: String, root_fid: u32, root_qid: u64) -> Self {
+    fn new(
+        uname: String,
+        root_fid: u32,
+        root_qid: u64,
+        client_id: ClientId,
+        qids: Arc<RwLock<BTreeMap<u64, QidMeta>>>,
+    ) -> Self {
         Self {
             uname,
             fids: [(root_fid, FidMeta::closed(root_qid))]
                 .into_iter()
                 .collect(),
+            client_id,
+            qids,
         }
     }
 }
@@ -166,7 +192,7 @@ where
     pub(crate) client_id: ClientId,
     pub(crate) msize: u32,
     pub(crate) roots: BTreeMap<String, u64>,
-    pub(crate) qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+    pub(crate) qids: Arc<RwLock<BTreeMap<u64, QidMeta>>>,
 }
 
 impl<T> SessionState<T>
@@ -180,7 +206,7 @@ where
     /// execute.
     pub(crate) fn with_shared_qids<F, U>(&self, f: F) -> U
     where
-        F: FnOnce(&BTreeMap<u64, FileMeta>) -> U,
+        F: FnOnce(&BTreeMap<u64, QidMeta>) -> U,
     {
         f(&self.qids.read().unwrap())
     }
@@ -192,17 +218,21 @@ where
     /// execute.
     pub(crate) fn with_shared_qids_mut<F, U>(&self, f: F) -> U
     where
-        F: FnOnce(&mut BTreeMap<u64, FileMeta>) -> U,
+        F: FnOnce(&mut BTreeMap<u64, QidMeta>) -> U,
     {
         f(&mut self.qids.write().unwrap())
     }
 
+    pub(crate) fn parent_qid(&self, qid: u64) -> Option<u64> {
+        self.with_shared_qids(|qids| qids.get(&qid).and_then(|qm| qm.parent_qid))
+    }
+
     pub(crate) fn qid(&self, qid: u64) -> Option<Qid> {
-        self.with_shared_qids(|qids| qids.get(&qid).map(|fm| fm.as_qid()))
+        self.with_shared_qids(|qids| qids.get(&qid).map(|qm| qm.file_meta.as_qid()))
     }
 
     pub(crate) fn file_meta_for_qid(&self, qid: u64) -> Option<FileMeta> {
-        self.with_shared_qids(|qids| qids.get(&qid).cloned())
+        self.with_shared_qids(|qids| qids.get(&qid).map(|qm| qm.file_meta.clone()))
     }
 }
 
@@ -224,6 +254,27 @@ impl SessionState<Attached> {
         opt.ok_or_else(|| E_UNKNOWN_FID.to_string())
     }
 
+    pub(crate) fn try_add_client_id_to_open_qids(&self, fid: u32) -> Result<()> {
+        let qid = self.try_fid_meta(fid)?.qid;
+
+        self.with_shared_qids_mut(|qids| match qids.get_mut(&qid) {
+            Some(meta) if meta.is_exclusive_and_open() => Err(E_EXCLUSIVE_ALREADY_OPEN.into()),
+            Some(meta) => {
+                meta.opened_by.insert(self.client_id);
+                Ok(())
+            }
+            None => Err(E_UNKNOWN_FILE.into()),
+        })
+    }
+
+    pub(crate) fn remove_client_id_from_open_qids(&self, qid: u64) {
+        self.with_shared_qids_mut(|qids| {
+            if let Some(meta) = qids.get_mut(&qid) {
+                meta.opened_by.remove(&self.client_id);
+            }
+        });
+    }
+
     #[expect(clippy::type_complexity)]
     pub(crate) fn handle_attached_walk<'s>(
         &'s mut self,
@@ -233,8 +284,8 @@ impl SessionState<Attached> {
     ) -> ReadyCoro<
         (u64, String, String),
         Result<FileMeta>,
-        Result<Rdata>,
-        impl Future<Output = Result<Rdata>> + use<'s>,
+        Result<Vec<Qid>>,
+        impl Future<Output = Result<Vec<Qid>>> + use<'s>,
     > {
         Coro::from(
             move |handle: Handle<(u64, String, String), Result<FileMeta>>| async move {
@@ -252,7 +303,7 @@ impl SessionState<Attached> {
 
                 if wnames.is_empty() {
                     self.state.fids.insert(new_fid, FidMeta::closed(fm.qid));
-                    return Ok(Rdata::Walk { wqids: vec![] });
+                    return Ok(vec![]);
                 } else if matches!(fm.ty, FileType::FILE) {
                     return Err(E_WALK_NON_DIR.to_string());
                 }
@@ -264,9 +315,12 @@ impl SessionState<Attached> {
                 for name in wnames.iter() {
                     match handle.yield_value((qid, name.clone(), uname.clone())).await {
                         Ok(fm) => {
+                            let parent = qid;
                             qid = fm.qid;
                             wqids.push(fm.as_qid());
-                            self.with_shared_qids_mut(|qids| qids.insert(qid, fm));
+                            self.with_shared_qids_mut(|qids| {
+                                qids.entry(qid).or_insert(QidMeta::new(fm, Some(parent)));
+                            });
                         }
                         Err(_) => break,
                     }
@@ -283,7 +337,7 @@ impl SessionState<Attached> {
                     self.state.fids.insert(new_fid, FidMeta::closed(qid));
                 }
 
-                Ok(Rdata::Walk { wqids })
+                Ok(wqids)
             },
         )
     }
@@ -323,7 +377,8 @@ impl SessionState<Attached> {
 
                 for stat in stats.into_iter() {
                     self.with_shared_qids_mut(|qids| {
-                        qids.entry(stat.fm.qid).or_insert(stat.fm.clone());
+                        qids.entry(stat.fm.qid)
+                            .or_insert(QidMeta::new(stat.fm.clone(), Some(fm.qid)));
                     });
                     let rstat: RawStat = stat.into();
                     let tmp = rstat.write_9p_bytes().unwrap();
@@ -346,6 +401,32 @@ impl SessionState<Attached> {
                 Ok(Some(Rdata::Read { data: Data(buf) }))
             },
         )
+    }
+
+    pub(crate) fn handle_perm_check<'s>(
+        &'s self,
+        stat: Stat,
+        user_groups: &'s [String],
+        mode: Mode,
+    ) -> ReadyCoro<(), Stat, Result<()>, impl Future<Output = Result<()>> + use<'s>> {
+        Coro::from(move |handle: Handle<(), Stat>| async move {
+            match dbg!(stat.check_user_permissions(&self.state.uname, user_groups, mode)) {
+                PermCheck::Denied => return Err(E_PERMISSION_DENIED.into()),
+                PermCheck::Allowed => return Ok(()),
+                PermCheck::NeedWriteOnParent => (),
+            }
+
+            let parent_stat = handle.yield_value(()).await;
+            match dbg!(parent_stat.check_user_permissions(
+                &self.state.uname,
+                user_groups,
+                Mode::WRITE
+            )) {
+                PermCheck::Allowed => Ok(()),
+                PermCheck::Denied => Err(E_PERMISSION_DENIED.into()),
+                PermCheck::NeedWriteOnParent => unreachable!(),
+            }
+        })
     }
 }
 
@@ -461,7 +542,7 @@ where
         client_id: ClientId,
         roots: BTreeMap<String, u64>,
         s: Arc<S>,
-        qids: Arc<RwLock<BTreeMap<u64, FileMeta>>>,
+        qids: Arc<RwLock<BTreeMap<u64, QidMeta>>>,
         stream: U,
         buf: SharedBuf,
     ) -> Self {
@@ -563,7 +644,7 @@ where
 
         // TODO: handle checking afids (AFID_NO_AUTH should be accepted if there is no auth)
 
-        let st = Attached::new(uname, root_fid, root_qid);
+        let st = Attached::new(uname, root_fid, root_qid, self.client_id, self.qids.clone());
         let aqid = self.qid(root_qid).expect("to have root qid");
 
         Ok((st, aqid))
@@ -591,6 +672,44 @@ impl FidMeta {
 
     pub(crate) fn is_open(&self) -> bool {
         self.mode.is_some()
+    }
+
+    pub(crate) fn check_open_for_read(&self) -> Result<()> {
+        match self.mode.as_ref() {
+            Some(mode) if mode.allows_read() => Ok(()),
+            Some(_) => Err(E_PERMISSION_DENIED.into()),
+            None => Err(E_FILE_NOT_OPEN.into()),
+        }
+    }
+
+    pub(crate) fn check_open_for_write(&self) -> Result<()> {
+        match self.mode.as_ref() {
+            Some(mode) if mode.allows_write() => Ok(()),
+            Some(_) => Err(E_PERMISSION_DENIED.into()),
+            None => Err(E_FILE_NOT_OPEN.into()),
+        }
+    }
+}
+
+/// Internal metadata for known qids
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct QidMeta {
+    pub(crate) file_meta: FileMeta,
+    pub(crate) parent_qid: Option<u64>,
+    pub(crate) opened_by: HashSet<ClientId>,
+}
+
+impl QidMeta {
+    pub(crate) fn new(file_meta: FileMeta, parent_qid: Option<u64>) -> Self {
+        Self {
+            file_meta,
+            opened_by: HashSet::new(),
+            parent_qid,
+        }
+    }
+
+    pub(crate) fn is_exclusive_and_open(&self) -> bool {
+        self.file_meta.ty == FileType::EXCLUSIVE && !self.opened_by.is_empty()
     }
 }
 
@@ -658,17 +777,21 @@ mod tests {
     use std::time::SystemTime;
 
     fn attached_session_state() -> SessionState<Attached> {
+        let qids = Arc::new(RwLock::new(BTreeMap::from([(
+            QID_ROOT,
+            QidMeta::new(FileMeta::dir("", QID_ROOT), None),
+        )])));
+
         SessionState {
             client_id: ClientId(0),
             msize: DEFAULT_MSIZE,
             roots: BTreeMap::from([("/".to_string(), QID_ROOT)]),
-            qids: Arc::new(RwLock::new(BTreeMap::from([(
-                QID_ROOT,
-                FileMeta::dir("", QID_ROOT),
-            )]))),
+            qids: qids.clone(),
             state: Attached {
                 uname: "testuser".to_string(),
                 fids: BTreeMap::from([(0, FidMeta::closed(QID_ROOT))]),
+                client_id: ClientId(0),
+                qids,
             },
         }
     }
@@ -822,10 +945,8 @@ mod tests {
         let mut ss = attached_session_state();
         let res = ss.handle_attached_walk(0, 1, vec![]).resume().unwrap();
 
-        match res.unwrap() {
-            Rdata::Walk { wqids } => assert!(wqids.is_empty(), "expected empty wqids: {wqids:?}"),
-            other => panic!("expected Walk, got: {other:?}"),
-        }
+        let wqids = res.unwrap();
+        assert!(wqids.is_empty(), "expected empty wqids: {wqids:?}");
 
         assert_eq!(
             ss.state.fids.get(&1),
@@ -861,7 +982,9 @@ mod tests {
     #[test]
     fn walk_non_dir_returns_error() {
         let mut ss = attached_session_state();
-        ss.with_shared_qids_mut(|qids| qids.insert(1, FileMeta::file("file.txt", 1)));
+        ss.with_shared_qids_mut(|qids| {
+            qids.insert(1, QidMeta::new(FileMeta::file("file.txt", 1), Some(0)))
+        });
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let res = ss
@@ -885,10 +1008,7 @@ mod tests {
             Ok(FileMeta::file("child", child_qid))
         });
 
-        let wqids = match coro.resume().unwrap() {
-            Ok(Rdata::Walk { wqids }) => wqids,
-            other => panic!("expected Walk, got: {other:?}"),
-        };
+        let wqids = coro.resume().unwrap().unwrap();
 
         assert_eq!(wqids.len(), 1, "expected one wqid");
         assert_eq!(wqids[0].path, child_qid, "wqid path should match child qid");
@@ -932,10 +1052,7 @@ mod tests {
             .resume()
             .unwrap_pending(|(_, _, _)| Err("not found".to_string()));
 
-        let wqids = match coro.resume().unwrap() {
-            Ok(Rdata::Walk { wqids }) => wqids,
-            other => panic!("expected partial Walk, got: {other:?}"),
-        };
+        let wqids = coro.resume().unwrap().unwrap();
 
         assert_eq!(wqids.len(), 1, "expected partial qid list");
         assert_eq!(wqids[0].path, a_qid, "partial qid should be for 'a'");
@@ -958,7 +1075,9 @@ mod tests {
     #[test]
     fn read_regular_file_yields_file_read_request() {
         let mut ss = attached_session_state();
-        ss.with_shared_qids_mut(|qids| qids.insert(1, FileMeta::file("file.txt", 1)));
+        ss.with_shared_qids_mut(|qids| {
+            qids.insert(1, QidMeta::new(FileMeta::file("file.txt", 1), Some(0)))
+        });
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let coro = ss.handle_attached_read(2, 0, 1024);

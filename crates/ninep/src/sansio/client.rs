@@ -1,8 +1,10 @@
 //! Traits and structs for implementing a 9p client
 use crate::{
-    fs::{Mode, Perm, Stat},
+    fs::{IoUnit, Mode, Perm, Stat},
     sansio::{
-        protocol::{Data, IOHDRSZ, MAXWELEM, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
+        protocol::{
+            Data, IOHDRSZ, MAXWELEM, Qid, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage,
+        },
         server::AFID_NO_AUTH,
     },
     sync::SyncNineP,
@@ -259,6 +261,21 @@ impl State {
         })
     }
 
+    pub(crate) fn handle_open(
+        &mut self,
+        fid: u32,
+        mode: Mode,
+    ) -> Coro9p<(Qid, IoUnit), impl Future<Output = Result<(Qid, IoUnit)>> + use<'_>> {
+        Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
+            let mode = mode.bits();
+            let rmsg = handle
+                .yield_value(Tmessage::new(0, Tdata::Open { fid, mode }))
+                .await;
+
+            expect_rmessage!(rmsg, Open { qid, iounit })
+        })
+    }
+
     pub(crate) fn handle_read_count(
         &mut self,
         fid: u32,
@@ -278,14 +295,10 @@ impl State {
     fn _read_all(
         &mut self,
         path: String,
-        mode: Mode,
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
-            let mode = mode.bits();
-            handle
-                .yield_value(Tmessage::new(0, Tdata::Open { fid, mode }))
-                .await;
+            handle.yield_from(self.handle_open(fid, Mode::READ)).await?;
 
             let count = self.msize - IOHDRSZ;
             let mut bytes = Vec::new();
@@ -310,7 +323,7 @@ impl State {
         &mut self,
         path: String,
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
-        self._read_all(path, Mode::READ)
+        self._read_all(path)
     }
 
     /// Read the directory listing of the directory at `path`.
@@ -319,7 +332,7 @@ impl State {
         path: String,
     ) -> Coro9p<Vec<Stat>, impl Future<Output = Result<Vec<Stat>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            let bytes = handle.yield_from(self._read_all(path, Mode::READ)).await?;
+            let bytes = handle.yield_from(self._read_all(path)).await?;
             let mut buf = io::Cursor::new(bytes);
             let mut stats: Vec<Stat> = Vec::new();
             let sb = SharedBuf::default();
@@ -348,6 +361,10 @@ impl State {
     ) -> Coro9p<usize, impl Future<Output = Result<usize>> + use<'a, 's>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
+            handle
+                .yield_from(self.handle_open(fid, Mode::WRITE))
+                .await?;
+
             let len = content.len();
             let mut cur = 0;
             let chunk_size = (self.msize - IOHDRSZ) as usize;

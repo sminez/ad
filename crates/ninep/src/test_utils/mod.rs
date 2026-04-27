@@ -188,6 +188,7 @@ impl Serve9p for TestFs {
         match qid {
             ROOT_QID => Ok(Stat::stub(FileMeta::dir("/", ROOT_QID))),
             HELLO_QID => Ok(Stat::stub(FileMeta::file("hello", HELLO_QID))),
+            BLOCKED_QID => Ok(Stat::stub(FileMeta::file("blocked", BLOCKED_QID))),
             SUBDIR_QID => Ok(Stat::stub(FileMeta::dir("subdir", SUBDIR_QID))),
             SUBFILE_QID => Ok(Stat::stub(FileMeta::file("subfile", SUBFILE_QID))),
             _ => Err(format!("unknown qid: {qid}")),

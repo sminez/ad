@@ -41,7 +41,7 @@ pub(crate) enum Step {
 impl Step {
     fn connect_valid() -> Self {
         Step::Connect {
-            uname: "uname",
+            uname: "owner",
             aname: "/",
             res: Ok(()),
         }
@@ -137,7 +137,7 @@ pub(crate) fn connect_to_known_aname_succeeds() -> TestCase {
 pub(crate) fn connect_to_unknown_aname_errors() -> TestCase {
     vec![
         Step::connect(
-            "user",
+            "owner",
             "unknown",
             Err(Error::Rerror {
                 ename: "unknown root directory".to_string(),

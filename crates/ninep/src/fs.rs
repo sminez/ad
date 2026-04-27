@@ -122,6 +122,21 @@ impl Perm {
         Perm::from_bits_truncate(bits)
     }
 
+    /// Allow owner, group & other to read.
+    pub fn any_read() -> Perm {
+        Perm::OWNER_READ | Perm::GROUP_READ | Perm::OTHER_READ
+    }
+
+    /// Allow owner, group & other to write.
+    pub fn any_write() -> Perm {
+        Perm::OWNER_WRITE | Perm::GROUP_WRITE | Perm::OTHER_WRITE
+    }
+
+    /// Allow owner, group & other to exec.
+    pub fn any_exec() -> Perm {
+        Perm::OWNER_EXEC | Perm::GROUP_EXEC | Perm::OTHER_EXEC
+    }
+
     /// Apply the appropriate 9P create permission mask based on the parent directory's
     /// permissions:
     ///
@@ -215,6 +230,14 @@ impl Mode {
             || (m == Mode::READ_WRITE && read && write)
             || (m == Mode::EXECUTE && exec)
             || false
+    }
+
+    pub(crate) fn allows_read(&self) -> bool {
+        *self == Mode::READ || *self == Mode::READ_WRITE
+    }
+
+    pub(crate) fn allows_write(&self) -> bool {
+        *self == Mode::WRITE || *self == Mode::READ_WRITE
     }
 }
 

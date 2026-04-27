@@ -3,8 +3,8 @@ use crate::{
     sansio::{
         protocol::{DEFAULT_MSIZE, NineP, Qid, RawStat, Rdata, Tdata},
         server::{
-            AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
-            E_ILLEGAL_CREATE_NAME, E_NO_VERSION_MESSAGE, E_UNKNOWN_FID, E_UNKNOWN_FILE,
+            AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
+            E_NO_VERSION_MESSAGE, E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE,
             E_WALK_OPEN_FID, SUPPORTED_VERSION,
         },
     },
@@ -64,7 +64,7 @@ impl Step {
     fn attach_req(tag: u16) -> Step {
         Step::req(
             tag,
-            Tdata::attach(0, AFID_NO_AUTH, "user", "/"),
+            Tdata::attach(0, AFID_NO_AUTH, "owner", "/"),
             Rdata::attach(Qid {
                 ty: FileType::DIRECTORY.bits(),
                 version: 0,
@@ -76,6 +76,22 @@ impl Step {
     fn walk_req(tag: u16, fid: u32, new_fid: u32, wnames: &[&str], wqids: &[Qid]) -> Step {
         let wnames: Vec<String> = wnames.iter().map(|s| s.to_string()).collect();
         Step::req(tag, Tdata::walk(fid, new_fid, wnames), Rdata::walk(wqids))
+    }
+
+    fn open_req(tag: u16, fid: u32, mode: Mode, qid: u64) -> Step {
+        Step::req(
+            tag,
+            Tdata::open(fid, mode.bits()),
+            Rdata::open(file_qid(qid), TEST_IOUNIT),
+        )
+    }
+
+    fn open_dir_req(tag: u16, fid: u32, mode: Mode, qid: u64) -> Step {
+        Step::req(
+            tag,
+            Tdata::open(fid, mode.bits()),
+            Rdata::open(dir_qid(qid), TEST_IOUNIT),
+        )
     }
 
     fn err(tag: u16, req: Tdata, msg: impl Into<String>) -> Step {
@@ -111,7 +127,6 @@ macro_rules! generate_server_test_suite {
             flush_pending_request_calls_filesystem_flush,
             flush_waits_for_blocked_read,
             open_known_fid_returns_ropen,
-            open_open_fid_returns_error,
             open_unknown_fid_returns_error,
             read_dir_returns_serialized_stats,
             read_file_returns_data,
@@ -163,7 +178,7 @@ pub(crate) fn attach_before_version_returns_error() -> TestCase {
     vec![
         Step::err(
             0,
-            Tdata::attach(0, AFID_NO_AUTH, "user", "/"),
+            Tdata::attach(0, AFID_NO_AUTH, "owner", "/"),
             E_NO_VERSION_MESSAGE,
         ),
         Step::assert_calls(&[]),
@@ -184,7 +199,7 @@ pub(crate) fn duplicate_attach_returns_error() -> TestCase {
         Step::attach_req(1),
         Step::err(
             2,
-            Tdata::attach(1, AFID_NO_AUTH, "user", "/"),
+            Tdata::attach(1, AFID_NO_AUTH, "owner", "/"),
             E_ALREADY_ATTACHED,
         ),
         Step::assert_calls(&[]),
@@ -196,15 +211,12 @@ pub(crate) fn version_while_attached_clunks_all_open_fids() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
-        Step::req(
-            3,
-            Tdata::open(1, 0),
-            Rdata::open(file_qid(HELLO_QID), TEST_IOUNIT),
-        ),
+        Step::open_req(3, 1, Mode::READ, HELLO_QID),
         Step::version_req(4),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "owner"),
             Call::clunk(ClientId(0), ROOT_QID),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
@@ -216,15 +228,12 @@ pub(crate) fn connection_close_clunks_all_open_fids() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
-        Step::req(
-            3,
-            Tdata::open(1, 0),
-            Rdata::open(file_qid(HELLO_QID), TEST_IOUNIT),
-        ),
+        Step::open_req(3, 1, Mode::READ, HELLO_QID),
         Step::CloseStream,
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "owner"),
             Call::clunk(ClientId(0), ROOT_QID),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
@@ -245,15 +254,18 @@ pub(crate) fn flush_waits_for_blocked_read() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["blocked"], &[file_qid(BLOCKED_QID)]),
+        Step::open_req(3, 1, Mode::READ, BLOCKED_QID),
         Step::req(
-            3,
+            4,
             Tdata::read(1, 0, 4096),
             Rdata::read(BLOCKED_CONTENT.to_vec()),
         ),
-        Step::req(4, Tdata::flush(3), Rdata::flush()),
+        Step::req(5, Tdata::flush(3), Rdata::flush()),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "blocked", "user"),
-            Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "blocked", "owner"),
+            Call::stat(ClientId(0), BLOCKED_QID, "owner"),
+            Call::open(ClientId(0), BLOCKED_QID, Mode::READ, "owner"),
+            Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "owner"),
         ]),
     ]
 }
@@ -263,13 +275,16 @@ pub(crate) fn flush_pending_request_calls_filesystem_flush() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["blocked"], &[file_qid(BLOCKED_QID)]),
+        Step::open_req(3, 1, Mode::READ, BLOCKED_QID),
         Step::snd(3, Tdata::read(1, 0, 4096)),
         Step::snd(4, Tdata::flush(3)),
         Step::rcv(3, Rdata::read(BLOCKED_CONTENT.to_vec())),
         Step::rcv(4, Rdata::flush()),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "blocked", "user"),
-            Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "blocked", "owner"),
+            Call::stat(ClientId(0), BLOCKED_QID, "owner"),
+            Call::open(ClientId(0), BLOCKED_QID, Mode::READ, "owner"),
+            Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "owner"),
             Call::flush(ClientId(0), 3),
         ]),
     ]
@@ -280,7 +295,7 @@ pub(crate) fn walk_to_known_child_returns_qids() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
-        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "hello", "user")]),
+        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "hello", "owner")]),
     ]
 }
 
@@ -293,7 +308,7 @@ pub(crate) fn walk_first_element_missing_returns_error() -> TestCase {
             Tdata::walk(0, 1, &["missing".to_string()]),
             E_UNKNOWN_FILE,
         ),
-        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "missing", "user")]),
+        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "missing", "owner")]),
     ]
 }
 
@@ -303,8 +318,8 @@ pub(crate) fn walk_partial_returns_partial_qids() -> TestCase {
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["subdir", "missing"], &[dir_qid(SUBDIR_QID)]),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "subdir", "user"),
-            Call::walk(ClientId(0), SUBDIR_QID, "missing", "user"),
+            Call::walk(ClientId(0), ROOT_QID, "subdir", "owner"),
+            Call::walk(ClientId(0), SUBDIR_QID, "missing", "owner"),
         ]),
     ]
 }
@@ -321,8 +336,9 @@ pub(crate) fn walk_open_fid_returns_error_after_open() -> TestCase {
         ),
         Step::err(4, Tdata::walk(1, 2, &[]), E_WALK_OPEN_FID),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "owner"),
         ]),
     ]
 }
@@ -340,14 +356,14 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
         ),
         Step::err(3, Tdata::walk(0, 1, &[]), E_WALK_OPEN_FID),
         Step::assert_calls(&[
-            Call::stat(ClientId(0), ROOT_QID, "user"),
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
             Call::create(
                 ClientId(0),
                 ROOT_QID,
                 "new.txt",
                 Perm::OWNER_READ,
                 Mode::READ,
-                "user",
+                "owner",
             ),
         ]),
     ]
@@ -369,7 +385,7 @@ pub(crate) fn clunk_known_fid_returns_rclunk_and_calls_serve9p() -> TestCase {
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
         Step::req(3, Tdata::clunk(1), Rdata::clunk()),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
     ]
@@ -389,32 +405,11 @@ pub(crate) fn open_known_fid_returns_ropen() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
-        Step::req(
-            3,
-            Tdata::open(1, 0),
-            Rdata::open(file_qid(HELLO_QID), TEST_IOUNIT),
-        ),
+        Step::open_req(3, 1, Mode::READ, HELLO_QID),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
-        ]),
-    ]
-}
-
-pub(crate) fn open_open_fid_returns_error() -> TestCase {
-    vec![
-        Step::version_req(0),
-        Step::attach_req(1),
-        Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
-        Step::req(
-            3,
-            Tdata::open(1, 0),
-            Rdata::open(file_qid(HELLO_QID), TEST_IOUNIT),
-        ),
-        Step::err(4, Tdata::open(1, 0), E_FID_ALREADY_OPEN),
-        Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::open(ClientId(0), HELLO_QID, Mode::READ, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "owner"),
         ]),
     ]
 }
@@ -433,14 +428,17 @@ pub(crate) fn read_file_returns_data() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
+        Step::open_req(3, 1, Mode::READ, HELLO_QID),
         Step::req(
-            3,
+            4,
             Tdata::read(1, 0, 5),
             Rdata::read(HELLO_CONTENT[..5].to_vec()),
         ),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::read(ClientId(0), HELLO_QID, 0, 5, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ, "owner"),
+            Call::read(ClientId(0), HELLO_QID, 0, 5, "owner"),
         ]),
     ]
 }
@@ -454,8 +452,13 @@ pub(crate) fn read_dir_returns_serialized_stats() -> TestCase {
     vec![
         Step::version_req(0),
         Step::attach_req(1),
-        Step::req(2, Tdata::read(0, 0, 4096), Rdata::read(buf)),
-        Step::assert_calls(&[Call::read_dir(ClientId(0), ROOT_QID, "user")]),
+        Step::open_dir_req(2, 0, Mode::READ, ROOT_QID),
+        Step::req(3, Tdata::read(0, 0, 4096), Rdata::read(buf)),
+        Step::assert_calls(&[
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
+            Call::open(ClientId(0), ROOT_QID, Mode::READ, "owner"),
+            Call::read_dir(ClientId(0), ROOT_QID, "owner"),
+        ]),
     ]
 }
 
@@ -466,10 +469,13 @@ pub(crate) fn write_to_file_returns_byte_count() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
-        Step::req(3, Tdata::write(1, 0, payload.clone()), Rdata::write(3)),
+        Step::open_req(3, 1, Mode::WRITE, HELLO_QID),
+        Step::req(4, Tdata::write(1, 0, payload.clone()), Rdata::write(3)),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::write(ClientId(0), HELLO_QID, 0, payload, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::WRITE, "owner"),
+            Call::write(ClientId(0), HELLO_QID, 0, payload, "owner"),
         ]),
     ]
 }
@@ -481,12 +487,17 @@ pub(crate) fn write_with_oversized_offset_returns_error() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
+        Step::open_req(3, 1, Mode::WRITE, HELLO_QID),
         Step::err(
-            3,
+            4,
             Tdata::write(1, offset, vec![1]),
             format!("offset too large: {offset} > {}", u32::MAX),
         ),
-        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "hello", "user")]),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::WRITE, "owner"),
+        ]),
     ]
 }
 
@@ -500,8 +511,8 @@ pub(crate) fn stat_known_fid_returns_rstat() -> TestCase {
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
         Step::req(3, Tdata::stat(1), Rdata::stat(size, stat)),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::stat(ClientId(0), HELLO_QID, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
         ]),
     ]
 }
@@ -527,14 +538,14 @@ pub(crate) fn create_in_directory_returns_rcreate() -> TestCase {
             Rdata::create(file_qid(CREATED_QID), TEST_IOUNIT),
         ),
         Step::assert_calls(&[
-            Call::stat(ClientId(0), ROOT_QID, "user"),
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
             Call::create(
                 ClientId(0),
                 ROOT_QID,
                 "new.txt",
                 Perm::OWNER_READ,
                 Mode::READ,
-                "user",
+                "owner",
             ),
         ]),
     ]
@@ -557,14 +568,14 @@ pub(crate) fn create_masks_permissions_before_call() -> TestCase {
             Rdata::create(file_qid(CREATED_QID), TEST_IOUNIT),
         ),
         Step::assert_calls(&[
-            Call::stat(ClientId(0), ROOT_QID, "user"),
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
             Call::create(
                 ClientId(0),
                 ROOT_QID,
                 "masked.txt",
                 Perm::OWNER_READ,
                 Mode::READ,
-                "user",
+                "owner",
             ),
         ]),
     ]
@@ -612,7 +623,7 @@ pub(crate) fn create_on_non_directory_returns_error() -> TestCase {
             Tdata::create(1, "child", perm.bits(), 0),
             E_CREATE_NON_DIR,
         ),
-        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "hello", "user")]),
+        Step::assert_calls(&[Call::walk(ClientId(0), ROOT_QID, "hello", "owner")]),
     ]
 }
 
@@ -623,8 +634,8 @@ pub(crate) fn remove_known_fid_returns_rremove() -> TestCase {
         Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
         Step::req(3, Tdata::remove(1), Rdata::remove()),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "hello", "user"),
-            Call::remove(ClientId(0), HELLO_QID, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::remove(ClientId(0), HELLO_QID, "owner"),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
     ]
@@ -635,14 +646,17 @@ pub(crate) fn blocked_read_delivers_response_later() -> TestCase {
         Step::version_req(0),
         Step::attach_req(1),
         Step::walk_req(2, 0, 1, &["blocked"], &[file_qid(BLOCKED_QID)]),
+        Step::open_req(3, 1, Mode::READ, BLOCKED_QID),
         Step::req(
-            3,
+            4,
             Tdata::read(1, 0, 4096),
             Rdata::read(BLOCKED_CONTENT.to_vec()),
         ),
         Step::assert_calls(&[
-            Call::walk(ClientId(0), ROOT_QID, "blocked", "user"),
-            Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "user"),
+            Call::walk(ClientId(0), ROOT_QID, "blocked", "owner"),
+            Call::stat(ClientId(0), BLOCKED_QID, "owner"),
+            Call::open(ClientId(0), BLOCKED_QID, Mode::READ, "owner"),
+            Call::read(ClientId(0), BLOCKED_QID, 0, 4096, "owner"),
         ]),
     ]
 }
@@ -651,7 +665,7 @@ pub(crate) fn write_to_directory_returns_error() -> TestCase {
     vec![
         Step::version_req(0),
         Step::attach_req(1),
-        Step::err(2, Tdata::write(0, 0, vec![1]), "illegal write to directory"),
-        Step::assert_calls(&[]),
+        Step::err(3, Tdata::open(0, Mode::WRITE.bits()), E_PERMISSION_DENIED),
+        Step::assert_calls(&[Call::stat(ClientId(0), ROOT_QID, "owner")]),
     ]
 }

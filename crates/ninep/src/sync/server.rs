@@ -8,9 +8,9 @@ use crate::{
     sansio::{
         protocol::{DEFAULT_MSIZE, Data, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
         server::{
-            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_FID_ALREADY_OPEN,
-            E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE, E_UNKNOWN_FID, Either, FidMeta,
-            FlushHandle, Session, SessionType, Unattached,
+            Attached, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
+            E_ILLEGAL_DIRECTORY_WRITE, E_PERMISSION_DENIED, E_UNKNOWN_FID, Either, FidMeta,
+            FlushHandle, QidMeta, Session, SessionType, Unattached,
         },
     },
     sync::{SyncNineP, SyncServerStream, SyncStream},
@@ -508,7 +508,7 @@ where
 
         loop {
             coro = match coro.resume() {
-                CoroState::Complete(res) => return res,
+                CoroState::Complete(res) => return res.map(|wqids| Rdata::Walk { wqids }),
                 CoroState::Pending(c, (qid, name, uname)) => {
                     let res = self.s.walk_one(client_id, qid, &name, &uname);
                     c.send(res)
@@ -546,12 +546,30 @@ where
         Ok(Rdata::Wstat {})
     }
 
-    fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
-        if self.try_fid_meta(fid)?.is_open() {
-            return Err(E_FID_ALREADY_OPEN.to_string());
+    fn file_meta_if_perms_hold(&self, fid: u32, mode: Mode) -> Result<FileMeta> {
+        let fm = self.try_file_meta(fid)?;
+        let stat = self.s.stat(self.client_id, fm.qid, &self.state.uname)?;
+
+        // TODO: handle user groups
+        let coro = self.handle_perm_check(stat, &[], mode);
+        match coro.resume() {
+            CoroState::Complete(res) => res?,
+            CoroState::Pending(c, _) => {
+                let parent = self
+                    .parent_qid(fm.qid)
+                    .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
+                let stat = self.s.stat(self.client_id, parent, &self.state.uname)?;
+                c.send(stat).resume().unwrap()?;
+            }
         }
 
-        let fm = self.try_file_meta(fid)?;
+        Ok(fm)
+    }
+
+    fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
+        let fm = self.file_meta_if_perms_hold(fid, mode)?;
+        self.try_add_client_id_to_open_qids(fid)?;
+
         let iounit = self
             .s
             .open(self.client_id, fm.qid, mode, &self.state.uname)?;
@@ -592,7 +610,8 @@ where
         let qid = fm.as_qid();
         self.state.fids.insert(fid, FidMeta::open(fm.qid, mode));
         self.with_shared_qids_mut(|qids| {
-            qids.entry(fm.qid).or_insert(fm);
+            qids.entry(fm.qid)
+                .or_insert(QidMeta::new(fm, Some(parent.fm.qid)));
         });
 
         Ok(Rdata::Create { qid, iounit })
@@ -617,6 +636,10 @@ where
         count: u32,
         tx: &Sender<Event>,
     ) -> Result<Option<Rdata>> {
+        self.session_state
+            .try_fid_meta(fid)?
+            .check_open_for_read()?;
+
         let cid = self.client_id;
         let coro = self.session_state.handle_attached_read(fid, offset, count);
         let (offset, count) = (offset as usize, count as usize);
@@ -646,6 +669,10 @@ where
     }
 
     fn handle_write(&mut self, fid: u32, offset: u64, data: Vec<u8>) -> Result<Rdata> {
+        self.session_state
+            .try_fid_meta(fid)?
+            .check_open_for_write()?;
+
         let fm = self.try_file_meta(fid)?;
 
         if fm.ty == FileType::DIRECTORY {
@@ -671,6 +698,8 @@ where
 
         // ensure that we clunk before erroring
         self.s.clunk(self.client_id, fm.qid);
+        self.remove_client_id_from_open_qids(fm.qid);
+
         res?;
 
         Ok(Rdata::Remove {})
