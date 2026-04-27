@@ -1,5 +1,5 @@
 use crate::{
-    fs::{FileMeta, Stat},
+    fs::{FileMeta, Perm, Stat},
     sansio::client::{Error, Result},
     test_utils::{HELLO_QID, SUBDIR_QID, SUBFILE_QID},
 };
@@ -270,8 +270,8 @@ pub(crate) fn read_root_dir_works() -> TestCase {
         Step::read_dir(
             "/",
             Ok(vec![
-                Stat::stub(FileMeta::file("hello", HELLO_QID)),
-                Stat::stub(FileMeta::dir("subdir", SUBDIR_QID)),
+                Stat::stub(FileMeta::file("hello", HELLO_QID, Perm::empty())),
+                Stat::stub(FileMeta::dir("subdir", SUBDIR_QID, Perm::empty())),
             ]),
         ),
         Step::assert_state(1, &[("/", 0)]),
@@ -283,7 +283,11 @@ pub(crate) fn read_subdir_works() -> TestCase {
         Step::connect_valid(),
         Step::read_dir(
             "/subdir",
-            Ok(vec![Stat::stub(FileMeta::file("subfile", SUBFILE_QID))]),
+            Ok(vec![Stat::stub(FileMeta::file(
+                "subfile",
+                SUBFILE_QID,
+                Perm::empty(),
+            ))]),
         ),
         // should have walked to the subdir
         Step::assert_state(2, &[("/", 0), ("/subdir", 1)]),

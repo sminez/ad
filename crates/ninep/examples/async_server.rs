@@ -63,6 +63,14 @@ const BAZ: u64 = 3;
 const RW: u64 = 4;
 const BLOCKING: u64 = 5;
 
+fn dir_perms() -> Perm {
+    Perm::any_read() | Perm::any_exec()
+}
+
+fn file_perms() -> Perm {
+    Perm::any_read()
+}
+
 impl AsyncServe9p for EchoServer {
     async fn write(
         &self,
@@ -116,11 +124,11 @@ impl AsyncServe9p for EchoServer {
     ) -> Result<FileMeta> {
         println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
-            (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR)),
-            (ROOT, "foo") => Ok(FileMeta::file("foo", FOO)),
-            (ROOT, "rw") => Ok(FileMeta::file("rw", RW)),
-            (ROOT, "blocking") => Ok(FileMeta::file("blocking", BLOCKING)),
-            (BAR, "baz") => Ok(FileMeta::file("baz", BAZ)),
+            (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR, dir_perms())),
+            (ROOT, "foo") => Ok(FileMeta::file("foo", FOO, file_perms())),
+            (ROOT, "rw") => Ok(FileMeta::file("rw", RW, file_perms())),
+            (ROOT, "blocking") => Ok(FileMeta::file("blocking", BLOCKING, file_perms())),
+            (BAR, "baz") => Ok(FileMeta::file("baz", BAZ, file_perms())),
             (qid, child) => Err(format!("unknown child: qid={qid}, child={child}")),
         }
     }
@@ -129,8 +137,7 @@ impl AsyncServe9p for EchoServer {
         println!("handling stat request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(Stat {
-                fm: FileMeta::dir("/", ROOT),
-                perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
+                fm: FileMeta::dir("/", ROOT, dir_perms()),
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -140,8 +147,7 @@ impl AsyncServe9p for EchoServer {
             }),
 
             BAR => Ok(Stat {
-                fm: FileMeta::dir("bar", BAR),
-                perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
+                fm: FileMeta::dir("bar", BAR, dir_perms()),
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -151,8 +157,7 @@ impl AsyncServe9p for EchoServer {
             }),
 
             FOO => Ok(Stat {
-                fm: FileMeta::file("foo", FOO),
-                perms: Perm::OWNER_READ,
+                fm: FileMeta::file("foo", FOO, file_perms()),
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -162,8 +167,7 @@ impl AsyncServe9p for EchoServer {
             }),
 
             BAZ => Ok(Stat {
-                fm: FileMeta::file("baz", BAZ),
-                perms: Perm::OWNER_READ,
+                fm: FileMeta::file("baz", BAZ, file_perms()),
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -173,8 +177,7 @@ impl AsyncServe9p for EchoServer {
             }),
 
             RW => Ok(Stat {
-                fm: FileMeta::file("rw", BAZ),
-                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                fm: FileMeta::file("rw", BAZ, file_perms()),
                 n_bytes: self.state.read().unwrap().rw.len() as u64,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -184,8 +187,7 @@ impl AsyncServe9p for EchoServer {
             }),
 
             BLOCKING => Ok(Stat {
-                fm: FileMeta::file("blocking", BLOCKING),
-                perms: Perm::OWNER_READ,
+                fm: FileMeta::file("blocking", BLOCKING, file_perms()),
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),
@@ -259,8 +261,7 @@ impl AsyncServe9p for EchoServer {
         match qid {
             ROOT => Ok(vec![
                 Stat {
-                    fm: FileMeta::dir("bar", BAR),
-                    perms: Perm::OWNER_READ | Perm::OWNER_EXEC,
+                    fm: FileMeta::dir("bar", BAR, dir_perms()),
                     n_bytes: 0,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -269,8 +270,7 @@ impl AsyncServe9p for EchoServer {
                     last_modified_by: uname.into(),
                 },
                 Stat {
-                    fm: FileMeta::file("foo", FOO),
-                    perms: Perm::OWNER_READ,
+                    fm: FileMeta::file("foo", FOO, file_perms()),
                     n_bytes: 42,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -279,8 +279,7 @@ impl AsyncServe9p for EchoServer {
                     last_modified_by: uname.into(),
                 },
                 Stat {
-                    fm: FileMeta::file("rw", RW),
-                    perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                    fm: FileMeta::file("rw", RW, file_perms()),
                     n_bytes: self.state.read().unwrap().rw.len() as u64,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -289,8 +288,7 @@ impl AsyncServe9p for EchoServer {
                     last_modified_by: uname.into(),
                 },
                 Stat {
-                    fm: FileMeta::file("blocking", BLOCKING),
-                    perms: Perm::OWNER_READ,
+                    fm: FileMeta::file("blocking", BLOCKING, file_perms()),
                     n_bytes: 0,
                     last_accesses: SystemTime::now(),
                     last_modified: SystemTime::now(),
@@ -301,8 +299,7 @@ impl AsyncServe9p for EchoServer {
             ]),
 
             BAR => Ok(vec![Stat {
-                fm: FileMeta::file("baz", BAZ),
-                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                fm: FileMeta::file("baz", BAZ, file_perms()),
                 n_bytes: 0,
                 last_accesses: SystemTime::now(),
                 last_modified: SystemTime::now(),

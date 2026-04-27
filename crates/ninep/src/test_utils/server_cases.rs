@@ -444,8 +444,8 @@ pub(crate) fn read_file_returns_data() -> TestCase {
 }
 
 pub(crate) fn read_dir_returns_serialized_stats() -> TestCase {
-    let s1: RawStat = Stat::stub(FileMeta::file("hello", HELLO_QID)).into();
-    let s2: RawStat = Stat::stub(FileMeta::dir("subdir", SUBDIR_QID)).into();
+    let s1: RawStat = Stat::stub(FileMeta::file("hello", HELLO_QID, Perm::empty())).into();
+    let s2: RawStat = Stat::stub(FileMeta::dir("subdir", SUBDIR_QID, Perm::empty())).into();
     let mut buf = s1.write_9p_bytes().unwrap();
     buf.extend(s2.write_9p_bytes().unwrap());
 
@@ -502,7 +502,7 @@ pub(crate) fn write_with_oversized_offset_returns_error() -> TestCase {
 }
 
 pub(crate) fn stat_known_fid_returns_rstat() -> TestCase {
-    let stat: RawStat = Stat::stub(FileMeta::file("hello", HELLO_QID)).into();
+    let stat: RawStat = Stat::stub(FileMeta::file("hello", HELLO_QID, Perm::empty())).into();
     let size = stat.n_bytes() as u16;
 
     vec![

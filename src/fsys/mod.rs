@@ -674,8 +674,7 @@ fn apply_offset(data: &[u8], offset: usize, count: usize) -> Vec<u8> {
 
 fn empty_dir_stat(qid: u64, name: &str) -> Stat {
     Stat {
-        fm: FileMeta::dir(name, qid),
-        perms: Perm::any_read() | Perm::any_exec(),
+        fm: FileMeta::dir(name, qid, Perm::any_read() | Perm::any_exec()),
         n_bytes: 0,
         last_accesses: SystemTime::now(),
         last_modified: SystemTime::now(),
@@ -687,8 +686,7 @@ fn empty_dir_stat(qid: u64, name: &str) -> Stat {
 
 fn empty_file_stat(qid: u64, name: &str) -> Stat {
     Stat {
-        fm: FileMeta::file(name, qid),
-        perms: Perm::any_read() | Perm::any_write(),
+        fm: FileMeta::file(name, qid, Perm::any_read() | Perm::any_write()),
         n_bytes: 0,
         last_accesses: SystemTime::now(),
         last_modified: SystemTime::now(),

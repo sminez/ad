@@ -727,7 +727,7 @@ where
                 self.client_id,
                 fm.qid,
                 &name,
-                perm.apply_create_mask(parent.perms),
+                perm.apply_create_mask(parent.fm.perms),
                 mode,
                 &self.state.uname,
             )

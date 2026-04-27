@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     Result,
-    fs::{FileMeta, FileType, Mode, PermCheck, QID_ROOT, Stat},
+    fs::{FileMeta, FileType, Mode, Perm, PermCheck, QID_ROOT, Stat},
     sansio::protocol::{
         DEFAULT_MSIZE, Data, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
@@ -97,7 +97,12 @@ where
         let qids = Arc::new(RwLock::new(
             roots
                 .iter()
-                .map(|(p, &qid)| (qid, QidMeta::new(FileMeta::dir(p.clone(), qid), None)))
+                .map(|(p, &qid)| {
+                    (
+                        qid,
+                        QidMeta::new(FileMeta::dir(p.clone(), qid, Perm::root()), None),
+                    )
+                })
                 .collect(),
         ));
 
@@ -778,7 +783,7 @@ mod tests {
     fn attached_session_state() -> SessionState<Attached> {
         let qids = Arc::new(RwLock::new(BTreeMap::from([(
             QID_ROOT,
-            QidMeta::new(FileMeta::dir("", QID_ROOT), None),
+            QidMeta::new(FileMeta::dir("", QID_ROOT, Perm::root()), None),
         )])));
 
         SessionState {
@@ -797,8 +802,7 @@ mod tests {
 
     fn test_stat(name: &str, qid: u64) -> Stat {
         Stat {
-            fm: FileMeta::dir(name, qid),
-            perms: Perm::DIRECTORY,
+            fm: FileMeta::dir(name, qid, Perm::root()),
             n_bytes: 0,
             last_accesses: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
@@ -982,7 +986,10 @@ mod tests {
     fn walk_non_dir_returns_error() {
         let mut ss = attached_session_state();
         ss.with_shared_qids_mut(|qids| {
-            qids.insert(1, QidMeta::new(FileMeta::file("file.txt", 1), Some(0)))
+            qids.insert(
+                1,
+                QidMeta::new(FileMeta::file("file.txt", 1, Perm::any_read()), Some(0)),
+            )
         });
         ss.state.fids.insert(2, FidMeta::closed(1));
 
@@ -1004,7 +1011,7 @@ mod tests {
         coro = coro.resume().unwrap_pending(|(parent_qid, name)| {
             assert_eq!(parent_qid, QID_ROOT, "should walk from root");
             assert_eq!(name, "child", "should request child name");
-            Ok(FileMeta::file("child", child_qid))
+            Ok(FileMeta::file("child", child_qid, Perm::any_read()))
         });
 
         let wqids = coro.resume().unwrap().unwrap();
@@ -1044,7 +1051,7 @@ mod tests {
         // First step of the walk succeeds
         coro = coro
             .resume()
-            .unwrap_pending(|(_, _)| Ok(FileMeta::dir("a", a_qid)));
+            .unwrap_pending(|(_, _)| Ok(FileMeta::dir("a", a_qid, Perm::any_read())));
 
         // Second step fails
         coro = coro
@@ -1075,7 +1082,10 @@ mod tests {
     fn read_regular_file_yields_file_read_request() {
         let mut ss = attached_session_state();
         ss.with_shared_qids_mut(|qids| {
-            qids.insert(1, QidMeta::new(FileMeta::file("file.txt", 1), Some(0)))
+            qids.insert(
+                1,
+                QidMeta::new(FileMeta::file("file.txt", 1, Perm::any_read()), Some(0)),
+            )
         });
         ss.state.fids.insert(2, FidMeta::closed(1));
 
