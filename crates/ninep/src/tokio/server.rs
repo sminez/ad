@@ -4,9 +4,9 @@
 //!  [1]: tokio::io::AsyncWrite
 use crate::{
     Result,
-    fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
-        protocol::{Data, RawStat, Rdata, Tdata, Tmessage},
+        protocol::{Data, FileType, RawStat, Rdata, Tdata, Tmessage},
         server::{
             Attached, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE,
             E_PERMISSION_DENIED, E_UNKNOWN_FID, Either, FidMeta, FlushHandle, QidMeta, Session,
@@ -625,6 +625,7 @@ where
         match self.state.fids.remove(&fid) {
             Some(meta) => {
                 self.s.clunk(self.client_id, meta.qid).await;
+                self.remove_client_id_from_open_qids(meta.qid);
 
                 Ok(Rdata::Clunk {})
             }

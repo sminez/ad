@@ -1,7 +1,7 @@
 use crate::{
-    fs::{FileMeta, FileType, Mode, Perm, Stat},
+    fs::{FileMeta, Mode, Perm, Stat},
     sansio::{
-        protocol::{DEFAULT_MSIZE, NineP, Qid, RawStat, Rdata, Tdata},
+        protocol::{DEFAULT_MSIZE, FileType, NineP, Qid, RawStat, Rdata, Tdata},
         server::{
             AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
             E_NO_VERSION_MESSAGE, E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE,
@@ -66,7 +66,7 @@ impl Step {
             tag,
             Tdata::attach(0, AFID_NO_AUTH, "owner", "/"),
             Rdata::attach(Qid {
-                ty: FileType::DIRECTORY.bits(),
+                ty: FileType::DIRECTORY,
                 version: 0,
                 path: ROOT_QID,
             }),

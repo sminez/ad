@@ -483,13 +483,69 @@ impl NineP for RawStat {
     }
 }
 
+bitflags::bitflags! {
+    /// The file mode contains some additional attributes besides the permissions. If bit 31 (DMDIR) is
+    /// set, the file is a directory; if bit 30 (DMAPPEND) is set, the file is append-only (offset is
+    /// ignored in writes); if bit 29 (DMEXCL) is set, the file is exclusive-use (only one client may
+    /// have it open at a time); if bit 27 (DMAUTH) is set, the file is an authentication file
+    /// established by auth messages; if bit 26 (DMTMP) is set, the contents of the file (or directory)
+    /// are not included in nightly archives. (Bit 28 is skipped for historical reasons.) These bits
+    /// are reproduced, from the top bit down, in the type byte of the Qid: QTDIR, QTAPPEND, QTEXCL,
+    /// (skipping one bit) QTAUTH, and QTTMP. The name QTFILE, defined to be zero, identifies the value
+    /// of the type for a plain file.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct FileType: u8 {
+        /// Directory
+        const DIRECTORY = 0x80;
+        /// Append only
+        const APPEND_ONLY = 0x40;
+        /// Exclusive access
+        const EXCLUSIVE = 0x20;
+        /// Auth
+        const AUTH = 0x08;
+        /// Temp
+        const TMP = 0x04;
+        /// File
+        const FILE = 0x00;
+    }
+}
+
+impl Default for FileType {
+    fn default() -> Self {
+        FileType::FILE
+    }
+}
+
+impl FileType {
+    /// Create a new [FileType] from a u8 bitmask
+    pub fn new(bits: u8) -> Self {
+        FileType::from_bits_truncate(bits)
+    }
+}
+
+impl NineP for FileType {
+    fn n_bytes(&self) -> usize {
+        1
+    }
+
+    fn write_bytes(&self, buf: &mut [u8]) -> Result<(), WriteError> {
+        self.bits().write_bytes(buf)
+    }
+
+    async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
+        let raw = u8::read_9p(msize, buf, handle).await?;
+
+        Ok(Self::new(raw))
+    }
+}
+
 /// A qid represents the server's unique identification for the file being accessed: two files
 /// on the same server hierarchy are the same if and only if their qids are the same.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Qid {
     /// `qid.type[1]` the type of the file (directory, etc.), represented as a bit vector
     /// corresponding to the high 8 bits of the file's mode word.
-    pub ty: u8,
+    pub ty: FileType,
     /// `qid.vers[4]`  version number for given path
     pub version: u32,
     /// `qid.path[8]`  the file server's unique identification for the file
@@ -503,7 +559,11 @@ impl Qid {
         let version = from_le_bytes!(u32, &bytes[1..]);
         let path = from_le_bytes!(u64, &bytes[5..]);
 
-        Self { ty, version, path }
+        Self {
+            ty: FileType::new(ty),
+            version,
+            path,
+        }
     }
 }
 
@@ -517,7 +577,7 @@ impl NineP for Qid {
     }
 
     async fn read_9p(msize: u32, buf: &SharedBuf, handle: Handle<usize>) -> io::Result<Self> {
-        let ty = u8::read_9p(msize, buf, handle).await?;
+        let ty = FileType::read_9p(msize, buf, handle).await?;
         let version = u32::read_9p(msize, buf, handle).await?;
         let path = u64::read_9p(msize, buf, handle).await?;
 
@@ -1151,7 +1211,7 @@ mod tests {
                 ty: 2,
                 dev: 3,
                 qid: Qid {
-                    ty: 1,
+                    ty: FileType::FILE,
                     version: 2,
                     path: 3,
                 },
@@ -1181,12 +1241,12 @@ mod tests {
                 content: Rdata::Walk {
                     wqids: vec![
                         Qid {
-                            ty: 0,
+                            ty: FileType::DIRECTORY,
                             version: 1,
                             path: 2,
                         },
                         Qid {
-                            ty: 3,
+                            ty: FileType::FILE,
                             version: 4,
                             path: 5,
                         },

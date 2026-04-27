@@ -1,9 +1,9 @@
 //! Shared test infrastructure for sync and tokio tests.
 use crate::{
-    fs::{FileMeta, FileType, IoUnit, Mode, Perm, Stat, WStat},
+    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
         client::MSIZE,
-        protocol::{Qid, Rmessage, SharedBuf, Tdata, Tmessage},
+        protocol::{FileType, Qid, Rmessage, SharedBuf, Tdata, Tmessage},
         server::ClientId,
     },
     sync::{
@@ -38,7 +38,7 @@ pub(crate) const TEST_IOUNIT: IoUnit = 8192;
 
 fn dir_qid(path: u64) -> Qid {
     Qid {
-        ty: FileType::DIRECTORY.bits(),
+        ty: FileType::DIRECTORY,
         version: 0,
         path,
     }
@@ -46,7 +46,7 @@ fn dir_qid(path: u64) -> Qid {
 
 fn file_qid(path: u64) -> Qid {
     Qid {
-        ty: FileType::FILE.bits(),
+        ty: FileType::FILE,
         version: 0,
         path,
     }

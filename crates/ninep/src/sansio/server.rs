@@ -1,9 +1,10 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     Result,
-    fs::{FileMeta, FileType, Mode, Perm, PermCheck, QID_ROOT, Stat},
+    fs::{FileMeta, Mode, Perm, PermCheck, QID_ROOT, Stat},
     sansio::protocol::{
-        DEFAULT_MSIZE, Data, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
+        DEFAULT_MSIZE, Data, FileType, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata,
+        Tmessage,
     },
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -774,8 +775,10 @@ impl FlushHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::{FileMeta, FileType, Perm, Stat};
-    use crate::sansio::protocol::{NineP, RawStat, Rdata, Tdata, Tmessage};
+    use crate::{
+        fs::{FileMeta, Perm, Stat},
+        sansio::protocol::{FileType, NineP, RawStat, Rdata, Tdata, Tmessage},
+    };
     use simple_coro::CoroState;
     use simple_test_case::test_case;
     use std::time::SystemTime;
@@ -877,7 +880,7 @@ mod tests {
             BTreeMap::from([(5, FidMeta::closed(QID_ROOT))])
         );
         assert_eq!(attached.uname, "testuser");
-        assert_eq!(qid.ty, FileType::DIRECTORY.bits());
+        assert_eq!(qid.ty, FileType::DIRECTORY);
         assert_eq!(qid.path, QID_ROOT);
     }
 

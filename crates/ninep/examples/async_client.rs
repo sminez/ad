@@ -1,5 +1,5 @@
 //! A simple demo of the 9p client interface
-use ninep::{fs::FileType, tokio::client::UnixClient};
+use ninep::{sansio::protocol::FileType, tokio::client::UnixClient};
 use std::io;
 
 #[tokio::main]

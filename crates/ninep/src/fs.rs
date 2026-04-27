@@ -1,5 +1,5 @@
 //! Types for describing files in a 9p virtual filesystem
-use crate::sansio::protocol::{NineP, Qid, RawStat};
+use crate::sansio::protocol::{FileType, NineP, Qid, RawStat};
 use std::{
     mem::size_of,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -7,46 +7,6 @@ use std::{
 
 /// The default root qid for 9p server implementations
 pub const QID_ROOT: u64 = 0;
-
-bitflags::bitflags! {
-    /// The file mode contains some additional attributes besides the permissions. If bit 31 (DMDIR) is
-    /// set, the file is a directory; if bit 30 (DMAPPEND) is set, the file is append-only (offset is
-    /// ignored in writes); if bit 29 (DMEXCL) is set, the file is exclusive-use (only one client may
-    /// have it open at a time); if bit 27 (DMAUTH) is set, the file is an authentication file
-    /// established by auth messages; if bit 26 (DMTMP) is set, the contents of the file (or directory)
-    /// are not included in nightly archives. (Bit 28 is skipped for historical reasons.) These bits
-    /// are reproduced, from the top bit down, in the type byte of the Qid: QTDIR, QTAPPEND, QTEXCL,
-    /// (skipping one bit) QTAUTH, and QTTMP. The name QTFILE, defined to be zero, identifies the value
-    /// of the type for a plain file.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub struct FileType: u8 {
-        /// Directory
-        const DIRECTORY = 0x80;
-        /// Append only
-        const APPEND_ONLY = 0x40;
-        /// Exclusive access
-        const EXCLUSIVE = 0x20;
-        /// Auth
-        const AUTH = 0x08;
-        /// Temp
-        const TMP = 0x04;
-        /// File
-        const FILE = 0x00;
-    }
-}
-
-impl FileType {
-    /// Create a new [FileType] from a u8 bitmask
-    pub fn new(bits: u8) -> Self {
-        FileType::from_bits_truncate(bits)
-    }
-}
-
-impl From<FileType> for Perm {
-    fn from(value: FileType) -> Self {
-        Perm::from_bits_truncate((value.bits() as u32) << 24)
-    }
-}
 
 bitflags::bitflags! {
     /// Each file has an associated owner and group id and three sets of permissions: those of the owner,
@@ -164,6 +124,12 @@ impl Perm {
         let bits = self.bits() & (!mask | (parent_perms.bits() & mask));
 
         Perm::new(bits)
+    }
+}
+
+impl From<FileType> for Perm {
+    fn from(value: FileType) -> Self {
+        Perm::from_bits_truncate((value.bits() as u32) << 24)
     }
 }
 
@@ -329,7 +295,7 @@ impl Stat {
 impl From<Stat> for RawStat {
     fn from(s: Stat) -> Self {
         let qid = Qid {
-            ty: s.fm.ty.bits(),
+            ty: s.fm.ty,
             version: 0,
             path: s.fm.qid,
         };
@@ -367,7 +333,7 @@ impl TryFrom<RawStat> for Stat {
         Ok(Stat {
             fm: FileMeta {
                 name: r.name,
-                ty: FileType::new(r.qid.ty),
+                ty: r.qid.ty,
                 qid: r.qid.path,
                 perms: Perm::new(r.mode & 0x0000FFFF),
             },
@@ -461,8 +427,7 @@ impl WStat {
     /// Returns `Ok` after applying set fields if the [Qid] of this update and the provided stat
     /// are equal, otherwise `Err`.
     pub fn try_apply(self, stat: &Stat) -> Result<Stat, Box<WStat>> {
-        let mode = FileType::new(self.qid.ty);
-        if (self.qid.path != stat.fm.qid) || (mode != stat.fm.ty) {
+        if (self.qid.path != stat.fm.qid) || (self.qid.ty != stat.fm.ty) {
             return Err(Box::new(self));
         }
 
@@ -581,7 +546,7 @@ pub struct FileMeta {
 impl FileMeta {
     pub(super) fn as_qid(&self) -> Qid {
         Qid {
-            ty: self.ty.bits(),
+            ty: self.ty,
             version: 0,
             path: self.qid,
         }
@@ -650,7 +615,7 @@ mod tests {
     };
 
     const TEST_QID: u64 = 42;
-    const TEST_MODE: FileType = FileType::FILE;
+    const TEST_TY: FileType = FileType::FILE;
 
     fn stat() -> Stat {
         Stat {
@@ -672,7 +637,7 @@ mod tests {
     fn wstat() -> WStat {
         WStat {
             qid: Qid {
-                ty: TEST_MODE.bits(),
+                ty: TEST_TY,
                 version: 0,
                 path: TEST_QID,
             },
@@ -690,10 +655,10 @@ mod tests {
     #[test_case(42, FileType::DIRECTORY; "type mismatch")]
     #[test_case(99, FileType::DIRECTORY; "path and type mismatch")]
     #[test]
-    fn try_apply_qid_mismatch_returns_err(path: u64, mode: FileType) {
+    fn try_apply_qid_mismatch_returns_err(path: u64, ty: FileType) {
         let wstat = WStat {
             qid: Qid {
-                ty: mode.bits(),
+                ty,
                 version: 0,
                 path,
             },
@@ -772,7 +737,7 @@ mod tests {
     fn rawstat_to_stat_strips_filetype_bits_from_perms() {
         let raw = RawStat {
             qid: Qid {
-                ty: FileType::FILE.bits(),
+                ty: FileType::FILE,
                 ..Qid::default()
             },
             mode: (Perm::DIRECTORY | Perm::OWNER_READ | Perm::OWNER_WRITE).bits(),
@@ -795,7 +760,7 @@ mod tests {
 
         let raw = RawStat::from(s);
 
-        assert_eq!(raw.qid.ty, ty.bits());
+        assert_eq!(raw.qid.ty, ty);
         assert_eq!(raw.mode, (Perm::from(ty) | user_perms).bits());
     }
 
