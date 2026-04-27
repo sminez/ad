@@ -282,13 +282,13 @@ impl SessionState<Attached> {
         new_fid: u32,
         wnames: Vec<String>,
     ) -> ReadyCoro<
-        (u64, String, String),
+        (u64, String),
         Result<FileMeta>,
         Result<Vec<Qid>>,
         impl Future<Output = Result<Vec<Qid>>> + use<'s>,
     > {
         Coro::from(
-            move |handle: Handle<(u64, String, String), Result<FileMeta>>| async move {
+            move |handle: Handle<(u64, String), Result<FileMeta>>| async move {
                 if wnames.len() > MAXWELEM {
                     return Err(E_OVER_MAXWELEM.to_string());
                 } else if new_fid != fid && self.state.fids.contains_key(&new_fid) {
@@ -310,10 +310,9 @@ impl SessionState<Attached> {
 
                 let mut wqids = Vec::with_capacity(wnames.len());
                 let mut qid = fm.qid;
-                let uname = self.state.uname.clone();
 
                 for name in wnames.iter() {
-                    match handle.yield_value((qid, name.clone(), uname.clone())).await {
+                    match handle.yield_value((qid, name.clone())).await {
                         Ok(fm) => {
                             let parent = qid;
                             qid = fm.qid;
@@ -1002,7 +1001,7 @@ mod tests {
         let child_qid = 42;
 
         let mut coro = ss.handle_attached_walk(0, 1, wnames);
-        coro = coro.resume().unwrap_pending(|(parent_qid, name, _uname)| {
+        coro = coro.resume().unwrap_pending(|(parent_qid, name)| {
             assert_eq!(parent_qid, QID_ROOT, "should walk from root");
             assert_eq!(name, "child", "should request child name");
             Ok(FileMeta::file("child", child_qid))
@@ -1045,12 +1044,12 @@ mod tests {
         // First step of the walk succeeds
         coro = coro
             .resume()
-            .unwrap_pending(|(_, _, _)| Ok(FileMeta::dir("a", a_qid)));
+            .unwrap_pending(|(_, _)| Ok(FileMeta::dir("a", a_qid)));
 
         // Second step fails
         coro = coro
             .resume()
-            .unwrap_pending(|(_, _, _)| Err("not found".to_string()));
+            .unwrap_pending(|(_, _)| Err("not found".to_string()));
 
         let wqids = coro.resume().unwrap().unwrap();
 

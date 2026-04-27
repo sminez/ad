@@ -605,6 +605,7 @@ where
         wnames: Vec<String>,
     ) -> Result<Rdata> {
         let client_id = self.client_id;
+        let uname = self.state.uname.clone();
         let mut coro = self
             .session_state
             .handle_attached_walk(fid, new_fid, wnames);
@@ -612,7 +613,7 @@ where
         loop {
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res.map(|wqids| Rdata::Walk { wqids }),
-                CoroState::Pending(c, (qid, name, uname)) => {
+                CoroState::Pending(c, (qid, name)) => {
                     let res = self.s.walk_one(client_id, qid, &name, &uname).await;
                     c.send(res)
                 }
