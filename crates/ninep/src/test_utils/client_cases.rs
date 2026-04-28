@@ -1,7 +1,7 @@
 use crate::{
     fs::{Qid, Stat},
     sansio::client::{Error, Result},
-    test_utils::{HELLO_QID, SUBDIR_QID, SUBFILE_QID},
+    test_utils::{HELLO_QID, SUBDIR_QID, SUBFILE_QID, perm_file_stat},
 };
 use std::collections::HashMap;
 
@@ -283,7 +283,10 @@ pub(crate) fn read_subdir_works() -> TestCase {
         Step::connect_valid(),
         Step::read_dir(
             "/subdir",
-            Ok(vec![Stat::stub(Qid::file(SUBFILE_QID), "subfile")]),
+            Ok(vec![
+                Stat::stub(Qid::file(SUBFILE_QID), "subfile"),
+                perm_file_stat(),
+            ]),
         ),
         // should have walked to the subdir
         Step::assert_state(2, &[("/", 0), ("/subdir", 1)]),

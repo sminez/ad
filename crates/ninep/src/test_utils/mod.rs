@@ -17,7 +17,7 @@ use std::{
     os::unix::net::UnixStream,
     sync::{Arc, Mutex, mpsc},
     thread::{sleep, spawn},
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 use tokio::io::DuplexStream;
 
@@ -29,11 +29,13 @@ pub(crate) const HELLO_QID: u64 = 1;
 pub(crate) const SUBDIR_QID: u64 = 2;
 pub(crate) const BLOCKED_QID: u64 = 3;
 pub(crate) const SUBFILE_QID: u64 = 4;
+pub(crate) const PERMFILE_QID: u64 = 5;
 pub(crate) const CREATED_QID: u64 = 99;
 
 pub(crate) const HELLO_CONTENT: &[u8] = b"hello world";
 pub(crate) const SUBFILE_CONTENT: &[u8] = b"subfile";
 pub(crate) const BLOCKED_CONTENT: &[u8] = b"delayed";
+pub(crate) const PERMFILE_CONTENT: &[u8] = b"permissions checks";
 pub(crate) const TEST_IOUNIT: IoUnit = 8192;
 
 fn dir_qid(path: u64) -> Qid {
@@ -49,6 +51,20 @@ fn file_qid(path: u64) -> Qid {
         ty: FileType::FILE,
         version: 0,
         path,
+    }
+}
+
+pub(crate) fn perm_file_stat() -> Stat {
+    Stat {
+        qid: file_qid(PERMFILE_QID),
+        name: "perm-checks".into(),
+        owner: "owner".to_string(),
+        group: "group".to_string(),
+        perms: Perm::OWNER_READ | Perm::GROUP_WRITE,
+        n_bytes: 0,
+        last_accessed: SystemTime::UNIX_EPOCH,
+        last_modified: SystemTime::UNIX_EPOCH,
+        last_modified_by: "owner".to_string(),
     }
 }
 
@@ -68,6 +84,11 @@ impl TestFs {
 }
 
 impl Serve9p for TestFs {
+    fn user_is_in_group(&self, uname: &str, _group: &str) -> bool {
+        // Not tracked
+        uname == "group-member"
+    }
+
     fn walk_one(
         &self,
         cid: ClientId,
@@ -82,6 +103,7 @@ impl Serve9p for TestFs {
             (ROOT_QID, "subdir") => Ok(Qid::dir(SUBDIR_QID)),
             (ROOT_QID, "blocked") => Ok(Qid::file(BLOCKED_QID)),
             (SUBDIR_QID, "subfile") => Ok(Qid::file(SUBFILE_QID)),
+            (SUBDIR_QID, "perm-checks") => Ok(Qid::file(PERMFILE_QID)),
             _ => Err(format!("not found: {child}")),
         }
     }
@@ -134,6 +156,10 @@ impl Serve9p for TestFs {
                 let src = SUBFILE_CONTENT.get(offset..).unwrap_or(&[]);
                 Ok(ReadOutcome::Immediate(src[..count.min(src.len())].to_vec()))
             }
+            PERMFILE_QID => {
+                let src = PERMFILE_CONTENT.get(offset..).unwrap_or(&[]);
+                Ok(ReadOutcome::Immediate(src[..count.min(src.len())].to_vec()))
+            }
             BLOCKED_QID => {
                 let (tx, rx) = mpsc::channel();
                 let data = BLOCKED_CONTENT.to_vec();
@@ -156,7 +182,10 @@ impl Serve9p for TestFs {
                 Stat::stub(Qid::file(HELLO_QID), "hello"),
                 Stat::stub(Qid::dir(SUBDIR_QID), "subdir"),
             ]),
-            SUBDIR_QID => Ok(vec![Stat::stub(Qid::file(SUBFILE_QID), "subfile")]),
+            SUBDIR_QID => Ok(vec![
+                Stat::stub(Qid::file(SUBFILE_QID), "subfile"),
+                perm_file_stat(),
+            ]),
             _ => Err(format!("not a directory: {qid}")),
         }
     }
@@ -191,6 +220,7 @@ impl Serve9p for TestFs {
             BLOCKED_QID => Ok(Stat::stub(Qid::file(BLOCKED_QID), "blocked")),
             SUBDIR_QID => Ok(Stat::stub(Qid::dir(SUBDIR_QID), "subdir")),
             SUBFILE_QID => Ok(Stat::stub(Qid::file(SUBFILE_QID), "subfile")),
+            PERMFILE_QID => Ok(perm_file_stat()),
             _ => Err(format!("unknown qid: {qid}")),
         }
     }

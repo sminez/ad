@@ -251,11 +251,12 @@ impl Stat {
     pub fn check_user_permissions(
         &self,
         user: &str,
-        user_groups: &[String],
+        user_is_in_group: bool,
         mode: Mode,
     ) -> PermCheck {
-        let (can_read, can_write, can_exec) =
-            self.user_type(user, user_groups).flags_for_user(self.perms);
+        let (can_read, can_write, can_exec) = self
+            .user_type(user, user_is_in_group)
+            .flags_for_user(self.perms);
 
         PermCheck::new(
             mode,
@@ -266,10 +267,10 @@ impl Stat {
         )
     }
 
-    fn user_type(&self, user: &str, user_groups: &[String]) -> UserType {
+    fn user_type(&self, user: &str, user_is_in_group: bool) -> UserType {
         if user == self.owner {
             UserType::Owner
-        } else if user_groups.iter().any(|g| g == &self.group) {
+        } else if user_is_in_group {
             UserType::Group
         } else {
             UserType::Other
@@ -739,21 +740,21 @@ mod tests {
         assert_eq!(Perm::from(ft), expected);
     }
 
-    #[test_case("owner", &[], UserType::Owner; "owner without groups")]
-    #[test_case("owner", &["group"], UserType::Owner; "owner and group")]
-    #[test_case("owner", &["other"], UserType::Owner; "owner and other group")]
-    #[test_case("bob", &["group"], UserType::Group; "group")]
-    #[test_case("bob", &["other"], UserType::Other; "other group")]
-    #[test_case("bob", &[], UserType::Other; "no group")]
+    #[test_case("owner", false, UserType::Owner; "owner without groups")]
+    #[test_case("owner", true, UserType::Owner; "owner and group")]
+    #[test_case("owner", false, UserType::Owner; "owner and other group")]
+    #[test_case("bob", true, UserType::Group; "group")]
+    #[test_case("bob", false, UserType::Other; "other group")]
+    #[test_case("bob", false, UserType::Other; "no group")]
     #[test]
-    fn stat_user_type_returns_expected_type(user: &str, user_groups: &[&str], expected: UserType) {
+    fn stat_user_type_returns_expected_type(
+        user: &str,
+        user_is_in_group: bool,
+        expected: UserType,
+    ) {
         let stat = Stat::stub(Qid::file(0), "");
         assert_eq!(stat.owner, "owner", "wrong owner from stub");
-        assert_eq!(stat.group, "group", "wrong group from stub");
-
-        let user_groups: Vec<_> = user_groups.iter().map(|s| s.to_string()).collect();
-
-        assert_eq!(stat.user_type(user, &user_groups), expected);
+        assert_eq!(stat.user_type(user, user_is_in_group), expected);
     }
 
     // The cases here are a little tricky to read but given that we can exhaustively test all

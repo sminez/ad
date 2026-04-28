@@ -9,8 +9,8 @@ use crate::{
         },
     },
     test_utils::{
-        BLOCKED_CONTENT, BLOCKED_QID, CREATED_QID, Call, HELLO_CONTENT, HELLO_QID, ROOT_QID,
-        SUBDIR_QID, TEST_IOUNIT, dir_qid, file_qid,
+        BLOCKED_CONTENT, BLOCKED_QID, CREATED_QID, Call, HELLO_CONTENT, HELLO_QID, PERMFILE_QID,
+        ROOT_QID, SUBDIR_QID, TEST_IOUNIT, dir_qid, file_qid, perm_file_stat,
     },
 };
 
@@ -61,16 +61,20 @@ impl Step {
         )
     }
 
-    fn attach_req(tag: u16) -> Step {
+    fn attach_as_req(tag: u16, uname: &str) -> Step {
         Step::req(
             tag,
-            Tdata::attach(0, AFID_NO_AUTH, "owner", "/"),
+            Tdata::attach(0, AFID_NO_AUTH, uname, "/"),
             Rdata::attach(Qid {
                 ty: FileType::DIRECTORY,
                 version: 0,
                 path: ROOT_QID,
             }),
         )
+    }
+
+    fn attach_req(tag: u16) -> Step {
+        Step::attach_as_req(tag, "owner")
     }
 
     fn walk_req(tag: u16, fid: u32, new_fid: u32, wnames: &[&str], wqids: &[Qid]) -> Step {
@@ -128,6 +132,9 @@ macro_rules! generate_server_test_suite {
             flush_waits_for_blocked_read,
             open_known_fid_returns_ropen,
             open_unknown_fid_returns_error,
+            permissions_gate_open_calls_for_group,
+            permissions_gate_open_calls_for_other,
+            permissions_gate_open_calls_for_owner,
             read_dir_returns_serialized_stats,
             read_file_returns_data,
             remove_known_fid_returns_rremove,
@@ -665,7 +672,86 @@ pub(crate) fn write_to_directory_returns_error() -> TestCase {
     vec![
         Step::version_req(0),
         Step::attach_req(1),
-        Step::err(3, Tdata::open(0, Mode::WRITE.bits()), E_PERMISSION_DENIED),
+        Step::err(2, Tdata::open(0, Mode::WRITE.bits()), E_PERMISSION_DENIED),
         Step::assert_calls(&[Call::stat(ClientId(0), ROOT_QID, "owner")]),
+    ]
+}
+
+/// Uses [perm_file_stat] which allows owner read and group write only.
+pub(crate) fn permissions_gate_open_calls_for_owner() -> TestCase {
+    assert_eq!(perm_file_stat().perms, Perm::OWNER_READ | Perm::GROUP_WRITE);
+    let walk_paths = &["subdir", "perm-checks"];
+    let walk_qids = &[dir_qid(SUBDIR_QID), file_qid(PERMFILE_QID)];
+
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, walk_paths, walk_qids),
+        Step::req(
+            3,
+            Tdata::open(1, Mode::READ.bits()),
+            Rdata::open(file_qid(PERMFILE_QID), TEST_IOUNIT),
+        ),
+        Step::err(4, Tdata::open(1, Mode::WRITE.bits()), E_PERMISSION_DENIED),
+        Step::err(5, Tdata::open(1, Mode::EXECUTE.bits()), E_PERMISSION_DENIED),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "subdir", "owner"),
+            Call::walk(ClientId(0), SUBDIR_QID, "perm-checks", "owner"),
+            Call::stat(ClientId(0), PERMFILE_QID, "owner"),
+            Call::open(ClientId(0), PERMFILE_QID, Mode::READ, "owner"),
+            Call::stat(ClientId(0), PERMFILE_QID, "owner"),
+            Call::stat(ClientId(0), PERMFILE_QID, "owner"),
+        ]),
+    ]
+}
+
+/// Uses [perm_file_stat] which allows owner read and group write only.
+pub(crate) fn permissions_gate_open_calls_for_group() -> TestCase {
+    assert_eq!(perm_file_stat().perms, Perm::OWNER_READ | Perm::GROUP_WRITE);
+    let walk_paths = &["subdir", "perm-checks"];
+    let walk_qids = &[dir_qid(SUBDIR_QID), file_qid(PERMFILE_QID)];
+
+    vec![
+        Step::version_req(0),
+        Step::attach_as_req(1, "group-member"),
+        Step::walk_req(2, 0, 1, walk_paths, walk_qids),
+        Step::err(3, Tdata::open(1, Mode::READ.bits()), E_PERMISSION_DENIED),
+        Step::req(
+            4,
+            Tdata::open(1, Mode::WRITE.bits()),
+            Rdata::open(file_qid(PERMFILE_QID), TEST_IOUNIT),
+        ),
+        Step::err(5, Tdata::open(1, Mode::EXECUTE.bits()), E_PERMISSION_DENIED),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "subdir", "group-member"),
+            Call::walk(ClientId(0), SUBDIR_QID, "perm-checks", "group-member"),
+            Call::stat(ClientId(0), PERMFILE_QID, "group-member"),
+            Call::stat(ClientId(0), PERMFILE_QID, "group-member"),
+            Call::open(ClientId(0), PERMFILE_QID, Mode::WRITE, "group-member"),
+            Call::stat(ClientId(0), PERMFILE_QID, "group-member"),
+        ]),
+    ]
+}
+
+/// Uses [perm_file_stat] which allows owner read and group write only.
+pub(crate) fn permissions_gate_open_calls_for_other() -> TestCase {
+    assert_eq!(perm_file_stat().perms, Perm::OWNER_READ | Perm::GROUP_WRITE);
+    let walk_paths = &["subdir", "perm-checks"];
+    let walk_qids = &[dir_qid(SUBDIR_QID), file_qid(PERMFILE_QID)];
+
+    vec![
+        Step::version_req(0),
+        Step::attach_as_req(1, "other"),
+        Step::walk_req(2, 0, 1, walk_paths, walk_qids),
+        Step::err(3, Tdata::open(1, Mode::READ.bits()), E_PERMISSION_DENIED),
+        Step::err(4, Tdata::open(1, Mode::WRITE.bits()), E_PERMISSION_DENIED),
+        Step::err(5, Tdata::open(1, Mode::EXECUTE.bits()), E_PERMISSION_DENIED),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "subdir", "other"),
+            Call::walk(ClientId(0), SUBDIR_QID, "perm-checks", "other"),
+            Call::stat(ClientId(0), PERMFILE_QID, "other"),
+            Call::stat(ClientId(0), PERMFILE_QID, "other"),
+            Call::stat(ClientId(0), PERMFILE_QID, "other"),
+        ]),
     ]
 }

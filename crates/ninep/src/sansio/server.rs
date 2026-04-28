@@ -399,20 +399,20 @@ impl SessionState<Attached> {
     pub(crate) fn handle_perm_check<'s>(
         &'s self,
         stat: Stat,
-        user_groups: &'s [String],
+        user_is_in_group: bool,
         mode: Mode,
-    ) -> ReadyCoro<(), Stat, Result<()>, impl Future<Output = Result<()>> + use<'s>> {
-        Coro::from(move |handle: Handle<(), Stat>| async move {
-            match dbg!(stat.check_user_permissions(&self.state.uname, user_groups, mode)) {
+    ) -> ReadyCoro<(), (Stat, bool), Result<()>, impl Future<Output = Result<()>> + use<'s>> {
+        Coro::from(move |handle: Handle<(), (Stat, bool)>| async move {
+            match dbg!(stat.check_user_permissions(&self.state.uname, user_is_in_group, mode)) {
                 PermCheck::Denied => return Err(E_PERMISSION_DENIED.into()),
                 PermCheck::Allowed => return Ok(()),
                 PermCheck::NeedWriteOnParent => (),
             }
 
-            let parent_stat = handle.yield_value(()).await;
+            let (parent_stat, user_is_in_group) = handle.yield_value(()).await;
             match dbg!(parent_stat.check_user_permissions(
                 &self.state.uname,
-                user_groups,
+                user_is_in_group,
                 Mode::WRITE
             )) {
                 PermCheck::Allowed => Ok(()),

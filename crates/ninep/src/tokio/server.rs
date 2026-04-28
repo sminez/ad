@@ -93,6 +93,17 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     //     async { Err("authentication not required".to_string()) }
     // }
 
+    /// Check whether or not the given `uname` is a member of the `group` permissions group.
+    ///
+    /// If implemented, this is used to determine whether or not the a user should make use of a
+    /// file's `group` based permissions ([Perm::GROUP_READ], [Perm::GROUP_WRITE],
+    /// [Perm::GROUP_EXEC]) rather than `other` ([Perm::OTHER_READ], [Perm::OTHER_WRITE],
+    /// [Perm::OTHER_EXEC]).
+    #[expect(unused_variables)]
+    fn user_is_in_group(&self, uname: &str, group: &str) -> impl Future<Output = bool> + Send {
+        async { false }
+    }
+
     /// Lookup the [Qid] for `child` under the directory represented by `parent_qid`.
     ///
     /// `9p` walk messages received by the [Server] will specify a full path from a known parent
@@ -271,6 +282,10 @@ impl<T> AsyncServe9p for T
 where
     T: AsyncServe9pFromSync,
 {
+    async fn user_is_in_group(&self, uname: &str, group: &str) -> bool {
+        <T as Serve9p>::user_is_in_group(self, uname, group)
+    }
+
     async fn walk_one(
         &self,
         cid: ClientId,
@@ -657,23 +672,21 @@ where
 
     async fn qid_if_perms_hold_async(&self, fid: u32, mode: Mode) -> Result<Qid> {
         let qid = self.try_map_fid(fid)?;
-        let stat = self
-            .s
-            .stat(self.client_id, qid.path, &self.state.uname)
-            .await?;
+        let uname = &self.state.uname;
+        let stat = self.s.stat(self.client_id, qid.path, uname).await?;
+        let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
 
-        let coro = self.handle_perm_check(stat, &[], mode);
+        let coro = self.handle_perm_check(stat, user_is_in_group, mode);
         match coro.resume() {
             CoroState::Complete(res) => res?,
             CoroState::Pending(c, _) => {
                 let parent = self
                     .parent_qid(qid.path)
                     .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
-                let stat = self
-                    .s
-                    .stat(self.client_id, parent, &self.state.uname)
-                    .await?;
-                c.send(stat).resume().unwrap()?;
+                let stat = self.s.stat(self.client_id, parent, uname).await?;
+                let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
+
+                c.send((stat, user_is_in_group)).resume().unwrap()?;
             }
         }
 
