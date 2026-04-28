@@ -674,7 +674,7 @@ fn empty_dir_stat(qid: u64, name: &str) -> Stat {
         group: "ad".into(),
         perms: Perm::any_read() | Perm::any_exec(),
         n_bytes: 0,
-        last_accesses: SystemTime::now(),
+        last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
         last_modified_by: "ad".into(),
     }
@@ -688,7 +688,7 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
         group: "ad".into(),
         perms: Perm::any_read() | Perm::any_write(),
         n_bytes: 0,
-        last_accesses: SystemTime::now(),
+        last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
         last_modified_by: "ad".into(),
     }

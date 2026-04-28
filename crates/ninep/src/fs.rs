@@ -238,7 +238,7 @@ pub struct Stat {
     /// Size in bytes
     pub n_bytes: u64,
     /// Timestamp of last access
-    pub last_accesses: SystemTime,
+    pub last_accessed: SystemTime,
     /// Timestamp of last modification
     pub last_modified: SystemTime,
     /// User who last modified this entry
@@ -292,7 +292,7 @@ impl Stat {
             group: "group".to_string(),
             perms,
             n_bytes: 0,
-            last_accesses: SystemTime::UNIX_EPOCH,
+            last_accessed: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
             last_modified_by: "owner".to_string(),
         }
@@ -316,7 +316,7 @@ impl From<Stat> for RawStat {
             dev: u32::MAX,
             qid: s.qid,
             mode: (Perm::from(s.qid.ty) | s.perms).bits(),
-            atime: systime_as_u32(s.last_accesses),
+            atime: systime_as_u32(s.last_accessed),
             mtime: systime_as_u32(s.last_modified),
             length: s.n_bytes,
             name: s.name.clone(),
@@ -337,7 +337,7 @@ impl TryFrom<RawStat> for Stat {
             owner: r.uid,
             group: r.gid,
             perms: Perm::new(r.mode & 0x0000FFFF),
-            last_accesses: systime_from_u32(r.atime),
+            last_accessed: systime_from_u32(r.atime),
             last_modified: systime_from_u32(r.mtime),
             n_bytes: r.length,
             last_modified_by: r.muid,
@@ -434,7 +434,7 @@ impl WStat {
         stat.name = self.name.unwrap_or(stat.name);
         stat.perms = self.perms.unwrap_or(stat.perms);
         stat.n_bytes = self.n_bytes.unwrap_or(stat.n_bytes);
-        stat.last_accesses = self.last_accesses.unwrap_or(stat.last_accesses);
+        stat.last_accessed = self.last_accesses.unwrap_or(stat.last_accessed);
         stat.last_modified = self.last_modified.unwrap_or(stat.last_modified);
         stat.group = self.group.unwrap_or(stat.group);
         stat.last_modified_by = self.last_modified_by.unwrap_or(stat.last_modified_by);
@@ -564,7 +564,7 @@ mod tests {
             group: "group".to_string(),
             perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
             n_bytes: 100,
-            last_accesses: UNIX_EPOCH,
+            last_accessed: UNIX_EPOCH,
             last_modified: UNIX_EPOCH,
             last_modified_by: "modifier".to_string(),
         }
@@ -622,7 +622,7 @@ mod tests {
     )]
     #[test_case(
         WStat { last_accesses: Some(UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
-        Stat { last_accesses: UNIX_EPOCH + Duration::from_secs(1), ..stat() };
+        Stat { last_accessed: UNIX_EPOCH + Duration::from_secs(1), ..stat() };
         "last_accesses"
     )]
     #[test_case(

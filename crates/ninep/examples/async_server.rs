@@ -77,7 +77,7 @@ fn dir_stat(qid_path: u64, name: &str, n_bytes: u64) -> Stat {
         group: "group".into(),
         perms: Perm::any_read() | Perm::any_exec(),
         n_bytes,
-        last_accesses: SystemTime::now(),
+        last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
         last_modified_by: "owner".into(),
     }
@@ -91,7 +91,7 @@ fn file_stat(qid_path: u64, name: &str, n_bytes: u64) -> Stat {
         group: "group".into(),
         perms: Perm::any_read() | Perm::any_write(),
         n_bytes,
-        last_accesses: SystemTime::now(),
+        last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
         last_modified_by: "owner".into(),
     }

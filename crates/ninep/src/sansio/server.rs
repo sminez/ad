@@ -796,7 +796,7 @@ mod tests {
             group: "group".to_string(),
             perms: Perm::root(),
             n_bytes: 0,
-            last_accesses: SystemTime::UNIX_EPOCH,
+            last_accessed: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
             last_modified_by: "owner".to_string(),
         }
