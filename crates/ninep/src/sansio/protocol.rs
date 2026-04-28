@@ -565,6 +565,42 @@ impl Qid {
             path,
         }
     }
+
+    /// Construct a new [Qid] for a directory.
+    pub fn dir(path: u64) -> Self {
+        Self {
+            ty: FileType::DIRECTORY,
+            version: 0,
+            path,
+        }
+    }
+
+    /// Construct a new [Qid] for a regular file.
+    pub fn file(path: u64) -> Self {
+        Self {
+            ty: FileType::FILE,
+            version: 0,
+            path,
+        }
+    }
+
+    /// Construct a new [Qid] for an append only file.
+    pub fn append_only(path: u64) -> Self {
+        Self {
+            ty: FileType::APPEND_ONLY,
+            version: 0,
+            path,
+        }
+    }
+
+    /// Construct a new [Qid] for an exclusive file.
+    pub fn exclusive(path: u64) -> Self {
+        Self {
+            ty: FileType::EXCLUSIVE,
+            version: 0,
+            path,
+        }
+    }
 }
 
 impl NineP for Qid {

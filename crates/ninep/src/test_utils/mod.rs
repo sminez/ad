@@ -1,9 +1,9 @@
 //! Shared test infrastructure for sync and tokio tests.
 use crate::{
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
+    fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
     sansio::{
         client::MSIZE,
-        protocol::{FileType, Qid, Rmessage, SharedBuf, Tdata, Tmessage},
+        protocol::{FileType, Rmessage, SharedBuf, Tdata, Tmessage},
         server::ClientId,
     },
     sync::{
@@ -52,14 +52,6 @@ fn file_qid(path: u64) -> Qid {
     }
 }
 
-fn dir_perms() -> Perm {
-    Perm::OWNER_READ | Perm::OWNER_EXEC
-}
-
-fn file_perms() -> Perm {
-    Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
-}
-
 #[derive(Debug, Default, Clone)]
 pub(crate) struct TestFs {
     calls: RecordedCalls,
@@ -82,14 +74,14 @@ impl Serve9p for TestFs {
         parent_qid: u64,
         child: &str,
         uname: &str,
-    ) -> crate::Result<FileMeta> {
+    ) -> crate::Result<Qid> {
         self.calls.push(Call::walk(cid, parent_qid, child, uname));
 
         match (parent_qid, child) {
-            (ROOT_QID, "hello") => Ok(FileMeta::file("hello", HELLO_QID, file_perms())),
-            (ROOT_QID, "subdir") => Ok(FileMeta::dir("subdir", SUBDIR_QID, dir_perms())),
-            (ROOT_QID, "blocked") => Ok(FileMeta::file("blocked", BLOCKED_QID, file_perms())),
-            (SUBDIR_QID, "subfile") => Ok(FileMeta::file("subfile", SUBFILE_QID, dir_perms())),
+            (ROOT_QID, "hello") => Ok(Qid::file(HELLO_QID)),
+            (ROOT_QID, "subdir") => Ok(Qid::dir(SUBDIR_QID)),
+            (ROOT_QID, "blocked") => Ok(Qid::file(BLOCKED_QID)),
+            (SUBDIR_QID, "subfile") => Ok(Qid::file(SUBFILE_QID)),
             _ => Err(format!("not found: {child}")),
         }
     }
@@ -116,11 +108,11 @@ impl Serve9p for TestFs {
         perm: Perm,
         mode: Mode,
         uname: &str,
-    ) -> crate::Result<(FileMeta, IoUnit)> {
+    ) -> crate::Result<(Qid, IoUnit)> {
         self.calls
             .push(Call::create(cid, parent, name, perm, mode, uname));
 
-        Ok((FileMeta::file(name, CREATED_QID, file_perms()), TEST_IOUNIT))
+        Ok((Qid::file(CREATED_QID), TEST_IOUNIT))
     }
 
     fn read(
@@ -161,14 +153,10 @@ impl Serve9p for TestFs {
 
         match qid {
             ROOT_QID => Ok(vec![
-                Stat::stub(FileMeta::file("hello", HELLO_QID, file_perms())),
-                Stat::stub(FileMeta::dir("subdir", SUBDIR_QID, dir_perms())),
+                Stat::stub(Qid::file(HELLO_QID), "hello"),
+                Stat::stub(Qid::dir(SUBDIR_QID), "subdir"),
             ]),
-            SUBDIR_QID => Ok(vec![Stat::stub(FileMeta::file(
-                "subfile",
-                SUBFILE_QID,
-                file_perms(),
-            ))]),
+            SUBDIR_QID => Ok(vec![Stat::stub(Qid::file(SUBFILE_QID), "subfile")]),
             _ => Err(format!("not a directory: {qid}")),
         }
     }
@@ -198,27 +186,11 @@ impl Serve9p for TestFs {
         self.calls.push(Call::stat(cid, qid, uname));
 
         match qid {
-            ROOT_QID => Ok(Stat::stub(FileMeta::dir("/", ROOT_QID, Perm::empty()))),
-            HELLO_QID => Ok(Stat::stub(FileMeta::file(
-                "hello",
-                HELLO_QID,
-                Perm::empty(),
-            ))),
-            BLOCKED_QID => Ok(Stat::stub(FileMeta::file(
-                "blocked",
-                BLOCKED_QID,
-                Perm::empty(),
-            ))),
-            SUBDIR_QID => Ok(Stat::stub(FileMeta::dir(
-                "subdir",
-                SUBDIR_QID,
-                Perm::empty(),
-            ))),
-            SUBFILE_QID => Ok(Stat::stub(FileMeta::file(
-                "subfile",
-                SUBFILE_QID,
-                Perm::empty(),
-            ))),
+            ROOT_QID => Ok(Stat::stub(Qid::dir(ROOT_QID), "/")),
+            HELLO_QID => Ok(Stat::stub(Qid::file(HELLO_QID), "hello")),
+            BLOCKED_QID => Ok(Stat::stub(Qid::file(BLOCKED_QID), "blocked")),
+            SUBDIR_QID => Ok(Stat::stub(Qid::dir(SUBDIR_QID), "subdir")),
+            SUBFILE_QID => Ok(Stat::stub(Qid::file(SUBFILE_QID), "subfile")),
             _ => Err(format!("unknown qid: {qid}")),
         }
     }

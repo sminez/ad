@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     Result,
-    fs::{FileMeta, Mode, Perm, PermCheck, QID_ROOT, Stat},
+    fs::{Mode, PermCheck, QID_ROOT, Stat},
     sansio::protocol::{
         DEFAULT_MSIZE, Data, FileType, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata,
         Tmessage,
@@ -98,12 +98,7 @@ where
         let qids = Arc::new(RwLock::new(
             roots
                 .iter()
-                .map(|(p, &qid)| {
-                    (
-                        qid,
-                        QidMeta::new(FileMeta::dir(p.clone(), qid, Perm::root()), None),
-                    )
-                })
+                .map(|(_, &qid)| (qid, QidMeta::new(Qid::dir(qid), None)))
                 .collect(),
         ));
 
@@ -234,11 +229,7 @@ where
     }
 
     pub(crate) fn qid(&self, qid: u64) -> Option<Qid> {
-        self.with_shared_qids(|qids| qids.get(&qid).map(|qm| qm.file_meta.as_qid()))
-    }
-
-    pub(crate) fn file_meta_for_qid(&self, qid: u64) -> Option<FileMeta> {
-        self.with_shared_qids(|qids| qids.get(&qid).map(|qm| qm.file_meta.clone()))
+        self.with_shared_qids(|qids| qids.get(&qid).map(|qm| qm.qid))
     }
 }
 
@@ -251,13 +242,9 @@ impl SessionState<Attached> {
             .ok_or_else(|| E_UNKNOWN_FID.to_string())
     }
 
-    pub(crate) fn try_file_meta(&self, fid: u32) -> Result<FileMeta> {
-        let opt = match self.state.fids.get(&fid) {
-            Some(meta) => self.file_meta_for_qid(meta.qid),
-            None => None,
-        };
-
-        opt.ok_or_else(|| E_UNKNOWN_FID.to_string())
+    pub(crate) fn try_map_fid(&self, fid: u32) -> Result<Qid> {
+        let fm = self.try_fid_meta(fid)?;
+        self.qid(fm.qid).ok_or_else(|| E_UNKNOWN_FID.to_string())
     }
 
     pub(crate) fn try_add_client_id_to_open_qids(&self, fid: u32) -> Result<()> {
@@ -289,12 +276,12 @@ impl SessionState<Attached> {
         wnames: Vec<String>,
     ) -> ReadyCoro<
         (u64, String),
-        Result<FileMeta>,
+        Result<Qid>,
         Result<Vec<Qid>>,
         impl Future<Output = Result<Vec<Qid>>> + use<'s>,
     > {
         Coro::from(
-            move |handle: Handle<(u64, String), Result<FileMeta>>| async move {
+            move |handle: Handle<(u64, String), Result<Qid>>| async move {
                 if wnames.len() > MAXWELEM {
                     return Err(E_OVER_MAXWELEM.to_string());
                 } else if new_fid != fid && self.state.fids.contains_key(&new_fid) {
@@ -305,26 +292,27 @@ impl SessionState<Attached> {
                     return Err(E_WALK_OPEN_FID.to_string());
                 }
 
-                let fm = self.try_file_meta(fid)?;
+                let qid = self.try_map_fid(fid)?;
 
                 if wnames.is_empty() {
-                    self.state.fids.insert(new_fid, FidMeta::closed(fm.qid));
+                    self.state.fids.insert(new_fid, FidMeta::closed(qid.path));
                     return Ok(vec![]);
-                } else if matches!(fm.ty, FileType::FILE) {
+                } else if matches!(qid.ty, FileType::FILE) {
                     return Err(E_WALK_NON_DIR.to_string());
                 }
 
                 let mut wqids = Vec::with_capacity(wnames.len());
-                let mut qid = fm.qid;
+                let mut qid_path = qid.path;
 
                 for name in wnames.iter() {
-                    match handle.yield_value((qid, name.clone())).await {
-                        Ok(fm) => {
-                            let parent = qid;
-                            qid = fm.qid;
-                            wqids.push(fm.as_qid());
+                    match handle.yield_value((qid_path, name.clone())).await {
+                        Ok(elem) => {
+                            let parent = qid_path;
+                            qid_path = elem.path;
+                            wqids.push(elem);
                             self.with_shared_qids_mut(|qids| {
-                                qids.entry(qid).or_insert(QidMeta::new(fm, Some(parent)));
+                                qids.entry(elem.path)
+                                    .or_insert(QidMeta::new(elem, Some(parent)));
                             });
                         }
                         Err(_) => break,
@@ -361,18 +349,18 @@ impl SessionState<Attached> {
     > {
         Coro::from(
             move |handle: Handle<Either<(u64, String), (u64, String)>, Vec<Stat>>| async move {
-                let fm = self.try_file_meta(fid)?;
+                let qid = self.try_map_fid(fid)?;
                 if offset > u32::MAX as u64 {
                     return Err(format!("offset too large: {offset} > {}", u32::MAX));
                 }
 
-                let stats = if fm.ty == FileType::DIRECTORY {
+                let stats = if qid.ty == FileType::DIRECTORY {
                     handle
-                        .yield_value(Either::L((fm.qid, self.state.uname.clone())))
+                        .yield_value(Either::L((qid.path, self.state.uname.clone())))
                         .await
                 } else {
                     handle
-                        .yield_value(Either::R((fm.qid, self.state.uname.clone())))
+                        .yield_value(Either::R((qid.path, self.state.uname.clone())))
                         .await;
                     return Ok(None); // processing of the ReadOutcome is handled by the caller
                 };
@@ -382,8 +370,8 @@ impl SessionState<Attached> {
 
                 for stat in stats.into_iter() {
                     self.with_shared_qids_mut(|qids| {
-                        qids.entry(stat.fm.qid)
-                            .or_insert(QidMeta::new(stat.fm.clone(), Some(fm.qid)));
+                        qids.entry(stat.qid.path)
+                            .or_insert(QidMeta::new(stat.qid, Some(qid.path)));
                     });
                     let rstat: RawStat = stat.into();
                     let tmp = rstat.write_9p_bytes().unwrap();
@@ -699,22 +687,22 @@ impl FidMeta {
 /// Internal metadata for known qids
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QidMeta {
-    pub(crate) file_meta: FileMeta,
+    pub(crate) qid: Qid,
     pub(crate) parent_qid: Option<u64>,
     pub(crate) opened_by: HashSet<ClientId>,
 }
 
 impl QidMeta {
-    pub(crate) fn new(file_meta: FileMeta, parent_qid: Option<u64>) -> Self {
+    pub(crate) fn new(qid: Qid, parent_qid: Option<u64>) -> Self {
         Self {
-            file_meta,
-            opened_by: HashSet::new(),
+            qid,
             parent_qid,
+            opened_by: HashSet::new(),
         }
     }
 
     pub(crate) fn is_exclusive_and_open(&self) -> bool {
-        self.file_meta.ty == FileType::EXCLUSIVE && !self.opened_by.is_empty()
+        self.qid.ty == FileType::EXCLUSIVE && !self.opened_by.is_empty()
     }
 }
 
@@ -775,10 +763,7 @@ impl FlushHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        fs::{FileMeta, Perm, Stat},
-        sansio::protocol::{FileType, NineP, RawStat, Rdata, Tdata, Tmessage},
-    };
+    use crate::fs::Perm;
     use simple_coro::CoroState;
     use simple_test_case::test_case;
     use std::time::SystemTime;
@@ -786,7 +771,7 @@ mod tests {
     fn attached_session_state() -> SessionState<Attached> {
         let qids = Arc::new(RwLock::new(BTreeMap::from([(
             QID_ROOT,
-            QidMeta::new(FileMeta::dir("", QID_ROOT, Perm::root()), None),
+            QidMeta::new(Qid::dir(QID_ROOT), None),
         )])));
 
         SessionState {
@@ -805,12 +790,14 @@ mod tests {
 
     fn test_stat(name: &str, qid: u64) -> Stat {
         Stat {
-            fm: FileMeta::dir(name, qid, Perm::root()),
+            qid: Qid::dir(qid),
+            name: name.into(),
+            owner: "owner".to_string(),
+            group: "group".to_string(),
+            perms: Perm::root(),
             n_bytes: 0,
             last_accesses: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
-            owner: "owner".to_string(),
-            group: "group".to_string(),
             last_modified_by: "owner".to_string(),
         }
     }
@@ -988,12 +975,7 @@ mod tests {
     #[test]
     fn walk_non_dir_returns_error() {
         let mut ss = attached_session_state();
-        ss.with_shared_qids_mut(|qids| {
-            qids.insert(
-                1,
-                QidMeta::new(FileMeta::file("file.txt", 1, Perm::any_read()), Some(0)),
-            )
-        });
+        ss.with_shared_qids_mut(|qids| qids.insert(1, QidMeta::new(Qid::file(1), Some(0))));
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let res = ss
@@ -1014,7 +996,7 @@ mod tests {
         coro = coro.resume().unwrap_pending(|(parent_qid, name)| {
             assert_eq!(parent_qid, QID_ROOT, "should walk from root");
             assert_eq!(name, "child", "should request child name");
-            Ok(FileMeta::file("child", child_qid, Perm::any_read()))
+            Ok(Qid::file(child_qid))
         });
 
         let wqids = coro.resume().unwrap().unwrap();
@@ -1052,9 +1034,7 @@ mod tests {
         let mut coro = ss.handle_attached_walk(0, 1, wnames);
 
         // First step of the walk succeeds
-        coro = coro
-            .resume()
-            .unwrap_pending(|(_, _)| Ok(FileMeta::dir("a", a_qid, Perm::any_read())));
+        coro = coro.resume().unwrap_pending(|(_, _)| Ok(Qid::dir(a_qid)));
 
         // Second step fails
         coro = coro
@@ -1084,12 +1064,7 @@ mod tests {
     #[test]
     fn read_regular_file_yields_file_read_request() {
         let mut ss = attached_session_state();
-        ss.with_shared_qids_mut(|qids| {
-            qids.insert(
-                1,
-                QidMeta::new(FileMeta::file("file.txt", 1, Perm::any_read()), Some(0)),
-            )
-        });
+        ss.with_shared_qids_mut(|qids| qids.insert(1, QidMeta::new(Qid::file(1), Some(0))));
         ss.state.fids.insert(2, FidMeta::closed(1));
 
         let coro = ss.handle_attached_read(2, 0, 1024);

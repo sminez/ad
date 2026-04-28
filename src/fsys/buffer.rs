@@ -325,12 +325,12 @@ impl BufferNode {
     }
 
     fn contains_qid(&self, qid: u64) -> bool {
-        self.file_stats.values().any(|s| s.fm.qid == qid)
+        self.file_stats.values().any(|s| s.qid.path == qid)
     }
 
     fn check_if_known_qid(&self, qid: u64) -> QidCheck {
         for (&fname, s) in self.file_stats.iter() {
-            if s.fm.qid == qid {
+            if s.qid.path == qid {
                 return if fname == EVENT {
                     // replaced with the correct qid by BufferNodes
                     QidCheck::EventFile { buf_qid: 0 }

@@ -33,7 +33,7 @@
 use crate::{editor::Action, input::Event, ui::SCRATCH_ID};
 use ninep::{
     Result,
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
+    fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
     sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
 use std::{
@@ -472,33 +472,27 @@ impl Serve9p for AdFs {
         Ok(())
     }
 
-    fn walk_one(
-        &self,
-        cid: ClientId,
-        parent_qid: u64,
-        child: &str,
-        uname: &str,
-    ) -> Result<FileMeta> {
+    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid> {
         trace!(?cid, %parent_qid, %child, %uname, "handling walk request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
         match parent_qid {
             MOUNT_ROOT_QID => match child {
-                CONTROL_FILE => Ok(s.control_file_stat.fm.clone()),
-                MINIBUFFER => Ok(s.minibuffer_stat.fm.clone()),
-                SCRATCH => Ok(s.scratch_stat.fm.clone()),
-                LOG_FILE => Ok(s.log_file_stat.fm.clone()),
-                BUFFERS_DIR => Ok(s.buffer_nodes.stat().fm.clone()),
+                CONTROL_FILE => Ok(s.control_file_stat.qid),
+                MINIBUFFER => Ok(s.minibuffer_stat.qid),
+                SCRATCH => Ok(s.scratch_stat.qid),
+                LOG_FILE => Ok(s.log_file_stat.qid),
+                BUFFERS_DIR => Ok(s.buffer_nodes.stat().qid),
                 _ => match s.buffer_nodes.lookup_file_stat(parent_qid, child) {
-                    Some(stat) => Ok(stat.fm.clone()),
+                    Some(stat) => Ok(stat.qid),
                     None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
                 },
             },
 
             qid if qid == BUFFERS_QID || s.buffer_nodes.is_known_buffer_qid(qid) => {
                 match s.buffer_nodes.lookup_file_stat(qid, child) {
-                    Some(stat) => Ok(stat.fm.clone()),
+                    Some(stat) => Ok(stat.qid),
                     None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
                 }
             }
@@ -658,7 +652,7 @@ impl Serve9p for AdFs {
         perm: Perm,
         mode: Mode,
         uname: &str,
-    ) -> Result<(FileMeta, IoUnit)> {
+    ) -> Result<(Qid, IoUnit)> {
         trace!(?cid, %parent, %name, ?perm, ?mode, %uname, "handling create request");
         Err("create not allowed".to_string())
     }
@@ -674,24 +668,28 @@ fn apply_offset(data: &[u8], offset: usize, count: usize) -> Vec<u8> {
 
 fn empty_dir_stat(qid: u64, name: &str) -> Stat {
     Stat {
-        fm: FileMeta::dir(name, qid, Perm::any_read() | Perm::any_exec()),
+        qid: Qid::dir(qid),
+        name: name.into(),
+        owner: "ad".into(),
+        group: "ad".into(),
+        perms: Perm::any_read() | Perm::any_exec(),
         n_bytes: 0,
         last_accesses: SystemTime::now(),
         last_modified: SystemTime::now(),
-        owner: "ad".into(),
-        group: "ad".into(),
         last_modified_by: "ad".into(),
     }
 }
 
 fn empty_file_stat(qid: u64, name: &str) -> Stat {
     Stat {
-        fm: FileMeta::file(name, qid, Perm::any_read() | Perm::any_write()),
+        qid: Qid::file(qid),
+        name: name.into(),
+        owner: "ad".into(),
+        group: "ad".into(),
+        perms: Perm::any_read() | Perm::any_write(),
         n_bytes: 0,
         last_accesses: SystemTime::now(),
         last_modified: SystemTime::now(),
-        owner: "ad".into(),
-        group: "ad".into(),
         last_modified_by: "ad".into(),
     }
 }

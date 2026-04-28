@@ -1,7 +1,7 @@
 use crate::{
-    fs::{FileMeta, Mode, Perm, Stat},
+    fs::{Mode, Perm, Qid, Stat},
     sansio::{
-        protocol::{DEFAULT_MSIZE, FileType, NineP, Qid, RawStat, Rdata, Tdata},
+        protocol::{DEFAULT_MSIZE, FileType, NineP, RawStat, Rdata, Tdata},
         server::{
             AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
             E_NO_VERSION_MESSAGE, E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE,
@@ -444,8 +444,8 @@ pub(crate) fn read_file_returns_data() -> TestCase {
 }
 
 pub(crate) fn read_dir_returns_serialized_stats() -> TestCase {
-    let s1: RawStat = Stat::stub(FileMeta::file("hello", HELLO_QID, Perm::empty())).into();
-    let s2: RawStat = Stat::stub(FileMeta::dir("subdir", SUBDIR_QID, Perm::empty())).into();
+    let s1: RawStat = Stat::stub(Qid::file(HELLO_QID), "hello").into();
+    let s2: RawStat = Stat::stub(Qid::dir(SUBDIR_QID), "subdir").into();
     let mut buf = s1.write_9p_bytes().unwrap();
     buf.extend(s2.write_9p_bytes().unwrap());
 
@@ -502,7 +502,7 @@ pub(crate) fn write_with_oversized_offset_returns_error() -> TestCase {
 }
 
 pub(crate) fn stat_known_fid_returns_rstat() -> TestCase {
-    let stat: RawStat = Stat::stub(FileMeta::file("hello", HELLO_QID, Perm::empty())).into();
+    let stat: RawStat = Stat::stub(Qid::file(HELLO_QID), "hello").into();
     let size = stat.n_bytes() as u16;
 
     vec![

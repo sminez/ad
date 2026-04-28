@@ -15,9 +15,9 @@ fn main() -> io::Result<()> {
 
 fn tree(client: &mut UnixClient, path: &str, depth: usize) -> io::Result<()> {
     for stat in client.read_dir(path)? {
-        let name = stat.fm.name;
+        let name = stat.name;
         println!("{:indent$}{name}", "", indent = depth * 2);
-        if stat.fm.ty == FileType::DIRECTORY {
+        if stat.qid.ty == FileType::DIRECTORY {
             let child = if path.is_empty() {
                 name
             } else {

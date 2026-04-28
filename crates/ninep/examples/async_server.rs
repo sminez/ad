@@ -24,7 +24,7 @@
 //! ```
 use ninep::{
     Result,
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
+    fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
     tokio::server::{AsyncServe9p, ClientId, ReadOutcome, Server},
 };
 use std::{
@@ -56,6 +56,12 @@ struct EchoServer {
     state: Arc<RwLock<State>>,
 }
 
+impl EchoServer {
+    fn rw_size(&self) -> u64 {
+        self.state.read().unwrap().rw.len() as u64
+    }
+}
+
 const ROOT: u64 = 0;
 const BAR: u64 = 1;
 const FOO: u64 = 2;
@@ -63,12 +69,32 @@ const BAZ: u64 = 3;
 const RW: u64 = 4;
 const BLOCKING: u64 = 5;
 
-fn dir_perms() -> Perm {
-    Perm::any_read() | Perm::any_exec()
+fn dir_stat(qid_path: u64, name: &str, n_bytes: u64) -> Stat {
+    Stat {
+        qid: Qid::dir(qid_path),
+        name: name.into(),
+        owner: "owner".into(),
+        group: "group".into(),
+        perms: Perm::any_read() | Perm::any_exec(),
+        n_bytes,
+        last_accesses: SystemTime::now(),
+        last_modified: SystemTime::now(),
+        last_modified_by: "owner".into(),
+    }
 }
 
-fn file_perms() -> Perm {
-    Perm::any_read()
+fn file_stat(qid_path: u64, name: &str, n_bytes: u64) -> Stat {
+    Stat {
+        qid: Qid::file(qid_path),
+        name: name.into(),
+        owner: "owner".into(),
+        group: "group".into(),
+        perms: Perm::any_read() | Perm::any_write(),
+        n_bytes,
+        last_accesses: SystemTime::now(),
+        last_modified: SystemTime::now(),
+        last_modified_by: "owner".into(),
+    }
 }
 
 impl AsyncServe9p for EchoServer {
@@ -101,7 +127,7 @@ impl AsyncServe9p for EchoServer {
         perm: Perm,
         mode: Mode,
         uname: &str,
-    ) -> Result<(FileMeta, IoUnit)> {
+    ) -> Result<(Qid, IoUnit)> {
         Err("create not supported".to_string())
     }
 
@@ -121,14 +147,14 @@ impl AsyncServe9p for EchoServer {
         parent_qid: u64,
         child: &str,
         _uname: &str,
-    ) -> Result<FileMeta> {
+    ) -> Result<Qid> {
         println!("handling walk request: parent={parent_qid} child={child}");
         match (parent_qid, child) {
-            (ROOT, "bar") => Ok(FileMeta::dir("bar", BAR, dir_perms())),
-            (ROOT, "foo") => Ok(FileMeta::file("foo", FOO, file_perms())),
-            (ROOT, "rw") => Ok(FileMeta::file("rw", RW, file_perms())),
-            (ROOT, "blocking") => Ok(FileMeta::file("blocking", BLOCKING, file_perms())),
-            (BAR, "baz") => Ok(FileMeta::file("baz", BAZ, file_perms())),
+            (ROOT, "bar") => Ok(Qid::dir(BAR)),
+            (ROOT, "foo") => Ok(Qid::file(FOO)),
+            (ROOT, "rw") => Ok(Qid::file(RW)),
+            (ROOT, "blocking") => Ok(Qid::file(BLOCKING)),
+            (BAR, "baz") => Ok(Qid::file(BAZ)),
             (qid, child) => Err(format!("unknown child: qid={qid}, child={child}")),
         }
     }
@@ -136,65 +162,12 @@ impl AsyncServe9p for EchoServer {
     async fn stat(&self, _cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
         println!("handling stat request: qid={qid} uname={uname}");
         match qid {
-            ROOT => Ok(Stat {
-                fm: FileMeta::dir("/", ROOT, dir_perms()),
-                n_bytes: 0,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }),
-
-            BAR => Ok(Stat {
-                fm: FileMeta::dir("bar", BAR, dir_perms()),
-                n_bytes: 0,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }),
-
-            FOO => Ok(Stat {
-                fm: FileMeta::file("foo", FOO, file_perms()),
-                n_bytes: 0,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }),
-
-            BAZ => Ok(Stat {
-                fm: FileMeta::file("baz", BAZ, file_perms()),
-                n_bytes: 0,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }),
-
-            RW => Ok(Stat {
-                fm: FileMeta::file("rw", BAZ, file_perms()),
-                n_bytes: self.state.read().unwrap().rw.len() as u64,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }),
-
-            BLOCKING => Ok(Stat {
-                fm: FileMeta::file("blocking", BLOCKING, file_perms()),
-                n_bytes: 0,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }),
+            ROOT => Ok(dir_stat(ROOT, "/", 0)),
+            BAR => Ok(dir_stat(BAR, "bar", 0)),
+            FOO => Ok(file_stat(FOO, "foo", 0)),
+            BAZ => Ok(file_stat(BAZ, "baz", 0)),
+            RW => Ok(file_stat(RW, "rw", self.rw_size())),
+            BLOCKING => Ok(file_stat(BLOCKING, "blocking", 0)),
 
             qid => Err(format!("stat for qid={qid}")),
         }
@@ -260,53 +233,13 @@ impl AsyncServe9p for EchoServer {
         println!("handling read_dir request: qid={qid} uname={uname}");
         match qid {
             ROOT => Ok(vec![
-                Stat {
-                    fm: FileMeta::dir("bar", BAR, dir_perms()),
-                    n_bytes: 0,
-                    last_accesses: SystemTime::now(),
-                    last_modified: SystemTime::now(),
-                    owner: uname.into(),
-                    group: uname.into(),
-                    last_modified_by: uname.into(),
-                },
-                Stat {
-                    fm: FileMeta::file("foo", FOO, file_perms()),
-                    n_bytes: 42,
-                    last_accesses: SystemTime::now(),
-                    last_modified: SystemTime::now(),
-                    owner: uname.into(),
-                    group: uname.into(),
-                    last_modified_by: uname.into(),
-                },
-                Stat {
-                    fm: FileMeta::file("rw", RW, file_perms()),
-                    n_bytes: self.state.read().unwrap().rw.len() as u64,
-                    last_accesses: SystemTime::now(),
-                    last_modified: SystemTime::now(),
-                    owner: uname.into(),
-                    group: uname.into(),
-                    last_modified_by: uname.into(),
-                },
-                Stat {
-                    fm: FileMeta::file("blocking", BLOCKING, file_perms()),
-                    n_bytes: 0,
-                    last_accesses: SystemTime::now(),
-                    last_modified: SystemTime::now(),
-                    owner: uname.into(),
-                    group: uname.into(),
-                    last_modified_by: uname.into(),
-                },
+                dir_stat(BAR, "bar", 0),
+                file_stat(FOO, "foo", 0),
+                file_stat(RW, "rw", self.rw_size()),
+                file_stat(BLOCKING, "blocking", 0),
             ]),
 
-            BAR => Ok(vec![Stat {
-                fm: FileMeta::file("baz", BAZ, file_perms()),
-                n_bytes: 0,
-                last_accesses: SystemTime::now(),
-                last_modified: SystemTime::now(),
-                owner: uname.into(),
-                group: uname.into(),
-                last_modified_by: uname.into(),
-            }]),
+            BAR => Ok(vec![file_stat(BAZ, "baz", 0)]),
 
             s => Err(format!("unknown dir: '{s}'")),
         }

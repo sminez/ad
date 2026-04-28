@@ -4,7 +4,7 @@
 //!  [1]: std::io::Write
 use crate::{
     Result,
-    fs::{FileMeta, IoUnit, Mode, Perm, Stat, WStat},
+    fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
     sansio::{
         protocol::{
             DEFAULT_MSIZE, Data, FileType, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage,
@@ -108,19 +108,13 @@ pub trait Serve9p: Send + Sync + 'static {
     //     Err("authentication not required".to_string())
     // }
 
-    /// Lookup the [FileMeta] for `child` under the directory represented by `parent_qid`.
+    /// Lookup the [Qid] for `child` under the directory represented by `parent_qid`.
     ///
     /// `9p` walk messages received by the [Server] will specify a full path from a known parent
     /// (of file type [Directory][FileType::DIRECTORY]) to a target `child`. This method is called
     /// for each element of that path in order, stopping either when the target is reached or some
     /// element of the path returns an error.
-    fn walk_one(
-        &self,
-        cid: ClientId,
-        parent_qid: u64,
-        child: &str,
-        uname: &str,
-    ) -> Result<FileMeta>;
+    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid>;
 
     /// Open an existing file for subsequent I/O via [read](Serve9p::read) and
     /// [write](Serve9p::write) messages.
@@ -158,14 +152,14 @@ pub trait Serve9p: Send + Sync + 'static {
     #[expect(unused_variables)]
     fn flush(&self, cid: ClientId, old_tag: u16) {}
 
-    /// Create a new entry in `parent`, returning its [metadata][FileMeta] and [IoUnit].
+    /// Create a new entry in `parent`, returning its [Qid] and [IoUnit].
     ///
     /// [Server] ensures that this method is only called when the target fid is known, pointing to
     /// a directory and not currently open for I/O. [Server] also handles rejecting `.` and `..` as
     /// invalid entry names, and applying `9p` permission masking before this call, meaning `perm`
     /// is already normalized against the parent directory's permissions.
     ///
-    /// On success, [Server] rebinds the creating fid to the qid found in the returned [FileMeta]
+    /// On success, [Server] rebinds the creating fid to the qid found in the returned [Qid]
     /// and marks it as open for I/O. Implementations should return `Err` if `name` already exists
     /// or creation cannot be completed for any reason.
     fn create(
@@ -176,7 +170,7 @@ pub trait Serve9p: Send + Sync + 'static {
         perm: Perm,
         mode: Mode,
         uname: &str,
-    ) -> Result<(FileMeta, IoUnit)>;
+    ) -> Result<(Qid, IoUnit)>;
 
     /// Read up to `count` bytes from `qid` starting at `offset`.
     ///
@@ -533,8 +527,8 @@ where
     }
 
     fn handle_stat(&mut self, fid: u32) -> Result<Rdata> {
-        let fm = self.try_file_meta(fid)?;
-        let s = self.s.stat(self.client_id, fm.qid, &self.state.uname)?;
+        let qid = self.try_map_fid(fid)?;
+        let s = self.s.stat(self.client_id, qid.path, &self.state.uname)?;
         let stat: RawStat = s.into();
         let size = stat.size + size_of::<u16>() as u16;
 
@@ -543,40 +537,39 @@ where
 
     fn handle_wstat(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
         let wstat: WStat = raw_stat.into();
-        let fm = self.try_file_meta(fid)?;
+        let qid = self.try_map_fid(fid)?;
         self.s
-            .write_stat(self.client_id, fm.qid, wstat, &self.state.uname)?;
+            .write_stat(self.client_id, qid.path, wstat, &self.state.uname)?;
 
         Ok(Rdata::Wstat {})
     }
 
-    fn file_meta_if_perms_hold(&self, fid: u32, mode: Mode) -> Result<FileMeta> {
-        let fm = self.try_file_meta(fid)?;
-        let stat = self.s.stat(self.client_id, fm.qid, &self.state.uname)?;
+    fn qid_if_perms_hold(&self, fid: u32, mode: Mode) -> Result<Qid> {
+        let qid = self.try_map_fid(fid)?;
+        let stat = self.s.stat(self.client_id, qid.path, &self.state.uname)?;
 
-        // TODO: handle user groups
         let coro = self.handle_perm_check(stat, &[], mode);
         match coro.resume() {
             CoroState::Complete(res) => res?,
             CoroState::Pending(c, _) => {
                 let parent = self
-                    .parent_qid(fm.qid)
+                    .parent_qid(qid.path)
                     .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
                 let stat = self.s.stat(self.client_id, parent, &self.state.uname)?;
                 c.send(stat).resume().unwrap()?;
             }
         }
 
-        Ok(fm)
+        Ok(qid)
     }
 
     fn handle_open(&mut self, fid: u32, mode: Mode) -> Result<Rdata> {
-        let fm = self.file_meta_if_perms_hold(fid, mode)?;
+        let qid = self.qid_if_perms_hold(fid, mode)?;
         self.try_add_client_id_to_open_qids(fid)?;
 
         let iounit = self
             .s
-            .open(self.client_id, fm.qid, mode, &self.state.uname)?;
+            .open(self.client_id, qid.path, mode, &self.state.uname)?;
 
         self.state
             .fids
@@ -584,10 +577,7 @@ where
             .expect("known fid after try_file_meta")
             .mode = Some(mode);
 
-        Ok(Rdata::Open {
-            qid: fm.as_qid(),
-            iounit,
-        })
+        Ok(Rdata::Open { qid, iounit })
     }
 
     fn handle_create(&mut self, fid: u32, name: String, perm: Perm, mode: Mode) -> Result<Rdata> {
@@ -595,27 +585,26 @@ where
             return Err(E_ILLEGAL_CREATE_NAME.to_string());
         }
 
-        let fm = self.try_file_meta(fid)?;
-        if fm.ty != FileType::DIRECTORY {
+        let qid = self.try_map_fid(fid)?;
+        if qid.ty != FileType::DIRECTORY {
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
-        let parent = self.s.stat(self.client_id, fm.qid, &self.state.uname)?;
-        let (fm, iounit) = self.s.create(
+        let parent = self.s.stat(self.client_id, qid.path, &self.state.uname)?;
+        let (qid, iounit) = self.s.create(
             self.client_id,
-            fm.qid,
+            qid.path,
             &name,
-            perm.apply_create_mask(parent.fm.perms),
+            perm.apply_create_mask(parent.perms),
             mode,
             &self.state.uname,
         )?;
 
         // fid is now changed to point to the newly created file rather than the parent
-        let qid = fm.as_qid();
-        self.state.fids.insert(fid, FidMeta::open(fm.qid, mode));
+        self.state.fids.insert(fid, FidMeta::open(qid.path, mode));
         self.with_shared_qids_mut(|qids| {
-            qids.entry(fm.qid)
-                .or_insert(QidMeta::new(fm, Some(parent.fm.qid)));
+            qids.entry(qid.path)
+                .or_insert(QidMeta::new(qid, Some(parent.qid.path)));
         });
 
         Ok(Rdata::Create { qid, iounit })
@@ -677,9 +666,9 @@ where
             .try_fid_meta(fid)?
             .check_open_for_write()?;
 
-        let fm = self.try_file_meta(fid)?;
+        let qid = self.try_map_fid(fid)?;
 
-        if fm.ty == FileType::DIRECTORY {
+        if qid.ty == FileType::DIRECTORY {
             return Err(E_ILLEGAL_DIRECTORY_WRITE.to_string());
         } else if offset > u32::MAX as u64 {
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
@@ -687,7 +676,7 @@ where
 
         let count = self.s.write(
             self.client_id,
-            fm.qid,
+            qid.path,
             offset as usize,
             data,
             &self.state.uname,
@@ -697,12 +686,12 @@ where
     }
 
     fn handle_remove(&mut self, fid: u32) -> Result<Rdata> {
-        let fm = self.try_file_meta(fid)?;
-        let res = self.s.remove(self.client_id, fm.qid, &self.state.uname);
+        let qid = self.try_map_fid(fid)?;
+        let res = self.s.remove(self.client_id, qid.path, &self.state.uname);
 
         // ensure that we clunk before erroring
-        self.s.clunk(self.client_id, fm.qid);
-        self.remove_client_id_from_open_qids(fm.qid);
+        self.s.clunk(self.client_id, qid.path);
+        self.remove_client_id_from_open_qids(qid.path);
 
         res?;
 

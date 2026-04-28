@@ -1,9 +1,11 @@
 //! Types for describing files in a 9p virtual filesystem
-use crate::sansio::protocol::{FileType, NineP, Qid, RawStat};
+use crate::sansio::protocol::{FileType, NineP, RawStat};
 use std::{
     mem::size_of,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+pub use crate::sansio::protocol::Qid;
 
 /// The default root qid for 9p server implementations
 pub const QID_ROOT: u64 = 0;
@@ -223,18 +225,22 @@ pub type IoUnit = u32;
 /// A machine independent directory entry
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Stat {
-    /// File metadata
-    pub fm: FileMeta,
+    /// The server qid for this file
+    pub qid: Qid,
+    /// The name of the file
+    pub name: String,
+    /// Owner
+    pub owner: String,
+    /// Group
+    pub group: String,
+    /// Permissions
+    pub perms: Perm,
     /// Size in bytes
     pub n_bytes: u64,
     /// Timestamp of last access
     pub last_accesses: SystemTime,
     /// Timestamp of last modification
     pub last_modified: SystemTime,
-    /// Owner
-    pub owner: String,
-    /// Group
-    pub group: String,
     /// User who last modified this entry
     pub last_modified_by: String,
 }
@@ -248,13 +254,12 @@ impl Stat {
         user_groups: &[String],
         mode: Mode,
     ) -> PermCheck {
-        let (can_read, can_write, can_exec) = self
-            .user_type(user, user_groups)
-            .flags_for_user(self.fm.perms);
+        let (can_read, can_write, can_exec) =
+            self.user_type(user, user_groups).flags_for_user(self.perms);
 
         PermCheck::new(
             mode,
-            self.fm.ty == FileType::DIRECTORY,
+            self.qid.ty == FileType::DIRECTORY,
             can_read,
             can_write,
             can_exec,
@@ -273,20 +278,22 @@ impl Stat {
 
     #[cfg(test)]
     /// Create a new stub [Stat] with default permissions and metadata.
-    pub(crate) fn stub(mut fm: FileMeta) -> Stat {
-        fm.perms = if fm.ty == FileType::DIRECTORY {
+    pub(crate) fn stub(qid: Qid, name: impl Into<String>) -> Stat {
+        let perms = if qid.ty == FileType::DIRECTORY {
             Perm::OWNER_READ | Perm::OWNER_EXEC
         } else {
             Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
         };
 
         Stat {
-            fm,
+            qid,
+            name: name.into(),
+            owner: "owner".to_string(),
+            group: "group".to_string(),
+            perms,
             n_bytes: 0,
             last_accesses: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
-            owner: "owner".to_string(),
-            group: "group".to_string(),
             last_modified_by: "owner".to_string(),
         }
     }
@@ -294,17 +301,11 @@ impl Stat {
 
 impl From<Stat> for RawStat {
     fn from(s: Stat) -> Self {
-        let qid = Qid {
-            ty: s.fm.ty,
-            version: 0,
-            path: s.fm.qid,
-        };
-
         let size = (size_of::<u16>()
             + size_of::<u32>() * 4
-            + qid.n_bytes()
+            + s.qid.n_bytes()
             + s.n_bytes.n_bytes()
-            + s.fm.name.n_bytes()
+            + s.name.n_bytes()
             + s.owner.n_bytes()
             + s.group.n_bytes()
             + s.last_modified_by.n_bytes()) as u16;
@@ -313,12 +314,12 @@ impl From<Stat> for RawStat {
             size,
             ty: u16::MAX,
             dev: u32::MAX,
-            qid,
-            mode: (Perm::from(s.fm.ty) | s.fm.perms).bits(),
+            qid: s.qid,
+            mode: (Perm::from(s.qid.ty) | s.perms).bits(),
             atime: systime_as_u32(s.last_accesses),
             mtime: systime_as_u32(s.last_modified),
             length: s.n_bytes,
-            name: s.fm.name.clone(),
+            name: s.name.clone(),
             uid: s.owner,
             gid: s.group,
             muid: s.last_modified_by,
@@ -331,17 +332,14 @@ impl TryFrom<RawStat> for Stat {
 
     fn try_from(r: RawStat) -> Result<Self, String> {
         Ok(Stat {
-            fm: FileMeta {
-                name: r.name,
-                ty: r.qid.ty,
-                qid: r.qid.path,
-                perms: Perm::new(r.mode & 0x0000FFFF),
-            },
+            qid: r.qid,
+            name: r.name,
+            owner: r.uid,
+            group: r.gid,
+            perms: Perm::new(r.mode & 0x0000FFFF),
             last_accesses: systime_from_u32(r.atime),
             last_modified: systime_from_u32(r.mtime),
             n_bytes: r.length,
-            owner: r.uid,
-            group: r.gid,
             last_modified_by: r.muid,
         })
     }
@@ -427,14 +425,14 @@ impl WStat {
     /// Returns `Ok` after applying set fields if the [Qid] of this update and the provided stat
     /// are equal, otherwise `Err`.
     pub fn try_apply(self, stat: &Stat) -> Result<Stat, Box<WStat>> {
-        if (self.qid.path != stat.fm.qid) || (self.qid.ty != stat.fm.ty) {
+        if (self.qid.path != stat.qid.path) || (self.qid.ty != stat.qid.ty) {
             return Err(Box::new(self));
         }
 
         let mut stat = stat.clone();
 
-        stat.fm.name = self.name.unwrap_or(stat.fm.name);
-        stat.fm.perms = self.perms.unwrap_or(stat.fm.perms);
+        stat.name = self.name.unwrap_or(stat.name);
+        stat.perms = self.perms.unwrap_or(stat.perms);
         stat.n_bytes = self.n_bytes.unwrap_or(stat.n_bytes);
         stat.last_accesses = self.last_accesses.unwrap_or(stat.last_accesses);
         stat.last_modified = self.last_modified.unwrap_or(stat.last_modified);
@@ -530,69 +528,6 @@ impl From<WStat> for RawStat {
     }
 }
 
-/// File meta-data
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FileMeta {
-    /// The name of the file
-    pub name: String,
-    /// The type of the file
-    pub ty: FileType,
-    /// The server Qid for this file
-    pub qid: u64,
-    /// Permissions
-    pub perms: Perm,
-}
-
-impl FileMeta {
-    pub(super) fn as_qid(&self) -> Qid {
-        Qid {
-            ty: self.ty,
-            version: 0,
-            path: self.qid,
-        }
-    }
-
-    /// Construct a new [FileMeta] for a directory.
-    pub fn dir(name: impl Into<String>, qid: u64, perms: Perm) -> Self {
-        Self {
-            name: name.into(),
-            ty: FileType::DIRECTORY,
-            qid,
-            perms,
-        }
-    }
-
-    /// Construct a new [FileMeta] for a regular file.
-    pub fn file(name: impl Into<String>, qid: u64, perms: Perm) -> Self {
-        Self {
-            name: name.into(),
-            ty: FileType::FILE,
-            qid,
-            perms,
-        }
-    }
-
-    /// Construct a new [FileMeta] for an append only file.
-    pub fn append_only_file(name: impl Into<String>, qid: u64, perms: Perm) -> Self {
-        Self {
-            name: name.into(),
-            ty: FileType::APPEND_ONLY,
-            qid,
-            perms,
-        }
-    }
-
-    /// Construct a new [FileMeta] for an exclusive file.
-    pub fn exclusive_file(name: impl Into<String>, qid: u64, perms: Perm) -> Self {
-        Self {
-            name: name.into(),
-            ty: FileType::EXCLUSIVE,
-            qid,
-            perms,
-        }
-    }
-}
-
 fn systime_as_u32(t: SystemTime) -> u32 {
     match t.duration_since(UNIX_EPOCH) {
         Ok(d) => d.as_secs() as u32,
@@ -619,17 +554,18 @@ mod tests {
 
     fn stat() -> Stat {
         Stat {
-            fm: FileMeta {
-                name: "test".to_string(),
+            qid: Qid {
                 ty: FileType::FILE,
-                qid: TEST_QID,
-                perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+                version: 0,
+                path: TEST_QID,
             },
+            name: "test".to_string(),
+            owner: "owner".to_string(),
+            group: "group".to_string(),
+            perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
             n_bytes: 100,
             last_accesses: UNIX_EPOCH,
             last_modified: UNIX_EPOCH,
-            owner: "owner".to_string(),
-            group: "group".to_string(),
             last_modified_by: "modifier".to_string(),
         }
     }
@@ -671,12 +607,12 @@ mod tests {
     #[test_case(wstat(), stat(); "unchanged")]
     #[test_case(
         WStat { name: Some("foo".into()), ..wstat() },
-        { let mut s = stat(); s.fm.name = "foo".into(); s };
+        { let mut s = stat(); s.name = "foo".into(); s };
         "name"
     )]
     #[test_case(
         WStat { perms: Some(Perm::OWNER_READ), ..wstat() },
-        { let mut s = stat(); s.fm.perms = Perm::OWNER_READ; s };
+        { let mut s = stat(); s.perms = Perm::OWNER_READ; s };
         "perms"
     )]
     #[test_case(
@@ -744,7 +680,7 @@ mod tests {
             ..RawStat::default()
         };
         let s = Stat::try_from(raw).unwrap();
-        assert_eq!(s.fm.perms, Perm::OWNER_READ | Perm::OWNER_WRITE);
+        assert_eq!(s.perms, Perm::OWNER_READ | Perm::OWNER_WRITE);
     }
 
     #[test_case(FileType::FILE; "regular file")]
@@ -755,8 +691,8 @@ mod tests {
     fn stat_to_rawstat_file_type_encoding_works(ty: FileType) {
         let user_perms = Perm::OWNER_READ | Perm::OWNER_WRITE;
         let mut s = stat();
-        s.fm.ty = ty;
-        s.fm.perms = user_perms;
+        s.qid.ty = ty;
+        s.perms = user_perms;
 
         let raw = RawStat::from(s);
 
@@ -785,7 +721,7 @@ mod tests {
 
     #[test]
     fn dir_stat_round_trips() {
-        let stat = Stat::stub(FileMeta::dir("foo", 0, Perm::empty()));
+        let stat = Stat::stub(Qid::dir(0), "foo");
         let raw = RawStat::from(stat.clone());
         let rt_stat = Stat::try_from(raw).unwrap();
 
@@ -811,7 +747,7 @@ mod tests {
     #[test_case("bob", &[], UserType::Other; "no group")]
     #[test]
     fn stat_user_type_returns_expected_type(user: &str, user_groups: &[&str], expected: UserType) {
-        let stat = Stat::stub(FileMeta::file("", 0, Perm::empty()));
+        let stat = Stat::stub(Qid::file(0), "");
         assert_eq!(stat.owner, "owner", "wrong owner from stub");
         assert_eq!(stat.group, "group", "wrong group from stub");
 

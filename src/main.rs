@@ -160,7 +160,7 @@ fn run_9p_command(action: Cmd9p, path: &str, mut client: UnixClient) -> io::Resu
 
         Cmd9p::List => {
             for stat in client.read_dir(path)?.into_iter() {
-                println!("{}", stat.fm.name);
+                println!("{}", stat.name);
             }
         }
     }

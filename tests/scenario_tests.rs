@@ -470,7 +470,7 @@ impl Fsys {
 
                 Fsys::ReadDir(path) => {
                     for stat in client.read_dir(&path)?.into_iter() {
-                        println!("read dir ({path}): {}", stat.fm.name);
+                        println!("read dir ({path}): {}", stat.name);
                     }
                 }
 
