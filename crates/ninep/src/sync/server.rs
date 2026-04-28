@@ -332,12 +332,12 @@ where
     S: Serve9p,
     U: SyncServerStream,
 {
-    /// Explicitly clunk all
+    /// Explicitly clunk all open fids
     fn clunk_and_clear(&mut self) {
-        for meta in self.state.fids.values() {
-            self.s.clunk(self.client_id, meta.qid);
+        let fids: Vec<u32> = self.state.fids.keys().copied().collect();
+        for fid in fids.into_iter() {
+            _ = self.handle_clunk(fid);
         }
-        self.state.fids.clear();
     }
 
     fn flush_waiters(&mut self, flush_handle: &mut FlushHandle, tag: u16) {
@@ -514,18 +514,6 @@ where
         }
     }
 
-    fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
-        match self.state.fids.remove(&fid) {
-            Some(meta) => {
-                self.s.clunk(self.client_id, meta.qid);
-                self.remove_client_id_from_open_qids(meta.qid);
-
-                Ok(Rdata::Clunk {})
-            }
-            None => Err(E_UNKNOWN_FID.to_string()),
-        }
-    }
-
     fn handle_stat(&mut self, fid: u32) -> Result<Rdata> {
         let qid = self.try_map_fid(fid)?;
         let s = self.s.stat(self.client_id, qid.path, &self.state.uname)?;
@@ -685,15 +673,33 @@ where
         Ok(Rdata::Write { count })
     }
 
+    fn _clunk<F>(&mut self, fid: u32, f: F) -> Result<()>
+    where
+        F: FnOnce(&mut Self, u64) -> Result<()>,
+    {
+        match self.state.fids.remove(&fid) {
+            Some(meta) => {
+                let res = f(self, meta.qid);
+                self.s.clunk(self.client_id, meta.qid);
+                self.remove_client_id_from_open_qids(meta.qid);
+
+                res
+            }
+
+            None => Err(E_UNKNOWN_FID.to_string()),
+        }
+    }
+
+    fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
+        self._clunk(fid, |_, _| Ok(()))?;
+
+        Ok(Rdata::Clunk {})
+    }
+
     fn handle_remove(&mut self, fid: u32) -> Result<Rdata> {
-        let qid = self.try_map_fid(fid)?;
-        let res = self.s.remove(self.client_id, qid.path, &self.state.uname);
-
-        // ensure that we clunk before erroring
-        self.s.clunk(self.client_id, qid.path);
-        self.remove_client_id_from_open_qids(qid.path);
-
-        res?;
+        self._clunk(fid, |sa, qid| {
+            sa.s.remove(sa.client_id, qid, &sa.state.uname)
+        })?;
 
         Ok(Rdata::Remove {})
     }

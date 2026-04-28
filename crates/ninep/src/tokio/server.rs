@@ -452,12 +452,12 @@ where
     S: AsyncServe9p,
     U: AsyncStream,
 {
-    /// Explicitly clunk all
+    /// Explicitly clunk all open fids
     async fn clunk_and_clear_async(&mut self) {
-        for meta in self.state.fids.values() {
-            self.s.clunk(self.client_id, meta.qid).await;
+        let fids: Vec<u32> = self.state.fids.keys().copied().collect();
+        for fid in fids.into_iter() {
+            _ = self.handle_clunk_async(fid).await;
         }
-        self.state.fids.clear();
     }
 
     async fn flush_waiters_async(&mut self, flush_handle: &mut FlushHandle, tag: u16) {
