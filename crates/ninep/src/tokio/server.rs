@@ -16,7 +16,7 @@ use crate::{
     sync::server::Serve9p,
     tokio::{AsyncNineP, AsyncStream},
 };
-use simple_coro::CoroState;
+use simple_coro::{CoroState, ReadyCoro};
 use std::{fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
     net::{TcpListener, UnixListener},
@@ -661,8 +661,18 @@ where
     }
 
     async fn handle_wstat_async(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
-        let wstat: WStat = raw_stat.into();
         let qid = self.try_map_fid(fid)?;
+        let uname = &self.state.uname;
+        let stat = self.s.stat(self.client_id, qid.path, uname).await?;
+        let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
+
+        let wstat: WStat = raw_stat.into();
+        self.run_perm_check_coro_async(
+            qid,
+            self.check_wstat_perms(&stat, &wstat, user_is_in_group),
+        )
+        .await?;
+
         self.s
             .write_stat(self.client_id, qid.path, wstat, &self.state.uname)
             .await?;
@@ -676,7 +686,17 @@ where
         let stat = self.s.stat(self.client_id, qid.path, uname).await?;
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
 
-        let coro = self.handle_perm_check(stat, user_is_in_group, mode);
+        self.run_perm_check_coro_async(qid, self.handle_perm_check(&stat, user_is_in_group, mode))
+            .await
+    }
+
+    async fn run_perm_check_coro_async(
+        &self,
+        qid: Qid,
+        coro: ReadyCoro<(), (Stat, bool), Result<()>, impl Future<Output = Result<()>>>,
+    ) -> Result<Qid> {
+        let uname = &self.state.uname;
+
         match coro.resume() {
             CoroState::Complete(res) => res?,
             CoroState::Pending(c, _) => {

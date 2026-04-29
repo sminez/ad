@@ -1,7 +1,7 @@
 //! Traits and structs for implementing a 9p fileserver
 use crate::{
     Result,
-    fs::{Mode, PermCheck, QID_ROOT, Stat},
+    fs::{Mode, PermCheck, QID_ROOT, Stat, WStat},
     sansio::protocol::{
         DEFAULT_MSIZE, Data, FileType, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata,
         Tmessage,
@@ -398,12 +398,12 @@ impl SessionState<Attached> {
 
     pub(crate) fn handle_perm_check<'s>(
         &'s self,
-        stat: Stat,
+        stat: &'s Stat,
         user_is_in_group: bool,
         mode: Mode,
     ) -> ReadyCoro<(), (Stat, bool), Result<()>, impl Future<Output = Result<()>> + use<'s>> {
         Coro::from(move |handle: Handle<(), (Stat, bool)>| async move {
-            match dbg!(stat.check_user_permissions(&self.state.uname, user_is_in_group, mode)) {
+            match stat.check_user_permissions(&self.state.uname, user_is_in_group, mode) {
                 PermCheck::Denied => return Err(E_PERMISSION_DENIED.into()),
                 PermCheck::Allowed => return Ok(()),
                 PermCheck::NeedWriteOnParent => (),
@@ -415,10 +415,57 @@ impl SessionState<Attached> {
                 user_is_in_group,
                 Mode::WRITE
             )) {
-                PermCheck::Allowed => Ok(()),
+                PermCheck::NeedWriteOnParent => unreachable!("only checking write"),
                 PermCheck::Denied => Err(E_PERMISSION_DENIED.into()),
-                PermCheck::NeedWriteOnParent => unreachable!(),
+                PermCheck::Allowed => Ok(()),
             }
+        })
+    }
+
+    pub(crate) fn check_wstat_perms<'s>(
+        &'s self,
+        stat: &'s Stat,
+        wstat: &'s WStat,
+        user_is_in_group: bool,
+    ) -> ReadyCoro<(), (Stat, bool), Result<()>, impl Future<Output = Result<()>> + use<'s>> {
+        Coro::from(move |handle: Handle<(), (Stat, bool)>| async move {
+            if stat.qid.path != wstat.qid.path {
+                return Err(E_PERMISSION_DENIED.into());
+            }
+
+            // Always illegal to change the directory bit
+            let stat_is_dir = stat.qid.ty == FileType::DIRECTORY;
+            let wstat_is_dir = wstat.qid.ty == FileType::DIRECTORY;
+            if stat_is_dir != wstat_is_dir {
+                return Err(E_PERMISSION_DENIED.into());
+            }
+
+            // Modify perms, last modified or group requires owner
+            if (wstat.perms.is_some() | wstat.last_modified.is_some() | wstat.group.is_some())
+                && stat.owner != self.state.uname
+            {
+                return Err(E_PERMISSION_DENIED.into());
+            }
+
+            // Modify length requires write on the file itself
+            if wstat.n_bytes.is_some() {
+                match stat.check_user_permissions(&self.state.uname, user_is_in_group, Mode::WRITE)
+                {
+                    PermCheck::NeedWriteOnParent => unreachable!("only checking write"),
+                    PermCheck::Denied => return Err(E_PERMISSION_DENIED.into()),
+                    PermCheck::Allowed => (),
+                }
+            }
+
+            // Modifying name requires write on parent directory
+            if wstat.name.is_some() {
+                let (parent_stat, user_is_in_parent_group) = handle.yield_value(()).await;
+                if !parent_stat.can_rename_child(&self.state.uname, user_is_in_parent_group) {
+                    return Err(E_PERMISSION_DENIED.into());
+                }
+            }
+
+            Ok(())
         })
     }
 }
@@ -1151,5 +1198,95 @@ mod tests {
         let expected_raw: RawStat = stat1.into();
 
         assert_eq!(raw_stats, vec![expected_raw]);
+    }
+
+    /// Base valid WStat for the following perm check tests
+    fn ws() -> WStat {
+        WStat::commit(Qid::file(1))
+    }
+
+    fn run_perm_check(wstat: WStat, uname: &str) -> Result<()> {
+        let mut stat = Stat::stub(Qid::file(1), "test-file");
+        stat.perms = Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::OWNER_EXEC | Perm::GROUP_WRITE;
+        assert_eq!(stat.owner, "owner");
+        assert_eq!(stat.group, "group");
+
+        let mut parent_stat = Stat::stub(Qid::dir(1), "test-dir");
+        parent_stat.perms = Perm::OWNER_WRITE | Perm::GROUP_WRITE;
+        assert_eq!(parent_stat.owner, "owner");
+        assert_eq!(parent_stat.group, "group");
+
+        let mut ss = attached_session_state();
+        ss.state.uname = uname.into();
+        let in_group = uname == "group-member";
+
+        let coro = ss.check_wstat_perms(&stat, &wstat, in_group);
+        match coro.resume() {
+            CoroState::Complete(res) => res,
+            CoroState::Pending(c, _) => c.send((parent_stat, in_group)).resume().unwrap(),
+        }
+    }
+
+    #[test_case(ws(), "owner"; "commit correct qid")]
+    #[test_case(
+        WStat { perms: Some(Perm::OTHER_READ), ..ws()},
+        "owner"; "owner change perm"
+    )]
+    #[test_case(
+        WStat { last_modified: Some(SystemTime::now()), ..ws()},
+        "owner"; "owner change last modified"
+    )]
+    #[test_case(
+        WStat { group: Some("new group".into()), ..ws()},
+        "owner"; "owner change group"
+    )]
+    #[test_case(
+        WStat { n_bytes: Some(1), ..ws()},
+        "owner"; "owner change n_bytes"
+    )]
+    #[test_case(
+        WStat { n_bytes: Some(1), ..ws()},
+        "group-member"; "other write change n_bytes"
+    )]
+    #[test_case(
+        WStat { name: Some("new".into()), ..ws()},
+        "owner"; "owner change name"
+    )]
+    #[test_case(
+        WStat { name: Some("new".into()), ..ws()},
+        "group-member"; "other write on parent change name"
+    )]
+    #[test]
+    fn check_wstat_perms_accepts_valid_wstats(wstat: WStat, uname: &str) {
+        let res = run_perm_check(wstat, uname);
+        assert!(res.is_ok());
+    }
+
+    #[test_case(WStat::commit(Qid::file(9)), "owner"; "commit wrong qid")]
+    #[test_case(WStat::commit(Qid::dir(1)), "owner"; "change dir bit")]
+    #[test_case(
+        WStat { perms: Some(Perm::OTHER_READ), ..ws()},
+        "non-owner"; "non-owner change perm"
+    )]
+    #[test_case(
+        WStat { last_modified: Some(SystemTime::now()), ..ws()},
+        "non-owner"; "non-owner change last modified"
+    )]
+    #[test_case(
+        WStat { group: Some("new group".into()), ..ws()},
+        "non-owner"; "non-owner change group"
+    )]
+    #[test_case(
+        WStat { n_bytes: Some(1), ..ws()},
+        "non-write"; "non-write change n_bytes"
+    )]
+    #[test_case(
+        WStat { name: Some("new".into()), ..ws()},
+        "non-write"; "non-write on parent change name"
+    )]
+    #[test]
+    fn check_wstat_perms_rejects_invalid_wstats(wstat: WStat, uname: &str) {
+        let res = run_perm_check(wstat, uname);
+        assert!(res.is_err());
     }
 }

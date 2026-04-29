@@ -248,7 +248,7 @@ pub struct Stat {
 impl Stat {
     /// Whether or not the provided user details are permitted to use the given [Mode] on the file
     /// described by this [Stat].
-    pub fn check_user_permissions(
+    pub(crate) fn check_user_permissions(
         &self,
         user: &str,
         user_is_in_group: bool,
@@ -265,6 +265,22 @@ impl Stat {
             can_write,
             can_exec,
         )
+    }
+
+    /// Whether or not the given user can rename a child of this directory.
+    ///
+    /// Returns `false` if not a directory, otherwise the value of the `can_write` flag from
+    /// [UserType::flags_for_user].
+    pub(crate) fn can_rename_child(&self, user: &str, user_is_in_group: bool) -> bool {
+        if self.qid.ty != FileType::DIRECTORY {
+            return false;
+        }
+
+        let (_, can_write, _) = self
+            .user_type(user, user_is_in_group)
+            .flags_for_user(self.perms);
+
+        can_write
     }
 
     fn user_type(&self, user: &str, user_is_in_group: bool) -> UserType {
@@ -348,7 +364,7 @@ impl TryFrom<RawStat> for Stat {
 
 /// The outcome of calling [Stat::check_user_permissions].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PermCheck {
+pub(crate) enum PermCheck {
     /// The user is allowed to open / create the file using the requested [Mode].
     Allowed,
     /// The user is not allowed to open / create the file using the requested [Mode].
@@ -421,6 +437,21 @@ pub struct WStat {
 }
 
 impl WStat {
+    /// A [WStat] with all fields other than `qid` as [None] requests that the server commits the
+    /// file associated with `qid` to stable storage.
+    pub fn commit(qid: Qid) -> Self {
+        WStat {
+            qid,
+            name: None,
+            perms: None,
+            n_bytes: None,
+            last_accesses: None,
+            last_modified: None,
+            group: None,
+            last_modified_by: None,
+        }
+    }
+
     /// Try to apply this wstat update to an existing [Stat].
     ///
     /// Returns `Ok` after applying set fields if the [Qid] of this update and the provided stat
@@ -551,7 +582,6 @@ mod tests {
     };
 
     const TEST_QID: u64 = 42;
-    const TEST_TY: FileType = FileType::FILE;
 
     fn stat() -> Stat {
         Stat {
@@ -574,7 +604,7 @@ mod tests {
     fn wstat() -> WStat {
         WStat {
             qid: Qid {
-                ty: TEST_TY,
+                ty: FileType::FILE,
                 version: 0,
                 path: TEST_QID,
             },
