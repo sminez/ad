@@ -1,6 +1,9 @@
 use crate::{
-    fs::{Qid, Stat},
-    sansio::client::{Error, Result},
+    fs::{Perm, Qid, Stat},
+    sansio::{
+        client::{Error, Result},
+        server::{E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE, E_UNKNOWN_ROOT},
+    },
     test_utils::{HELLO_QID, SUBDIR_QID, SUBFILE_QID, perm_file_stat},
 };
 use std::collections::HashMap;
@@ -31,6 +34,12 @@ pub(crate) enum Step {
     ReadDir {
         path: &'static str,
         res: Result<Vec<Stat>>,
+    },
+    Write {
+        path: &'static str,
+        offset: u64,
+        content: &'static [u8],
+        res: Result<usize>,
     },
     AssertState {
         next_fid: u32,
@@ -65,6 +74,15 @@ impl Step {
 
     fn read_dir(path: &'static str, res: Result<Vec<Stat>>) -> Self {
         Step::ReadDir { path, res }
+    }
+
+    fn write(path: &'static str, offset: u64, content: &'static [u8], res: Result<usize>) -> Self {
+        Step::Write {
+            path,
+            offset,
+            content,
+            res,
+        }
     }
 
     fn assert_state(next_fid: u32, fids: &[(&str, u32)]) -> Self {
@@ -110,6 +128,8 @@ macro_rules! generate_client_test_suite {
             walk_to_known_file_succeeds,
             walk_to_root_succeeds,
             walk_to_unknown_entry_errors,
+            write_with_permission_succeeds,
+            write_without_permission_fails,
         );
     };
 
@@ -140,7 +160,7 @@ pub(crate) fn connect_to_unknown_aname_errors() -> TestCase {
             "owner",
             "unknown",
             Err(Error::Rerror {
-                ename: "unknown root directory".to_string(),
+                ename: E_UNKNOWN_ROOT.into(),
             }),
         ),
         Step::assert_state(1, &[("/", 0)]),
@@ -204,7 +224,7 @@ pub(crate) fn walk_to_unknown_entry_errors() -> TestCase {
         Step::walk(
             "/missing",
             Err(Error::Rerror {
-                ename: "unknown file".into(),
+                ename: E_UNKNOWN_FILE.into(),
             }),
         ),
         Step::assert_state(2, &[("/", 0)]),
@@ -227,7 +247,7 @@ pub(crate) fn clunk_unknown_file_errors() -> TestCase {
         Step::clunk(
             42,
             Err(Error::Rerror {
-                ename: "unknown fid".to_string(),
+                ename: E_UNKNOWN_FID.into(),
             }),
         ),
         Step::assert_state(1, &[("/", 0)]),
@@ -257,7 +277,7 @@ pub(crate) fn read_unknown_file_errors() -> TestCase {
         Step::read(
             "/not/a/known/file",
             Err(Error::Rerror {
-                ename: "unknown file".into(),
+                ename: E_UNKNOWN_FILE.into(),
             }),
         ),
         Step::assert_state(2, &[("/", 0)]),
@@ -299,9 +319,40 @@ pub(crate) fn read_unknown_dir_errors() -> TestCase {
         Step::read_dir(
             "/not-a-dir",
             Err(Error::Rerror {
-                ename: "unknown file".into(),
+                ename: E_UNKNOWN_FILE.into(),
             }),
         ),
         Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn write_with_permission_succeeds() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::write("/hello", 0, b"data", Ok(4)),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn write_without_permission_fails() -> TestCase {
+    assert!(
+        !Stat::stub(Qid::file(0), "")
+            .perms
+            .contains(Perm::OTHER_WRITE),
+        "write perms not expected to include 'other'"
+    );
+
+    vec![
+        Step::connect("not-owner", "/", Ok(())),
+        Step::write(
+            "/hello",
+            0,
+            b"data",
+            Err(Error::Rerror {
+                ename: E_PERMISSION_DENIED.into(),
+            }),
+        ),
+        // Should still have walked to the file and cached the fid
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]
 }

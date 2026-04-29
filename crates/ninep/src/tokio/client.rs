@@ -443,6 +443,16 @@ mod tests {
                 assert_9p_client_result!("read dir", i, actual, res);
             }
 
+            Step::Write {
+                path,
+                offset,
+                content,
+                res,
+            } => {
+                let actual = client.write(path, offset, content).await;
+                assert_9p_client_result!("write", i, actual, res);
+            }
+
             Step::AssertState { next_fid, fids } => {
                 let st = client.state.lock().await;
                 assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
