@@ -6,10 +6,10 @@ srcDir="$1"
 cd $srcDir
 
 files="$(fd -t f -e rs)"
-sourceLines=$(ad -e 'y:#\[cfg\(test\)\]@*^}: x:.*\n: g:\S: v:^\s*//: P' $files | wc -l)
-sourceComment=$(ad -e 'y:#\[cfg\(test\)\]@*^}: x:.*\n: g:^\s*//: P' $files | wc -l)
-testLines=$(ad -e 'x:#\[cfg\(test\)\]@*^}: x:.*\n: g:\S: v:^\s*//: P' $files | wc -l)
-testComment=$(ad -e 'x:#\[cfg\(test\)\]@*^}: x:.*\n: g:^\s*//: P' $files | wc -l)
+sourceLines=$(ad -e 'y:#\[cfg\(test\)\]@*^}: x:.*\n: g:\S: v:^\s*//: p/{0}/' $files | wc -l)
+sourceComment=$(ad -e 'y:#\[cfg\(test\)\]@*^}: x:.*\n: g:^\s*//: p/{0}/' $files | wc -l)
+testLines=$(ad -e 'x:#\[cfg\(test\)\]@*^}: x:.*\n: g:\S: v:^\s*//: p/{0}/' $files | wc -l)
+testComment=$(ad -e 'x:#\[cfg\(test\)\]@*^}: x:.*\n: g:^\s*//: p/{0}/' $files | wc -l)
 
 echo "Rust Source lines in '$srcDir'"
 echo -e "  FILES       $(echo $files | wc -w)"
