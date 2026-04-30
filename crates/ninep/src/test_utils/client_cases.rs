@@ -1,5 +1,5 @@
 use crate::{
-    fs::{Perm, Qid, Stat},
+    fs::{Mode, Perm, Qid, Stat},
     sansio::{
         client::{Error, Result},
         server::{E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE, E_UNKNOWN_ROOT},
@@ -23,6 +23,13 @@ pub(crate) enum Step {
         fid: u32,
         res: Result<()>,
     },
+    Create {
+        dir: &'static str,
+        name: &'static str,
+        perms: Perm,
+        mode: Mode,
+        res: Result<()>,
+    },
     Walk {
         path: &'static str,
         res: Result<u32>,
@@ -34,6 +41,10 @@ pub(crate) enum Step {
     ReadDir {
         path: &'static str,
         res: Result<Vec<Stat>>,
+    },
+    Remove {
+        path: &'static str,
+        res: Result<()>,
     },
     Write {
         path: &'static str,
@@ -64,6 +75,22 @@ impl Step {
         Step::Clunk { fid, res }
     }
 
+    fn create(
+        dir: &'static str,
+        name: &'static str,
+        perms: Perm,
+        mode: Mode,
+        res: Result<()>,
+    ) -> Self {
+        Self::Create {
+            dir,
+            name,
+            perms,
+            mode,
+            res,
+        }
+    }
+
     fn walk(path: &'static str, res: Result<u32>) -> Self {
         Step::Walk { path, res }
     }
@@ -74,6 +101,10 @@ impl Step {
 
     fn read_dir(path: &'static str, res: Result<Vec<Stat>>) -> Self {
         Step::ReadDir { path, res }
+    }
+
+    fn remove(path: &'static str, res: Result<()>) -> Self {
+        Step::Remove { path, res }
     }
 
     fn write(path: &'static str, offset: u64, content: &'static [u8], res: Result<usize>) -> Self {
@@ -116,11 +147,14 @@ macro_rules! generate_client_test_suite {
             clunk_unknown_file_errors,
             connect_to_known_aname_succeeds,
             connect_to_unknown_aname_errors,
+            create_dir_succeeds,
+            create_file_succeeds,
             read_known_file_works,
             read_root_dir_works,
             read_subdir_works,
             read_unknown_dir_errors,
             read_unknown_file_errors,
+            remove_clears_fid_cache,
             repeated_read_works,
             walk_dot_is_root,
             walk_empty_path_is_root,
@@ -128,8 +162,8 @@ macro_rules! generate_client_test_suite {
             walk_to_known_file_succeeds,
             walk_to_root_succeeds,
             walk_to_unknown_entry_errors,
-            write_with_permission_succeeds,
             write_without_permission_fails,
+            write_with_permission_succeeds,
         );
     };
 
@@ -354,5 +388,35 @@ pub(crate) fn write_without_permission_fails() -> TestCase {
         ),
         // Should still have walked to the file and cached the fid
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn create_file_succeeds() -> TestCase {
+    let perms = Perm::FILE | Perm::OWNER_READ | Perm::OWNER_WRITE;
+
+    vec![
+        Step::connect_valid(),
+        Step::create("", "new.txt", perms, Mode::READ, Ok(())),
+        Step::assert_state(2, &[("/", 0), ("/new.txt", 1)]),
+    ]
+}
+
+pub(crate) fn create_dir_succeeds() -> TestCase {
+    let perms = Perm::DIRECTORY | Perm::OWNER_READ | Perm::OWNER_WRITE;
+
+    vec![
+        Step::connect_valid(),
+        Step::create("", "new-dir", perms, Mode::READ, Ok(())),
+        Step::assert_state(2, &[("/", 0), ("/new-dir", 1)]),
+    ]
+}
+
+pub(crate) fn remove_clears_fid_cache() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::walk("/hello", Ok(1)),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+        Step::remove("/hello", Ok(())),
+        Step::assert_state(2, &[("/", 0)]),
     ]
 }

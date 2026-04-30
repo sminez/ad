@@ -159,7 +159,7 @@ where
     pub async fn clunk(&mut self, fid: u32) -> Result<()> {
         if fid != 0 {
             self.send(0, Tdata::Clunk { fid }).await?;
-            self.state.lock().await.fids.retain(|_, v| *v != fid);
+            self.state.lock().await.fids.remove(fid);
         }
 
         Ok(())
@@ -167,9 +167,12 @@ where
 
     /// Free server side state for the given path.
     pub async fn clunk_path(&mut self, path: impl Into<String>) -> Result<()> {
-        let fid = match self.state.lock().await.fids.get(&path.into()) {
-            Some(fid) => *fid,
-            None => return Ok(()),
+        let fid = {
+            let state = self.state.lock().await;
+            match state.fids.fid_for_unnormalised_path(&path.into()) {
+                Some(fid) => fid,
+                None => return Ok(()),
+            }
         };
 
         self.clunk(fid).await
@@ -428,6 +431,17 @@ mod tests {
                 assert_9p_client_result!("clunk", i, actual, res);
             }
 
+            Step::Create {
+                dir,
+                name,
+                perms,
+                mode,
+                res,
+            } => {
+                let actual = client.create(dir, name, perms, mode).await;
+                assert_9p_client_result!("create", i, actual, res);
+            }
+
             Step::Walk { path, res } => {
                 let actual = client.walk(path).await;
                 assert_9p_client_result!("walk", i, actual, res);
@@ -443,6 +457,11 @@ mod tests {
                 assert_9p_client_result!("read dir", i, actual, res);
             }
 
+            Step::Remove { path, res } => {
+                let actual = client.remove(path).await;
+                assert_9p_client_result!("remove", i, actual, res);
+            }
+
             Step::Write {
                 path,
                 offset,
@@ -456,7 +475,7 @@ mod tests {
             Step::AssertState { next_fid, fids } => {
                 let st = client.state.lock().await;
                 assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
-                assert_eq!(st.fids, fids, "(step {i}) fids");
+                assert_eq!(st.fids.path_to_fid(), &fids, "(step {i}) fids");
             }
         }
     }

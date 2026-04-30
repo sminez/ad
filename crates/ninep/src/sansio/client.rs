@@ -25,11 +25,13 @@ pub enum Error {
         /// The response data received
         received: Box<Rdata>,
     },
+
     /// The server returned an error
     Rerror {
         /// The error string returned by the server
         ename: String,
     },
+
     /// An IO error was encountered
     Io(io::Error),
 }
@@ -72,9 +74,9 @@ impl From<Error> for io::Error {
 }
 
 macro_rules! expect_rmessage {
-    ($resp:expr, $variant:ident { $($field:ident),+, .. }) => {
+    ($resp:expr, $variant:ident { $($field:ident,)* .. }) => {
         match $resp.content {
-            Rdata::$variant { $($field),+, .. } => Ok(($($field),+)),
+            Rdata::$variant { $($field,)* .. } => Ok(($($field),*)),
             Rdata::Error { ename } => Err(Error::Rerror { ename }),
             m => Err(Error::ProtocolViolation {
                 expected: stringify!($variant).to_string(),
@@ -84,9 +86,9 @@ macro_rules! expect_rmessage {
 
     };
 
-    ($resp:expr, $variant:ident { $($field:ident),+ }) => {
+    ($resp:expr, $variant:ident { $($field:ident),* }) => {
         match $resp.content {
-            Rdata::$variant { $($field),+ } => Ok(($($field),+)),
+            Rdata::$variant { $($field),* } => Ok(($($field),*)),
             Rdata::Error { ename } => Err(Error::Rerror { ename }),
             m => Err(Error::ProtocolViolation {
                 expected: stringify!($variant).to_string(),
@@ -114,7 +116,7 @@ where
 #[derive(Debug)]
 pub(crate) struct State {
     pub(crate) msize: u32,
-    pub(crate) fids: HashMap<String, u32>,
+    pub(crate) fids: FidCache,
     pub(crate) next_fid: u32,
 }
 
@@ -122,7 +124,7 @@ impl Default for State {
     fn default() -> Self {
         State {
             msize: MSIZE,
-            fids: HashMap::from([("/".into(), 0)]),
+            fids: FidCache::default(),
             next_fid: 1,
         }
     }
@@ -177,68 +179,93 @@ impl State {
         })
     }
 
-    /// Associate the given path with a new fid.
+    /// Run a walk from root
     pub(crate) fn handle_walk(
         &mut self,
         path: String,
     ) -> Coro9p<u32, impl Future<Output = Result<u32>> + use<'_>> {
+        self.handle_walk_from(0, path)
+    }
+
+    /// Associate the given path with a new fid by walking from the starting `fid`.
+    ///
+    /// Panics if `fid` is not currently within the fid cache.
+    pub(crate) fn handle_walk_from(
+        &mut self,
+        mut fid: u32,
+        path: String,
+    ) -> Coro9p<u32, impl Future<Output = Result<u32>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            if let Some(fid) = self.fids.get(&path) {
+            let base = self
+                .fids
+                .path_for(fid)
+                .unwrap_or_else(|| panic!("unknown base fid for walk: {fid}"));
+
+            let target = normalise_path(&format!("{base}/{path}"));
+
+            // Already normalised so just key directly into the map
+            if let Some(fid) = self.fids.path_to_fid.get(&target) {
                 return Ok(*fid);
             }
 
             let wnames: Vec<String> = path
                 .split('/')
-                .filter(|elem| !["", "."].contains(elem))
+                .filter(|elem| !elem.is_empty() && *elem != ".")
                 .map(Into::into)
                 .collect();
 
             if wnames.is_empty() {
-                // walk to root but don't cache the path
-                return Ok(0);
+                // Walk to "." -> just return the fid we already have
+                return Ok(fid);
             }
 
-            let mut intermediate_fids = Vec::new();
-            let mut fid = 0;
-
+            let new_fid = self.next_fid();
             for chunk in wnames.chunks(MAXWELEM) {
-                let new_fid = self.next_fid();
-                let rmessage = handle
-                    .yield_value(Tmessage::new(
-                        0,
-                        Tdata::Walk {
-                            fid,
-                            new_fid,
-                            wnames: chunk.to_vec(),
-                        },
-                    ))
-                    .await;
-                let wqids = expect_rmessage!(rmessage, Walk { wqids })?;
+                let _wqids = handle
+                    .yield_from(self.walk_one(fid, new_fid, chunk.to_vec()))
+                    .await?;
 
-                if wqids.len() != chunk.len() {
-                    for fid in intermediate_fids.into_iter().rev() {
-                        _ = handle
-                            .yield_value(Tmessage::new(0, Tdata::Clunk { fid }))
-                            .await;
-                    }
-
-                    return err("walk failed before reaching full path");
-                }
-
-                intermediate_fids.push(new_fid);
+                // no-op once we've handled the first chunk. Allows us to create a single new fid
+                // and walk it all the way to the target without needing to create and clunk
+                // intermediate fids per-chunk.
                 fid = new_fid;
             }
 
-            let new_fid = intermediate_fids.pop().unwrap();
-            self.fids.insert(path, new_fid);
-
-            for fid in intermediate_fids {
-                _ = handle
-                    .yield_value(Tmessage::new(0, Tdata::Clunk { fid }))
-                    .await;
-            }
+            self.fids.insert(new_fid, target);
 
             Ok(new_fid)
+        })
+    }
+
+    fn walk_one(
+        &mut self,
+        fid: u32,
+        new_fid: u32,
+        wnames: Vec<String>,
+    ) -> Coro9p<Vec<Qid>, impl Future<Output = Result<Vec<Qid>>> + use<'_>> {
+        Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
+            let n_wnames = wnames.len();
+            let rmessage = handle
+                .yield_value(Tmessage::new(
+                    0,
+                    Tdata::Walk {
+                        fid,
+                        new_fid,
+                        wnames,
+                    },
+                ))
+                .await;
+            let wqids = expect_rmessage!(rmessage, Walk { wqids })?;
+
+            if wqids.len() != n_wnames && fid == new_fid {
+                _ = handle
+                    .yield_value(Tmessage::new(0, Tdata::Clunk { fid: new_fid }))
+                    .await;
+
+                return err("walk failed before reaching full path");
+            }
+
+            Ok(wqids)
         })
     }
 
@@ -406,9 +433,15 @@ impl State {
         mode: Mode,
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            let path = format!("{dir}/{name}");
-            let fid = handle.yield_from(self.handle_walk(dir)).await?;
+            let normalised_abspath = normalise_path(&format!("{dir}/{name}"));
+            let parent_fid = handle.yield_from(self.handle_walk(dir)).await?;
+            let fid = self.next_fid();
+
             handle
+                .yield_from(self.walk_one(parent_fid, fid, vec![]))
+                .await?;
+
+            let rmessage = handle
                 .yield_value(Tmessage::new(
                     0,
                     Tdata::Create {
@@ -420,7 +453,9 @@ impl State {
                 ))
                 .await;
 
-            self.fids.insert(path, fid);
+            let _qid = expect_rmessage!(rmessage, Create { qid, .. })?;
+
+            self.fids.insert(fid, normalised_abspath);
 
             Ok(())
         })
@@ -433,32 +468,90 @@ impl State {
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
-            handle
+            let rmessage = handle
                 .yield_value(Tmessage::new(0, Tdata::Remove { fid }))
                 .await;
+
+            expect_rmessage!(rmessage, Remove {})?;
+            self.fids.remove(fid);
 
             Ok(())
         })
     }
 }
 
+/// Bi-directional mapping of cached fid <-> absolute path relationships
+#[derive(Debug)]
+pub(crate) struct FidCache {
+    path_to_fid: HashMap<String, u32>,
+    fid_to_path: HashMap<u32, String>,
+}
+
+impl Default for FidCache {
+    fn default() -> Self {
+        Self {
+            path_to_fid: HashMap::from([("/".into(), 0)]),
+            fid_to_path: HashMap::from([(0, "/".into())]),
+        }
+    }
+}
+
+impl FidCache {
+    /// Lookup a `fid` using a user supplied path that will be normalised to create the cache key.
+    pub(crate) fn fid_for_unnormalised_path(&self, path: &str) -> Option<u32> {
+        self.path_to_fid.get(&normalise_path(path)).copied()
+    }
+
+    fn path_for(&self, fid: u32) -> Option<&str> {
+        self.fid_to_path.get(&fid).map(|s| s.as_str())
+    }
+
+    /// Path MUST be normalised before insert.
+    ///
+    /// Panics if `fid` or `path` are already in the cache.
+    fn insert(&mut self, fid: u32, path: String) {
+        if self.fid_to_path.contains_key(&fid) || self.path_to_fid.contains_key(&path) {
+            panic!("fid cache insert collision: ({fid}, {path})\ncache state: {self:?}")
+        }
+
+        self.path_to_fid.insert(path.clone(), fid);
+        self.fid_to_path.insert(fid, path);
+    }
+
+    pub(crate) fn remove(&mut self, fid: u32) -> Option<String> {
+        let path = self.fid_to_path.remove(&fid)?;
+        self.path_to_fid.remove(&path);
+
+        Some(path)
+    }
+
+    #[cfg(test)]
+    /// Used to assert on the cache state in client integration tests
+    pub(crate) fn path_to_fid(&self) -> &HashMap<String, u32> {
+        &self.path_to_fid
+    }
+}
+
+fn normalise_path(path: &str) -> String {
+    let elems: Vec<&str> = path
+        .split('/')
+        .filter(|elem| !elem.is_empty() && *elem != ".")
+        .collect();
+
+    format!("/{}", elems.join("/"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sansio::protocol::Qid;
-    use std::collections::HashMap;
 
     #[test]
     fn handle_walk_chunks_requests_to_maxwelem() {
         let parts: Vec<String> = (0..=MAXWELEM).map(|i| format!("n{i}")).collect();
         let full_path = parts.join("/");
 
-        let mut state = State {
-            msize: MSIZE,
-            fids: HashMap::new(),
-            next_fid: 1,
-        };
-
+        let mut state = State::default();
         let mut coro = state.handle_walk(full_path.clone());
 
         // first walk should be MAXWELEM elements
@@ -486,7 +579,7 @@ mod tests {
                 content,
                 Tdata::Walk {
                     fid: 1,
-                    new_fid: 2,
+                    new_fid: 1,
                     wnames: parts[MAXWELEM..].to_vec()
                 }
             );
@@ -499,29 +592,67 @@ mod tests {
             )
         });
 
-        // after the walks we should clunk the intermediate fid
-        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
-            assert_eq!(content, Tdata::Clunk { fid: 1 });
-            Rmessage::new(tag, Rdata::Clunk {})
-        });
-
         // the provided fid for the walk should now be bound to the full path
         let fid = coro.resume().unwrap().unwrap();
-        assert_eq!(fid, 2);
-        assert_eq!(state.fids.get(&full_path), Some(&2));
+        assert_eq!(fid, 1);
+        assert_eq!(state.fids.fid_for_unnormalised_path(&full_path), Some(1));
     }
 
     #[test]
-    fn handle_walk_empty_path_returns_root_without_messages() {
-        let mut state = State {
-            msize: MSIZE,
-            fids: HashMap::from([("/".to_string(), 0)]),
-            next_fid: 1,
-        };
+    fn fidcache_insert_updates_both_maps() {
+        let mut state = State::default();
+        state.fids.insert(1, "/hello".into());
 
-        let coro = state.handle_walk(String::new());
-        let fid = coro.resume().unwrap().unwrap();
+        assert_eq!(state.fids.fid_for_unnormalised_path("/hello"), Some(1));
+        assert_eq!(state.fids.path_for(1), Some("/hello"));
+    }
 
-        assert_eq!(fid, 0);
+    #[test]
+    fn fidcache_remove_updates_both_maps() {
+        let mut state = State::default();
+        state.fids.insert(1, "/hello".into());
+
+        assert_eq!(state.fids.remove(1), Some("/hello".into()));
+        assert_eq!(state.fids.fid_for_unnormalised_path("/hello"), None);
+        assert_eq!(state.fids.path_for(1), None);
+    }
+
+    #[test]
+    fn handle_walk_from_empty_path_returns_base_fid() {
+        let mut state = State::default();
+        state.fids.insert(1, "/subdir".into());
+
+        let fid = state
+            .handle_walk_from(1, "".to_string())
+            .resume()
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(fid, 1);
+        assert_eq!(state.next_fid, 1);
+        assert_eq!(state.fids.fid_for_unnormalised_path("/subdir"), Some(1));
+    }
+
+    #[test]
+    fn handle_walk_from_uses_base_path_for_cache_key() {
+        let mut state = State::default();
+        state.fids.insert(1, "/subdir".into());
+        state.fids.insert(2, "/subdir/child".into());
+
+        let fid = state
+            .handle_walk_from(1, "child".to_string())
+            .resume()
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(fid, 2);
+        assert_eq!(state.next_fid, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown base fid for walk: 42")]
+    fn handle_walk_from_panics_when_base_fid_not_cached() {
+        let mut state = State::default();
+        _ = state.handle_walk_from(42, "child".to_string()).resume();
     }
 }

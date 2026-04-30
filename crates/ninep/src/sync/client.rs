@@ -178,7 +178,7 @@ where
     pub fn clunk(&mut self, fid: u32) -> Result<()> {
         if fid != 0 {
             self.send(0, Tdata::Clunk { fid })?;
-            self.state().fids.retain(|_, v| *v != fid);
+            self.state().fids.remove(fid);
         }
 
         Ok(())
@@ -186,8 +186,8 @@ where
 
     /// Free server side state for the given path.
     pub fn clunk_path(&mut self, path: impl Into<String>) -> Result<()> {
-        let fid = match self.state().fids.get(&path.into()) {
-            Some(fid) => *fid,
+        let fid = match self.state().fids.fid_for_unnormalised_path(&path.into()) {
+            Some(fid) => fid,
             None => return Ok(()),
         };
 
@@ -433,6 +433,17 @@ mod tests {
                 assert_9p_client_result!("clunk", i, actual, res);
             }
 
+            Step::Create {
+                dir,
+                name,
+                perms,
+                mode,
+                res,
+            } => {
+                let actual = client.create(dir, name, perms, mode);
+                assert_9p_client_result!("create", i, actual, res);
+            }
+
             Step::Walk { path, res } => {
                 let actual = client.walk(path);
                 assert_9p_client_result!("walk", i, actual, res);
@@ -448,6 +459,11 @@ mod tests {
                 assert_9p_client_result!("read dir", i, actual, res);
             }
 
+            Step::Remove { path, res } => {
+                let actual = client.remove(path);
+                assert_9p_client_result!("remove", i, actual, res);
+            }
+
             Step::Write {
                 path,
                 offset,
@@ -461,7 +477,7 @@ mod tests {
             Step::AssertState { next_fid, fids } => {
                 let st = client.state();
                 assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
-                assert_eq!(st.fids, fids, "(step {i}) fids");
+                assert_eq!(st.fids.path_to_fid(), &fids, "(step {i}) fids");
             }
         }
     }
