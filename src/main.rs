@@ -131,7 +131,7 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
 fn run_9p(aname: String, action: Cmd9p, path: String) {
     let (ns, path) = match path.split_once('/') {
         Some((ns, path)) => (ns, path),
-        None => (path.as_str(), ""),
+        None => (path.as_str(), "/"),
     };
 
     let client = match client_for_ns(ns, aname) {
@@ -217,7 +217,7 @@ fn list_open_sessions() {
         let mut had_unresponsive = false;
 
         for ns in open_9p_sockets()?.into_iter() {
-            let mut client = match UnixClient::new_unix(&ns, "") {
+            let mut client = match UnixClient::new_unix(&ns, "/") {
                 Ok(client) => client,
                 Err(e) => {
                     println!("{ns}\tunresponsive: {e}");
@@ -246,7 +246,7 @@ fn remove_open_sockets() {
     fn inner() -> io::Result<()> {
         let d = socket_dir();
         for ns in open_9p_sockets()?.into_iter() {
-            if UnixClient::new_unix(&ns, "").is_err() {
+            if UnixClient::new_unix(&ns, "/").is_err() {
                 let path = d.join(ns);
                 println!("removing unresponsive ad socket at {}", path.display());
                 fs::remove_file(path)?;
