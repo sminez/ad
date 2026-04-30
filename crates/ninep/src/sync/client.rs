@@ -204,6 +204,16 @@ where
         run_9p_coro!(self, handle_read, path.into())
     }
 
+    /// Read up to `count` bytes from the file at `path` starting at byte `offset`.
+    pub fn read_from(
+        &mut self,
+        path: impl Into<String>,
+        offset: u64,
+        count: u32,
+    ) -> Result<Vec<u8>> {
+        run_9p_coro!(self, handle_read_from, path.into(), offset, count)
+    }
+
     /// Read the full contents of the file at `path` as utf-8 encoded text.
     pub fn read_str(&mut self, path: impl Into<String>) -> Result<String> {
         let bytes = run_9p_coro!(self, handle_read, path.into())?;
@@ -452,6 +462,16 @@ mod tests {
             Step::Read { path, res } => {
                 let actual = client.read_str(path);
                 assert_9p_client_result!("read", i, actual, res);
+            }
+
+            Step::ReadFrom {
+                path,
+                offset,
+                count,
+                res,
+            } => {
+                let actual = client.read_from(path, offset, count);
+                assert_9p_client_result!("read_at", i, actual, res);
             }
 
             Step::ReadDir { path, res } => {

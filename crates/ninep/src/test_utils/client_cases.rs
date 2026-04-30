@@ -38,6 +38,14 @@ pub(crate) enum Step {
         path: &'static str,
         res: Result<&'static str>,
     },
+
+    ReadFrom {
+        path: &'static str,
+        offset: u64,
+        count: u32,
+        res: Result<Vec<u8>>,
+    },
+
     ReadDir {
         path: &'static str,
         res: Result<Vec<Stat>>,
@@ -99,6 +107,15 @@ impl Step {
         Step::Read { path, res }
     }
 
+    fn read_from(path: &'static str, offset: u64, count: u32, res: Result<Vec<u8>>) -> Self {
+        Step::ReadFrom {
+            path,
+            offset,
+            count,
+            res,
+        }
+    }
+
     fn read_dir(path: &'static str, res: Result<Vec<Stat>>) -> Self {
         Step::ReadDir { path, res }
     }
@@ -149,6 +166,10 @@ macro_rules! generate_client_test_suite {
             connect_to_unknown_aname_errors,
             create_dir_succeeds,
             create_file_succeeds,
+            read_from_beyond_eof_is_empty,
+            read_from_known_file_works,
+            read_from_partial_to_eof_works,
+            read_from_unknown_file_errors,
             read_known_file_works,
             read_root_dir_works,
             read_subdir_works,
@@ -190,13 +211,7 @@ pub(crate) fn connect_to_known_aname_succeeds() -> TestCase {
 
 pub(crate) fn connect_to_unknown_aname_errors() -> TestCase {
     vec![
-        Step::connect(
-            "owner",
-            "unknown",
-            Err(Error::Rerror {
-                ename: E_UNKNOWN_ROOT.into(),
-            }),
-        ),
+        Step::connect("owner", "unknown", Err(Error::r(E_UNKNOWN_ROOT))),
         Step::assert_state(1, &[("/", 0)]),
     ]
 }
@@ -255,12 +270,7 @@ pub(crate) fn walk_same_path_doesnt_alter_next_fid() -> TestCase {
 pub(crate) fn walk_to_unknown_entry_errors() -> TestCase {
     vec![
         Step::connect_valid(),
-        Step::walk(
-            "/missing",
-            Err(Error::Rerror {
-                ename: E_UNKNOWN_FILE.into(),
-            }),
-        ),
+        Step::walk("/missing", Err(Error::r(E_UNKNOWN_FILE))),
         Step::assert_state(2, &[("/", 0)]),
     ]
 }
@@ -278,12 +288,7 @@ pub(crate) fn clunk_open_file_clears_fid_cache() -> TestCase {
 pub(crate) fn clunk_unknown_file_errors() -> TestCase {
     vec![
         Step::connect_valid(),
-        Step::clunk(
-            42,
-            Err(Error::Rerror {
-                ename: E_UNKNOWN_FID.into(),
-            }),
-        ),
+        Step::clunk(42, Err(Error::r(E_UNKNOWN_FID))),
         Step::assert_state(1, &[("/", 0)]),
     ]
 }
@@ -293,6 +298,38 @@ pub(crate) fn read_known_file_works() -> TestCase {
         Step::connect_valid(),
         Step::read("/hello", Ok("hello world")),
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn read_from_known_file_works() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_from("/hello", 6, 5, Ok(b"world".to_vec())),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn read_from_partial_to_eof_works() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_from("/hello", 8, 10, Ok(b"rld".to_vec())),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn read_from_beyond_eof_is_empty() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_from("/hello", 64, 10, Ok(vec![])),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn read_from_unknown_file_errors() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::read_from("/not/a/known/file", 0, 8, Err(Error::r(E_UNKNOWN_FILE))),
+        Step::assert_state(2, &[("/", 0)]),
     ]
 }
 
@@ -308,12 +345,7 @@ pub(crate) fn repeated_read_works() -> TestCase {
 pub(crate) fn read_unknown_file_errors() -> TestCase {
     vec![
         Step::connect_valid(),
-        Step::read(
-            "/not/a/known/file",
-            Err(Error::Rerror {
-                ename: E_UNKNOWN_FILE.into(),
-            }),
-        ),
+        Step::read("/not/a/known/file", Err(Error::r(E_UNKNOWN_FILE))),
         Step::assert_state(2, &[("/", 0)]),
     ]
 }
@@ -350,12 +382,7 @@ pub(crate) fn read_subdir_works() -> TestCase {
 pub(crate) fn read_unknown_dir_errors() -> TestCase {
     vec![
         Step::connect_valid(),
-        Step::read_dir(
-            "/not-a-dir",
-            Err(Error::Rerror {
-                ename: E_UNKNOWN_FILE.into(),
-            }),
-        ),
+        Step::read_dir("/not-a-dir", Err(Error::r(E_UNKNOWN_FILE))),
         Step::assert_state(2, &[("/", 0)]),
     ]
 }
@@ -378,14 +405,7 @@ pub(crate) fn write_without_permission_fails() -> TestCase {
 
     vec![
         Step::connect("not-owner", "/", Ok(())),
-        Step::write(
-            "/hello",
-            0,
-            b"data",
-            Err(Error::Rerror {
-                ename: E_PERMISSION_DENIED.into(),
-            }),
-        ),
+        Step::write("/hello", 0, b"data", Err(Error::r(E_PERMISSION_DENIED))),
         // Should still have walked to the file and cached the fid
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]

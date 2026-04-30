@@ -36,6 +36,15 @@ pub enum Error {
     Io(io::Error),
 }
 
+impl Error {
+    #[cfg(test)]
+    pub(crate) fn r(ename: impl Into<String>) -> Self {
+        Self::Rerror {
+            ename: ename.into(),
+        }
+    }
+}
+
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -319,25 +328,35 @@ impl State {
         })
     }
 
-    fn _read_all(
+    /// Read up to `count` bytes from the file at `path` starting at byte `offset`.
+    pub(crate) fn handle_read_from(
         &mut self,
         path: String,
+        mut offset: u64,
+        mut count: u32,
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
-            handle.yield_from(self.handle_open(fid, Mode::READ)).await?;
+            let (_qid, iounit) = handle.yield_from(self.handle_open(fid, Mode::READ)).await?;
 
-            let count = self.msize - IOHDRSZ;
+            let max_payload = self.msize - IOHDRSZ;
+            let iounit = if iounit == 0 {
+                max_payload
+            } else {
+                min(iounit, max_payload)
+            };
+
             let mut bytes = Vec::new();
-            let mut offset = 0;
-            loop {
+            while count > 0 {
+                let n = min(count, iounit);
                 let data = handle
-                    .yield_from(self.handle_read_count(fid, offset, count))
+                    .yield_from(self.handle_read_count(fid, offset, n))
                     .await?;
                 if data.is_empty() {
                     break;
                 }
                 offset += data.len() as u64;
+                count -= data.len() as u32;
                 bytes.extend(data);
             }
 
@@ -350,7 +369,7 @@ impl State {
         &mut self,
         path: String,
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
-        self._read_all(path)
+        self.handle_read_from(path, 0, u32::MAX)
     }
 
     /// Read the directory listing of the directory at `path`.
@@ -359,7 +378,9 @@ impl State {
         path: String,
     ) -> Coro9p<Vec<Stat>, impl Future<Output = Result<Vec<Stat>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            let bytes = handle.yield_from(self._read_all(path)).await?;
+            let bytes = handle
+                .yield_from(self.handle_read_from(path, 0, u32::MAX))
+                .await?;
             let mut buf = io::Cursor::new(bytes);
             let mut stats: Vec<Stat> = Vec::new();
             let sb = SharedBuf::default();
@@ -596,6 +617,36 @@ mod tests {
         let fid = coro.resume().unwrap().unwrap();
         assert_eq!(fid, 1);
         assert_eq!(state.fids.fid_for_unnormalised_path(&full_path), Some(1));
+    }
+
+    #[test]
+    fn handle_read_from_respects_requested_count_and_iounit() {
+        let mut state = State::default();
+        let mut coro = state.handle_read_from("/hello".to_string(), 0, 5);
+
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(content, Tdata::walk(0, 1, ["hello".to_string()]));
+            Rmessage::new(tag, Rdata::walk(vec![Qid::default()]))
+        });
+
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(content, Tdata::open(1, Mode::READ.bits()));
+            Rmessage::new(tag, Rdata::open(Qid::default(), 3))
+        });
+
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(content, Tdata::read(1, 0, 3));
+            Rmessage::new(tag, Rdata::read(b"abc".to_vec()))
+        });
+
+        coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
+            assert_eq!(content, Tdata::read(1, 3, 2));
+            Rmessage::new(tag, Rdata::read(b"de".to_vec()))
+        });
+
+        let bytes = coro.resume().unwrap().unwrap();
+
+        assert_eq!(bytes, b"abcde".to_vec());
     }
 
     #[test]
