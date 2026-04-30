@@ -3,8 +3,7 @@ use crate::{
     Result,
     fs::{Mode, PermCheck, QID_ROOT, Stat, WStat},
     sansio::protocol::{
-        DEFAULT_MSIZE, Data, FileType, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata,
-        Tmessage,
+        DEFAULT_MSIZE, FileType, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
 };
 use simple_coro::{Coro, Handle, ReadyCoro};
@@ -391,7 +390,7 @@ impl SessionState<Attached> {
                     buf.extend(tmp);
                 }
 
-                Ok(Some(Rdata::Read { data: Data(buf) }))
+                Ok(Some(Rdata::read(buf)))
             },
         )
     }
@@ -546,10 +545,7 @@ where
 
         self.msize = min(DEFAULT_MSIZE, msize);
 
-        Rdata::Version {
-            msize: self.msize,
-            version: server_version.to_string(),
-        }
+        Rdata::version(self.msize, server_version)
     }
 
     /// If the client does wish to authenticate, it must acquire and validate an afid using an auth
@@ -862,13 +858,7 @@ mod tests {
         let mut session = Server::new(()).new_session(());
         let resp = session.handle_version(client_msize, version.into());
 
-        assert_eq!(
-            resp,
-            Rdata::Version {
-                msize: expected_msize,
-                version: expected_version.into()
-            }
-        );
+        assert_eq!(resp, Rdata::version(expected_msize, expected_version));
     }
 
     #[test]
@@ -877,10 +867,7 @@ mod tests {
 
         session.handle_tmessage_unattached(Tmessage::new(
             u16::MAX,
-            Tdata::Version {
-                msize: DEFAULT_MSIZE,
-                version: "12345".into(),
-            },
+            Tdata::version(DEFAULT_MSIZE, "12345"),
         ));
 
         assert!(
@@ -924,12 +911,7 @@ mod tests {
 
         let resp = session.handle_tmessage_unattached(Tmessage::new(
             0,
-            Tdata::Attach {
-                fid: 0,
-                afid: AFID_NO_AUTH,
-                uname: "user".into(),
-                aname: "".into(),
-            },
+            Tdata::attach(0, AFID_NO_AUTH, "user", ""),
         ));
 
         match resp {
@@ -945,12 +927,7 @@ mod tests {
 
         let resp = session.handle_tmessage_unattached(Tmessage::new(
             0,
-            Tdata::Attach {
-                fid: 0,
-                afid: AFID_NO_AUTH,
-                uname: "user".into(),
-                aname: "unknown aname".into(),
-            },
+            Tdata::attach(0, AFID_NO_AUTH, "user", "unknown aname"),
         ));
 
         match resp {
@@ -966,12 +943,7 @@ mod tests {
 
         let resp = session.handle_tmessage_unattached(Tmessage::new(
             0,
-            Tdata::Attach {
-                fid: 0,
-                afid: AFID_NO_AUTH,
-                uname: "user".into(),
-                aname: "/".into(),
-            },
+            Tdata::attach(0, AFID_NO_AUTH, "user", "/"),
         ));
 
         match resp {

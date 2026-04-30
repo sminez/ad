@@ -344,11 +344,9 @@ impl From<Stat> for RawStat {
     }
 }
 
-impl TryFrom<RawStat> for Stat {
-    type Error = String;
-
-    fn try_from(r: RawStat) -> Result<Self, String> {
-        Ok(Stat {
+impl From<RawStat> for Stat {
+    fn from(r: RawStat) -> Self {
+        Stat {
             qid: r.qid,
             name: r.name,
             owner: r.uid,
@@ -358,7 +356,7 @@ impl TryFrom<RawStat> for Stat {
             last_modified: systime_from_u32(r.mtime),
             n_bytes: r.length,
             last_modified_by: r.muid,
-        })
+        }
     }
 }
 
@@ -710,7 +708,7 @@ mod tests {
             mode: (Perm::DIRECTORY | Perm::OWNER_READ | Perm::OWNER_WRITE).bits(),
             ..RawStat::default()
         };
-        let s = Stat::try_from(raw).unwrap();
+        let s = Stat::from(raw);
         assert_eq!(s.perms, Perm::OWNER_READ | Perm::OWNER_WRITE);
     }
 
@@ -754,7 +752,7 @@ mod tests {
     fn dir_stat_round_trips() {
         let stat = Stat::stub(Qid::dir(0), "foo");
         let raw = RawStat::from(stat.clone());
-        let rt_stat = Stat::try_from(raw).unwrap();
+        let rt_stat = Stat::from(raw);
 
         assert_eq!(stat, rt_stat);
     }

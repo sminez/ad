@@ -34,6 +34,12 @@ pub enum Error {
 
     /// An IO error was encountered
     Io(io::Error),
+
+    /// The version offered by the server is not supported
+    UnsupportedServerVersion {
+        /// The version requested by the server
+        version: String,
+    },
 }
 
 impl Error {
@@ -54,6 +60,10 @@ impl fmt::Display for Error {
             ),
             Self::Rerror { ename } => write!(f, "9p error: {ename}"),
             Self::Io(inner) => write!(f, "IO error: {inner}"),
+            Self::UnsupportedServerVersion { version } => write!(
+                f,
+                "requested server version of {VERSION} is not supported: got {version}"
+            ),
         }
     }
 }
@@ -155,29 +165,18 @@ impl State {
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let rmessage = handle
-                .yield_value(Tmessage::new(
-                    u16::MAX,
-                    Tdata::Version {
-                        msize: MSIZE,
-                        version: VERSION.to_string(),
-                    },
-                ))
+                .yield_value(Tmessage::new(u16::MAX, Tdata::version(MSIZE, VERSION)))
                 .await;
 
             let (msize, version) = expect_rmessage!(rmessage, Version { msize, version })?;
             if version != VERSION {
-                return err("server version not supported");
+                return Err(Error::UnsupportedServerVersion { version });
             }
 
             let rmessage = handle
                 .yield_value(Tmessage::new(
                     0,
-                    Tdata::Attach {
-                        fid: 0,
-                        afid: AFID_NO_AUTH,
-                        uname,
-                        aname,
-                    },
+                    Tdata::attach(0, AFID_NO_AUTH, uname, aname),
                 ))
                 .await;
 
@@ -255,20 +254,13 @@ impl State {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let n_wnames = wnames.len();
             let rmessage = handle
-                .yield_value(Tmessage::new(
-                    0,
-                    Tdata::Walk {
-                        fid,
-                        new_fid,
-                        wnames,
-                    },
-                ))
+                .yield_value(Tmessage::new(0, Tdata::walk(fid, new_fid, wnames)))
                 .await;
             let wqids = expect_rmessage!(rmessage, Walk { wqids })?;
 
             if wqids.len() != n_wnames && fid == new_fid {
                 _ = handle
-                    .yield_value(Tmessage::new(0, Tdata::Clunk { fid: new_fid }))
+                    .yield_value(Tmessage::new(0, Tdata::clunk(new_fid)))
                     .await;
 
                 return err("walk failed before reaching full path");
@@ -285,15 +277,11 @@ impl State {
     ) -> Coro9p<Stat, impl Future<Output = Result<Stat>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
-            let rmessage = handle
-                .yield_value(Tmessage::new(0, Tdata::Stat { fid }))
-                .await;
+            let rmessage = handle.yield_value(Tmessage::new(0, Tdata::stat(fid))).await;
 
             let raw_stat = expect_rmessage!(rmessage, Stat { stat, .. })?;
-            match raw_stat.try_into() {
-                Ok(s) => Ok(s),
-                Err(e) => err(e),
-            }
+
+            Ok(raw_stat.into())
         })
     }
 
@@ -305,7 +293,7 @@ impl State {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let mode = mode.bits();
             let rmsg = handle
-                .yield_value(Tmessage::new(0, Tdata::Open { fid, mode }))
+                .yield_value(Tmessage::new(0, Tdata::open(fid, mode)))
                 .await;
 
             expect_rmessage!(rmsg, Open { qid, iounit })
@@ -320,7 +308,7 @@ impl State {
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let rmessage = handle
-                .yield_value(Tmessage::new(0, Tdata::Read { fid, offset, count }))
+                .yield_value(Tmessage::new(0, Tdata::read(fid, offset, count)))
                 .await;
             let Data(data) = expect_rmessage!(rmessage, Read { data })?;
 
@@ -387,10 +375,7 @@ impl State {
 
             loop {
                 match RawStat::read_from(self.msize, &sb, &mut buf) {
-                    Ok(rs) => match rs.try_into() {
-                        Ok(s) => stats.push(s),
-                        Err(e) => return err(e),
-                    },
+                    Ok(rs) => stats.push(rs.into()),
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                     Err(e) => return Err(Error::Io(e)),
                 }
@@ -422,11 +407,7 @@ impl State {
                 let rmessage = handle
                     .yield_value(Tmessage::new(
                         0,
-                        Tdata::Write {
-                            fid,
-                            offset,
-                            data: Data(content[cur..end].to_vec()),
-                        },
+                        Tdata::write(fid, offset, content[cur..end].to_vec()),
                     ))
                     .await;
                 let n = expect_rmessage!(rmessage, Write { count })?;
@@ -465,12 +446,7 @@ impl State {
             let rmessage = handle
                 .yield_value(Tmessage::new(
                     0,
-                    Tdata::Create {
-                        fid,
-                        name,
-                        perm: perms.bits(),
-                        mode: mode.bits(),
-                    },
+                    Tdata::create(fid, name, perms.bits(), mode.bits()),
                 ))
                 .await;
 
@@ -490,7 +466,7 @@ impl State {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             let rmessage = handle
-                .yield_value(Tmessage::new(0, Tdata::Remove { fid }))
+                .yield_value(Tmessage::new(0, Tdata::remove(fid)))
                 .await;
 
             expect_rmessage!(rmessage, Remove {})?;
@@ -577,40 +553,14 @@ mod tests {
 
         // first walk should be MAXWELEM elements
         coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
-            assert_eq!(
-                content,
-                Tdata::Walk {
-                    fid: 0,
-                    new_fid: 1,
-                    wnames: parts[0..MAXWELEM].to_vec()
-                }
-            );
-
-            Rmessage::new(
-                tag,
-                Rdata::Walk {
-                    wqids: vec![Qid::default(); MAXWELEM],
-                },
-            )
+            assert_eq!(content, Tdata::walk(0, 1, parts[0..MAXWELEM].to_vec()));
+            Rmessage::new(tag, Rdata::walk(vec![Qid::default(); MAXWELEM]))
         });
 
         // second walk should contain the 17th element only
         coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
-            assert_eq!(
-                content,
-                Tdata::Walk {
-                    fid: 1,
-                    new_fid: 1,
-                    wnames: parts[MAXWELEM..].to_vec()
-                }
-            );
-
-            Rmessage::new(
-                tag,
-                Rdata::Walk {
-                    wqids: vec![Qid::default()],
-                },
-            )
+            assert_eq!(content, Tdata::walk(1, 1, parts[MAXWELEM..].to_vec()));
+            Rmessage::new(tag, Rdata::walk(vec![Qid::default()]))
         });
 
         // the provided fid for the walk should now be bound to the full path

@@ -6,7 +6,7 @@ use crate::{
     Result,
     fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
     sansio::{
-        protocol::{Data, FileType, RawStat, Rdata, Tdata, Tmessage},
+        protocol::{FileType, RawStat, Rdata, Tdata, Tmessage},
         server::{
             Attached, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME, E_ILLEGAL_DIRECTORY_WRITE,
             E_PERMISSION_DENIED, E_UNKNOWN_FID, Either, FidMeta, FlushHandle, QidMeta, Session,
@@ -491,7 +491,7 @@ where
                 // Blocked read came through so send it to the client
                 Some((tag, data)) = rx.recv() => {
                     self.stream
-                        .reply(self.msize, tag, Ok(Rdata::Read { data: Data(data) }))
+                        .reply(self.msize, tag, Ok(Rdata::read(data)))
                         .await;
                     self.flush_waiters_async(&mut flush_handle, tag).await;
                     continue;
@@ -627,7 +627,7 @@ where
 
         loop {
             coro = match coro.resume() {
-                CoroState::Complete(res) => return res.map(|wqids| Rdata::Walk { wqids }),
+                CoroState::Complete(res) => return res.map(Rdata::walk),
                 CoroState::Pending(c, (qid, name)) => {
                     let res = self.s.walk_one(client_id, qid, &name, &uname).await;
                     c.send(res)
@@ -728,7 +728,7 @@ where
             .expect("known fid after try_file_meta")
             .mode = Some(mode);
 
-        Ok(Rdata::Open { qid, iounit })
+        Ok(Rdata::open(qid, iounit))
     }
 
     async fn handle_create_async(
@@ -770,7 +770,7 @@ where
                 .or_insert(QidMeta::new(qid, Some(parent.qid.path)));
         });
 
-        Ok(Rdata::Create { qid, iounit })
+        Ok(Rdata::create(qid, iounit))
     }
 
     // The read request asks for count bytes of data from the file identified by fid, which must be
@@ -809,7 +809,7 @@ where
             CoroState::Pending(_, Either::R((qid, uname))) => {
                 let outcome = self.s.read(cid, qid, offset, count, &uname).await?;
                 match outcome {
-                    ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
+                    ReadOutcome::Immediate(data) => Ok(Some(Rdata::read(data))),
                     ReadOutcome::Blocked(mut chan) => {
                         let tx = tx.clone();
                         spawn(async move {
@@ -848,7 +848,7 @@ where
             )
             .await? as u32;
 
-        Ok(Rdata::Write { count })
+        Ok(Rdata::write(count))
     }
 
     async fn handle_remove_async(&mut self, fid: u32) -> Result<Rdata> {

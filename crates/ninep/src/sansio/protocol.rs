@@ -1006,11 +1006,9 @@ impl Rmessage {
         let n = self.n_bytes() as u32;
 
         if n > msize {
-            self.content = Rdata::Error {
-                ename: format!(
-                    "request generated a response of {n} bytes which is larger than msize ({msize})",
-                ),
-            };
+            self.content = Rdata::error(format!(
+                "request generated a response of {n} bytes which is larger than msize ({msize})",
+            ));
         }
     }
 }

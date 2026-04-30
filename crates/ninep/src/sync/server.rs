@@ -399,7 +399,7 @@ where
             let (tag, content) = match rx.recv() {
                 Ok(Some(Either::L(Tmessage { tag, content }))) => (tag, content),
                 Ok(Some(Either::R((tag, data)))) => {
-                    self.reply(tag, Ok(Rdata::Read { data: Data(data) }));
+                    self.reply(tag, Ok(Rdata::read(data)));
                     self.flush_waiters(&mut flush_handle, tag);
                     continue;
                 }
@@ -516,7 +516,7 @@ where
 
         loop {
             coro = match coro.resume() {
-                CoroState::Complete(res) => return res.map(|wqids| Rdata::Walk { wqids }),
+                CoroState::Complete(res) => return res.map(Rdata::walk),
                 CoroState::Pending(c, (qid, name)) => {
                     let res = self.s.walk_one(client_id, qid, &name, &uname);
                     c.send(res)
@@ -531,7 +531,7 @@ where
         let stat: RawStat = s.into();
         let size = stat.size + size_of::<u16>() as u16;
 
-        Ok(Rdata::Stat { size, stat })
+        Ok(Rdata::stat(size, stat))
     }
 
     fn handle_wstat(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
@@ -595,7 +595,7 @@ where
             .expect("known fid after try_file_meta")
             .mode = Some(mode);
 
-        Ok(Rdata::Open { qid, iounit })
+        Ok(Rdata::open(qid, iounit))
     }
 
     fn handle_create(&mut self, fid: u32, name: String, perm: Perm, mode: Mode) -> Result<Rdata> {
@@ -625,7 +625,7 @@ where
                 .or_insert(QidMeta::new(qid, Some(parent.qid.path)));
         });
 
-        Ok(Rdata::Create { qid, iounit })
+        Ok(Rdata::create(qid, iounit))
     }
 
     // The read request asks for count bytes of data from the file identified by fid, which must be
@@ -700,7 +700,7 @@ where
             &self.state.uname,
         )? as u32;
 
-        Ok(Rdata::Write { count })
+        Ok(Rdata::write(count))
     }
 
     fn _clunk<F>(&mut self, fid: u32, f: F) -> Result<()>
