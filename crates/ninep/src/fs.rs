@@ -1,11 +1,11 @@
 //! Types for describing files in a 9p virtual filesystem
-use crate::sansio::protocol::{FileType, NineP, RawStat};
+use crate::sansio::protocol::{NineP, RawStat};
 use std::{
     mem::size_of,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-pub use crate::sansio::protocol::Qid;
+pub use crate::sansio::protocol::{FileType, Qid};
 
 /// The default root qid for 9p server implementations
 pub const QID_ROOT: u64 = 0;
