@@ -1,5 +1,5 @@
 //! An asynchronous client implementation.
-use crate::{LogEvent, SessionMeta};
+use crate::{LogEvent, MiniBufferSelection, SessionMeta};
 use ninep::tokio::client::{ReadLineStream, Result, UnixClient};
 use std::{env, io, str::FromStr};
 use tokio::net::UnixStream;
@@ -196,6 +196,48 @@ impl Client {
             path: format!("buffers/{bufid}/body"),
             client: UnixClient::new_unix(&self.ns, "/").await?,
         })
+    }
+
+    /// Open the minibuffer with the provided `prompt` showing `lines`.
+    ///
+    /// If the user makes a selection (either from the provided lines or
+    pub async fn minibuffer_select<I, S>(
+        &mut self,
+        prompt: &str,
+        lines: I,
+    ) -> Result<MiniBufferSelection>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let lines: Vec<String> = lines
+            .into_iter()
+            .map(|elem| elem.as_ref().to_string())
+            .collect();
+        self.inner
+            .write_str("minibuffer", 0, &lines.join("\n"))
+            .await?;
+        self.ctl("minibuffer-prompt", prompt).await?;
+        let s = self.inner.read_str("minibuffer").await?;
+
+        if s.is_empty() {
+            Ok(MiniBufferSelection::Cancelled)
+        } else if let Some(index) = lines.iter().position(|elem| elem == &s) {
+            Ok(MiniBufferSelection::Line { index, content: s })
+        } else {
+            Ok(MiniBufferSelection::UserInput { content: s })
+        }
+    }
+
+    /// Prompt the user for input via the minibuffer.
+    ///
+    /// Returns `Ok(None)` if the user dismisses the minibuffer without input.
+    pub async fn minibuffer_prompt(&mut self, prompt: &str) -> Result<Option<String>> {
+        self.inner.write_str("minibuffer", 0, "").await?;
+        self.ctl("minibuffer-prompt", prompt).await?;
+        let s = self.inner.read_str("minibuffer").await?;
+
+        if s.is_empty() { Ok(None) } else { Ok(Some(s)) }
     }
 }
 

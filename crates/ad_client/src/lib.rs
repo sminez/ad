@@ -22,8 +22,27 @@ pub mod tokio;
 
 pub use ad_event::Source;
 
+/// The result of asking the user to provide input via the minibuffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MiniBufferSelection {
+    /// The user selected one of the provided input lines
+    Line {
+        /// The index of the selected line within the input
+        index: usize,
+        /// The content of the selected line
+        content: String,
+    },
+    /// The user provided a custom response that was not in the input
+    UserInput {
+        /// The content provided by the user
+        content: String,
+    },
+    /// The user dismissed the minibuffer without providing input
+    Cancelled,
+}
+
 /// Outcome of handling an event within an event filter
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     /// The event should be passed back to ad
     Passthrough,
@@ -153,7 +172,7 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
     let mut sessions = Vec::new();
 
     for ns in open_9p_sockets()?.into_iter() {
-        let mut client = match UnixClient::new_unix(&ns, "") {
+        let mut client = match UnixClient::new_unix(&ns, "/") {
             Ok(client) => client,
             Err(_) => {
                 sessions.push(SessionMeta {

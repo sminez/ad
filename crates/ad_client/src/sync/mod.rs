@@ -1,5 +1,5 @@
 //! A synchronous client implementation.
-use crate::{LogEvent, SessionMeta};
+use crate::{LogEvent, MiniBufferSelection, SessionMeta};
 use ninep::sync::client::{ReadLineIter, Result, UnixClient};
 use std::{
     env,
@@ -54,6 +54,7 @@ impl Client {
     pub(crate) fn write_event(&mut self, buffer: &str, event_line: &str) -> Result<()> {
         self.inner
             .write_str(format!("buffers/{buffer}/event"), 0, event_line)?;
+
         Ok(())
     }
 
@@ -188,6 +189,42 @@ impl Client {
             path: format!("buffers/{bufid}/body"),
             client: UnixClient::new_unix(&self.ns, "/")?,
         })
+    }
+
+    /// Open the minibuffer with the provided `prompt` showing `lines`.
+    ///
+    /// If the user makes a selection (either from the provided lines or
+    pub fn minibuffer_select<I, S>(&mut self, prompt: &str, lines: I) -> Result<MiniBufferSelection>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let lines: Vec<String> = lines
+            .into_iter()
+            .map(|elem| elem.as_ref().to_string())
+            .collect();
+        self.inner.write_str("minibuffer", 0, &lines.join("\n"))?;
+        self.ctl("minibuffer-prompt", prompt)?;
+        let s = self.inner.read_str("minibuffer")?;
+
+        if s.is_empty() {
+            Ok(MiniBufferSelection::Cancelled)
+        } else if let Some(index) = lines.iter().position(|elem| elem == &s) {
+            Ok(MiniBufferSelection::Line { index, content: s })
+        } else {
+            Ok(MiniBufferSelection::UserInput { content: s })
+        }
+    }
+
+    /// Prompt the user for input via the minibuffer.
+    ///
+    /// Returns `Ok(None)` if the user dismisses the minibuffer without input.
+    pub fn minibuffer_prompt(&mut self, prompt: &str) -> Result<Option<String>> {
+        self.inner.write_str("minibuffer", 0, "")?;
+        self.ctl("minibuffer-prompt", prompt)?;
+        let s = self.inner.read_str("minibuffer")?;
+
+        if s.is_empty() { Ok(None) } else { Ok(Some(s)) }
     }
 }
 
