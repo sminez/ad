@@ -39,6 +39,7 @@ pub(crate) const E_UNKNOWN_FILE: &str = "unknown file";
 pub(crate) const E_UNKNOWN_ROOT: &str = "unknown root directory";
 pub(crate) const E_WALK_OPEN_FID: &str = "cannot clone open fid";
 pub(crate) const E_WALK_NON_DIR: &str = "walk in non-directory";
+pub(crate) const E_WSTAT_WRONG_QID: &str = "wstat qid does not match target";
 
 pub(crate) const UNKNOWN_VERSION: &str = "unknown";
 pub(crate) const SUPPORTED_VERSION: &str = "9P2000";
@@ -429,7 +430,7 @@ impl SessionState<Attached> {
     ) -> ReadyCoro<(), (Stat, bool), Result<()>, impl Future<Output = Result<()>> + use<'s>> {
         Coro::from(move |handle: Handle<(), (Stat, bool)>| async move {
             if stat.qid.path != wstat.qid.path {
-                return Err(E_PERMISSION_DENIED.into());
+                return Err(E_WSTAT_WRONG_QID.into());
             }
 
             // Always illegal to change the directory bit

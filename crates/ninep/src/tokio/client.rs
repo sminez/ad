@@ -1,6 +1,6 @@
 //! A simple async 9p client for building out application specific client applications.
 use crate::{
-    fs::{Mode, Perm, Stat},
+    fs::{Mode, Perm, Stat, WStat},
     sansio::{
         client::{MSIZE, State, err},
         protocol::{Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
@@ -181,6 +181,12 @@ where
     /// Request the current [Stat] of the file or directory identified by the given path.
     pub async fn stat(&mut self, path: impl Into<String>) -> Result<Stat> {
         run_9p_coro!(self, handle_stat, path.into())
+    }
+
+    /// Attempt to modify the current [Stat] of the file or directory identified by the given path
+    /// using the given [WStat].
+    pub async fn write_stat(&mut self, path: impl Into<String>, wstat: WStat) -> Result<()> {
+        run_9p_coro!(self, handle_wstat, path.into(), wstat)
     }
 
     /// Read the full contents of the file at `path` as bytes.
@@ -490,6 +496,11 @@ mod tests {
             } => {
                 let actual = client.write(path, offset, content).await;
                 assert_9p_client_result!("write", i, actual, res);
+            }
+
+            Step::WriteStat { path, wstat, res } => {
+                let actual = client.write_stat(path, wstat).await;
+                assert_9p_client_result!("write stat", i, actual, res);
             }
 
             Step::AssertState { next_fid, fids } => {

@@ -1,11 +1,11 @@
 use crate::{
-    fs::{Mode, Perm, Qid, Stat},
+    fs::{Mode, Perm, Qid, Stat, WStat},
     sansio::{
-        protocol::{DEFAULT_MSIZE, FileType, NineP, RawStat, Rdata, Tdata},
+        protocol::{DEFAULT_MSIZE, NineP, RawStat, Rdata, Tdata},
         server::{
             AFID_NO_AUTH, ClientId, E_ALREADY_ATTACHED, E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME,
             E_NO_VERSION_MESSAGE, E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE,
-            E_WALK_OPEN_FID, SUPPORTED_VERSION,
+            E_WALK_OPEN_FID, E_WSTAT_WRONG_QID, SUPPORTED_VERSION,
         },
     },
     test_utils::{
@@ -65,11 +65,7 @@ impl Step {
         Step::req(
             tag,
             Tdata::attach(0, AFID_NO_AUTH, uname, "/"),
-            Rdata::attach(Qid {
-                ty: FileType::DIRECTORY,
-                version: 0,
-                path: ROOT_QID,
-            }),
+            Rdata::attach(Qid::dir(ROOT_QID)),
         )
     }
 
@@ -127,8 +123,8 @@ macro_rules! generate_server_test_suite {
             create_with_dot_name_returns_error,
             create_with_double_dot_name_returns_error,
             duplicate_attach_returns_error,
-            flush_returns_rflush,
             flush_pending_request_calls_filesystem_flush,
+            flush_returns_rflush,
             flush_waits_for_blocked_read,
             open_known_fid_returns_ropen,
             open_unknown_fid_returns_error,
@@ -143,14 +139,17 @@ macro_rules! generate_server_test_suite {
             version_sets_negotiated_msize,
             version_while_attached_clunks_all_open_fids,
             walk_first_element_missing_returns_error,
-            walk_partial_returns_partial_qids,
             walk_open_fid_returns_error_after_create,
             walk_open_fid_returns_error_after_open,
+            walk_partial_returns_partial_qids,
             walk_to_known_child_returns_qids,
             walk_unknown_fid_returns_error,
             write_to_directory_returns_error,
             write_to_file_returns_byte_count,
             write_with_oversized_offset_returns_error,
+            wstat_known_dir_succeeds,
+            wstat_known_file_succeeds,
+            wstat_mismatched_qid_errors,
         );
     };
 
@@ -368,7 +367,7 @@ pub(crate) fn walk_open_fid_returns_error_after_create() -> TestCase {
                 ClientId(0),
                 ROOT_QID,
                 "new.txt",
-                Perm::OWNER_READ,
+                Perm::OWNER_READ | Perm::OWNER_WRITE,
                 Mode::READ,
                 "owner",
             ),
@@ -550,7 +549,7 @@ pub(crate) fn create_in_directory_returns_rcreate() -> TestCase {
                 ClientId(0),
                 ROOT_QID,
                 "new.txt",
-                Perm::OWNER_READ,
+                Perm::OWNER_READ | Perm::OWNER_WRITE,
                 Mode::READ,
                 "owner",
             ),
@@ -580,7 +579,7 @@ pub(crate) fn create_masks_permissions_before_call() -> TestCase {
                 ClientId(0),
                 ROOT_QID,
                 "masked.txt",
-                Perm::OWNER_READ,
+                Perm::OWNER_READ | Perm::OWNER_WRITE,
                 Mode::READ,
                 "owner",
             ),
@@ -752,6 +751,56 @@ pub(crate) fn permissions_gate_open_calls_for_other() -> TestCase {
             Call::stat(ClientId(0), PERMFILE_QID, "other"),
             Call::stat(ClientId(0), PERMFILE_QID, "other"),
             Call::stat(ClientId(0), PERMFILE_QID, "other"),
+        ]),
+    ]
+}
+
+// Perm checks around wstat behaviour are all covered in the sansio::server tests.
+
+pub(crate) fn wstat_known_file_succeeds() -> TestCase {
+    let wstat = WStat::commit(Qid::file(HELLO_QID));
+
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
+        Step::req(3, wstat.clone().into_tdata(1), Rdata::wstat()),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::write_stat(ClientId(0), HELLO_QID, wstat, "owner"),
+        ]),
+    ]
+}
+
+pub(crate) fn wstat_known_dir_succeeds() -> TestCase {
+    let wstat = WStat::commit(Qid::dir(SUBDIR_QID));
+
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, &["subdir"], &[dir_qid(SUBDIR_QID)]),
+        Step::req(3, wstat.clone().into_tdata(1), Rdata::wstat()),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "subdir", "owner"),
+            Call::stat(ClientId(0), SUBDIR_QID, "owner"),
+            Call::write_stat(ClientId(0), SUBDIR_QID, wstat, "owner"),
+        ]),
+    ]
+}
+
+/// WStat for HELLO_QID but sending against SUBDIR_QID
+pub(crate) fn wstat_mismatched_qid_errors() -> TestCase {
+    let wstat = WStat::commit(Qid::file(HELLO_QID));
+
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, &["subdir"], &[dir_qid(SUBDIR_QID)]),
+        Step::req(3, wstat.into_tdata(1), Rdata::error(E_WSTAT_WRONG_QID)),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "subdir", "owner"),
+            Call::stat(ClientId(0), SUBDIR_QID, "owner"),
         ]),
     ]
 }

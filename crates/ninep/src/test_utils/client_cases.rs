@@ -1,8 +1,10 @@
 use crate::{
-    fs::{Mode, Perm, Qid, Stat},
+    fs::{Mode, Perm, Qid, Stat, WStat},
     sansio::{
         client::{Error, Result},
-        server::{E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE, E_UNKNOWN_ROOT},
+        server::{
+            E_PERMISSION_DENIED, E_UNKNOWN_FID, E_UNKNOWN_FILE, E_UNKNOWN_ROOT, E_WSTAT_WRONG_QID,
+        },
     },
     test_utils::{HELLO_QID, SUBDIR_QID, SUBFILE_QID, perm_file_stat},
 };
@@ -59,6 +61,11 @@ pub(crate) enum Step {
         offset: u64,
         content: &'static [u8],
         res: Result<usize>,
+    },
+    WriteStat {
+        path: &'static str,
+        wstat: WStat,
+        res: Result<()>,
     },
     AssertState {
         next_fid: u32,
@@ -133,6 +140,10 @@ impl Step {
         }
     }
 
+    fn write_stat(path: &'static str, wstat: WStat, res: Result<()>) -> Self {
+        Step::WriteStat { path, wstat, res }
+    }
+
     fn assert_state(next_fid: u32, fids: &[(&str, u32)]) -> Self {
         Self::AssertState {
             next_fid,
@@ -183,6 +194,8 @@ macro_rules! generate_client_test_suite {
             walk_to_known_file_succeeds,
             walk_to_root_succeeds,
             walk_to_unknown_entry_errors,
+            write_stat_successful_clears_fid_cache,
+            write_stat_error_does_not_clear_fid_cache,
             write_without_permission_fails,
             write_with_permission_succeeds,
         );
@@ -438,5 +451,31 @@ pub(crate) fn remove_clears_fid_cache() -> TestCase {
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
         Step::remove("/hello", Ok(())),
         Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+// Perm checks around wstat behaviour are all covered in the sansio::server tests.
+
+pub(crate) fn write_stat_successful_clears_fid_cache() -> TestCase {
+    let wstat = WStat::commit(Qid::file(HELLO_QID));
+
+    vec![
+        Step::connect_valid(),
+        Step::walk("/hello", Ok(1)),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+        Step::write_stat("/hello", wstat, Ok(())),
+        Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn write_stat_error_does_not_clear_fid_cache() -> TestCase {
+    let wstat = WStat::commit(Qid::file(SUBDIR_QID)); // wrong qid
+
+    vec![
+        Step::connect_valid(),
+        Step::walk("/hello", Ok(1)),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+        Step::write_stat("/hello", wstat, Err(Error::r(E_WSTAT_WRONG_QID))),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]
 }

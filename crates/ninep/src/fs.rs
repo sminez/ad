@@ -1,5 +1,5 @@
 //! Types for describing files in a 9p virtual filesystem
-use crate::sansio::protocol::{NineP, RawStat};
+use crate::sansio::protocol::{NineP, RawStat, Tdata};
 use std::{
     mem::size_of,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -297,7 +297,7 @@ impl Stat {
     /// Create a new stub [Stat] with default permissions and metadata.
     pub(crate) fn stub(qid: Qid, name: impl Into<String>) -> Stat {
         let perms = if qid.ty == FileType::DIRECTORY {
-            Perm::OWNER_READ | Perm::OWNER_EXEC
+            Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::OWNER_EXEC
         } else {
             Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::GROUP_READ | Perm::OTHER_READ
         };
@@ -435,6 +435,13 @@ pub struct WStat {
 }
 
 impl WStat {
+    pub(crate) fn into_tdata(self, fid: u32) -> Tdata {
+        let rstat: RawStat = self.into();
+        let size = rstat.n_bytes();
+
+        Tdata::wstat(fid, size as u16, rstat)
+    }
+
     /// A [WStat] with all fields other than `qid` as [None] requests that the server commits the
     /// file associated with `qid` to stable storage.
     pub fn commit(qid: Qid) -> Self {

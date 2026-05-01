@@ -1,6 +1,6 @@
 //! Traits and structs for implementing a 9p client
 use crate::{
-    fs::{IoUnit, Mode, Perm, Stat},
+    fs::{IoUnit, Mode, Perm, Stat, WStat},
     sansio::{
         protocol::{
             Data, IOHDRSZ, MAXWELEM, Qid, RawStat, Rdata, Rmessage, SharedBuf, Tdata, Tmessage,
@@ -282,6 +282,30 @@ impl State {
             let raw_stat = expect_rmessage!(rmessage, Stat { stat, .. })?;
 
             Ok(raw_stat.into())
+        })
+    }
+
+    /// Attempt to modify the current [Stat] of the file or directory identified by the given path
+    /// using the given [WStat].
+    pub(crate) fn handle_wstat(
+        &mut self,
+        path: String,
+        wstat: WStat,
+    ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
+        Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
+            let fid = handle.yield_from(self.handle_walk(path)).await?;
+            let rmessage = handle
+                .yield_value(Tmessage::new(0, wstat.into_tdata(fid)))
+                .await;
+
+            expect_rmessage!(rmessage, Wstat {})?;
+
+            // If our update was successful then our cached state is potentially invalid. Rather
+            // than trying to be "smart" about how we handle the cache, we simply evict and re-walk
+            // this path the next time it is needed.
+            self.fids.remove(fid);
+
+            Ok(())
         })
     }
 

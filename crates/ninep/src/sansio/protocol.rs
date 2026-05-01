@@ -1,7 +1,7 @@
 //! Sans-io 9p protocol implementation
 //!
 //!   <http://man.cat-v.org/plan_9/5/>
-use crate::{fs::WStat, sync::SyncNineP};
+use crate::sync::SyncNineP;
 use simple_coro::{Coro, CoroState, Handle, ReadyCoro};
 use std::{
     cell::UnsafeCell,
@@ -962,7 +962,7 @@ impl_tdata! {
         /// The size of the following stat
         size: u16, u16;
         /// The stat data to be written
-        stat: RawStat, WStat;
+        stat: RawStat, RawStat;
     }
 }
 
