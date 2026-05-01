@@ -1,4 +1,4 @@
-use ad_client::{Client, LogEvent};
+use ad_client::{LogEvent, sync::Client};
 use anyhow::Context;
 use std::{
     env,

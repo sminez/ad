@@ -4,7 +4,10 @@
 //! - Hitting return at the end of the buffer will send that line to the shell.
 //! - Running "clear" will clear the ad buffer
 //! - Running "exit" will close the shell subprocess as well as the ad buffer
-use ad_client::{Client, EventFilter, Outcome, Source};
+use ad_client::{
+    Outcome, Source,
+    sync::{Client, EventFilter},
+};
 use anyhow::Context;
 use std::{
     env,

@@ -1,4 +1,7 @@
-use ad_client::{Client, EventFilter, Outcome, Source};
+use ad_client::{
+    Outcome, Source,
+    sync::{Client, EventFilter},
+};
 use std::io;
 
 fn main() -> io::Result<()> {

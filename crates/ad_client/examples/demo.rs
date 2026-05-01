@@ -1,5 +1,5 @@
 //! A simple demo of the client behaviour
-use ad_client::Client;
+use ad_client::sync::Client;
 use std::io;
 
 fn main() -> io::Result<()> {

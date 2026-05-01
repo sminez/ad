@@ -1,27 +1,14 @@
 //! Handling of event filtering
-use crate::Client;
+use crate::{Outcome, tokio::Client};
 use ad_event::{FsysEvent, Kind, Source};
-use ninep::sync::client::Result;
+use ninep::tokio::client::Result;
 use std::io;
-
-/// Outcome of handling an event within an [EventFilter]
-#[derive(Debug)]
-pub enum Outcome {
-    /// The event should be passed back to ad
-    Passthrough,
-    /// The event should not be passed back to ad
-    Handled,
-    /// The event should be passed back to ad and then the filter should exit
-    PassthroughAndExit,
-    /// The event should not be passed back to ad and the filter should exit
-    Exit,
-}
 
 /// An event filter takes control over a buffer's events file and handles processing the events
 /// that come through. Any events without a corresponding handler are written back to ad for
 /// internal processing.
-#[allow(unused_variables)]
-pub trait EventFilter {
+#[expect(unused_variables)]
+pub trait AsyncEventFilter {
     /// Handle text being inserted into the buffer body
     fn handle_insert(
         &mut self,
@@ -30,8 +17,8 @@ pub trait EventFilter {
         to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Handled)
+    ) -> impl Future<Output = io::Result<Outcome>> + Send {
+        async { Ok(Outcome::Handled) }
     }
 
     /// Handle text being deleted from the buffer body
@@ -41,8 +28,8 @@ pub trait EventFilter {
         from: usize,
         to: usize,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Handled)
+    ) -> impl Future<Output = io::Result<Outcome>> + Send {
+        async { Ok(Outcome::Handled) }
     }
 
     /// Handle a load event in the body
@@ -53,8 +40,8 @@ pub trait EventFilter {
         to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Passthrough)
+    ) -> impl Future<Output = io::Result<Outcome>> + Send {
+        async { Ok(Outcome::Passthrough) }
     }
 
     /// Handle an execute event in the body
@@ -65,37 +52,55 @@ pub trait EventFilter {
         to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Passthrough)
+    ) -> impl Future<Output = io::Result<Outcome>> + Send {
+        async { Ok(Outcome::Passthrough) }
     }
 }
 
-pub(crate) fn run_filter<F>(buffer: &str, mut filter: F, client: &mut Client) -> Result<()>
+pub(super) async fn run_filter<F>(buffer: &str, mut filter: F, client: &mut Client) -> Result<()>
 where
-    F: EventFilter,
+    F: AsyncEventFilter,
 {
-    for line in client.event_lines(buffer)? {
+    let mut stream = client.event_lines(buffer).await?;
+
+    while let Some(line) = stream.next().await {
         let evt = FsysEvent::try_from_str(&line).map_err(io::Error::other)?;
 
         let outcome = match evt.kind {
             Kind::LoadBody => {
-                filter.handle_load(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)?
+                filter
+                    .handle_load(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
+                    .await?
             }
             Kind::ExecuteBody => {
-                filter.handle_execute(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)?
+                filter
+                    .handle_execute(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
+                    .await?
             }
             Kind::InsertBody => {
-                filter.handle_insert(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)?
+                filter
+                    .handle_insert(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
+                    .await?
             }
-            Kind::DeleteBody => filter.handle_delete(evt.source, evt.ch_from, evt.ch_to, client)?,
+            Kind::DeleteBody => {
+                filter
+                    .handle_delete(evt.source, evt.ch_from, evt.ch_to, client)
+                    .await?
+            }
             _ => Outcome::Passthrough,
         };
 
         match outcome {
             Outcome::Handled => (),
-            Outcome::Passthrough => client.write_event(buffer, &evt.as_event_file_line())?,
+            Outcome::Passthrough => {
+                client
+                    .write_event(buffer, &evt.as_event_file_line())
+                    .await?
+            }
             Outcome::PassthroughAndExit => {
-                client.write_event(buffer, &evt.as_event_file_line())?;
+                client
+                    .write_event(buffer, &evt.as_event_file_line())
+                    .await?;
                 return Ok(());
             }
             Outcome::Exit => return Ok(()),

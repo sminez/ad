@@ -16,7 +16,11 @@ include = [
 keywords = [ "terminal", "editor", "text-editor", ]
 categories = [ "development-tools", "text-editors", "command-line-utilities" ]
 
+[features]
+default = ["tokio"]
+tokio = ["dep:tokio", "ninep/tokio"]
 
 [dependencies]
 ad_event = { version = "0.4", path = "../ad_event" }
-ninep = { version = "0.6", path = "../ninep" }
+ninep = { version = "0.6", path = "../ninep", default-features = false }
+tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync"], optional = true }

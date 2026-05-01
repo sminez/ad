@@ -1,0 +1,228 @@
+//! A synchronous client implementation.
+use crate::{LogEvent, SessionMeta};
+use ninep::sync::client::{ReadLineIter, Result, UnixClient};
+use std::{
+    env,
+    io::{self, Write},
+    os::unix::net::UnixStream,
+    str::FromStr,
+};
+
+mod event;
+
+pub use event::EventFilter;
+
+/// A simple synchronous 9p client for ad
+#[derive(Debug, Clone)]
+pub struct Client {
+    inner: UnixClient,
+    ns: String,
+}
+
+impl Client {
+    /// Create a new client connected to `ad` over it's 9p unix socket
+    pub fn new() -> Result<Self> {
+        let ns = match env::var("AD_PID") {
+            Ok(pid) => format!("ad-{pid}"),
+            Err(_) => "ad".to_string(),
+        };
+
+        Ok(Self {
+            inner: UnixClient::new_unix(&ns, "/")?,
+            ns,
+        })
+    }
+
+    /// Create a new client connected to the `ad` session with the given pid
+    /// over it's 9p unix socket.
+    ///
+    /// When running under ad, the [Client::new] method will automatically find
+    /// and connect to it's parent session.
+    pub fn new_for_pid(pid: &str) -> Result<Self> {
+        let ns = format!("ad-{pid}");
+
+        Ok(Self {
+            inner: UnixClient::new_unix(&ns, "/")?,
+            ns,
+        })
+    }
+
+    pub(crate) fn event_lines(&mut self, buffer: &str) -> Result<ReadLineIter<UnixStream>> {
+        self.inner.iter_lines(format!("buffers/{buffer}/event"))
+    }
+
+    pub(crate) fn write_event(&mut self, buffer: &str, event_line: &str) -> Result<()> {
+        self.inner
+            .write_str(format!("buffers/{buffer}/event"), 0, event_line)?;
+        Ok(())
+    }
+
+    /// Iterate over the log events emitted by ad
+    pub fn log_events(&mut self) -> Result<impl Iterator<Item = Result<LogEvent>> + use<>> {
+        Ok(self
+            .inner
+            .iter_lines("log")?
+            .map(|line| LogEvent::from_str(&line)))
+    }
+
+    /// Get the currently active buffer id.
+    pub fn current_buffer(&mut self) -> Result<String> {
+        self.inner.read_str("buffers/current")
+    }
+
+    fn _read_buffer_file(&mut self, buffer: &str, file: &str) -> Result<String> {
+        self.inner.read_str(format!("buffers/{buffer}/{file}"))
+    }
+
+    /// Read the contents of the dot of the given buffer
+    pub fn read_dot(&mut self, buffer: &str) -> Result<String> {
+        self._read_buffer_file(buffer, "dot")
+    }
+
+    /// Read the body of the given buffer.
+    pub fn read_body(&mut self, buffer: &str) -> Result<String> {
+        self._read_buffer_file(buffer, "body")
+    }
+
+    /// Read the current dot address of the given buffer.
+    pub fn read_addr(&mut self, buffer: &str) -> Result<String> {
+        self._read_buffer_file(buffer, "addr")
+    }
+
+    /// Read the filename of the given buffer
+    pub fn read_filename(&mut self, buffer: &str) -> Result<String> {
+        self._read_buffer_file(buffer, "filename")
+    }
+
+    /// Read the x-address of the given buffer.
+    ///
+    /// This is only used by the filesystem interface of `ad` and will not affect the current
+    /// editor state.
+    pub fn read_xaddr(&mut self, buffer: &str) -> Result<String> {
+        self._read_buffer_file(buffer, "xaddr")
+    }
+
+    /// Read the x-dot of the given buffer.
+    ///
+    /// This is only used by the filesystem interface of `ad` and will not affect the current
+    /// editor state.
+    pub fn read_xdot(&mut self, buffer: &str) -> Result<String> {
+        self._read_buffer_file(buffer, "xdot")
+    }
+
+    fn _write_buffer_file(
+        &mut self,
+        buffer: &str,
+        file: &str,
+        offset: u64,
+        content: &[u8],
+    ) -> Result<usize> {
+        self.inner
+            .write(format!("buffers/{buffer}/{file}"), offset, content)
+    }
+
+    /// Replace the dot of the given buffer with the provided string.
+    pub fn write_dot(&mut self, buffer: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer, "dot", 0, content.as_bytes())
+    }
+
+    /// Append the provided string to the given buffer.
+    pub fn append_to_body(&mut self, buffer: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer, "body", 0, content.as_bytes())
+    }
+
+    /// Set the addr of the given buffer.
+    pub fn write_addr(&mut self, buffer: &str, addr: &str) -> Result<usize> {
+        self._write_buffer_file(buffer, "addr", 0, addr.as_bytes())
+    }
+
+    /// Replace the xdot of the given buffer with the provided string.
+    pub fn write_xdot(&mut self, buffer: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer, "xdot", 0, content.as_bytes())
+    }
+
+    /// Set the xaddr of the given buffer.
+    pub fn write_xaddr(&mut self, buffer: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer, "xaddr", 0, content.as_bytes())
+    }
+
+    /// Send a control message to ad.
+    pub fn ctl(&mut self, command: &str, args: &str) -> Result<()> {
+        self.inner
+            .write("ctl", 0, format!("{command} {args}").as_bytes())?;
+
+        Ok(())
+    }
+
+    /// Echo a string message in the status line.
+    pub fn echo(&mut self, msg: impl AsRef<str>) -> Result<()> {
+        self.ctl("echo", msg.as_ref())
+    }
+
+    /// Open the requested file.
+    pub fn open(&mut self, path: impl AsRef<str>) -> Result<()> {
+        self.ctl("open", path.as_ref())
+    }
+
+    /// Open the requested file in a new window.
+    pub fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<()> {
+        self.ctl("open-in-new-window", path.as_ref())
+    }
+
+    /// Reload the currently active buffer.
+    pub fn reload_current_buffer(&mut self) -> Result<()> {
+        self.ctl("reload", "")
+    }
+
+    /// Run a provided [EventFilter] until it exits or errors
+    pub fn run_event_filter<F>(&mut self, buffer: &str, filter: F) -> Result<()>
+    where
+        F: EventFilter,
+    {
+        event::run_filter(buffer, filter, self)
+    }
+
+    /// Create a [Write] impl that can be used to continuously write to the given path
+    pub fn body_writer(&self, bufid: &str) -> Result<BodyWriter> {
+        Ok(BodyWriter {
+            path: format!("buffers/{bufid}/body"),
+            client: UnixClient::new_unix(&self.ns, "/")?,
+        })
+    }
+}
+
+impl SessionMeta {
+    /// Create a new [Client] for this session.
+    pub fn client_for_session(&self) -> Result<Client> {
+        Ok(Client {
+            inner: UnixClient::new_unix(&self.socket_name, "/")?,
+            ns: self.socket_name.clone(),
+        })
+    }
+}
+
+/// A writer for appending to the body of a buffer
+#[derive(Debug)]
+pub struct BodyWriter {
+    path: String,
+    client: UnixClient,
+}
+
+impl BodyWriter {
+    /// Mark the buffer as being clean
+    pub fn mark_clean(&mut self) -> Result<()> {
+        self.client.write("ctl", 0, "mark-clean".as_bytes())?;
+
+        Ok(())
+    }
+}
+
+impl Write for BodyWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        Ok(self.client.write(&self.path, 0, buf)?)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
