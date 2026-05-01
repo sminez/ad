@@ -135,7 +135,7 @@ impl EventFilter for Filter {
         txt: &str,
         client: &mut Client,
     ) -> io::Result<Outcome> {
-        client.ctl("mark-clean", "")?;
+        client.mark_clean()?;
 
         if src == Source::Fsys {
             // This is us writing to the body so move dot to EOF
@@ -165,7 +165,7 @@ impl EventFilter for Filter {
         _to: usize,
         client: &mut Client,
     ) -> io::Result<Outcome> {
-        client.ctl("mark-clean", "")?;
+        client.mark_clean()?;
 
         Ok(Outcome::Handled)
     }

@@ -69,88 +69,119 @@ impl Client {
         self.inner.read_str("buffers/current").await
     }
 
-    async fn _read_buffer_file(&mut self, buffer: &str, file: &str) -> Result<String> {
+    async fn _read_buffer_file(&mut self, buffer_id: &str, file: &str) -> Result<String> {
         self.inner
-            .read_str(format!("buffers/{buffer}/{file}"))
+            .read_str(format!("buffers/{buffer_id}/{file}"))
             .await
     }
 
     /// Read the contents of the dot of the given buffer
-    pub async fn read_dot(&mut self, buffer: &str) -> Result<String> {
-        self._read_buffer_file(buffer, "dot").await
+    pub async fn read_dot(&mut self, buffer_id: &str) -> Result<String> {
+        self._read_buffer_file(buffer_id, "dot").await
     }
 
     /// Read the body of the given buffer.
-    pub async fn read_body(&mut self, buffer: &str) -> Result<String> {
-        self._read_buffer_file(buffer, "body").await
+    pub async fn read_body(&mut self, buffer_id: &str) -> Result<String> {
+        self._read_buffer_file(buffer_id, "body").await
     }
 
     /// Read the current dot address of the given buffer.
-    pub async fn read_addr(&mut self, buffer: &str) -> Result<String> {
-        self._read_buffer_file(buffer, "addr").await
+    pub async fn read_addr(&mut self, buffer_id: &str) -> Result<String> {
+        self._read_buffer_file(buffer_id, "addr").await
     }
 
     /// Read the filename of the given buffer
-    pub async fn read_filename(&mut self, buffer: &str) -> Result<String> {
-        self._read_buffer_file(buffer, "filename").await
+    pub async fn read_filename(&mut self, buffer_id: &str) -> Result<String> {
+        self._read_buffer_file(buffer_id, "filename").await
     }
 
     /// Read the x-address of the given buffer.
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub async fn read_xaddr(&mut self, buffer: &str) -> Result<String> {
-        self._read_buffer_file(buffer, "xaddr").await
+    pub async fn read_xaddr(&mut self, buffer_id: &str) -> Result<String> {
+        self._read_buffer_file(buffer_id, "xaddr").await
     }
 
     /// Read the x-dot of the given buffer.
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub async fn read_xdot(&mut self, buffer: &str) -> Result<String> {
-        self._read_buffer_file(buffer, "xdot").await
+    pub async fn read_xdot(&mut self, buffer_id: &str) -> Result<String> {
+        self._read_buffer_file(buffer_id, "xdot").await
     }
 
     async fn _write_buffer_file(
         &mut self,
-        buffer: &str,
+        buffer_id: &str,
         file: &str,
         offset: u64,
         content: &[u8],
     ) -> Result<usize> {
         self.inner
-            .write(format!("buffers/{buffer}/{file}"), offset, content)
+            .write(format!("buffers/{buffer_id}/{file}"), offset, content)
             .await
     }
 
     /// Replace the dot of the given buffer with the provided string.
-    pub async fn write_dot(&mut self, buffer: &str, content: &str) -> Result<usize> {
-        self._write_buffer_file(buffer, "dot", 0, content.as_bytes())
+    pub async fn write_dot(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer_id, "dot", 0, content.as_bytes())
             .await
     }
 
     /// Append the provided string to the given buffer.
-    pub async fn append_to_body(&mut self, buffer: &str, content: &str) -> Result<usize> {
-        self._write_buffer_file(buffer, "body", 0, content.as_bytes())
+    pub async fn append_to_body(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer_id, "body", 0, content.as_bytes())
             .await
     }
 
     /// Set the addr of the given buffer.
-    pub async fn write_addr(&mut self, buffer: &str, addr: &str) -> Result<usize> {
-        self._write_buffer_file(buffer, "addr", 0, addr.as_bytes())
+    pub async fn write_addr(&mut self, buffer_id: &str, addr: &str) -> Result<usize> {
+        self._write_buffer_file(buffer_id, "addr", 0, addr.as_bytes())
             .await
     }
 
     /// Replace the xdot of the given buffer with the provided string.
-    pub async fn write_xdot(&mut self, buffer: &str, content: &str) -> Result<usize> {
-        self._write_buffer_file(buffer, "xdot", 0, content.as_bytes())
+    pub async fn write_xdot(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer_id, "xdot", 0, content.as_bytes())
             .await
     }
 
     /// Set the xaddr of the given buffer.
-    pub async fn write_xaddr(&mut self, buffer: &str, content: &str) -> Result<usize> {
-        self._write_buffer_file(buffer, "xaddr", 0, content.as_bytes())
+    pub async fn write_xaddr(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer_id, "xaddr", 0, content.as_bytes())
             .await
+    }
+
+    /// Clear the contents of the given buffer
+    pub async fn clear(&mut self, buffer_id: &str) -> Result<()> {
+        self.write_xaddr(buffer_id, ",").await?;
+        self.write_xdot(buffer_id, "").await?;
+
+        Ok(())
+    }
+
+    /// Focus the given buffer
+    pub async fn focus_buffer(&mut self, buffer_id: &str) -> Result<()> {
+        self.inner
+            .write_str("buffers/current", 0, buffer_id)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Set the cursor position for the given buffer to the beginning of the file
+    pub async fn cur_to_bof(&mut self, buffer_id: &str) -> Result<()> {
+        self.write_addr(buffer_id, "0").await?;
+
+        Ok(())
+    }
+
+    /// Set the cursor position for the given buffer to the end of the file
+    pub async fn cur_to_eof(&mut self, buffer_id: &str) -> Result<()> {
+        self.write_addr(buffer_id, "$").await?;
+
+        Ok(())
     }
 
     /// Send a control message to ad.
@@ -182,18 +213,28 @@ impl Client {
         self.ctl("reload", "").await
     }
 
+    /// Mark the currently active buffer as being clean.
+    pub async fn mark_clean(&mut self) -> Result<()> {
+        self.ctl("mark-clean", "").await
+    }
+
+    /// Run the provided ad Edit script against the current buffer
+    pub async fn run_edit_script(&mut self, script: impl AsRef<str>) -> Result<()> {
+        self.ctl("Edit", script.as_ref()).await
+    }
+
     /// Run a provided [AsyncEventFilter] until it exits or errors.
-    pub async fn run_event_filter<F>(&mut self, buffer: &str, filter: F) -> Result<()>
+    pub async fn run_event_filter<F>(&mut self, buffer_id: &str, filter: F) -> Result<()>
     where
         F: AsyncEventFilter,
     {
-        event::run_filter(buffer, filter, self).await
+        event::run_filter(buffer_id, filter, self).await
     }
 
     /// Create a [BodyWriter] impl that can be used to continuously write to the given path
-    pub async fn body_writer(&self, bufid: &str) -> Result<BodyWriter> {
+    pub async fn body_writer(&self, buffer_id: &str) -> Result<BodyWriter> {
         Ok(BodyWriter {
-            path: format!("buffers/{bufid}/body"),
+            path: format!("buffers/{buffer_id}/body"),
             client: UnixClient::new_unix(&self.ns, "/").await?,
         })
     }

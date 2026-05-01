@@ -60,15 +60,8 @@ fn main() -> anyhow::Result<()> {
 }
 
 fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> anyhow::Result<()> {
-    client
-        .write_xaddr(id, ",")
-        .context("unable to write xaddr")?;
-    client
-        .write_xdot(id, "\n")
-        .context("unable to write xdot")?;
-    client
-        .ctl("mark-clean", "")
-        .context("unable to mark buffer clean")?;
+    client.clear(id).context("unable to clear buffer")?;
+    client.mark_clean().context("unable to mark buffer clean")?;
 
     let mut child = Popen::create(
         args,
