@@ -1,7 +1,6 @@
 //! Handling of event filtering
-use crate::{Outcome, sync::Client};
+use crate::{EventOutcome, Result, sync::Client};
 use ad_event::{FsysEvent, Kind, Source};
-use ninep::sync::client::Result;
 use std::io;
 
 /// An event filter takes control over a buffer's events file and handles processing the events
@@ -17,8 +16,8 @@ pub trait EventFilter {
         to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Handled)
+    ) -> Result<EventOutcome> {
+        Ok(EventOutcome::Handled)
     }
 
     /// Handle text being deleted from the buffer body
@@ -28,8 +27,8 @@ pub trait EventFilter {
         from: usize,
         to: usize,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Handled)
+    ) -> Result<EventOutcome> {
+        Ok(EventOutcome::Handled)
     }
 
     /// Handle a load event in the body
@@ -40,8 +39,8 @@ pub trait EventFilter {
         to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Passthrough)
+    ) -> Result<EventOutcome> {
+        Ok(EventOutcome::Passthrough)
     }
 
     /// Handle an execute event in the body
@@ -52,8 +51,8 @@ pub trait EventFilter {
         to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
-        Ok(Outcome::Passthrough)
+    ) -> Result<EventOutcome> {
+        Ok(EventOutcome::Passthrough)
     }
 }
 
@@ -75,17 +74,17 @@ where
                 filter.handle_insert(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)?
             }
             Kind::DeleteBody => filter.handle_delete(evt.source, evt.ch_from, evt.ch_to, client)?,
-            _ => Outcome::Passthrough,
+            _ => EventOutcome::Passthrough,
         };
 
         match outcome {
-            Outcome::Handled => (),
-            Outcome::Passthrough => client.write_event(buffer, &evt.as_event_file_line())?,
-            Outcome::PassthroughAndExit => {
+            EventOutcome::Handled => (),
+            EventOutcome::Passthrough => client.write_event(buffer, &evt.as_event_file_line())?,
+            EventOutcome::PassthroughAndExit => {
                 client.write_event(buffer, &evt.as_event_file_line())?;
                 return Ok(());
             }
-            Outcome::Exit => return Ok(()),
+            EventOutcome::Exit => return Ok(()),
         }
     }
 

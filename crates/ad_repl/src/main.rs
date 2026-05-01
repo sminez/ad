@@ -5,7 +5,7 @@
 //! - Running "clear" will clear the ad buffer
 //! - Running "exit" will close the shell subprocess as well as the ad buffer
 use ad_client::{
-    Outcome, Source,
+    EventOutcome, Result, Source,
     sync::{Client, EventFilter},
 };
 use anyhow::Context;
@@ -101,11 +101,11 @@ impl Filter {
         Ok(())
     }
 
-    fn send_input(&mut self, input: &str, client: &mut Client) -> io::Result<Outcome> {
+    fn send_input(&mut self, input: &str, client: &mut Client) -> Result<EventOutcome> {
         match input.trim() {
             "clear" => {
                 self.clear_buffer(client)?;
-                return Ok(Outcome::Handled);
+                return Ok(EventOutcome::Handled);
             }
 
             "exit" => {
@@ -122,7 +122,7 @@ impl Filter {
             self.stdin.write_all(b"\n")?;
         }
 
-        Ok(Outcome::Handled)
+        Ok(EventOutcome::Handled)
     }
 }
 
@@ -134,13 +134,13 @@ impl EventFilter for Filter {
         _to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
+    ) -> Result<EventOutcome> {
         client.mark_clean()?;
 
         if src == Source::Fsys {
             // This is us writing to the body so move dot to EOF
             client.write_addr(&self.buffer_id, "$")?;
-            return Ok(Outcome::Handled);
+            return Ok(EventOutcome::Handled);
         }
 
         if txt == "\n" {
@@ -155,7 +155,7 @@ impl EventFilter for Filter {
             }
         }
 
-        Ok(Outcome::Handled)
+        Ok(EventOutcome::Handled)
     }
 
     fn handle_delete(
@@ -164,10 +164,10 @@ impl EventFilter for Filter {
         _from: usize,
         _to: usize,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
+    ) -> Result<EventOutcome> {
         client.mark_clean()?;
 
-        Ok(Outcome::Handled)
+        Ok(EventOutcome::Handled)
     }
 
     fn handle_execute(
@@ -177,7 +177,7 @@ impl EventFilter for Filter {
         _to: usize,
         txt: &str,
         client: &mut Client,
-    ) -> io::Result<Outcome> {
+    ) -> Result<EventOutcome> {
         let s = strip_prompt(txt).trim();
         client.append_to_body(&self.buffer_id, &format!("\n{PROMPT}{s}\n"))?;
         let outcome = self.send_input(s, client)?;

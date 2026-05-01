@@ -1,5 +1,5 @@
 use ad_client::{
-    Outcome, Source,
+    EventOutcome, Result, Source,
     sync::{Client, EventFilter},
 };
 use std::io;
@@ -23,13 +23,13 @@ impl EventFilter for Filter {
         to: usize,
         txt: &str,
         _client: &mut Client,
-    ) -> io::Result<Outcome> {
+    ) -> Result<EventOutcome> {
         println!("got load: {from}->{to} {txt:?}");
         match txt {
-            "README.md" => Ok(Outcome::Passthrough),
+            "README.md" => Ok(EventOutcome::Passthrough),
             _ => {
                 println!("  > suppressing load of {txt}");
-                Ok(Outcome::Handled)
+                Ok(EventOutcome::Handled)
             }
         }
     }

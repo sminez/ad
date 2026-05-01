@@ -10,10 +10,7 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
-use ninep::{
-    sansio::server::socket_dir,
-    sync::client::{Error, Result, UnixClient},
-};
+use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
 use std::{fs, io, str::FromStr};
 
 pub mod sync;
@@ -21,6 +18,7 @@ pub mod sync;
 pub mod tokio;
 
 pub use ad_event::Source;
+pub use ninep::sansio::client::{Error, Result};
 
 /// The result of asking the user to provide input via the minibuffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,7 +41,7 @@ pub enum MiniBufferSelection {
 
 /// Outcome of handling an event within an event filter
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Outcome {
+pub enum EventOutcome {
     /// The event should be passed back to ad
     Passthrough,
     /// The event should not be passed back to ad
