@@ -1,7 +1,7 @@
 //! An asynchronous client implementation.
 use crate::{LogEvent, MiniBufferSelection, SessionMeta};
 use ninep::tokio::client::{ReadLineStream, Result, UnixClient};
-use std::{env, io, str::FromStr};
+use std::{env, io, path::Path, str::FromStr};
 use tokio::net::UnixStream;
 
 mod event;
@@ -12,7 +12,6 @@ pub use event::AsyncEventFilter;
 #[derive(Debug, Clone)]
 pub struct Client {
     inner: UnixClient,
-    ns: String,
 }
 
 impl Client {
@@ -25,7 +24,6 @@ impl Client {
 
         Ok(Self {
             inner: UnixClient::new_unix(&ns, "/").await?,
-            ns,
         })
     }
 
@@ -39,7 +37,18 @@ impl Client {
 
         Ok(Self {
             inner: UnixClient::new_unix(&ns, "/").await?,
-            ns,
+        })
+    }
+
+    /// Create a new client connected to the socket found at `path`.
+    pub async fn new_with_explicit_path(path: impl AsRef<Path>) -> Result<Self> {
+        let uname = match env::var("USER") {
+            Ok(s) => s,
+            Err(_) => return Err(io::Error::other("USER env var not set").into()),
+        };
+
+        Ok(Self {
+            inner: UnixClient::new_unix_with_explicit_path(uname, path, "/").await?,
         })
     }
 
@@ -235,7 +244,7 @@ impl Client {
     pub async fn body_writer(&self, buffer_id: &str) -> Result<BodyWriter> {
         Ok(BodyWriter {
             path: format!("buffers/{buffer_id}/body"),
-            client: UnixClient::new_unix(&self.ns, "/").await?,
+            client: self.inner.clone(),
         })
     }
 
@@ -259,7 +268,10 @@ impl Client {
             .write_str("minibuffer", 0, &lines.join("\n"))
             .await?;
         self.ctl("minibuffer-prompt", prompt).await?;
-        let s = self.inner.read_str("minibuffer").await?;
+        let mut s = self.inner.read_str("minibuffer").await?;
+        if s.ends_with('\n') {
+            s.pop();
+        }
 
         if s.is_empty() {
             Ok(MiniBufferSelection::Cancelled)
@@ -276,7 +288,10 @@ impl Client {
     pub async fn minibuffer_prompt(&mut self, prompt: &str) -> Result<Option<String>> {
         self.inner.write_str("minibuffer", 0, "").await?;
         self.ctl("minibuffer-prompt", prompt).await?;
-        let s = self.inner.read_str("minibuffer").await?;
+        let mut s = self.inner.read_str("minibuffer").await?;
+        if s.ends_with('\n') {
+            s.pop();
+        }
 
         if s.is_empty() { Ok(None) } else { Ok(Some(s)) }
     }
@@ -305,7 +320,6 @@ impl SessionMeta {
     pub async fn async_client_for_session(&self) -> Result<Client> {
         Ok(Client {
             inner: UnixClient::new_unix(&self.socket_name, "/").await?,
-            ns: self.socket_name.clone(),
         })
     }
 }
@@ -328,5 +342,160 @@ impl BodyWriter {
         self.client.write("ctl", 0, "mark-clean".as_bytes()).await?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user};
+    use ad_editor::{input::Event, key::Input};
+    use simple_test_case::test_case;
+    use std::time::Duration;
+    use tokio::{spawn, time::sleep};
+
+    async fn prepare(files: &[(&str, &str)]) -> (Client, TestEditor) {
+        let ted = TestEditor::prepare(files);
+        let client = Client::new_with_explicit_path(ted.socket_path())
+            .await
+            .unwrap();
+
+        (client, ted)
+    }
+
+    // We provide additional helper methods around some of the common `ctl` commands, but so long
+    // as one interaction with `ctl` works, we don't need to exhaustively test all of the ad
+    // command functionality.
+
+    #[tokio::test]
+    async fn ctl_works() {
+        let (mut client, _ted) = prepare(&[("foo", "foo content")]).await;
+
+        let fname = client.read_filename("1").await.unwrap();
+        assert!(fname.ends_with("foo"), "{fname:?}");
+
+        client.ctl("rename-buffer", "bar").await.unwrap();
+        let fname = client.read_filename("1").await.unwrap();
+        assert!(fname.ends_with("bar"), "{fname:?}");
+    }
+
+    #[tokio::test]
+    async fn manipulating_current_buffer_works() {
+        let (mut client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]).await;
+        assert_eq!(
+            client.current_buffer().await.unwrap(),
+            "2",
+            "initial current buffer"
+        );
+
+        client.focus_buffer("1").await.unwrap();
+        sleep(Duration::from_millis(5)).await;
+
+        assert_eq!(
+            client.current_buffer().await.unwrap(),
+            "1",
+            "current buffer after focus"
+        );
+    }
+
+    #[tokio::test]
+    async fn manipulating_body_file_works() {
+        let (mut client, _ted) = prepare(&[("foo", "foo content")]).await;
+
+        let s = client.read_body("1").await.unwrap();
+        assert_eq!(s, "foo content", "initial content");
+
+        client.append_to_body("1", " new").await.unwrap();
+        let s = client.read_body("1").await.unwrap();
+        assert_eq!(s, "foo content new", "after append");
+
+        client.clear("1").await.unwrap();
+        let s = client.read_body("1").await.unwrap();
+        assert_eq!(s, "", "after clear");
+    }
+
+    #[tokio::test]
+    async fn manipulating_addr_and_dot_works() {
+        let (mut client, _ted) = prepare(&[("test", "This is a test")]).await;
+
+        assert_eq!(client.read_addr("1").await.unwrap(), "1:1", "initial");
+        assert_eq!(client.read_dot("1").await.unwrap(), "T", "initial");
+
+        client.write_addr("1", "1:1,1:4").await.unwrap();
+        assert_eq!(
+            client.read_addr("1").await.unwrap(),
+            "1:1,1:4",
+            "write_addr"
+        );
+        assert_eq!(client.read_dot("1").await.unwrap(), "This", "write_addr");
+
+        client.write_dot("1", "THIS").await.unwrap();
+        assert_eq!(client.read_addr("1").await.unwrap(), "1:5", "write_dot");
+
+        client.write_addr("1", "1:1,1:4").await.unwrap();
+        assert_eq!(client.read_dot("1").await.unwrap(), "THIS", "write_dot");
+    }
+
+    #[tokio::test]
+    async fn manipulating_xaddr_and_xdot_works() {
+        let (mut client, _ted) = prepare(&[("test", "This is a test")]).await;
+
+        assert_eq!(client.read_xaddr("1").await.unwrap(), "1:1", "initial");
+        assert_eq!(client.read_xdot("1").await.unwrap(), "T", "initial");
+
+        client.write_xaddr("1", "1:1,1:4").await.unwrap();
+        assert_eq!(
+            client.read_xaddr("1").await.unwrap(),
+            "1:1,1:4",
+            "write_xaddr"
+        );
+        assert_eq!(
+            client.read_addr("1").await.unwrap(),
+            "1:1",
+            "addr should be unchanged"
+        );
+        assert_eq!(client.read_xdot("1").await.unwrap(), "This", "write_xaddr");
+
+        client.write_xdot("1", "THIS").await.unwrap();
+        assert_eq!(client.read_xaddr("1").await.unwrap(), "1:5", "write_xdot");
+
+        client.write_xaddr("1", "1:1,1:4").await.unwrap();
+        assert_eq!(client.read_xdot("1").await.unwrap(), "THIS", "write_xdot");
+    }
+
+    #[test_case(&[Input::Char('a'), Input::Return], mbs_line(0, "alpha"); "type a")]
+    #[test_case(&[Input::Char('b'), Input::Return], mbs_line(1, "bravo"); "type b")]
+    #[test_case(&[Input::Char('x'), Input::Return], mbs_user("x"); "type x")]
+    #[test_case(&[Input::Esc], mbs_cancelled(); "cancelled")]
+    #[tokio::test]
+    async fn minibuffer_select_works(inputs: &[Input], expected: MiniBufferSelection) {
+        let (mut client, ted) = prepare(&[]).await;
+        let handle = spawn(async move { client.minibuffer_select("> ", ["alpha", "bravo"]).await });
+        sleep(Duration::from_millis(10)).await; // wait for the minibuffer to open
+
+        for input in inputs.iter() {
+            ted.tx.send(Event::Input(*input)).unwrap();
+        }
+
+        let res = handle.await.unwrap();
+
+        assert_eq!(res.unwrap(), expected);
+    }
+
+    #[test_case(&[Input::Char('a'), Input::Return], Some("a"); "user input")]
+    #[test_case(&[Input::Esc], None; "cancelled")]
+    #[tokio::test]
+    async fn minibuffer_prompt_works(inputs: &[Input], expected: Option<&str>) {
+        let (mut client, ted) = prepare(&[]).await;
+        let handle = spawn(async move { client.minibuffer_prompt("> ").await });
+        sleep(Duration::from_millis(10)).await; // wait for the minibuffer to open
+
+        for input in inputs.iter() {
+            ted.tx.send(Event::Input(*input)).unwrap();
+        }
+
+        let res = handle.await.unwrap();
+
+        assert_eq!(res.unwrap().as_deref(), expected);
     }
 }

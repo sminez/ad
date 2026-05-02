@@ -462,11 +462,13 @@ impl Serve9p for AdFs {
         s.buffer_nodes.update();
 
         if wstat.n_bytes == Some(0) {
-            trace!(%qid, %uname, "stat n_bytes=0, truncating file");
+            trace!(%qid, %uname, "wstat n_bytes=0, truncating file");
             match qid {
                 MOUNT_ROOT_QID | CONTROL_FILE_QID | MINIBUFFER_QID | LOG_FILE_QID => (),
                 qid => s.buffer_nodes.truncate(qid),
             }
+        } else if !wstat.is_commit() {
+            return Err("permission denied".into());
         }
 
         Ok(())

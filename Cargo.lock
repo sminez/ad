@@ -45,8 +45,11 @@ dependencies = [
 name = "ad_client"
 version = "0.5.0"
 dependencies = [
+ "ad-editor",
  "ad_event",
+ "assert_fs",
  "ninep",
+ "simple_test_case",
  "tokio",
 ]
 

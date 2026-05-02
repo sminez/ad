@@ -5,6 +5,7 @@ use std::{
     env,
     io::{self, Write},
     os::unix::net::UnixStream,
+    path::Path,
     str::FromStr,
 };
 
@@ -16,7 +17,6 @@ pub use event::EventFilter;
 #[derive(Debug, Clone)]
 pub struct Client {
     inner: UnixClient,
-    ns: String,
 }
 
 impl Client {
@@ -29,7 +29,6 @@ impl Client {
 
         Ok(Self {
             inner: UnixClient::new_unix(&ns, "/")?,
-            ns,
         })
     }
 
@@ -43,7 +42,18 @@ impl Client {
 
         Ok(Self {
             inner: UnixClient::new_unix(&ns, "/")?,
-            ns,
+        })
+    }
+
+    /// Create a new client connected to the socket found at `path`.
+    pub fn new_with_explicit_path(path: impl AsRef<Path>) -> Result<Self> {
+        let uname = match env::var("USER") {
+            Ok(s) => s,
+            Err(_) => return Err(io::Error::other("USER env var not set").into()),
+        };
+
+        Ok(Self {
+            inner: UnixClient::new_unix_with_explicit_path(uname, path, "/")?,
         })
     }
 
@@ -127,11 +137,6 @@ impl Client {
         self._write_buffer_file(buffer_id, "dot", 0, content.as_bytes())
     }
 
-    /// Append the provided string to the given buffer.
-    pub fn append_to_body(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
-        self._write_buffer_file(buffer_id, "body", 0, content.as_bytes())
-    }
-
     /// Set the addr of the given buffer.
     pub fn write_addr(&mut self, buffer_id: &str, addr: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "addr", 0, addr.as_bytes())
@@ -145,6 +150,11 @@ impl Client {
     /// Set the xaddr of the given buffer.
     pub fn write_xaddr(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xaddr", 0, content.as_bytes())
+    }
+
+    /// Append the provided string to the given buffer.
+    pub fn append_to_body(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+        self._write_buffer_file(buffer_id, "body", 0, content.as_bytes())
     }
 
     /// Clear the contents of the given buffer
@@ -226,7 +236,7 @@ impl Client {
     pub fn body_writer(&self, buffer_id: &str) -> Result<BodyWriter> {
         Ok(BodyWriter {
             path: format!("buffers/{buffer_id}/body"),
-            client: UnixClient::new_unix(&self.ns, "/")?,
+            client: self.inner.clone(),
         })
     }
 
@@ -244,7 +254,10 @@ impl Client {
             .collect();
         self.inner.write_str("minibuffer", 0, &lines.join("\n"))?;
         self.ctl("minibuffer-prompt", prompt)?;
-        let s = self.inner.read_str("minibuffer")?;
+        let mut s = self.inner.read_str("minibuffer")?;
+        if s.ends_with('\n') {
+            s.pop();
+        }
 
         if s.is_empty() {
             Ok(MiniBufferSelection::Cancelled)
@@ -261,7 +274,10 @@ impl Client {
     pub fn minibuffer_prompt(&mut self, prompt: &str) -> Result<Option<String>> {
         self.inner.write_str("minibuffer", 0, "")?;
         self.ctl("minibuffer-prompt", prompt)?;
-        let s = self.inner.read_str("minibuffer")?;
+        let mut s = self.inner.read_str("minibuffer")?;
+        if s.ends_with('\n') {
+            s.pop();
+        }
 
         if s.is_empty() { Ok(None) } else { Ok(Some(s)) }
     }
@@ -272,7 +288,6 @@ impl SessionMeta {
     pub fn client_for_session(&self) -> Result<Client> {
         Ok(Client {
             inner: UnixClient::new_unix(&self.socket_name, "/")?,
-            ns: self.socket_name.clone(),
         })
     }
 }
@@ -300,5 +315,152 @@ impl Write for BodyWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user};
+    use ad_editor::{input::Event, key::Input};
+    use simple_test_case::test_case;
+    use std::{
+        thread::{sleep, spawn},
+        time::Duration,
+    };
+
+    fn prepare(files: &[(&str, &str)]) -> (Client, TestEditor) {
+        let ted = TestEditor::prepare(files);
+        let client = Client::new_with_explicit_path(ted.socket_path()).unwrap();
+
+        (client, ted)
+    }
+
+    // We provide additional helper methods around some of the common `ctl` commands, but so long
+    // as one interaction with `ctl` works, we don't need to exhaustively test all of the ad
+    // command functionality.
+
+    #[test]
+    fn ctl_works() {
+        let (mut client, _ted) = prepare(&[("foo", "foo content")]);
+
+        let fname = client.read_filename("1").unwrap();
+        assert!(fname.ends_with("foo"), "{fname:?}");
+
+        client.ctl("rename-buffer", "bar").unwrap();
+        let fname = client.read_filename("1").unwrap();
+        assert!(fname.ends_with("bar"), "{fname:?}");
+    }
+
+    #[test]
+    fn manipulating_current_buffer_works() {
+        let (mut client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]);
+        assert_eq!(
+            client.current_buffer().unwrap(),
+            "2",
+            "initial current buffer"
+        );
+
+        client.focus_buffer("1").unwrap();
+        sleep(Duration::from_millis(5));
+
+        assert_eq!(
+            client.current_buffer().unwrap(),
+            "1",
+            "current buffer after focus"
+        );
+    }
+
+    #[test]
+    fn manipulating_body_file_works() {
+        let (mut client, _ted) = prepare(&[("foo", "foo content")]);
+
+        let s = client.read_body("1").unwrap();
+        assert_eq!(s, "foo content", "initial content");
+
+        client.append_to_body("1", " new").unwrap();
+        let s = client.read_body("1").unwrap();
+        assert_eq!(s, "foo content new", "after append");
+
+        client.clear("1").unwrap();
+        let s = client.read_body("1").unwrap();
+        assert_eq!(s, "", "after clear");
+    }
+
+    #[test]
+    fn manipulating_addr_and_dot_works() {
+        let (mut client, _ted) = prepare(&[("test", "This is a test")]);
+
+        assert_eq!(client.read_addr("1").unwrap(), "1:1", "initial");
+        assert_eq!(client.read_dot("1").unwrap(), "T", "initial");
+
+        client.write_addr("1", "1:1,1:4").unwrap();
+        assert_eq!(client.read_addr("1").unwrap(), "1:1,1:4", "write_addr");
+        assert_eq!(client.read_dot("1").unwrap(), "This", "write_addr");
+
+        client.write_dot("1", "THIS").unwrap();
+        assert_eq!(client.read_addr("1").unwrap(), "1:5", "write_dot");
+
+        client.write_addr("1", "1:1,1:4").unwrap();
+        assert_eq!(client.read_dot("1").unwrap(), "THIS", "write_dot");
+    }
+
+    #[test]
+    fn manipulating_xaddr_and_xdot_works() {
+        let (mut client, _ted) = prepare(&[("test", "This is a test")]);
+
+        assert_eq!(client.read_xaddr("1").unwrap(), "1:1", "initial");
+        assert_eq!(client.read_xdot("1").unwrap(), "T", "initial");
+
+        client.write_xaddr("1", "1:1,1:4").unwrap();
+        assert_eq!(client.read_xaddr("1").unwrap(), "1:1,1:4", "write_xaddr");
+        assert_eq!(
+            client.read_addr("1").unwrap(),
+            "1:1",
+            "addr should be unchanged"
+        );
+        assert_eq!(client.read_xdot("1").unwrap(), "This", "write_xaddr");
+
+        client.write_xdot("1", "THIS").unwrap();
+        assert_eq!(client.read_xaddr("1").unwrap(), "1:5", "write_xdot");
+
+        client.write_xaddr("1", "1:1,1:4").unwrap();
+        assert_eq!(client.read_xdot("1").unwrap(), "THIS", "write_xdot");
+    }
+
+    #[test_case(&[Input::Char('a'), Input::Return], mbs_line(0, "alpha"); "type a")]
+    #[test_case(&[Input::Char('b'), Input::Return], mbs_line(1, "bravo"); "type b")]
+    #[test_case(&[Input::Char('x'), Input::Return], mbs_user("x"); "type x")]
+    #[test_case(&[Input::Esc], mbs_cancelled(); "cancelled")]
+    #[test]
+    fn minibuffer_select_works(inputs: &[Input], expected: MiniBufferSelection) {
+        let (mut client, ted) = prepare(&[]);
+        let handle = spawn(move || client.minibuffer_select("> ", ["alpha", "bravo"]));
+        sleep(Duration::from_millis(10)); // wait for the minibuffer to open
+
+        for input in inputs.iter() {
+            ted.tx.send(Event::Input(*input)).unwrap();
+        }
+
+        let res = handle.join().unwrap();
+
+        assert_eq!(res.unwrap(), expected);
+    }
+
+    #[test_case(&[Input::Char('a'), Input::Return], Some("a"); "user input")]
+    #[test_case(&[Input::Esc], None; "cancelled")]
+    #[test]
+    fn minibuffer_prompt_works(inputs: &[Input], expected: Option<&str>) {
+        let (mut client, ted) = prepare(&[]);
+        let handle = spawn(move || client.minibuffer_prompt("> "));
+        sleep(Duration::from_millis(10)); // wait for the minibuffer to open
+
+        for input in inputs.iter() {
+            ted.tx.send(Event::Input(*input)).unwrap();
+        }
+
+        let res = handle.join().unwrap();
+
+        assert_eq!(res.unwrap().as_deref(), expected);
     }
 }

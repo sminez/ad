@@ -24,3 +24,9 @@ tokio = ["dep:tokio", "ninep/tokio"]
 ad_event = { version = "0.4", path = "../ad_event" }
 ninep = { version = "0.6", path = "../ninep", default-features = false }
 tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync"], optional = true }
+
+[dev-dependencies]
+ad-editor = { path = "../../" }
+assert_fs = "1.1"
+simple_test_case = "1"
+tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync", "time", "rt-multi-thread", "net", "io-util"] }

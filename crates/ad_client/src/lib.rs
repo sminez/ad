@@ -17,6 +17,9 @@ pub mod sync;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
+#[cfg(test)]
+pub(crate) mod test_util;
+
 pub use ad_event::Source;
 pub use ninep::sansio::client::{Error, Result};
 

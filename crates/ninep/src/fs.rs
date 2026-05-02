@@ -442,6 +442,11 @@ impl WStat {
         Tdata::wstat(fid, size as u16, rstat)
     }
 
+    /// Whether or not this [WStat] is a request to commit to stable storage.
+    pub fn is_commit(&self) -> bool {
+        *self == WStat::commit(self.qid)
+    }
+
     /// A [WStat] with all fields other than `qid` as [None] requests that the server commits the
     /// file associated with `qid` to stable storage.
     pub fn commit(qid: Qid) -> Self {
