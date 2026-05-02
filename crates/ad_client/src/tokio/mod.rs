@@ -348,11 +348,15 @@ impl BodyWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user};
-    use ad_editor::{input::Event, key::Input};
+    use crate::{
+        EventOutcome,
+        test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user},
+    };
+    use ad_editor::{editor::Action, input::Event, key::Input};
+    use ad_event::Source;
     use simple_test_case::test_case;
-    use std::time::Duration;
-    use tokio::{spawn, time::sleep};
+    use std::{sync::Arc, time::Duration};
+    use tokio::{spawn, sync::Mutex, time::sleep};
 
     async fn prepare(files: &[(&str, &str)]) -> (Client, TestEditor) {
         let ted = TestEditor::prepare(files);
@@ -497,5 +501,86 @@ mod tests {
         let res = handle.await.unwrap();
 
         assert_eq!(res.unwrap().as_deref(), expected);
+    }
+
+    #[derive(Default)]
+    struct TestFilter {
+        inner: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl AsyncEventFilter for TestFilter {
+        async fn handle_load(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _txt: &str,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().await.push("load");
+
+            Ok(EventOutcome::Exit)
+        }
+
+        async fn handle_execute(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _txt: &str,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().await.push("execute");
+
+            Ok(EventOutcome::Exit)
+        }
+
+        async fn handle_insert(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _txt: &str,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().await.push("insert");
+
+            Ok(EventOutcome::Exit)
+        }
+
+        async fn handle_delete(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().await.push("delete");
+
+            Ok(EventOutcome::Exit)
+        }
+    }
+
+    #[test_case(Action::LoadDot { new_window: false }, "load"; "load")]
+    #[test_case(Action::ExecuteDot , "execute"; "execute")]
+    #[test_case(Action::InsertChar { c: 'a' } , "insert"; "insert")]
+    #[test_case(Action::Delete, "delete"; "delete")]
+    #[tokio::test]
+    async fn run_event_filter_works(action: Action, expected: &str) {
+        let (mut client, ted) = prepare(&[("foo", "foo content")]).await;
+
+        let filter = TestFilter::default();
+        let calls = Arc::clone(&filter.inner);
+
+        let handle = spawn(async move { client.run_event_filter("1", filter).await });
+        sleep(Duration::from_millis(10)).await; // wait for the filter to attach
+
+        _ = ted.tx.send(Event::Action(action));
+
+        let res = handle.await.unwrap();
+        assert!(res.is_ok(), "{res:?}");
+
+        let recorded = calls.lock().await;
+        assert_eq!(*recorded, vec![expected]);
     }
 }

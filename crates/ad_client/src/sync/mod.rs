@@ -321,10 +321,15 @@ impl Write for BodyWriter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user};
-    use ad_editor::{input::Event, key::Input};
+    use crate::{
+        EventOutcome,
+        test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user},
+    };
+    use ad_editor::{editor::Action, input::Event, key::Input};
+    use ad_event::Source;
     use simple_test_case::test_case;
     use std::{
+        sync::{Arc, Mutex},
         thread::{sleep, spawn},
         time::Duration,
     };
@@ -462,5 +467,86 @@ mod tests {
         let res = handle.join().unwrap();
 
         assert_eq!(res.unwrap().as_deref(), expected);
+    }
+
+    #[derive(Default)]
+    struct TestFilter {
+        inner: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    impl EventFilter for TestFilter {
+        fn handle_load(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _txt: &str,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().unwrap().push("load");
+
+            Ok(EventOutcome::Exit)
+        }
+
+        fn handle_execute(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _txt: &str,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().unwrap().push("execute");
+
+            Ok(EventOutcome::Exit)
+        }
+
+        fn handle_insert(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _txt: &str,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().unwrap().push("insert");
+
+            Ok(EventOutcome::Exit)
+        }
+
+        fn handle_delete(
+            &mut self,
+            _src: Source,
+            _from: usize,
+            _to: usize,
+            _client: &mut Client,
+        ) -> Result<EventOutcome> {
+            self.inner.lock().unwrap().push("delete");
+
+            Ok(EventOutcome::Exit)
+        }
+    }
+
+    #[test_case(Action::LoadDot { new_window: false }, "load"; "load")]
+    #[test_case(Action::ExecuteDot , "execute"; "execute")]
+    #[test_case(Action::InsertChar { c: 'a' } , "insert"; "insert")]
+    #[test_case(Action::Delete, "delete"; "delete")]
+    #[test]
+    fn run_event_filter_works(action: Action, expected: &str) {
+        let (mut client, ted) = prepare(&[("foo", "foo content")]);
+
+        let filter = TestFilter::default();
+        let calls = Arc::clone(&filter.inner);
+
+        let handle = spawn(move || client.run_event_filter("1", filter));
+        sleep(Duration::from_millis(10)); // wait for the filter to attach
+
+        _ = ted.tx.send(Event::Action(action));
+
+        let res = handle.join().unwrap();
+        assert!(res.is_ok(), "{res:?}");
+
+        let recorded = calls.lock().unwrap();
+        assert_eq!(*recorded, vec![expected]);
     }
 }
