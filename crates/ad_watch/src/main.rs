@@ -32,20 +32,18 @@ fn main() -> anyhow::Result<()> {
         .open_in_new_window(format!("{dir}/+watch"))
         .context("unable to open +watch buffer")?;
 
-    let int_id: usize = buffer_id.parse().unwrap();
-
-    clear_and_rerun(&mut client, &buffer_id, &args)?;
+    clear_and_rerun(&mut client, buffer_id, &args)?;
 
     for evt in client.log_events()? {
         match evt? {
-            LogEvent::Close(id) if id == int_id => break,
+            LogEvent::Close(id) if id == buffer_id => break,
 
             LogEvent::Save(id) => {
                 let fname = client
-                    .read_filename(&id.to_string())
+                    .read_filename(id)
                     .context("unable to read filename of saved buffer")?;
                 if fname.starts_with(&dir) {
-                    clear_and_rerun(&mut client, &buffer_id, &args)?;
+                    clear_and_rerun(&mut client, buffer_id, &args)?;
                 }
             }
 
@@ -56,7 +54,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn clear_and_rerun(client: &mut Client, id: &str, args: &[String]) -> anyhow::Result<()> {
+fn clear_and_rerun(client: &mut Client, id: usize, args: &[String]) -> anyhow::Result<()> {
     client.clear(id).context("unable to clear buffer")?;
     client.mark_clean().context("unable to mark buffer clean")?;
 

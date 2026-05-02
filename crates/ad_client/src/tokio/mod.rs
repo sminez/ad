@@ -1,5 +1,5 @@
 //! An asynchronous client implementation.
-use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta};
+use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
 use ninep::tokio::client::{Error, ReadLineStream, Result, UnixClient};
 use std::{env, io, path::Path, str::FromStr};
 use tokio::net::UnixStream;
@@ -52,13 +52,16 @@ impl Client {
         })
     }
 
-    pub(crate) async fn event_lines(&mut self, buffer: &str) -> Result<ReadLineStream<UnixStream>> {
+    pub(crate) async fn event_lines(
+        &mut self,
+        buffer: usize,
+    ) -> Result<ReadLineStream<UnixStream>> {
         self.inner
             .stream_lines(format!("buffers/{buffer}/event"))
             .await
     }
 
-    pub(crate) async fn write_event(&mut self, buffer: &str, event_line: &str) -> Result<()> {
+    pub(crate) async fn write_event(&mut self, buffer: usize, event_line: &str) -> Result<()> {
         self.inner
             .write_str(format!("buffers/{buffer}/event"), 0, event_line)
             .await?;
@@ -74,8 +77,10 @@ impl Client {
     }
 
     /// Get the currently active buffer id.
-    pub async fn current_buffer(&mut self) -> Result<String> {
-        self.inner.read_str("buffers/current").await
+    pub async fn current_buffer(&mut self) -> Result<usize> {
+        let id = parse_bufid(&self.inner.read_str("buffers/current").await?)?;
+
+        Ok(id)
     }
 
     /// Get the list of currently open buffers
@@ -87,39 +92,39 @@ impl Client {
             .lines()
             .map(|line| {
                 let mut it = line.split_whitespace();
-                let id = it.next().map(String::from).unwrap_or_default();
+                let id = parse_bufid(it.next().unwrap_or_default())?;
                 let filename = it.next().map(String::from).unwrap_or_default();
 
-                BufferMeta { id, filename }
+                Ok(BufferMeta { id, filename })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(buffers)
     }
 
-    async fn _read_buffer_file(&mut self, buffer_id: &str, file: &str) -> Result<String> {
+    async fn _read_buffer_file(&mut self, buffer_id: usize, file: &str) -> Result<String> {
         self.inner
             .read_str(format!("buffers/{buffer_id}/{file}"))
             .await
     }
 
     /// Read the contents of the dot of the given buffer
-    pub async fn read_dot(&mut self, buffer_id: &str) -> Result<String> {
+    pub async fn read_dot(&mut self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "dot").await
     }
 
     /// Read the body of the given buffer.
-    pub async fn read_body(&mut self, buffer_id: &str) -> Result<String> {
+    pub async fn read_body(&mut self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "body").await
     }
 
     /// Read the current dot address of the given buffer.
-    pub async fn read_addr(&mut self, buffer_id: &str) -> Result<String> {
+    pub async fn read_addr(&mut self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "addr").await
     }
 
     /// Read the filename of the given buffer
-    pub async fn read_filename(&mut self, buffer_id: &str) -> Result<String> {
+    pub async fn read_filename(&mut self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "filename").await
     }
 
@@ -127,7 +132,7 @@ impl Client {
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub async fn read_xaddr(&mut self, buffer_id: &str) -> Result<String> {
+    pub async fn read_xaddr(&mut self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "xaddr").await
     }
 
@@ -135,13 +140,13 @@ impl Client {
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub async fn read_xdot(&mut self, buffer_id: &str) -> Result<String> {
+    pub async fn read_xdot(&mut self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "xdot").await
     }
 
     async fn _write_buffer_file(
         &mut self,
-        buffer_id: &str,
+        buffer_id: usize,
         file: &str,
         offset: u64,
         content: &[u8],
@@ -152,37 +157,37 @@ impl Client {
     }
 
     /// Replace the dot of the given buffer with the provided string.
-    pub async fn write_dot(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+    pub async fn write_dot(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "dot", 0, content.as_bytes())
             .await
     }
 
     /// Append the provided string to the given buffer.
-    pub async fn append_to_body(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+    pub async fn append_to_body(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "body", 0, content.as_bytes())
             .await
     }
 
     /// Set the addr of the given buffer.
-    pub async fn write_addr(&mut self, buffer_id: &str, addr: &str) -> Result<usize> {
+    pub async fn write_addr(&mut self, buffer_id: usize, addr: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "addr", 0, addr.as_bytes())
             .await
     }
 
     /// Replace the xdot of the given buffer with the provided string.
-    pub async fn write_xdot(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+    pub async fn write_xdot(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xdot", 0, content.as_bytes())
             .await
     }
 
     /// Set the xaddr of the given buffer.
-    pub async fn write_xaddr(&mut self, buffer_id: &str, content: &str) -> Result<usize> {
+    pub async fn write_xaddr(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xaddr", 0, content.as_bytes())
             .await
     }
 
     /// Clear the contents of the given buffer
-    pub async fn clear(&mut self, buffer_id: &str) -> Result<()> {
+    pub async fn clear(&mut self, buffer_id: usize) -> Result<()> {
         self.write_xaddr(buffer_id, ",").await?;
         self.write_xdot(buffer_id, "").await?;
 
@@ -190,23 +195,23 @@ impl Client {
     }
 
     /// Focus the given buffer
-    pub async fn focus_buffer(&mut self, buffer_id: &str) -> Result<()> {
+    pub async fn focus_buffer(&mut self, buffer_id: usize) -> Result<()> {
         self.inner
-            .write_str("buffers/current", 0, buffer_id)
+            .write_str("buffers/current", 0, &buffer_id.to_string())
             .await?;
 
         Ok(())
     }
 
     /// Set the cursor position for the given buffer to the beginning of the file
-    pub async fn cur_to_bof(&mut self, buffer_id: &str) -> Result<()> {
+    pub async fn cur_to_bof(&mut self, buffer_id: usize) -> Result<()> {
         self.write_addr(buffer_id, "0").await?;
 
         Ok(())
     }
 
     /// Set the cursor position for the given buffer to the end of the file
-    pub async fn cur_to_eof(&mut self, buffer_id: &str) -> Result<()> {
+    pub async fn cur_to_eof(&mut self, buffer_id: usize) -> Result<()> {
         self.write_addr(buffer_id, "$").await?;
 
         Ok(())
@@ -226,7 +231,7 @@ impl Client {
         self.ctl("echo", msg.as_ref()).await
     }
 
-    async fn _id_for_path(&mut self, path: &str) -> Result<String> {
+    async fn _id_for_path(&mut self, path: &str) -> Result<usize> {
         for BufferMeta { id, filename } in self.open_buffers().await?.into_iter() {
             if filename.ends_with(path) {
                 return Ok(id);
@@ -239,7 +244,7 @@ impl Client {
     }
 
     /// Open the requested file, returning its ID.
-    pub async fn open(&mut self, path: impl AsRef<str>) -> Result<String> {
+    pub async fn open(&mut self, path: impl AsRef<str>) -> Result<usize> {
         let path = path.as_ref();
         self.ctl("open", path).await?;
 
@@ -247,7 +252,7 @@ impl Client {
     }
 
     /// Open the requested file in a new window, returning its ID.
-    pub async fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<String> {
+    pub async fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<usize> {
         let path = path.as_ref();
         self.ctl("open-in-new-window", path).await?;
 
@@ -259,7 +264,7 @@ impl Client {
         &mut self,
         name: impl AsRef<str>,
         content: impl AsRef<str>,
-    ) -> Result<String> {
+    ) -> Result<usize> {
         let name = name.as_ref();
         let content = content.as_ref();
 
@@ -290,7 +295,7 @@ impl Client {
     }
 
     /// Run a provided [AsyncEventFilter] until it exits or errors.
-    pub async fn run_event_filter<F>(&mut self, buffer_id: &str, filter: F) -> Result<()>
+    pub async fn run_event_filter<F>(&mut self, buffer_id: usize, filter: F) -> Result<()>
     where
         F: AsyncEventFilter,
     {
@@ -298,7 +303,7 @@ impl Client {
     }
 
     /// Create a [BodyWriter] impl that can be used to continuously write to the given path
-    pub async fn body_writer(&self, buffer_id: &str) -> Result<BodyWriter> {
+    pub async fn body_writer(&self, buffer_id: usize) -> Result<BodyWriter> {
         Ok(BodyWriter {
             path: format!("buffers/{buffer_id}/body"),
             client: self.inner.clone(),
@@ -432,11 +437,11 @@ mod tests {
     async fn ctl_works() {
         let (mut client, _ted) = prepare(&[("foo", "foo content")]).await;
 
-        let fname = client.read_filename("1").await.unwrap();
+        let fname = client.read_filename(1).await.unwrap();
         assert!(fname.ends_with("foo"), "{fname:?}");
 
         client.ctl("rename-buffer", "bar").await.unwrap();
-        let fname = client.read_filename("1").await.unwrap();
+        let fname = client.read_filename(1).await.unwrap();
         assert!(fname.ends_with("bar"), "{fname:?}");
     }
 
@@ -445,16 +450,16 @@ mod tests {
         let (mut client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]).await;
         assert_eq!(
             client.current_buffer().await.unwrap(),
-            "2",
+            2,
             "initial current buffer"
         );
 
-        client.focus_buffer("1").await.unwrap();
+        client.focus_buffer(1).await.unwrap();
         sleep(Duration::from_millis(5)).await;
 
         assert_eq!(
             client.current_buffer().await.unwrap(),
-            "1",
+            1,
             "current buffer after focus"
         );
     }
@@ -463,15 +468,15 @@ mod tests {
     async fn manipulating_body_file_works() {
         let (mut client, _ted) = prepare(&[("foo", "foo content")]).await;
 
-        let s = client.read_body("1").await.unwrap();
+        let s = client.read_body(1).await.unwrap();
         assert_eq!(s, "foo content", "initial content");
 
-        client.append_to_body("1", " new").await.unwrap();
-        let s = client.read_body("1").await.unwrap();
+        client.append_to_body(1, " new").await.unwrap();
+        let s = client.read_body(1).await.unwrap();
         assert_eq!(s, "foo content new", "after append");
 
-        client.clear("1").await.unwrap();
-        let s = client.read_body("1").await.unwrap();
+        client.clear(1).await.unwrap();
+        let s = client.read_body(1).await.unwrap();
         assert_eq!(s, "", "after clear");
     }
 
@@ -479,49 +484,45 @@ mod tests {
     async fn manipulating_addr_and_dot_works() {
         let (mut client, _ted) = prepare(&[("test", "This is a test")]).await;
 
-        assert_eq!(client.read_addr("1").await.unwrap(), "1:1", "initial");
-        assert_eq!(client.read_dot("1").await.unwrap(), "T", "initial");
+        assert_eq!(client.read_addr(1).await.unwrap(), "1:1", "initial");
+        assert_eq!(client.read_dot(1).await.unwrap(), "T", "initial");
 
-        client.write_addr("1", "1:1,1:4").await.unwrap();
-        assert_eq!(
-            client.read_addr("1").await.unwrap(),
-            "1:1,1:4",
-            "write_addr"
-        );
-        assert_eq!(client.read_dot("1").await.unwrap(), "This", "write_addr");
+        client.write_addr(1, "1:1,1:4").await.unwrap();
+        assert_eq!(client.read_addr(1).await.unwrap(), "1:1,1:4", "write_addr");
+        assert_eq!(client.read_dot(1).await.unwrap(), "This", "write_addr");
 
-        client.write_dot("1", "THIS").await.unwrap();
-        assert_eq!(client.read_addr("1").await.unwrap(), "1:5", "write_dot");
+        client.write_dot(1, "THIS").await.unwrap();
+        assert_eq!(client.read_addr(1).await.unwrap(), "1:5", "write_dot");
 
-        client.write_addr("1", "1:1,1:4").await.unwrap();
-        assert_eq!(client.read_dot("1").await.unwrap(), "THIS", "write_dot");
+        client.write_addr(1, "1:1,1:4").await.unwrap();
+        assert_eq!(client.read_dot(1).await.unwrap(), "THIS", "write_dot");
     }
 
     #[tokio::test]
     async fn manipulating_xaddr_and_xdot_works() {
         let (mut client, _ted) = prepare(&[("test", "This is a test")]).await;
 
-        assert_eq!(client.read_xaddr("1").await.unwrap(), "1:1", "initial");
-        assert_eq!(client.read_xdot("1").await.unwrap(), "T", "initial");
+        assert_eq!(client.read_xaddr(1).await.unwrap(), "1:1", "initial");
+        assert_eq!(client.read_xdot(1).await.unwrap(), "T", "initial");
 
-        client.write_xaddr("1", "1:1,1:4").await.unwrap();
+        client.write_xaddr(1, "1:1,1:4").await.unwrap();
         assert_eq!(
-            client.read_xaddr("1").await.unwrap(),
+            client.read_xaddr(1).await.unwrap(),
             "1:1,1:4",
             "write_xaddr"
         );
         assert_eq!(
-            client.read_addr("1").await.unwrap(),
+            client.read_addr(1).await.unwrap(),
             "1:1",
             "addr should be unchanged"
         );
-        assert_eq!(client.read_xdot("1").await.unwrap(), "This", "write_xaddr");
+        assert_eq!(client.read_xdot(1).await.unwrap(), "This", "write_xaddr");
 
-        client.write_xdot("1", "THIS").await.unwrap();
-        assert_eq!(client.read_xaddr("1").await.unwrap(), "1:5", "write_xdot");
+        client.write_xdot(1, "THIS").await.unwrap();
+        assert_eq!(client.read_xaddr(1).await.unwrap(), "1:5", "write_xdot");
 
-        client.write_xaddr("1", "1:1,1:4").await.unwrap();
-        assert_eq!(client.read_xdot("1").await.unwrap(), "THIS", "write_xdot");
+        client.write_xaddr(1, "1:1,1:4").await.unwrap();
+        assert_eq!(client.read_xdot(1).await.unwrap(), "THIS", "write_xdot");
     }
 
     #[test_case(&[Input::Char('a'), Input::Return], mbs_line(0, "alpha"); "type a")]
@@ -629,7 +630,7 @@ mod tests {
         let filter = TestFilter::default();
         let calls = Arc::clone(&filter.inner);
 
-        let handle = spawn(async move { client.run_event_filter("1", filter).await });
+        let handle = spawn(async move { client.run_event_filter(1, filter).await });
         sleep(Duration::from_millis(10)).await; // wait for the filter to attach
 
         _ = ted.tx.send(Event::Action(action));
@@ -647,9 +648,9 @@ mod tests {
         let path = ted.write_file("test", "test content");
 
         let id = client.open(path).await.unwrap();
-        assert_eq!(id, "1");
+        assert_eq!(id, 1);
 
-        let body = client.read_body("1").await.unwrap();
+        let body = client.read_body(1).await.unwrap();
         assert_eq!(body, "test content");
     }
 
@@ -659,9 +660,9 @@ mod tests {
         let path = ted.write_file("test", "test content");
 
         let id = client.open_in_new_window(path).await.unwrap();
-        assert_eq!(id, "1");
+        assert_eq!(id, 1);
 
-        let body = client.read_body("1").await.unwrap();
+        let body = client.read_body(1).await.unwrap();
         assert_eq!(body, "test content");
     }
 
@@ -670,9 +671,9 @@ mod tests {
         let (mut client, _ted) = prepare(&[]).await;
 
         let id = client.open_virtual("+test", "test content").await.unwrap();
-        assert_eq!(id, "1");
+        assert_eq!(id, 1);
 
-        let body = client.read_body("1").await.unwrap();
+        let body = client.read_body(1).await.unwrap();
         assert_eq!(body, "test content");
     }
 }

@@ -7,8 +7,8 @@ use std::io;
 fn main() -> io::Result<()> {
     let mut client = Client::new()?;
     client.open(".")?;
-    let buffer = client.current_buffer()?;
-    client.run_event_filter(&buffer, Filter)?;
+    let bufid = client.current_buffer()?;
+    client.run_event_filter(bufid, Filter)?;
 
     Ok(())
 }

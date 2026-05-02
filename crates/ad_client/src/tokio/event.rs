@@ -56,7 +56,7 @@ pub trait AsyncEventFilter {
     }
 }
 
-pub(super) async fn run_filter<F>(buffer: &str, mut filter: F, client: &mut Client) -> Result<()>
+pub(super) async fn run_filter<F>(buffer: usize, mut filter: F, client: &mut Client) -> Result<()>
 where
     F: AsyncEventFilter,
 {

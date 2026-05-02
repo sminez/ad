@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
     let stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
     let mut w = client
-        .body_writer(&buffer_id)
+        .body_writer(buffer_id)
         .context("unable to create body writer")?;
 
     spawn(move || {
@@ -64,10 +64,10 @@ fn main() -> anyhow::Result<()> {
 
     client
         .run_event_filter(
-            &buffer_id,
+            buffer_id,
             Filter {
                 child,
-                buffer_id: buffer_id.clone(),
+                buffer_id,
                 stdin,
             },
         )
@@ -78,7 +78,7 @@ fn main() -> anyhow::Result<()> {
 
 struct Filter {
     child: Popen,
-    buffer_id: String,
+    buffer_id: usize,
     stdin: File,
 }
 
@@ -90,9 +90,9 @@ impl Drop for Filter {
 
 impl Filter {
     fn clear_buffer(&mut self, client: &mut Client) -> io::Result<()> {
-        client.write_xaddr(&self.buffer_id, ",")?;
-        client.write_xdot(&self.buffer_id, PROMPT)?;
-        client.write_addr(&self.buffer_id, "$")?;
+        client.write_xaddr(self.buffer_id, ",")?;
+        client.write_xdot(self.buffer_id, PROMPT)?;
+        client.write_addr(self.buffer_id, "$")?;
         client.ctl("mark-clean", "")?;
 
         Ok(())
@@ -136,18 +136,18 @@ impl EventFilter for Filter {
 
         if src == Source::Fsys {
             // This is us writing to the body so move dot to EOF
-            client.write_addr(&self.buffer_id, "$")?;
+            client.write_addr(self.buffer_id, "$")?;
             return Ok(EventOutcome::Handled);
         }
 
         if txt == "\n" {
-            client.write_xaddr(&self.buffer_id, "$")?;
-            let xaddr = client.read_xaddr(&self.buffer_id)?;
-            let addr = client.read_addr(&self.buffer_id)?;
+            client.write_xaddr(self.buffer_id, "$")?;
+            let xaddr = client.read_xaddr(self.buffer_id)?;
+            let addr = client.read_addr(self.buffer_id)?;
 
             if xaddr == addr {
-                client.write_xaddr(&self.buffer_id, "$-1")?;
-                let raw = client.read_xdot(&self.buffer_id)?;
+                client.write_xaddr(self.buffer_id, "$-1")?;
+                let raw = client.read_xdot(self.buffer_id)?;
                 return self.send_input(strip_prompt(&raw), client);
             }
         }
@@ -176,7 +176,7 @@ impl EventFilter for Filter {
         client: &mut Client,
     ) -> Result<EventOutcome> {
         let s = strip_prompt(txt).trim();
-        client.append_to_body(&self.buffer_id, &format!("\n{PROMPT}{s}\n"))?;
+        client.append_to_body(self.buffer_id, &format!("\n{PROMPT}{s}\n"))?;
         let outcome = self.send_input(s, client)?;
 
         Ok(outcome)

@@ -55,6 +55,15 @@ pub enum EventOutcome {
     Exit,
 }
 
+pub(crate) fn parse_bufid(str_id: &str) -> io::Result<usize> {
+    str_id.parse().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            "expected integer ID, got {str_id:?}",
+        )
+    })
+}
+
 /// A message sent by the main editor thread to notify the fs thread that
 /// the current buffer list has changed.
 #[derive(Debug, Clone, Copy)]
@@ -83,13 +92,7 @@ impl FromStr for LogEvent {
             "malformed log line: {s:?}",
         ))?;
 
-        let id: usize = str_id.parse().map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                "expected integer ID, got {str_id:?}",
-            )
-        })?;
-
+        let id = parse_bufid(str_id)?;
         let evt = match action {
             "open" => Self::Open(id),
             "close" => Self::Close(id),
@@ -152,7 +155,7 @@ impl SessionMeta {
 #[derive(Debug)]
 pub struct BufferMeta {
     /// The id of the buffer.
-    pub id: String,
+    pub id: usize,
     /// The full filename of the buffer.
     pub filename: String,
 }
@@ -191,12 +194,12 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
             .lines()
             .map(|line| {
                 let mut it = line.split_whitespace();
-                let id = it.next().map(String::from).unwrap_or_default();
+                let id = parse_bufid(it.next().unwrap_or_default())?;
                 let filename = it.next().map(String::from).unwrap_or_default();
 
-                BufferMeta { id, filename }
+                Ok(BufferMeta { id, filename })
             })
-            .collect();
+            .collect::<Result<Vec<_>>>()?;
 
         sessions.push(SessionMeta {
             socket_name: ns,
