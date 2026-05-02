@@ -19,7 +19,7 @@ pub use layout::{Border, Layout, SCRATCH_ID};
 pub use tui::{GenericTui, Tui};
 
 /// Something that can be used as a user interface
-pub trait UserInterface {
+pub trait UserInterface: Send {
     /// Initialise the UI and start processing events.
     ///
     /// Called before entering the main editor event loop

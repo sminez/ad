@@ -259,6 +259,11 @@ where
         self.layout.ids()
     }
 
+    /// Obtain a handle for sending events to the editor event loop.
+    pub fn tx_events(&self) -> Sender<Event> {
+        self.tx_events.clone()
+    }
+
     /// The effective directory of the editor at any point is the directory containing the
     /// file backing the active buffer, or if the active buffer can not define a containing
     /// directory, self.cwd.

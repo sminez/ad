@@ -20,7 +20,7 @@ use std::{
     cmp::Ordering,
     collections::HashMap,
     fmt::Write as _,
-    io::{self, BufWriter, Read, StdoutLock, Write, stdin, stdout},
+    io::{self, BufWriter, Read, Stdout, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
     sync::{Arc, RwLock, mpsc::Sender},
@@ -48,10 +48,13 @@ const TR_STR: &str = "├";
 const TL_STR: &str = "┤";
 const X_STR: &str = "┼";
 
-pub type Tui = GenericTui<StdoutLock<'static>>;
+pub type Tui = GenericTui<Stdout>;
 
 #[derive(Debug)]
-pub struct GenericTui<W: Write> {
+pub struct GenericTui<W>
+where
+    W: Write + Send,
+{
     stdout: BufWriter<W>,
     config: Arc<RwLock<Config>>,
     status_message: String,
@@ -66,7 +69,10 @@ impl Default for Tui {
     }
 }
 
-impl<W: Write> Drop for GenericTui<W> {
+impl<W> Drop for GenericTui<W>
+where
+    W: Write + Send,
+{
     fn drop(&mut self) {
         restore_terminal_state(&mut self.stdout);
     }
@@ -74,11 +80,14 @@ impl<W: Write> Drop for GenericTui<W> {
 
 impl Tui {
     pub fn new(config: Arc<RwLock<Config>>) -> Self {
-        Self::new_with_stdout_handle(config, stdout().lock())
+        Self::new_with_stdout_handle(config, stdout())
     }
 }
 
-impl<W: Write> GenericTui<W> {
+impl<W> GenericTui<W>
+where
+    W: Write + Send,
+{
     pub fn new_with_stdout_handle(config: Arc<RwLock<Config>>, stdout: W) -> Self {
         Self {
             stdout: BufWriter::new(stdout),
@@ -182,7 +191,10 @@ impl<W: Write> GenericTui<W> {
     }
 }
 
-impl<W: Write> UserInterface for GenericTui<W> {
+impl<W> UserInterface for GenericTui<W>
+where
+    W: Write + Send,
+{
     fn init(&mut self, tx: Sender<Event>) -> (usize, usize) {
         let original_termios = get_termios();
         enable_raw_mode(original_termios);
