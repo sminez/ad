@@ -270,7 +270,7 @@ impl Layout {
         name: impl Into<String>,
         content: impl Into<String>,
         new_window: bool,
-    ) {
+    ) -> BufferId {
         self.scratch.is_focused = false;
         self.changed_since_last_render = true;
 
@@ -286,6 +286,8 @@ impl Layout {
 
         #[cfg(test)]
         assert_invariants!(self);
+
+        id
     }
 
     /// Open a new transient scratch buffer.

@@ -608,7 +608,7 @@ where
                     .lsp_manager
                     .show_server_capabilities(self.layout.active_buffer_ignoring_scratch())
                 {
-                    self.layout.open_virtual(name, txt, true)
+                    self.open_virtual(name, txt, true)
                 }
             }
             LspShowDiagnostics => {
@@ -672,7 +672,7 @@ where
                 self.open_file_relative_to_effective_directory(&path, true)
             }
             OpenTransientScratch { name, txt } => self.layout.open_transient_scratch(name, txt),
-            OpenVirtualFile { name, txt } => self.layout.open_virtual(name, txt, true),
+            OpenVirtualFile { name, txt } => self.open_virtual(name, txt, true),
             Paste => self.paste_from_clipboard(source),
             Plumb { txt, new_window } => self.plumb(txt, new_window),
             PreviousBuffer => {

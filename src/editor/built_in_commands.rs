@@ -113,6 +113,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "open the given file path in a new buffer placed in a new window ('open-in-new-window README.md')",
         ),
         (
+            vec!["open-virtual"],
+            "open a new virtual file with the provided name and content ('open-virtual +my-file initial content')",
+        ),
+        (
             vec!["plumb"],
             "plumb the provided string as if it had been loaded within the active buffer",
         ),

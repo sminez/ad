@@ -210,6 +210,7 @@ impl Buffers {
             let n = self.inner.focus.txt.len_chars();
             self.inner.focus.dot.clamp_idx(n);
             self.inner.focus.xdot.clamp_idx(n);
+
             return id;
         }
 

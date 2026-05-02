@@ -754,8 +754,7 @@ mod tests {
             },
         );
         ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
-        ed.layout
-            .open_virtual("test", "some text to test with", false);
+        ed.open_virtual("test", "some text to test with", false);
         ed.layout.active_buffer_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
 
         // attach an input filter so we can intercept load and execute events
@@ -792,7 +791,7 @@ mod tests {
             TestSystem::default(),
         );
         ed.update_window_size(80, 100);
-        ed.layout.open_virtual("test", "test content", false);
+        ed.open_virtual("test", "test content", false);
 
         for _ in 1..n_cols {
             ed.layout.new_column();

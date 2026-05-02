@@ -205,7 +205,9 @@ where
         content: impl Into<String>,
         new_window: bool,
     ) {
-        self.layout.open_virtual(name, content, new_window)
+        let id = self.layout.open_virtual(name, content, new_window);
+        _ = self.tx_fsys.send(LogEvent::Open(id));
+        _ = self.tx_fsys.send(LogEvent::Focus(id));
     }
 
     /// Open a file within the editor
@@ -569,8 +571,7 @@ where
     }
 
     pub(super) fn view_logs(&mut self) {
-        self.layout
-            .open_virtual("+logs", self.log_buffer.content(), false)
+        self.open_virtual("+logs", self.log_buffer.content(), false)
     }
 
     pub(super) fn show_active_ts_tree(&mut self) {
@@ -579,13 +580,13 @@ where
             .active_buffer_ignoring_scratch()
             .pretty_print_ts_tree()
         {
-            Some(s) => self.layout.open_virtual("+ts-tree", s, false),
+            Some(s) => self.open_virtual("+ts-tree", s, false),
             None => self.set_status_message("no tree-sitter tree for current buffer"),
         }
     }
 
     pub(super) fn show_help(&mut self) {
-        self.layout.open_virtual("+help", gen_help_docs(), false)
+        self.open_virtual("+help", gen_help_docs(), false)
     }
 
     pub(super) fn debug_edit_log(&mut self) {
@@ -684,7 +685,7 @@ where
                     .get("filename")
                     .cloned()
                     .unwrap_or_else(|| "+plumbing-message".to_string());
-                self.layout.open_virtual(filename, data, load_in_new_window);
+                self.open_virtual(filename, data, load_in_new_window);
             }
 
             _ => {

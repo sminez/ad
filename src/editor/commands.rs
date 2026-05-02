@@ -20,10 +20,7 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
     }
 
     let input = input.trim_end();
-    let (command, args) = match input.split_once(' ') {
-        Some((command, args)) => (command, args),
-        None => (input, ""),
-    };
+    let (command, args) = input.split_once(' ').unwrap_or((input, ""));
 
     match command {
         "b" | "buffer" => match args.parse::<usize>() {
@@ -126,6 +123,18 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             } else {
                 Ok(Single(OpenFileInNewWindow {
                     path: args.to_string(),
+                }))
+            }
+        }
+
+        "open-virtual" => {
+            if args.is_empty() {
+                Err("No filename provided".to_string())
+            } else {
+                let (name, txt) = args.split_once(' ').unwrap_or((args, ""));
+                Ok(Single(OpenVirtualFile {
+                    name: name.to_string(),
+                    txt: txt.to_string(),
                 }))
             }
         }
