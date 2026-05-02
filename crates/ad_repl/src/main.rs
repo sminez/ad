@@ -29,12 +29,9 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    client
+    let buffer_id = client
         .open_in_new_window("+repl")
         .context("unable to create +repl window")?;
-    let buffer_id = client
-        .current_buffer()
-        .context("unable to get current buffer ID")?;
     let mut env_vars: Vec<(String, String)> = env::vars().collect();
     env_vars.push(("prompt".into(), PROMPT.into()));
 

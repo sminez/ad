@@ -1,6 +1,6 @@
 //! An asynchronous client implementation.
-use crate::{LogEvent, MiniBufferSelection, SessionMeta};
-use ninep::tokio::client::{ReadLineStream, Result, UnixClient};
+use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta};
+use ninep::tokio::client::{Error, ReadLineStream, Result, UnixClient};
 use std::{env, io, path::Path, str::FromStr};
 use tokio::net::UnixStream;
 
@@ -76,6 +76,25 @@ impl Client {
     /// Get the currently active buffer id.
     pub async fn current_buffer(&mut self) -> Result<String> {
         self.inner.read_str("buffers/current").await
+    }
+
+    /// Get the list of currently open buffers
+    pub async fn open_buffers(&mut self) -> Result<Vec<BufferMeta>> {
+        let buffers = self
+            .inner
+            .read_str("buffers/index")
+            .await?
+            .lines()
+            .map(|line| {
+                let mut it = line.split_whitespace();
+                let id = it.next().map(String::from).unwrap_or_default();
+                let filename = it.next().map(String::from).unwrap_or_default();
+
+                BufferMeta { id, filename }
+            })
+            .collect();
+
+        Ok(buffers)
     }
 
     async fn _read_buffer_file(&mut self, buffer_id: &str, file: &str) -> Result<String> {
@@ -207,14 +226,52 @@ impl Client {
         self.ctl("echo", msg.as_ref()).await
     }
 
-    /// Open the requested file.
-    pub async fn open(&mut self, path: impl AsRef<str>) -> Result<()> {
-        self.ctl("open", path.as_ref()).await
+    async fn _id_for_path(&mut self, path: &str) -> Result<String> {
+        for BufferMeta { id, filename } in self.open_buffers().await?.into_iter() {
+            if filename.ends_with(path) {
+                return Ok(id);
+            }
+        }
+
+        Err(Error::Rerror {
+            ename: "unable to determine new buffer ID".into(),
+        })
     }
 
-    /// Open the requested file in a new window.
-    pub async fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<()> {
-        self.ctl("open-in-new-window", path.as_ref()).await
+    /// Open the requested file, returning its ID.
+    pub async fn open(&mut self, path: impl AsRef<str>) -> Result<String> {
+        let path = path.as_ref();
+        self.ctl("open", path).await?;
+
+        self._id_for_path(path).await
+    }
+
+    /// Open the requested file in a new window, returning its ID.
+    pub async fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<String> {
+        let path = path.as_ref();
+        self.ctl("open-in-new-window", path).await?;
+
+        self._id_for_path(path).await
+    }
+
+    /// Open a new virtual file showing the given content, returning its ID.
+    pub async fn open_virtual(
+        &mut self,
+        name: impl AsRef<str>,
+        content: impl AsRef<str>,
+    ) -> Result<String> {
+        let name = name.as_ref();
+        let content = content.as_ref();
+
+        self.inner
+            .write(
+                "ctl",
+                0,
+                format!("open-virtual {name} {content}").as_bytes(),
+            )
+            .await?;
+
+        self._id_for_path(name).await
     }
 
     /// Reload the currently active buffer.
@@ -582,5 +639,40 @@ mod tests {
 
         let recorded = calls.lock().await;
         assert_eq!(*recorded, vec![expected]);
+    }
+
+    #[tokio::test]
+    async fn open_returns_correct_id() {
+        let (mut client, ted) = prepare(&[]).await;
+        let path = ted.write_file("test", "test content");
+
+        let id = client.open(path).await.unwrap();
+        assert_eq!(id, "1");
+
+        let body = client.read_body("1").await.unwrap();
+        assert_eq!(body, "test content");
+    }
+
+    #[tokio::test]
+    async fn open_in_new_window_returns_correct_id() {
+        let (mut client, ted) = prepare(&[]).await;
+        let path = ted.write_file("test", "test content");
+
+        let id = client.open_in_new_window(path).await.unwrap();
+        assert_eq!(id, "1");
+
+        let body = client.read_body("1").await.unwrap();
+        assert_eq!(body, "test content");
+    }
+
+    #[tokio::test]
+    async fn open_virtual_returns_correct_id() {
+        let (mut client, _ted) = prepare(&[]).await;
+
+        let id = client.open_virtual("+test", "test content").await.unwrap();
+        assert_eq!(id, "1");
+
+        let body = client.read_body("1").await.unwrap();
+        assert_eq!(body, "test content");
     }
 }

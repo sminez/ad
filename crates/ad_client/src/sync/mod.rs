@@ -1,6 +1,6 @@
 //! A synchronous client implementation.
-use crate::{LogEvent, MiniBufferSelection, SessionMeta};
-use ninep::sync::client::{ReadLineIter, Result, UnixClient};
+use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta};
+use ninep::sync::client::{Error, ReadLineIter, Result, UnixClient};
 use std::{
     env,
     io::{self, Write},
@@ -79,6 +79,24 @@ impl Client {
     /// Get the currently active buffer id.
     pub fn current_buffer(&mut self) -> Result<String> {
         self.inner.read_str("buffers/current")
+    }
+
+    /// Get the list of currently open buffers
+    pub fn open_buffers(&mut self) -> Result<Vec<BufferMeta>> {
+        let buffers = self
+            .inner
+            .read_str("buffers/index")?
+            .lines()
+            .map(|line| {
+                let mut it = line.split_whitespace();
+                let id = it.next().map(String::from).unwrap_or_default();
+                let filename = it.next().map(String::from).unwrap_or_default();
+
+                BufferMeta { id, filename }
+            })
+            .collect();
+
+        Ok(buffers)
     }
 
     fn _read_buffer_file(&mut self, buffer_id: &str, file: &str) -> Result<String> {
@@ -199,14 +217,50 @@ impl Client {
         self.ctl("echo", msg.as_ref())
     }
 
-    /// Open the requested file.
-    pub fn open(&mut self, path: impl AsRef<str>) -> Result<()> {
-        self.ctl("open", path.as_ref())
+    fn _id_for_path(&mut self, path: &str) -> Result<String> {
+        for BufferMeta { id, filename } in self.open_buffers()?.into_iter() {
+            if filename.ends_with(path) {
+                return Ok(id);
+            }
+        }
+
+        Err(Error::Rerror {
+            ename: "unable to determine new buffer ID".into(),
+        })
     }
 
-    /// Open the requested file in a new window.
-    pub fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<()> {
-        self.ctl("open-in-new-window", path.as_ref())
+    /// Open the requested file, returning its ID.
+    pub fn open(&mut self, path: impl AsRef<str>) -> Result<String> {
+        let path = path.as_ref();
+        self.ctl("open", path)?;
+
+        self._id_for_path(path)
+    }
+
+    /// Open the requested file in a new window, returning its ID.
+    pub fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<String> {
+        let path = path.as_ref();
+        self.ctl("open-in-new-window", path)?;
+
+        self._id_for_path(path)
+    }
+
+    /// Open a new virtual file showing the given content, returning its ID.
+    pub fn open_virtual(
+        &mut self,
+        name: impl AsRef<str>,
+        content: impl AsRef<str>,
+    ) -> Result<String> {
+        let name = name.as_ref();
+        let content = content.as_ref();
+
+        self.inner.write(
+            "ctl",
+            0,
+            format!("open-virtual {name} {content}").as_bytes(),
+        )?;
+
+        self._id_for_path(name)
     }
 
     /// Reload the currently active buffer.
@@ -548,5 +602,40 @@ mod tests {
 
         let recorded = calls.lock().unwrap();
         assert_eq!(*recorded, vec![expected]);
+    }
+
+    #[test]
+    fn open_returns_correct_id() {
+        let (mut client, ted) = prepare(&[]);
+        let path = ted.write_file("test", "test content");
+
+        let id = client.open(path).unwrap();
+        assert_eq!(id, "1");
+
+        let body = client.read_body("1").unwrap();
+        assert_eq!(body, "test content");
+    }
+
+    #[test]
+    fn open_in_new_window_returns_correct_id() {
+        let (mut client, ted) = prepare(&[]);
+        let path = ted.write_file("test", "test content");
+
+        let id = client.open_in_new_window(path).unwrap();
+        assert_eq!(id, "1");
+
+        let body = client.read_body("1").unwrap();
+        assert_eq!(body, "test content");
+    }
+
+    #[test]
+    fn open_virtual_returns_correct_id() {
+        let (mut client, _ted) = prepare(&[]);
+
+        let id = client.open_virtual("+test", "test content").unwrap();
+        assert_eq!(id, "1");
+
+        let body = client.read_body("1").unwrap();
+        assert_eq!(body, "test content");
     }
 }

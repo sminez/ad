@@ -28,13 +28,10 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    client
+    let buffer_id = client
         .open_in_new_window(format!("{dir}/+watch"))
         .context("unable to open +watch buffer")?;
 
-    let buffer_id = client
-        .current_buffer()
-        .context("unable to determine current buffer")?;
     let int_id: usize = buffer_id.parse().unwrap();
 
     clear_and_rerun(&mut client, &buffer_id, &args)?;

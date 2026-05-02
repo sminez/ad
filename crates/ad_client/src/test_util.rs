@@ -43,6 +43,15 @@ impl TestEditor {
         self.tmp.join("sock")
     }
 
+    pub fn write_file(&self, name: &str, content: &str) -> String {
+        let p = self.tmp.join("files").join(name);
+        if let Err(e) = fs::write(&p, content) {
+            panic!("failed to write test file {name}: {e}");
+        }
+
+        p.to_string_lossy().to_string()
+    }
+
     /// Run a new [Editor] in a dedicated thread with the given initial files.
     pub fn prepare(files: &[(&str, &str)]) -> TestEditor {
         let tmp = TempDir::new().unwrap();
