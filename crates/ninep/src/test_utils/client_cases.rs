@@ -62,6 +62,10 @@ pub(crate) enum Step {
         content: &'static [u8],
         res: Result<usize>,
     },
+    Stat {
+        path: &'static str,
+        res: Result<Stat>,
+    },
     WriteStat {
         path: &'static str,
         wstat: WStat,
@@ -140,6 +144,10 @@ impl Step {
         }
     }
 
+    fn stat(path: &'static str, res: Result<Stat>) -> Self {
+        Step::Stat { path, res }
+    }
+
     fn write_stat(path: &'static str, wstat: WStat, res: Result<()>) -> Self {
         Step::WriteStat { path, wstat, res }
     }
@@ -188,14 +196,16 @@ macro_rules! generate_client_test_suite {
             read_unknown_file_errors,
             remove_clears_fid_cache,
             repeated_read_works,
+            stat_known_file_succeeds,
+            stat_unknown_file_errors,
             walk_dot_is_root,
             walk_empty_path_is_root,
             walk_same_path_doesnt_alter_next_fid,
             walk_to_known_file_succeeds,
             walk_to_root_succeeds,
             walk_to_unknown_entry_errors,
-            write_stat_successful_clears_fid_cache,
             write_stat_error_does_not_clear_fid_cache,
+            write_stat_successful_clears_fid_cache,
             write_without_permission_fails,
             write_with_permission_succeeds,
         );
@@ -450,6 +460,22 @@ pub(crate) fn remove_clears_fid_cache() -> TestCase {
         Step::walk("/hello", Ok(1)),
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
         Step::remove("/hello", Ok(())),
+        Step::assert_state(2, &[("/", 0)]),
+    ]
+}
+
+pub(crate) fn stat_known_file_succeeds() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::stat("/hello", Ok(Stat::stub(Qid::file(HELLO_QID), "hello"))),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn stat_unknown_file_errors() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::stat("/unknown", Err(Error::r(E_UNKNOWN_FILE))),
         Step::assert_state(2, &[("/", 0)]),
     ]
 }

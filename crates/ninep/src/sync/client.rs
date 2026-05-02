@@ -500,6 +500,11 @@ mod tests {
                 assert_9p_client_result!("write", i, actual, res);
             }
 
+            Step::Stat { path, res } => {
+                let actual = client.stat(path);
+                assert_9p_client_result!("stat", i, actual, res);
+            }
+
             Step::WriteStat { path, wstat, res } => {
                 let actual = client.write_stat(path, wstat);
                 assert_9p_client_result!("write stat", i, actual, res);
