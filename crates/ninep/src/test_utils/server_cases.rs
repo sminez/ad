@@ -144,6 +144,7 @@ macro_rules! generate_server_test_suite {
             walk_partial_returns_partial_qids,
             walk_to_known_child_returns_qids,
             walk_unknown_fid_returns_error,
+            write_empty_data_succeeds,
             write_to_directory_returns_error,
             write_to_file_returns_byte_count,
             write_with_oversized_offset_returns_error,
@@ -482,6 +483,22 @@ pub(crate) fn write_to_file_returns_byte_count() -> TestCase {
             Call::stat(ClientId(0), HELLO_QID, "owner"),
             Call::open(ClientId(0), HELLO_QID, Mode::WRITE, "owner"),
             Call::write(ClientId(0), HELLO_QID, 0, payload, "owner"),
+        ]),
+    ]
+}
+
+pub(crate) fn write_empty_data_succeeds() -> TestCase {
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
+        Step::open_req(3, 1, Mode::WRITE, HELLO_QID),
+        Step::req(4, Tdata::write(1, 0, b"".to_vec()), Rdata::write(0)),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::WRITE, "owner"),
+            Call::write(ClientId(0), HELLO_QID, 0, b"".to_vec(), "owner"),
         ]),
     ]
 }

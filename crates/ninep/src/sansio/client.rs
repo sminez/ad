@@ -422,6 +422,15 @@ impl State {
                 .yield_from(self.handle_open(fid, Mode::WRITE))
                 .await?;
 
+            if content.is_empty() {
+                let rmessage = handle
+                    .yield_value(Tmessage::new(0, Tdata::write(fid, offset, b"".to_vec())))
+                    .await;
+                let n = expect_rmessage!(rmessage, Write { count })?;
+
+                return Ok(n as usize);
+            }
+
             let len = content.len();
             let mut cur = 0;
             let chunk_size = (self.msize - IOHDRSZ) as usize;

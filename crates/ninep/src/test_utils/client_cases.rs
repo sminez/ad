@@ -204,6 +204,7 @@ macro_rules! generate_client_test_suite {
             walk_to_known_file_succeeds,
             walk_to_root_succeeds,
             walk_to_unknown_entry_errors,
+            write_empty_data_succeeds,
             write_stat_error_does_not_clear_fid_cache,
             write_stat_successful_clears_fid_cache,
             write_without_permission_fails,
@@ -414,6 +415,14 @@ pub(crate) fn write_with_permission_succeeds() -> TestCase {
     vec![
         Step::connect_valid(),
         Step::write("/hello", 0, b"data", Ok(4)),
+        Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
+    ]
+}
+
+pub(crate) fn write_empty_data_succeeds() -> TestCase {
+    vec![
+        Step::connect_valid(),
+        Step::write("/hello", 0, b"", Ok(0)),
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),
     ]
 }
