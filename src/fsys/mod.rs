@@ -37,7 +37,6 @@ use ninep::{
     sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
 use std::{
-    collections::HashMap,
     env,
     fs::{create_dir_all, remove_file},
     mem::take,
@@ -128,12 +127,6 @@ enum InternalRead {
     Unknown,
 }
 
-#[derive(Debug, Default)]
-struct Cids {
-    cids: Vec<ClientId>,
-    read_locked: Option<ClientId>,
-}
-
 /// A join handle for the filesystem thread
 #[derive(Debug)]
 pub struct FsHandle {
@@ -174,8 +167,6 @@ struct State {
     buffer_nodes: BufferNodes,
     minibuffer_content: MiniBufferContent,
     minibuffer_prompt: Option<String>,
-    /// map of qids to client IDs with that qid open
-    open_cids: HashMap<u64, Cids>,
     // Root level files and directories
     mount_dir_stat: Stat,
     control_file_stat: Stat,
@@ -201,33 +192,6 @@ impl Drop for State {
 }
 
 impl State {
-    fn add_open_cid(&mut self, qid: u64, cid: ClientId) {
-        self.open_cids.entry(qid).or_default().cids.push(cid);
-    }
-
-    fn remove_open_cid(&mut self, qid: u64, cid: ClientId) {
-        self.open_cids.entry(qid).and_modify(|cids| {
-            cids.cids.retain(|&id| id != cid);
-            if cids.read_locked == Some(cid) {
-                cids.read_locked = None;
-            }
-        });
-    }
-
-    fn lock_qid_for_reading(&mut self, qid: u64, cid: ClientId) -> Result<()> {
-        trace!("locking qid for reading qid={qid} cid={cid:?}");
-        match self.open_cids.get_mut(&qid) {
-            Some(cids) => cids.read_locked = Some(cid),
-            None => return Err(E_UNKNOWN_FILE.to_string()),
-        }
-
-        Ok(())
-    }
-
-    fn readlocked_cid(&self, qid: u64) -> Option<ClientId> {
-        self.open_cids.get(&qid).and_then(|cids| cids.read_locked)
-    }
-
     fn set_active_buffer(&mut self, s: String) -> Result<usize> {
         let id: usize = match s.trim().parse() {
             Ok(n) => n,
@@ -355,10 +319,6 @@ impl AdFs {
         let home = env::var("HOME").expect("$HOME to be set");
         let mount_path = format!("{home}/{MOUNT_DIR}");
 
-        if !Path::new(&mount_path).exists() {
-            create_dir_all(&mount_path).expect("to be able to create our mount point");
-        }
-
         let (log_tx, log_rx) = channel();
         let (listener_tx, listener_rx) = channel();
         spawn_log_listener(brx, listener_tx, log_rx);
@@ -369,7 +329,6 @@ impl AdFs {
             state: Arc::new(Mutex::new(State {
                 tx,
                 buffer_nodes,
-                open_cids: HashMap::new(),
                 minibuffer_content: MiniBufferContent::Data(Vec::new()),
                 minibuffer_prompt: None,
                 mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
@@ -398,6 +357,10 @@ impl AdFs {
         };
 
         if auto_mount {
+            if !Path::new(&mount_path).exists() {
+                create_dir_all(&mount_path).expect("to be able to create our mount point");
+            }
+
             let res = Command::new("9pfuse")
                 .args([socket_path, mount_path])
                 .spawn();
@@ -409,31 +372,6 @@ impl AdFs {
 
         handle
     }
-}
-
-/// Spawn a listener to wait for a reply from the editor for our minibuffer selection
-fn spawn_minibuffer_listener(
-    data_rx: Receiver<String>,
-    fsys_tx: Sender<Vec<u8>>,
-    sub_rx: Receiver<Sender<Vec<u8>>>,
-) {
-    spawn(move || {
-        let data = match data_rx.recv() {
-            Ok(s) => s.into_bytes(),
-            Err(e) => {
-                error!("unable to read minibuffer output: {e}");
-                Vec::new()
-            }
-        };
-
-        // Reply to fsys first so the data is ready for incoming reads
-        _ = fsys_tx.send(data.clone());
-
-        // Any client currently blocked on a read then gets their own reply
-        for tx in sub_rx.try_iter() {
-            _ = tx.send(data.clone());
-        }
-    });
 }
 
 impl Serve9p for AdFs {
@@ -448,11 +386,11 @@ impl Serve9p for AdFs {
             MINIBUFFER_QID => Ok(s.minibuffer_stat.clone()),
             SCRATCH_QID => Ok(s.scratch_stat.clone()),
             LOG_FILE_QID => Ok(s.log_file_stat.clone()),
-            BUFFERS_QID => Ok(s.buffer_nodes.stat().clone()),
-            qid => match s.buffer_nodes.get_stat_for_qid(qid) {
-                Some(stat) => Ok(stat.clone()),
-                None => Err(E_UNKNOWN_FILE.to_string()),
-            },
+            BUFFERS_QID => Ok(s.buffer_nodes.stat()),
+            qid => s
+                .buffer_nodes
+                .get_stat_for_qid(qid)
+                .ok_or_else(|| E_UNKNOWN_FILE.to_string()),
         }
     }
 
@@ -492,7 +430,7 @@ impl Serve9p for AdFs {
                 },
             },
 
-            qid if qid == BUFFERS_QID || s.buffer_nodes.is_known_buffer_qid(qid) => {
+            qid if qid == BUFFERS_QID || s.buffer_nodes.is_known_qid(qid) => {
                 match s.buffer_nodes.lookup_file_stat(qid, child) {
                     Some(stat) => Ok(stat.qid),
                     None => Err(format!("{E_UNKNOWN_FILE}: {parent_qid} {child}")),
@@ -510,13 +448,9 @@ impl Serve9p for AdFs {
 
         if qid == LOG_FILE_QID {
             s.buffer_nodes.log.add_client(cid);
-        } else if !TOP_LEVEL_QIDS.contains(&qid)
-            && let QidCheck::Unknown = s.buffer_nodes.check_if_known_qid(qid)
-        {
+        } else if !TOP_LEVEL_QIDS.contains(&qid) && !s.buffer_nodes.is_known_qid(qid) {
             return Err(format!("{E_UNKNOWN_FILE}: {qid}"));
         }
-
-        s.add_open_cid(qid, cid);
 
         Ok(IO_UNIT)
     }
@@ -527,12 +461,9 @@ impl Serve9p for AdFs {
 
         if qid == LOG_FILE_QID {
             s.buffer_nodes.log.remove_client(cid);
-        } else if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid)
-            && s.readlocked_cid(qid) == Some(cid)
-        {
+        } else if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid) {
             s.buffer_nodes.clear_input_filter(buf_qid);
         }
-        s.remove_open_cid(qid, cid); // also handles clearing the read lock
     }
 
     fn read(
@@ -557,16 +488,11 @@ impl Serve9p for AdFs {
             return Ok(s.buffer_nodes.log.events_since_last_read(cid));
         }
 
-        if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid) {
-            match s.readlocked_cid(qid) {
-                Some(id) if id == cid => (),
-                Some(_) => return Ok(ReadOutcome::Immediate(Vec::new())),
-                None => {
-                    trace!("attaching filter qid={qid} cid={cid:?}");
-                    s.buffer_nodes.attach_input_filter(buf_qid)?;
-                    s.lock_qid_for_reading(qid, cid)?;
-                }
-            }
+        if let QidCheck::EventFile { buf_qid } = s.buffer_nodes.check_if_known_qid(qid)
+            && !s.buffer_nodes.has_input_filter(buf_qid)
+        {
+            trace!("attaching filter qid={qid} cid={cid:?}");
+            s.buffer_nodes.attach_input_filter(buf_qid)?;
         }
 
         match s.buffer_nodes.get_file_content(qid, offset, count) {
@@ -677,6 +603,31 @@ impl Serve9p for AdFs {
     }
 }
 
+/// Spawn a listener to wait for a reply from the editor for our minibuffer selection
+fn spawn_minibuffer_listener(
+    data_rx: Receiver<String>,
+    fsys_tx: Sender<Vec<u8>>,
+    sub_rx: Receiver<Sender<Vec<u8>>>,
+) {
+    spawn(move || {
+        let data = match data_rx.recv() {
+            Ok(s) => s.into_bytes(),
+            Err(e) => {
+                error!("unable to read minibuffer output: {e}");
+                Vec::new()
+            }
+        };
+
+        // Reply to fsys first so the data is ready for incoming reads
+        _ = fsys_tx.send(data.clone());
+
+        // Any client currently blocked on a read then gets their own reply
+        for tx in sub_rx.try_iter() {
+            _ = tx.send(data.clone());
+        }
+    });
+}
+
 fn apply_offset(data: &[u8], offset: usize, count: usize) -> Vec<u8> {
     data.iter()
         .skip(offset)
@@ -710,5 +661,51 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
         last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
         last_modified_by: "ad".into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ninep::sync::client::Error;
+
+    #[test]
+    fn event_files_are_exclusive() {
+        let (tx, _rx) = channel();
+        let (btx, brx) = channel();
+        let adfs = AdFs::new(tx, brx, false);
+
+        {
+            // Ensure that we have a buffer to work with
+            _ = btx.send(LogEvent::Open(1));
+            let mut state = adfs.state.lock().unwrap();
+            state.buffer_nodes.update();
+        }
+
+        let mut server = Server::new(adfs);
+        let (mut client1, _handle1) = server.session_with_attached_client("client1", "/").unwrap();
+        let (mut client2, _handle2) = server.session_with_attached_client("client2", "/").unwrap();
+
+        // First client to try to grab the event file should succeed
+        let res = client1.iter_lines("buffers/1/event");
+        assert!(res.is_ok(), "first read failed: {res:?}");
+
+        // Second client should error
+        let err = client2.iter_lines("buffers/1/event").unwrap_err();
+        assert!(
+            matches!(
+            &err,
+            Error::Rerror {
+                ename
+            } if ename == "exclusive file already open"),
+            "unexpected error: {err:?}"
+        );
+
+        // Dropping the first line reader and clunking should allow client2 to grab the file
+        drop(res);
+        client1.clunk_path("buffers/1/event").unwrap();
+
+        let res = client2.iter_lines("buffers/1/event");
+        assert!(res.is_ok(), "client2 read after clunk failed: {res:?}");
     }
 }

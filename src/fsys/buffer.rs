@@ -9,7 +9,10 @@ use crate::{
     },
     input::Event,
 };
-use ninep::{fs::Stat, sync::server::ReadOutcome};
+use ninep::{
+    fs::{FileType, Stat},
+    sync::server::ReadOutcome,
+};
 use std::{
     collections::BTreeMap,
     sync::mpsc::{Receiver, Sender, channel},
@@ -104,7 +107,7 @@ impl BufferNodes {
         self.known.get(&qid).map(|b| b.file_stats())
     }
 
-    pub(super) fn is_known_buffer_qid(&self, qid: u64) -> bool {
+    pub(super) fn is_known_qid(&self, qid: u64) -> bool {
         self.known.contains_key(&qid) || self.known.values().any(|bn| bn.contains_qid(qid))
     }
 
@@ -121,6 +124,13 @@ impl BufferNodes {
             }
 
             QidCheck::Unknown
+        }
+    }
+
+    pub(super) fn has_input_filter(&self, buf_qid: u64) -> bool {
+        match self.known.get(&buf_qid) {
+            Some(bn) => bn.input_handle.is_some(),
+            None => false,
         }
     }
 
@@ -468,7 +478,12 @@ fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {
     let mut m = BTreeMap::new();
 
     for (offset, name) in BUFFER_FILES.into_iter() {
-        m.insert(name, empty_file_stat(qid + offset, name));
+        let mut stat = empty_file_stat(qid + offset, name);
+        if name == EVENT {
+            stat.qid.ty = FileType::EXCLUSIVE;
+        };
+
+        m.insert(name, stat);
     }
 
     m
