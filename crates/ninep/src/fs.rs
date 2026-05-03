@@ -1,6 +1,7 @@
 //! Types for describing files in a 9p virtual filesystem
 use crate::sansio::protocol::{NineP, RawStat, Tdata};
 use std::{
+    fmt,
     mem::size_of,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -127,6 +128,18 @@ impl Perm {
 
         Perm::new(bits)
     }
+
+    fn ch_or_dash(&self, p: Perm, ch: char) -> char {
+        if self.contains(p) { ch } else { '-' }
+    }
+
+    fn rwx(&self, r: Perm, w: Perm, x: Perm) -> [char; 3] {
+        [
+            self.ch_or_dash(r, 'r'),
+            self.ch_or_dash(w, 'w'),
+            self.ch_or_dash(x, 'x'),
+        ]
+    }
 }
 
 impl From<FileType> for Perm {
@@ -243,6 +256,62 @@ pub struct Stat {
     pub last_modified: SystemTime,
     /// User who last modified this entry
     pub last_modified_by: String,
+}
+
+impl fmt::Display for Stat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let d = if self.qid.ty == FileType::DIRECTORY {
+            'd'
+        } else {
+            '-'
+        };
+
+        let [or, ow, ox] = self
+            .perms
+            .rwx(Perm::OWNER_READ, Perm::OWNER_WRITE, Perm::OWNER_EXEC);
+        let [gr, gw, gx] = self
+            .perms
+            .rwx(Perm::GROUP_READ, Perm::GROUP_WRITE, Perm::GROUP_EXEC);
+        let [tr, tw, tx] = self
+            .perms
+            .rwx(Perm::OTHER_READ, Perm::OTHER_WRITE, Perm::OTHER_EXEC);
+
+        let last_modified = self
+            .last_modified
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        write!(
+            f,
+            "{d}{or}{ow}{ox}{gr}{gw}{gx}{tr}{tw}{tx} {} {} {:>6} {} {}",
+            self.owner,
+            self.group,
+            fmt_bytes(self.n_bytes),
+            last_modified,
+            self.name
+        )
+    }
+}
+
+fn fmt_bytes(n: u64) -> String {
+    let suffix;
+    let mut f = n as f64;
+
+    if n >= 1024 * 1024 * 1024 {
+        f /= (1024 * 1024 * 1024) as f64;
+        suffix = 'G';
+    } else if n >= 1024 * 1024 {
+        f /= (1024 * 1024) as f64;
+        suffix = 'M';
+    } else if n >= 1024 {
+        f /= 1024.0;
+        suffix = 'k';
+    } else {
+        return n.to_string();
+    }
+
+    format!("{f:.1}{suffix}")
 }
 
 impl Stat {
