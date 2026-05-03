@@ -164,6 +164,12 @@ fn run_9p_command(action: Cmd9p, path: &str, mut client: UnixClient) -> io::Resu
             }
         }
 
+        Cmd9p::LongList => {
+            for stat in client.read_dir(path)?.into_iter() {
+                println!("{stat}");
+            }
+        }
+
         Cmd9p::Remove => {
             client.remove(path)?;
         }

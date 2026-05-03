@@ -1,8 +1,5 @@
 :: TODO
 
-- [ ] ad client buffer meta should include stat details
-- [ ] ad client remove file to close buffer
-
 -- RE rewrite --
 - [ ] look at bailing early from running the VM to go back to aho-corasick if
       all threads die?

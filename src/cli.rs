@@ -45,6 +45,7 @@ pub enum Cmd9p {
     Read,
     Write,
     List,
+    LongList,
     Remove,
 }
 
@@ -220,6 +221,7 @@ fn parse_9p(parser: &mut Parser) -> Result<CliAction, lexopt::Error> {
                 Some("read") => Cmd9p::Read,
                 Some("write") => Cmd9p::Write,
                 Some("ls") => Cmd9p::List,
+                Some("lsl") => Cmd9p::LongList,
                 Some("rm") => Cmd9p::Remove,
                 _ => return Err(Value(cmd).unexpected()),
             },
