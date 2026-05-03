@@ -6,14 +6,15 @@ use std::{
     process::exit,
     thread::spawn,
 };
-use subprocess::{Popen, PopenConfig, Redirection};
+use subprocess::{Exec, Redirection};
 
 fn main() -> anyhow::Result<()> {
-    let args: Vec<String> = env::args().skip(1).collect();
+    let mut args: Vec<String> = env::args().skip(1).collect();
     if args.is_empty() {
         eprintln!("no command provided to ad-watch");
         exit(1);
     }
+    let cmd = args.remove(0);
 
     let dir = env::current_dir()
         .context("unable to determine working directory")?
@@ -32,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         .open_in_new_window(format!("{dir}/+watch"))
         .context("unable to open +watch buffer")?;
 
-    clear_and_rerun(&mut client, buffer_id, &args)?;
+    clear_and_rerun(&mut client, buffer_id, &cmd, &args)?;
 
     for evt in client.log_events()? {
         match evt? {
@@ -43,7 +44,7 @@ fn main() -> anyhow::Result<()> {
                     .read_filename(id)
                     .context("unable to read filename of saved buffer")?;
                 if fname.starts_with(&dir) {
-                    clear_and_rerun(&mut client, buffer_id, &args)?;
+                    clear_and_rerun(&mut client, buffer_id, &cmd, &args)?;
                 }
             }
 
@@ -54,19 +55,22 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn clear_and_rerun(client: &mut Client, id: usize, args: &[String]) -> anyhow::Result<()> {
+fn clear_and_rerun(
+    client: &mut Client,
+    id: usize,
+    cmd: &str,
+    args: &[String],
+) -> anyhow::Result<()> {
     client.clear(id).context("unable to clear buffer")?;
     client.mark_clean().context("unable to mark buffer clean")?;
 
-    let mut child = Popen::create(
-        args,
-        PopenConfig {
-            stdout: Redirection::Pipe,
-            stderr: Redirection::Merge,
-            ..Default::default()
-        },
-    )
-    .context("unable to run command")?;
+    let mut child = Exec::cmd(cmd)
+        .args(args)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Merge)
+        .start()
+        .context("unable to run command")?;
+
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let mut w = client
         .body_writer(id)

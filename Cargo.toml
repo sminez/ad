@@ -56,25 +56,25 @@ codegen-units = 16
 ad_event = { version = "0.4", path = "crates/ad_event" }
 aho-corasick = "1.1.4"
 arbitrary = { version = "1", features = ["derive"], optional = true }
-lexopt = "0.3.1"
-libc = "0.2.178"
+lexopt = "0.3.2"
+libc = "0.2.186"
 libloading = "0.9.0"
 lsp-types = "0.97.0"
 ninep = { version = "0.6", path = "crates/ninep", default-features = false }
 serde = "1.0.228"
-serde_json = "1.0.145"
+serde_json = "1.0.149"
 structex = { version = "0.6", default-features = false }
-toml = { version = "0.9.8", features = [ "preserve_order" ] }
-tracing = "0.1.43"
-tracing-subscriber = { version = "0.3.22", features = [ "fmt" ] }
-tree-sitter = "0.25.10"
+toml = { version = "1.1.2", features = [ "preserve_order" ] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = [ "fmt" ] }
+tree-sitter = "0.26.8"
 unicode-width = "0.2.2"
 
 [dev-dependencies]
 assert_fs = "1.1"
-criterion = { version = "0.8.0", features = ["html_reports"] }
-libflate = "2.2.1"
+criterion = { version = "0.8.2", features = ["html_reports"] }
+libflate = "2.3.0"
 simple_test_case = "1"
 simple_txtar = "1"
 tree-sitter-python = "0.25.0"
-tree-sitter-rust = "0.24.0"
+tree-sitter-rust = "0.24.2"

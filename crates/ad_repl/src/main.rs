@@ -16,7 +16,7 @@ use std::{
     process::exit,
     thread::spawn,
 };
-use subprocess::{Popen, PopenConfig, Redirection};
+use subprocess::{Exec, Job, Redirection};
 
 const PROMPT: &str = "% ";
 
@@ -35,22 +35,14 @@ fn main() -> anyhow::Result<()> {
     let mut env_vars: Vec<(String, String)> = env::vars().collect();
     env_vars.push(("prompt".into(), PROMPT.into()));
 
-    let mut child = Popen::create(
-        &["rc", "-i"],
-        PopenConfig {
-            stdin: Redirection::Pipe,
-            stdout: Redirection::Pipe,
-            stderr: Redirection::Merge,
-            env: Some(
-                env_vars
-                    .into_iter()
-                    .map(|(k, v)| (k.into(), v.into()))
-                    .collect(),
-            ),
-            ..Default::default()
-        },
-    )
-    .context("unable to spawn rc")?;
+    let mut child = Exec::cmd("rc")
+        .arg("-i")
+        .stdin(Redirection::Pipe)
+        .stdout(Redirection::Pipe)
+        .stderr(Redirection::Merge)
+        .env_extend(env_vars)
+        .start()
+        .context("unable to spawn rc")?;
 
     let stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
@@ -77,7 +69,7 @@ fn main() -> anyhow::Result<()> {
 }
 
 struct Filter {
-    child: Popen,
+    child: Job,
     buffer_id: usize,
     stdin: File,
 }
