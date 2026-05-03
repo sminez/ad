@@ -15,14 +15,14 @@ use crate::{
             FlushHandle, QidMeta, Session, SessionType, Unattached,
         },
     },
-    sync::{SyncNineP, SyncServerStream, SyncStream},
+    sync::{SyncNineP, SyncServerStream, SyncStream, client::Client},
 };
 use simple_coro::{CoroState, ReadyCoro};
 use std::{
     fs,
     mem::size_of,
     net::TcpListener,
-    os::unix::net::UnixListener,
+    os::unix::net::{UnixListener, UnixStream},
     path::PathBuf,
     sync::{
         Arc,
@@ -293,12 +293,35 @@ where
         })
     }
 
-    #[cfg(test)]
-    pub(crate) fn handle_single_test_stream_sync<U>(&mut self, stream: U)
+    /// Run a new session handling a connection on the provided [stream][SyncServerStream].
+    ///
+    /// This method will run until the stream closes. To serve incomming connections in their own
+    /// thread see [serve_tcp][Self::serve_tcp] and [serve_socket][Self::serve_socket].
+    ///
+    /// # Use in testing
+    /// The standard library [UnixStream::pair][std::os::unix::net::UnixStream::pair] method can be
+    /// used to create an in-memory stream that can be passed to this method for running tests.
+    pub fn handle_single_client_stream<U>(&mut self, stream: U)
     where
         U: SyncServerStream,
     {
         self.new_session(stream).handle_connection();
+    }
+
+    /// Run a single session using an in-memory [UnixStream] connected to a [Client].
+    pub fn session_with_attached_client(
+        &mut self,
+        uname: impl Into<String>,
+        aname: impl Into<String>,
+    ) -> Result<(Client<UnixStream>, JoinHandle<()>)> {
+        let (client_stream, server_stream) = UnixStream::pair().unwrap();
+        let session = self.new_session(server_stream);
+        let handle = spawn(|| session.handle_connection());
+
+        let client =
+            Client::new_from_unix_stream(uname, aname, client_stream).map_err(|e| e.to_string())?;
+
+        Ok((client, handle))
     }
 }
 

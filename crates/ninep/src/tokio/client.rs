@@ -10,6 +10,7 @@ use crate::{
 use simple_coro::CoroState;
 use std::{env, mem, path::Path, sync::Arc};
 use tokio::{
+    io::DuplexStream,
     net::{TcpStream, ToSocketAddrs, UnixStream},
     sync::Mutex,
 };
@@ -73,7 +74,7 @@ impl Client<UnixStream> {
     /// Create a new [Client] connected to a unix socket at the given aname under the default
     /// namespace.
     ///
-    /// The default namespace is located in /tmp/ns.$USER.$DISPLAY/
+    /// The default namespace is located in `/tmp/ns.$USER.$DISPLAY/`
     pub async fn new_unix(ns: impl Into<String>, aname: impl Into<String>) -> Result<Self> {
         let ns = ns.into();
         let uname = match env::var("USER") {
@@ -84,6 +85,20 @@ impl Client<UnixStream> {
         let path = format!("/tmp/ns.{uname}.{display}/{ns}");
 
         Self::new_unix_with_explicit_path(uname, path, aname).await
+    }
+}
+
+impl Client<DuplexStream> {
+    /// Create a new [Client] using an existing [stream][UnixStream].
+    pub async fn new_from_duplex_stream(
+        uname: impl Into<String>,
+        aname: impl Into<String>,
+        stream: DuplexStream,
+    ) -> Result<Self> {
+        let mut client = Self::new(stream);
+        client.connect(uname, aname).await?;
+
+        Ok(client)
     }
 }
 
@@ -424,7 +439,9 @@ mod tests {
         let (client_stream, server_stream) = tokio::io::duplex(8192);
         let mut client = Client::new(client_stream);
         let handle = task::spawn(async move {
-            server.handle_single_test_stream_async(server_stream).await;
+            server
+                .handle_single_client_stream_async(server_stream)
+                .await;
         });
 
         for (i, step) in case.into_iter().enumerate() {

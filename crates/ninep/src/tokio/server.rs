@@ -14,11 +14,12 @@ use crate::{
         },
     },
     sync::server::Serve9p,
-    tokio::{AsyncNineP, AsyncStream},
+    tokio::{AsyncNineP, AsyncStream, client::Client},
 };
 use simple_coro::{CoroState, ReadyCoro};
 use std::{fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
+    io::{DuplexStream, duplex},
     net::{TcpListener, UnixListener},
     sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel},
     task::{JoinHandle, spawn},
@@ -419,12 +420,36 @@ where
         })
     }
 
-    #[cfg(test)]
-    pub(crate) async fn handle_single_test_stream_async<U>(&mut self, stream: U)
+    /// Run a new session handling a connection on the provided [stream][AsyncStream].
+    ///
+    /// This method will run until the stream closes. To serve incomming connections in their own
+    /// thread see [serve_tcp][Self::serve_tcp] and [serve_socket][Self::serve_socket].
+    pub async fn handle_single_client_stream_async<U>(&mut self, stream: U)
     where
         U: AsyncStream,
     {
         self.new_session(stream).handle_connection_async().await;
+    }
+
+    /// Run a single session using an in-memory [DuplexStream] connected to a [Client].
+    pub async fn session_with_attached_client_async(
+        &mut self,
+        uname: impl Into<String>,
+        aname: impl Into<String>,
+        buf_size: usize,
+    ) -> Result<(Client<DuplexStream>, JoinHandle<()>)> {
+        let (client_stream, server_stream) = duplex(buf_size);
+        let session = self.new_session(server_stream);
+
+        let handle = spawn(async move {
+            session.handle_connection_async().await;
+        });
+
+        let client = Client::new_from_duplex_stream(uname, aname, client_stream)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok((client, handle))
     }
 }
 

@@ -105,6 +105,18 @@ impl Client<UnixStream> {
 
         Self::new_unix_with_explicit_path(uname, path, aname)
     }
+
+    /// Create a new [Client] using an existing [stream][UnixStream].
+    pub fn new_from_unix_stream(
+        uname: impl Into<String>,
+        aname: impl Into<String>,
+        stream: UnixStream,
+    ) -> Result<Self> {
+        let mut client = Self::new(stream);
+        client.connect(uname, aname)?;
+
+        Ok(client)
+    }
 }
 
 impl Client<TcpStream> {
@@ -426,7 +438,7 @@ mod tests {
         let (client_stream, server_stream) = UnixStream::pair().unwrap();
         let mut client = Client::new(client_stream);
         let handle = thread::spawn(move || {
-            server.handle_single_test_stream_sync(server_stream);
+            server.handle_single_client_stream(server_stream);
         });
 
         for (i, step) in case.into_iter().enumerate() {
