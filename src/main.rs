@@ -163,6 +163,10 @@ fn run_9p_command(action: Cmd9p, path: &str, mut client: UnixClient) -> io::Resu
                 println!("{}", stat.name);
             }
         }
+
+        Cmd9p::Remove => {
+            client.remove(path)?;
+        }
     }
 
     Ok(())

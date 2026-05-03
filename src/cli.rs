@@ -45,6 +45,7 @@ pub enum Cmd9p {
     Read,
     Write,
     List,
+    Remove,
 }
 
 #[derive(Debug)]
@@ -219,6 +220,7 @@ fn parse_9p(parser: &mut Parser) -> Result<CliAction, lexopt::Error> {
                 Some("read") => Cmd9p::Read,
                 Some("write") => Cmd9p::Write,
                 Some("ls") => Cmd9p::List,
+                Some("rm") => Cmd9p::Remove,
                 _ => return Err(Value(cmd).unexpected()),
             },
             _ => return Err(arg.unexpected()),
@@ -254,9 +256,11 @@ mod tests {
     #[test_case("-9p read ad/buffers/index"; "9p read")]
     #[test_case("-9p write ad/buffers/1/dot"; "9p write")]
     #[test_case("-9p ls ad/buffers"; "9p ls")]
+    #[test_case("-9p rm ad/buffers/1"; "9p rm")]
     #[test_case("-9p -A foo read ad/buffers/index"; "9p read with aname")]
     #[test_case("-9p -A foo write ad/buffers/1/dot"; "9p write with aname")]
     #[test_case("-9p -A foo ls ad/buffers"; "9p ls with aname")]
+    #[test_case("-9p -A foo rm ad/buffers/1"; "9p rm with aname")]
     #[test_case("-h"; "short help")]
     #[test_case("--help"; "long help")]
     #[test_case("-v"; "short version")]
