@@ -573,7 +573,7 @@ where
             CleanupChild { id } => self.system.cleanup_child(id),
             ClearScratch => self.layout.scratch.b.clear(),
             CommandMode => self.command_mode(),
-            DeleteBuffer { force } => self.delete_buffer(self.active_buffer_id(), force),
+            DeleteBuffer { bufid, force } => self.delete_buffer(bufid, force),
             DeleteColumn { force } => self.delete_active_column(force),
             DeleteWindow { force } => self.delete_active_window(force),
             DragWindow {

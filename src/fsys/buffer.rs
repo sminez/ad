@@ -297,7 +297,7 @@ impl BufferNodes {
 /// from the qid of the buffer directory itself (see QID_OFFSET above).
 #[derive(Debug)]
 pub(super) struct BufferNode {
-    id: usize,
+    pub id: usize,
     str_id: String,
     stat: Stat,
     file_stats: BTreeMap<&'static str, Stat>,

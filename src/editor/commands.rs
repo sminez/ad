@@ -62,8 +62,16 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             Ok(Single(MarkClean { bufid }))
         }
 
-        "db" | "delete-buffer" => Ok(Single(DeleteBuffer { force: false })),
-        "db!" | "delete-buffer!" => Ok(Single(DeleteBuffer { force: true })),
+        "db" | "delete-buffer" => Ok(Single(DeleteBuffer {
+            bufid: try_parse_bufid(args, active_buffer_id)?,
+            force: false,
+        })),
+
+        "db!" | "delete-buffer!" => Ok(Single(DeleteBuffer {
+            bufid: try_parse_bufid(args, active_buffer_id)?,
+            force: true,
+        })),
+
         "dc" | "delete-column" => Ok(Single(DeleteColumn { force: false })),
         "dc!" | "delete-column!" => Ok(Single(DeleteColumn { force: true })),
         "dw" | "delete-window" => Ok(Single(DeleteWindow { force: false })),
@@ -237,6 +245,17 @@ where
                 self.set_status_message(&msg);
                 None
             }
+        }
+    }
+}
+
+fn try_parse_bufid(args: &str, active_buffer_id: usize) -> Result<usize, String> {
+    if args.is_empty() {
+        Ok(active_buffer_id)
+    } else {
+        match args.parse::<usize>() {
+            Ok(bufid) => Ok(bufid),
+            Err(_) => Err(format!("'{args}' is not a valid buffer id")),
         }
     }
 }

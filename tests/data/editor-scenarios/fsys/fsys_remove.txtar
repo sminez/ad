@@ -1,0 +1,24 @@
+Close an open buffer by removing its associated fsys directory.
+To ensure that success of this test isn't just down to the file
+failing to open, we copy the content of the file to second file
+first and make sure that worked as well.
+
+-- config --
+path: tests/data/config/with-fsys.toml
+-- file-start-empty.txt --
+-- file-remove-me.txt --
+Testing
+-- actions --
+# yank from buffer 2
+type: xy
+# switch to buffer 1
+type: :b 1\n
+# paste
+type: p
+fsys: rm buffers/2
+-- buffer-list --
+1    * start-empty.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+Testing

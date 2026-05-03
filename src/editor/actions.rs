@@ -56,7 +56,7 @@ pub enum Action {
     ClearScratch,
     CommandMode,
     Delete,
-    DeleteBuffer { force: bool },
+    DeleteBuffer { bufid: usize, force: bool },
     DeleteColumn { force: bool },
     DeleteWindow { force: bool },
     DotCollapseFirst,

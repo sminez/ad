@@ -640,10 +640,27 @@ impl Serve9p for AdFs {
         }
     }
 
-    // TODO: allow remove of a buffer to close the buffer
+    // If this qid is a buffer directory then removing it closes the buffer. All other removes
+    // are forbidden.
     fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
         trace!(?cid, %qid, %uname, "handling remove request");
-        Err("remove not allowed".to_string())
+        let mut s = self.state.lock().unwrap();
+        s.buffer_nodes.update();
+
+        if let Some(bnode) = s.buffer_nodes.known.get(&qid) {
+            let id = bnode.id;
+            match Message::send(
+                Req::ControlMessage {
+                    msg: format!("db {id}"),
+                },
+                &s.tx,
+            ) {
+                Ok(_) => Ok(()),
+                Err(e) => Err(format!("unable to execute control message: {e}")),
+            }
+        } else {
+            Err(E_NOT_ALLOWED.to_string())
+        }
     }
 
     fn create(
@@ -656,7 +673,7 @@ impl Serve9p for AdFs {
         uname: &str,
     ) -> Result<(Qid, IoUnit)> {
         trace!(?cid, %parent, %name, ?perm, ?mode, %uname, "handling create request");
-        Err("create not allowed".to_string())
+        Err(E_NOT_ALLOWED.to_string())
     }
 }
 

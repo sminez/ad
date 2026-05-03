@@ -456,6 +456,7 @@ impl UserInterface for ScriptedUi {
 enum Fsys {
     Read(String),
     ReadDir(String),
+    Remove(String),
     Write(String, String),
 }
 
@@ -472,6 +473,11 @@ impl Fsys {
                     for stat in client.read_dir(&path)?.into_iter() {
                         println!("read dir ({path}): {}", stat.name);
                     }
+                }
+
+                Fsys::Remove(path) => {
+                    client.remove(&path)?;
+                    println!("remove {path}");
                 }
 
                 Fsys::Write(path, content) => {
@@ -593,6 +599,7 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
         } else if let Some(s) = line.strip_prefix("fsys: ") {
             let f = match s.split_once(' ') {
                 Some(("read", path)) => Fsys::Read(path.to_string()),
+                Some(("rm", path)) => Fsys::Remove(path.to_string()),
                 Some(("ls", path)) => Fsys::ReadDir(path.to_string()),
                 Some(("write", tail)) => match tail.split_once(' ') {
                     Some((path, content)) => Fsys::Write(path.to_string(), content.to_string()),
