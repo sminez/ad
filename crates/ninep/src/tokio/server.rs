@@ -661,18 +661,6 @@ where
         }
     }
 
-    async fn handle_clunk_async(&mut self, fid: u32) -> Result<Rdata> {
-        match self.state.fids.remove(&fid) {
-            Some(meta) => {
-                self.s.clunk(self.client_id, meta.qid).await;
-                self.remove_client_id_from_open_qids(meta.qid);
-
-                Ok(Rdata::Clunk {})
-            }
-            None => Err(E_UNKNOWN_FID.to_string()),
-        }
-    }
-
     async fn handle_stat_async(&mut self, fid: u32) -> Result<Rdata> {
         let qid = self.try_map_fid(fid)?;
         let s = self
@@ -713,6 +701,22 @@ where
 
         self.run_perm_check_coro_async(qid, self.handle_perm_check(&stat, user_is_in_group, mode))
             .await
+    }
+
+    async fn check_rename_or_remove_async(&self, fid: u32) -> Result<()> {
+        let uname = &self.state.uname;
+        let qid = self.try_map_fid(fid)?;
+        let parent = self
+            .parent_qid(qid.path)
+            .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
+        let stat = self.s.stat(self.client_id, parent, uname).await?;
+        let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
+
+        if stat.can_rename_or_remove_child(&self.state.uname, user_is_in_group) {
+            Ok(())
+        } else {
+            Err(E_PERMISSION_DENIED.to_string())
+        }
     }
 
     async fn run_perm_check_coro_async(
@@ -899,18 +903,39 @@ where
         Ok(Rdata::write(count))
     }
 
+    async fn _clunk_async<F>(&mut self, fid: u32, f: F) -> Result<()>
+    where
+        F: AsyncFnOnce(&mut Self, u64) -> Result<()>,
+    {
+        match self.state.fids.remove(&fid) {
+            Some(meta) => {
+                let res = f(self, meta.qid).await;
+                self.s.clunk(self.client_id, meta.qid).await;
+                self.remove_client_id_from_open_qids(meta.qid);
+
+                res
+            }
+
+            None => Err(E_UNKNOWN_FID.to_string()),
+        }
+    }
+
+    async fn handle_clunk_async(&mut self, fid: u32) -> Result<Rdata> {
+        if self.state.fid_requires_remove_on_close(fid) {
+            self.handle_remove_async(fid).await?;
+        } else {
+            self._clunk_async(fid, async |_, _| Ok(())).await?;
+        }
+
+        Ok(Rdata::Clunk {})
+    }
+
     async fn handle_remove_async(&mut self, fid: u32) -> Result<Rdata> {
-        let qid = self.try_map_fid(fid)?;
-        let res = self
-            .s
-            .remove(self.client_id, qid.path, &self.state.uname)
-            .await;
-
-        // ensure that we clunk before erroring
-        self.s.clunk(self.client_id, qid.path).await;
-        self.remove_client_id_from_open_qids(qid.path);
-
-        res?;
+        self.check_rename_or_remove_async(fid).await?;
+        self._clunk_async(fid, async |sa, qid| {
+            sa.s.remove(sa.client_id, qid, &sa.state.uname).await
+        })
+        .await?;
 
         Ok(Rdata::Remove {})
     }

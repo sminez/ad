@@ -114,7 +114,8 @@ macro_rules! generate_server_test_suite {
             attach_after_version_succeeds,
             attach_before_version_returns_error,
             blocked_read_delivers_response_later,
-            clunk_known_fid_returns_rclunk_and_calls_serve9p,
+            clunk_after_open_with_remove_on_close_removes_file,
+            clunk_known_fid_returns_rclunk,
             clunk_unknown_fid_returns_error,
             connection_close_clunks_all_open_fids,
             create_in_directory_returns_rcreate,
@@ -386,7 +387,7 @@ pub(crate) fn walk_unknown_fid_returns_error() -> TestCase {
     ]
 }
 
-pub(crate) fn clunk_known_fid_returns_rclunk_and_calls_serve9p() -> TestCase {
+pub(crate) fn clunk_known_fid_returns_rclunk() -> TestCase {
     vec![
         Step::version_req(0),
         Step::attach_req(1),
@@ -394,6 +395,32 @@ pub(crate) fn clunk_known_fid_returns_rclunk_and_calls_serve9p() -> TestCase {
         Step::req(3, Tdata::clunk(1), Rdata::clunk()),
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::clunk(ClientId(0), HELLO_QID),
+        ]),
+    ]
+}
+
+pub(crate) fn clunk_after_open_with_remove_on_close_removes_file() -> TestCase {
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
+        Step::open_req(3, 1, Mode::READ | Mode::REMOVE_ON_CLOSE, HELLO_QID),
+        Step::req(4, Tdata::clunk(1), Rdata::clunk()),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            // Open needs to stat the file being opened AND the parent to check for remove-on-close
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
+            Call::open(
+                ClientId(0),
+                HELLO_QID,
+                Mode::READ | Mode::REMOVE_ON_CLOSE,
+                "owner",
+            ),
+            // Remove checks parent perms again
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
+            Call::remove(ClientId(0), HELLO_QID, "owner"),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),
     ]
@@ -679,6 +706,7 @@ pub(crate) fn remove_known_fid_returns_rremove() -> TestCase {
         Step::req(3, Tdata::remove(1), Rdata::remove()),
         Step::assert_calls(&[
             Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), ROOT_QID, "owner"),
             Call::remove(ClientId(0), HELLO_QID, "owner"),
             Call::clunk(ClientId(0), HELLO_QID),
         ]),

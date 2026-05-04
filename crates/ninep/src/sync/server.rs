@@ -581,6 +581,23 @@ where
         self.run_perm_check_coro(qid, self.handle_perm_check(&stat, user_is_in_group, mode))
     }
 
+    fn check_rename_or_remove(&self, fid: u32) -> Result<()> {
+        let uname = &self.state.uname;
+        let qid = self.try_map_fid(fid)?;
+        let parent = self
+            .parent_qid(qid.path)
+            .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
+        let stat = self.s.stat(self.client_id, parent, uname)?;
+        println!("{stat}");
+        let user_is_in_group = self.s.user_is_in_group(uname, &stat.group);
+
+        if stat.can_rename_or_remove_child(&self.state.uname, user_is_in_group) {
+            Ok(())
+        } else {
+            Err(E_PERMISSION_DENIED.to_string())
+        }
+    }
+
     fn run_perm_check_coro(
         &self,
         qid: Qid,
@@ -765,12 +782,17 @@ where
     }
 
     fn handle_clunk(&mut self, fid: u32) -> Result<Rdata> {
-        self._clunk(fid, |_, _| Ok(()))?;
+        if self.state.fid_requires_remove_on_close(fid) {
+            self.handle_remove(fid)?;
+        } else {
+            self._clunk(fid, |_, _| Ok(()))?;
+        }
 
         Ok(Rdata::Clunk {})
     }
 
     fn handle_remove(&mut self, fid: u32) -> Result<Rdata> {
+        self.check_rename_or_remove(fid)?;
         self._clunk(fid, |sa, qid| {
             sa.s.remove(sa.client_id, qid, &sa.state.uname)
         })?;

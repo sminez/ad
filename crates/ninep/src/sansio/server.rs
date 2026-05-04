@@ -179,6 +179,16 @@ impl Attached {
             qids,
         }
     }
+
+    /// Whether or not the given fid requires removal on close based on its [Mode].
+    ///
+    /// Returns `false` for unknown fids.
+    pub(crate) fn fid_requires_remove_on_close(&self, fid: u32) -> bool {
+        self.fids
+            .get(&fid)
+            .map(|meta| meta.requires_remove_on_close())
+            .unwrap_or(false)
+    }
 }
 
 /// Internal state for a running client session other than the user provided filesystem
@@ -410,14 +420,10 @@ impl SessionState<Attached> {
             }
 
             let (parent_stat, user_is_in_group) = handle.yield_value(()).await;
-            match dbg!(parent_stat.check_user_permissions(
-                &self.state.uname,
-                user_is_in_group,
-                Mode::WRITE
-            )) {
-                PermCheck::NeedWriteOnParent => unreachable!("only checking write"),
-                PermCheck::Denied => Err(E_PERMISSION_DENIED.into()),
-                PermCheck::Allowed => Ok(()),
+            if parent_stat.can_rename_or_remove_child(&self.state.uname, user_is_in_group) {
+                Ok(())
+            } else {
+                Err(E_PERMISSION_DENIED.to_string())
             }
         })
     }
@@ -460,7 +466,9 @@ impl SessionState<Attached> {
             // Modifying name requires write on parent directory
             if wstat.name.is_some() {
                 let (parent_stat, user_is_in_parent_group) = handle.yield_value(()).await;
-                if !parent_stat.can_rename_child(&self.state.uname, user_is_in_parent_group) {
+                if !parent_stat
+                    .can_rename_or_remove_child(&self.state.uname, user_is_in_parent_group)
+                {
                     return Err(E_PERMISSION_DENIED.into());
                 }
             }
@@ -709,6 +717,13 @@ impl FidMeta {
 
     pub(crate) fn is_open(&self) -> bool {
         self.mode.is_some()
+    }
+
+    pub(crate) fn requires_remove_on_close(&self) -> bool {
+        self.mode
+            .as_ref()
+            .map(|m| m.contains(Mode::REMOVE_ON_CLOSE))
+            .unwrap_or(false)
     }
 
     pub(crate) fn check_open_for_read(&self) -> Result<()> {

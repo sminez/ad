@@ -334,11 +334,11 @@ impl Stat {
         )
     }
 
-    /// Whether or not the given user can rename a child of this directory.
+    /// Whether or not the given user can rename or remove aa child of this directory.
     ///
     /// Returns `false` if not a directory, otherwise the value of the `can_write` flag from
     /// [UserType::flags_for_user].
-    pub(crate) fn can_rename_child(&self, user: &str, user_is_in_group: bool) -> bool {
+    pub(crate) fn can_rename_or_remove_child(&self, user: &str, user_is_in_group: bool) -> bool {
         if self.qid.ty != FileType::DIRECTORY {
             return false;
         }
