@@ -59,7 +59,7 @@ pub(crate) fn parse_bufid(str_id: &str) -> io::Result<usize> {
     str_id.parse().map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidData,
-            "expected integer ID, got {str_id:?}",
+            format!("expected integer ID, got {str_id:?}"),
         )
     })
 }
