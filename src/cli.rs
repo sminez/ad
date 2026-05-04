@@ -1,5 +1,6 @@
 //! CLI parser
 //! See main.rs for the usage of the parsed arguments
+use crate::client::Cmd;
 use lexopt::{Parser, prelude::*};
 use std::{fs, path::PathBuf};
 
@@ -9,9 +10,13 @@ usage: ad [options] [file ...]     Edit file(s)
 options:
   -e, --expression <script>        Execute edit script on file(s)
   -f, --script-file <script-file>  Execute edit script loaded from a script-file on file(s)
-  -9p [-A aname] read [path]       Read the contents of a file on a 9p file server
-  -9p [-A aname] write [path]      Write the contents of stdin to a file on a 9p file server
   -9p [-A aname] ls [path]         List the contents of a directory on a 9p file server
+  -9p [-A aname] lsl [path]        List the contents of a directory on a 9p file server in long format
+  -9p [-A aname] mkdir [path]      Create a new directory on a 9p file server
+  -9p [-A aname] new [path]        Create a new file on a 9p file server
+  -9p [-A aname] read [path]       Read the contents of a file on a 9p file server
+  -9p [-A aname] rm [path]         Remove a file from a 9p file server
+  -9p [-A aname] write [path]      Write the contents of stdin to a file on a 9p file server
   -l, --list-sessions              List the current open editor 9p sessions
   --rm-sockets                     Remove all unresponsive ad 9p sockets from the default namespace directory
   -c, --config <path>              Load config from the specified path
@@ -30,9 +35,9 @@ pub enum CliAction {
         files: Vec<PathBuf>,
     },
     NineP {
-        aname: String,
-        cmd: Cmd9p,
+        cmd: Cmd,
         path: String,
+        aname: String,
     },
     ListSessions,
     RmSockets,
@@ -217,13 +222,9 @@ fn parse_9p(parser: &mut Parser) -> Result<CliAction, lexopt::Error> {
 
     let cmd = match next {
         Some(arg) => match arg {
-            Value(cmd) => match cmd.to_str() {
-                Some("read") => Cmd9p::Read,
-                Some("write") => Cmd9p::Write,
-                Some("ls") => Cmd9p::List,
-                Some("lsl") => Cmd9p::LongList,
-                Some("rm") => Cmd9p::Remove,
-                _ => return Err(Value(cmd).unexpected()),
+            Value(s) => match s.to_str().and_then(Cmd::try_from_str) {
+                Some(cmd) => cmd,
+                None => return Err(Value(s).unexpected()),
             },
             _ => return Err(arg.unexpected()),
         },
@@ -236,7 +237,7 @@ fn parse_9p(parser: &mut Parser) -> Result<CliAction, lexopt::Error> {
         None => return Err(lexopt::Error::from("no path provided for -9p")),
     };
 
-    Ok(CliAction::NineP { aname, cmd, path })
+    Ok(CliAction::NineP { cmd, path, aname })
 }
 
 #[cfg(test)]

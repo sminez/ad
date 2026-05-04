@@ -20,6 +20,7 @@ pub use ad_event::Source;
 
 pub mod buffer;
 pub mod cli;
+pub mod client;
 pub mod config;
 pub mod dot;
 pub mod editor;
