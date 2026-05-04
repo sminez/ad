@@ -1,7 +1,7 @@
 //! Sans-io 9p protocol implementation
 //!
 //!   <http://man.cat-v.org/plan_9/5/>
-use crate::sync::SyncNineP;
+use crate::{fs::Perm, sync::SyncNineP};
 use simple_coro::{Coro, CoroState, Handle, ReadyCoro};
 use std::{
     cell::UnsafeCell,
@@ -520,6 +520,12 @@ impl FileType {
     /// Create a new [FileType] from a u8 bitmask
     pub fn new(bits: u8) -> Self {
         FileType::from_bits_truncate(bits)
+    }
+}
+
+impl From<Perm> for FileType {
+    fn from(value: Perm) -> Self {
+        FileType::from_bits_truncate((value.bits() >> 24) as u8)
     }
 }
 

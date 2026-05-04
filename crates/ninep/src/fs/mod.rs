@@ -6,7 +6,10 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
+mod simple;
+
 pub use crate::sansio::protocol::{FileType, Qid};
+pub use simple::{File, FileTree};
 
 /// The default root qid for 9p server implementations
 pub const QID_ROOT: u64 = 0;
@@ -98,11 +101,6 @@ impl Perm {
     /// Allow owner, group & other to exec.
     pub fn any_exec() -> Perm {
         Perm::OWNER_EXEC | Perm::GROUP_EXEC | Perm::OTHER_EXEC
-    }
-
-    /// Permissions for the root directory
-    pub fn root() -> Perm {
-        Perm::any_read() | Perm::any_exec()
     }
 
     /// Apply the appropriate 9P create permission mask based on the parent directory's

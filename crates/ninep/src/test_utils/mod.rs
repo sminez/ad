@@ -1,5 +1,6 @@
 //! Shared test infrastructure for sync and tokio tests.
 use crate::{
+    Result,
     fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
     sansio::{
         client::MSIZE,
@@ -89,13 +90,7 @@ impl Serve9p for TestFs {
         uname == "group-member"
     }
 
-    fn walk_one(
-        &self,
-        cid: ClientId,
-        parent_qid: u64,
-        child: &str,
-        uname: &str,
-    ) -> crate::Result<Qid> {
+    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid> {
         self.calls.push(Call::walk(cid, parent_qid, child, uname));
 
         match (parent_qid, child) {
@@ -108,7 +103,7 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> crate::Result<IoUnit> {
+    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
         self.calls.push(Call::open(cid, qid, mode, uname));
 
         Ok(TEST_IOUNIT)
@@ -130,7 +125,7 @@ impl Serve9p for TestFs {
         perm: Perm,
         mode: Mode,
         uname: &str,
-    ) -> crate::Result<(Qid, IoUnit)> {
+    ) -> Result<(Qid, IoUnit)> {
         self.calls
             .push(Call::create(cid, parent, name, perm, mode, uname));
 
@@ -144,7 +139,7 @@ impl Serve9p for TestFs {
         offset: usize,
         count: usize,
         uname: &str,
-    ) -> crate::Result<ReadOutcome> {
+    ) -> Result<ReadOutcome> {
         self.calls.push(Call::read(cid, qid, offset, count, uname));
 
         match qid {
@@ -174,7 +169,7 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> crate::Result<Vec<Stat>> {
+    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
         self.calls.push(Call::read_dir(cid, qid, uname));
 
         match qid {
@@ -197,7 +192,7 @@ impl Serve9p for TestFs {
         offset: usize,
         data: Vec<u8>,
         uname: &str,
-    ) -> crate::Result<usize> {
+    ) -> Result<usize> {
         let n = data.len();
 
         self.calls.push(Call::write(cid, qid, offset, data, uname));
@@ -205,13 +200,13 @@ impl Serve9p for TestFs {
         Ok(n)
     }
 
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> crate::Result<()> {
+    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
         self.calls.push(Call::remove(cid, qid, uname));
 
         Ok(())
     }
 
-    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> crate::Result<Stat> {
+    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
         self.calls.push(Call::stat(cid, qid, uname));
 
         match qid {
@@ -225,7 +220,7 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> crate::Result<()> {
+    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
         self.calls.push(Call::write_stat(cid, qid, wstat, uname));
 
         Ok(())

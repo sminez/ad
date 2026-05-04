@@ -738,6 +738,7 @@ name = "ninep"
 version = "0.6.0"
 dependencies = [
  "bitflags 2.11.1",
+ "lexopt",
  "simple_coro",
  "simple_test_case",
  "tokio",

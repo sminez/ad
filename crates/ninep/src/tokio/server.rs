@@ -422,7 +422,7 @@ where
 
     /// Run a new session handling a connection on the provided [stream][AsyncStream].
     ///
-    /// This method will run until the stream closes. To serve incomming connections in their own
+    /// This method will run until the stream closes. To serve incoming connections in their own
     /// thread see [serve_tcp][Self::serve_tcp] and [serve_socket][Self::serve_socket].
     pub async fn handle_single_client_stream_async<U>(&mut self, stream: U)
     where
