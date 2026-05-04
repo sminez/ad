@@ -1,4 +1,6 @@
 //! A minimal file tree data structure that can be used to implement simple 9p filesystems
+use jiff::Timestamp;
+
 use crate::{
     Result,
     fs::{FileType, Perm, Qid, Stat, WStat},
@@ -7,7 +9,6 @@ use crate::{
 use std::{
     collections::BTreeMap,
     sync::{Arc, RwLock},
-    time::SystemTime,
 };
 
 /// A minimal file tree implementation that can be used to implement a simple 9p file server.
@@ -137,8 +138,8 @@ impl<T> File<T> {
                 group: group.into(),
                 perms,
                 n_bytes: 0,
-                last_accessed: SystemTime::now(),
-                last_modified: SystemTime::now(),
+                last_accessed: Timestamp::now(),
+                last_modified: Timestamp::now(),
                 last_modified_by: owner.into(),
             },
             aux,

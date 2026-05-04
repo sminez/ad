@@ -823,9 +823,9 @@ impl FlushHandle {
 mod tests {
     use super::*;
     use crate::fs::Perm;
+    use jiff::Timestamp;
     use simple_coro::CoroState;
     use simple_test_case::test_case;
-    use std::time::SystemTime;
 
     fn attached_session_state() -> SessionState<Attached> {
         let qids = Arc::new(RwLock::new(BTreeMap::from([(
@@ -855,8 +855,8 @@ mod tests {
             group: "group".to_string(),
             perms: Perm::any_read() | Perm::any_exec(),
             n_bytes: 0,
-            last_accessed: SystemTime::UNIX_EPOCH,
-            last_modified: SystemTime::UNIX_EPOCH,
+            last_accessed: Timestamp::UNIX_EPOCH,
+            last_modified: Timestamp::UNIX_EPOCH,
             last_modified_by: "owner".to_string(),
         }
     }
@@ -1221,7 +1221,7 @@ mod tests {
         "owner"; "owner change perm"
     )]
     #[test_case(
-        WStat { last_modified: Some(SystemTime::now()), ..ws()},
+        WStat { last_modified: Some(Timestamp::now()), ..ws()},
         "owner"; "owner change last modified"
     )]
     #[test_case(
@@ -1257,7 +1257,7 @@ mod tests {
         "non-owner"; "non-owner change perm"
     )]
     #[test_case(
-        WStat { last_modified: Some(SystemTime::now()), ..ws()},
+        WStat { last_modified: Some(Timestamp::now()), ..ws()},
         "non-owner"; "non-owner change last modified"
     )]
     #[test_case(

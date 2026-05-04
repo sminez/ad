@@ -24,13 +24,13 @@
 //! ```
 use ninep::{
     Result,
-    fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
+    fs::{IoUnit, Mode, Perm, Qid, Stat, Timestamp, WStat},
     sync::server::{ClientId, ReadOutcome, Serve9p, Server},
 };
 use std::{
     sync::{Arc, RwLock, mpsc::channel},
     thread::{sleep, spawn},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 
 fn main() {
@@ -76,8 +76,8 @@ fn dir_stat(qid_path: u64, name: &str, n_bytes: u64) -> Stat {
         group: "group".into(),
         perms: Perm::any_read() | Perm::any_exec(),
         n_bytes,
-        last_accessed: SystemTime::now(),
-        last_modified: SystemTime::now(),
+        last_accessed: Timestamp::now(),
+        last_modified: Timestamp::now(),
         last_modified_by: "owner".into(),
     }
 }
@@ -90,8 +90,8 @@ fn file_stat(qid_path: u64, name: &str, n_bytes: u64) -> Stat {
         group: "group".into(),
         perms: Perm::any_read() | Perm::any_write(),
         n_bytes,
-        last_accessed: SystemTime::now(),
-        last_modified: SystemTime::now(),
+        last_accessed: Timestamp::now(),
+        last_modified: Timestamp::now(),
         last_modified_by: "owner".into(),
     }
 }

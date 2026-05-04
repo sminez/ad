@@ -33,7 +33,7 @@
 use crate::{editor::Action, input::Event, ui::SCRATCH_ID};
 use ninep::{
     Result,
-    fs::{IoUnit, Mode, Perm, Qid, Stat, WStat},
+    fs::{IoUnit, Mode, Perm, Qid, Stat, Timestamp, WStat},
     sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
 use std::{
@@ -47,7 +47,6 @@ use std::{
         mpsc::{Receiver, Sender, channel},
     },
     thread::{JoinHandle, spawn},
-    time::SystemTime,
 };
 use tracing::{error, trace};
 
@@ -251,7 +250,7 @@ impl State {
                 let (sub_tx, sub_rx) = channel();
 
                 self.minibuffer_stat.n_bytes = 0;
-                self.minibuffer_stat.last_modified = SystemTime::now();
+                self.minibuffer_stat.last_modified = Timestamp::now();
                 spawn_minibuffer_listener(data_rx, fsys_tx, sub_rx);
 
                 let (tx, rx) = channel();
@@ -553,7 +552,7 @@ impl Serve9p for AdFs {
                     Ok(n_bytes)
                 }
                 None => {
-                    s.control_file_stat.last_modified = SystemTime::now();
+                    s.control_file_stat.last_modified = Timestamp::now();
                     match Message::send(Req::ControlMessage { msg: str }, &s.tx) {
                         Ok(_) => Ok(n_bytes),
                         Err(e) => Err(format!("unable to execute control message: {e}")),
@@ -649,8 +648,8 @@ fn empty_dir_stat(qid: u64, name: &str) -> Stat {
         group: "ad".into(),
         perms: Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::OWNER_WRITE,
         n_bytes: 0,
-        last_accessed: SystemTime::now(),
-        last_modified: SystemTime::now(),
+        last_accessed: Timestamp::now(),
+        last_modified: Timestamp::now(),
         last_modified_by: UNAME.to_string(),
     }
 }
@@ -663,8 +662,8 @@ fn empty_file_stat_with_perms(qid: u64, name: &str, perms: Perm) -> Stat {
         group: "ad".into(),
         perms,
         n_bytes: 0,
-        last_accessed: SystemTime::now(),
-        last_modified: SystemTime::now(),
+        last_accessed: Timestamp::now(),
+        last_modified: Timestamp::now(),
         last_modified_by: UNAME.to_string(),
     }
 }

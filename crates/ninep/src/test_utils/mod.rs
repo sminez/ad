@@ -13,12 +13,13 @@ use crate::{
     },
     tokio::{AsyncNineP, server::AsyncServe9pFromSync},
 };
+use jiff::Timestamp;
 use std::{
     io, mem,
     os::unix::net::UnixStream,
     sync::{Arc, Mutex, mpsc},
     thread::{sleep, spawn},
-    time::{Duration, SystemTime},
+    time::Duration,
 };
 use tokio::io::DuplexStream;
 
@@ -63,8 +64,8 @@ pub(crate) fn perm_file_stat() -> Stat {
         group: "group".to_string(),
         perms: Perm::OWNER_READ | Perm::GROUP_WRITE,
         n_bytes: 0,
-        last_accessed: SystemTime::UNIX_EPOCH,
-        last_modified: SystemTime::UNIX_EPOCH,
+        last_accessed: Timestamp::UNIX_EPOCH,
+        last_modified: Timestamp::UNIX_EPOCH,
         last_modified_by: "owner".to_string(),
     }
 }

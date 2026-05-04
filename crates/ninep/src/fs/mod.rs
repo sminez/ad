@@ -1,14 +1,11 @@
 //! Types for describing files in a 9p virtual filesystem
 use crate::sansio::protocol::{NineP, RawStat, Tdata};
-use std::{
-    fmt,
-    mem::size_of,
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
+use std::{fmt, mem::size_of};
 
 mod simple;
 
 pub use crate::sansio::protocol::{FileType, Qid};
+pub use jiff::Timestamp;
 pub use simple::{File, FileTree};
 
 /// The default root qid for 9p server implementations
@@ -249,9 +246,9 @@ pub struct Stat {
     /// Size in bytes
     pub n_bytes: u64,
     /// Timestamp of last access
-    pub last_accessed: SystemTime,
+    pub last_accessed: Timestamp,
     /// Timestamp of last modification
-    pub last_modified: SystemTime,
+    pub last_modified: Timestamp,
     /// User who last modified this entry
     pub last_modified_by: String,
 }
@@ -274,11 +271,7 @@ impl fmt::Display for Stat {
             .perms
             .rwx(Perm::OTHER_READ, Perm::OTHER_WRITE, Perm::OTHER_EXEC);
 
-        let last_modified = self
-            .last_modified
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+        let last_modified = self.last_modified.strftime("%a %b %e %I:%M:%S %p UTC %Y");
 
         write!(
             f,
@@ -376,8 +369,8 @@ impl Stat {
             group: "group".to_string(),
             perms,
             n_bytes: 0,
-            last_accessed: SystemTime::UNIX_EPOCH,
-            last_modified: SystemTime::UNIX_EPOCH,
+            last_accessed: Timestamp::UNIX_EPOCH,
+            last_modified: Timestamp::UNIX_EPOCH,
             last_modified_by: "owner".to_string(),
         }
     }
@@ -400,8 +393,8 @@ impl From<Stat> for RawStat {
             dev: u32::MAX,
             qid: s.qid,
             mode: (Perm::from(s.qid.ty) | s.perms).bits(),
-            atime: systime_as_u32(s.last_accessed),
-            mtime: systime_as_u32(s.last_modified),
+            atime: s.last_accessed.as_second() as u32,
+            mtime: s.last_modified.as_second() as u32,
             length: s.n_bytes,
             name: s.name.clone(),
             uid: s.owner,
@@ -419,8 +412,8 @@ impl From<RawStat> for Stat {
             owner: r.uid,
             group: r.gid,
             perms: Perm::new(r.mode & 0x0000FFFF),
-            last_accessed: systime_from_u32(r.atime),
-            last_modified: systime_from_u32(r.mtime),
+            last_accessed: Timestamp::from_second(r.atime as i64).unwrap(),
+            last_modified: Timestamp::from_second(r.mtime as i64).unwrap(),
             n_bytes: r.length,
             last_modified_by: r.muid,
         }
@@ -494,9 +487,9 @@ pub struct WStat {
     /// Size in bytes
     pub n_bytes: Option<u64>,
     /// Timestamp of last access
-    pub last_accesses: Option<SystemTime>,
+    pub last_accessed: Option<Timestamp>,
     /// Timestamp of last modification
-    pub last_modified: Option<SystemTime>,
+    pub last_modified: Option<Timestamp>,
     /// Group
     pub group: Option<String>,
     /// User who last modified this entry
@@ -524,7 +517,7 @@ impl WStat {
             name: None,
             perms: None,
             n_bytes: None,
-            last_accesses: None,
+            last_accessed: None,
             last_modified: None,
             group: None,
             last_modified_by: None,
@@ -538,7 +531,7 @@ impl WStat {
             name: None,
             perms: None,
             n_bytes: Some(0),
-            last_accesses: None,
+            last_accessed: None,
             last_modified: None,
             group: None,
             last_modified_by: None,
@@ -559,7 +552,7 @@ impl WStat {
         stat.name = self.name.unwrap_or(stat.name);
         stat.perms = self.perms.unwrap_or(stat.perms);
         stat.n_bytes = self.n_bytes.unwrap_or(stat.n_bytes);
-        stat.last_accessed = self.last_accesses.unwrap_or(stat.last_accessed);
+        stat.last_accessed = self.last_accessed.unwrap_or(stat.last_accessed);
         stat.last_modified = self.last_modified.unwrap_or(stat.last_modified);
         stat.group = self.group.unwrap_or(stat.group);
         stat.last_modified_by = self.last_modified_by.unwrap_or(stat.last_modified_by);
@@ -596,15 +589,15 @@ impl From<RawStat> for WStat {
             } else {
                 Some(r.length)
             },
-            last_accesses: if r.atime == u32::MAX {
+            last_accessed: if r.atime == u32::MAX {
                 None
             } else {
-                Some(systime_from_u32(r.atime))
+                Some(Timestamp::from_second(r.atime as i64).unwrap())
             },
             last_modified: if r.mtime == u32::MAX {
                 None
             } else {
-                Some(systime_from_u32(r.mtime))
+                Some(Timestamp::from_second(r.mtime as i64).unwrap())
             },
             group: if r.gid.is_empty() { None } else { Some(r.gid) },
             last_modified_by: if r.muid.is_empty() {
@@ -623,8 +616,8 @@ impl From<WStat> for RawStat {
         let gid = w.group.unwrap_or_default();
         let muid = w.last_modified_by.unwrap_or_default();
         let mode = w.perms.map_or(u32::MAX, |p| p.bits() & 0x0000FFFF);
-        let atime = w.last_accesses.map_or(u32::MAX, systime_as_u32);
-        let mtime = w.last_modified.map_or(u32::MAX, systime_as_u32);
+        let atime = w.last_accessed.map_or(u32::MAX, |t| t.as_second() as u32);
+        let mtime = w.last_modified.map_or(u32::MAX, |t| t.as_second() as u32);
         let length = w.n_bytes.unwrap_or(u64::MAX);
 
         let size = (size_of::<u16>()
@@ -653,26 +646,12 @@ impl From<WStat> for RawStat {
     }
 }
 
-fn systime_as_u32(t: SystemTime) -> u32 {
-    match t.duration_since(UNIX_EPOCH) {
-        Ok(d) => d.as_secs() as u32,
-        Err(_) => 0,
-    }
-}
-
-fn systime_from_u32(t: u32) -> SystemTime {
-    UNIX_EPOCH + Duration::from_secs(t as u64)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sansio::protocol::{Qid, RawStat};
     use simple_test_case::test_case;
-    use std::{
-        collections::HashSet,
-        time::{Duration, UNIX_EPOCH},
-    };
+    use std::{collections::HashSet, time::Duration};
 
     const TEST_QID: u64 = 42;
 
@@ -688,8 +667,8 @@ mod tests {
             group: "group".to_string(),
             perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
             n_bytes: 100,
-            last_accessed: UNIX_EPOCH,
-            last_modified: UNIX_EPOCH,
+            last_accessed: Timestamp::UNIX_EPOCH,
+            last_modified: Timestamp::UNIX_EPOCH,
             last_modified_by: "modifier".to_string(),
         }
     }
@@ -704,7 +683,7 @@ mod tests {
             name: None,
             perms: None,
             n_bytes: None,
-            last_accesses: None,
+            last_accessed: None,
             last_modified: None,
             group: None,
             last_modified_by: None,
@@ -745,13 +724,13 @@ mod tests {
         "n_bytes"
     )]
     #[test_case(
-        WStat { last_accesses: Some(UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
-        Stat { last_accessed: UNIX_EPOCH + Duration::from_secs(1), ..stat() };
+        WStat { last_accessed: Some(Timestamp::UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
+        Stat { last_accessed: Timestamp::UNIX_EPOCH + Duration::from_secs(1), ..stat() };
         "last_accesses"
     )]
     #[test_case(
-        WStat { last_modified: Some(UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
-        Stat { last_modified: UNIX_EPOCH + Duration::from_secs(1), ..stat() };
+        WStat { last_modified: Some(Timestamp::UNIX_EPOCH + Duration::from_secs(1)), ..wstat() },
+        Stat { last_modified: Timestamp::UNIX_EPOCH + Duration::from_secs(1), ..stat() };
         "last_modified"
     )]
     #[test_case(
@@ -787,7 +766,7 @@ mod tests {
         assert!(wstat.name.is_none(), "name");
         assert!(wstat.perms.is_none(), "perms");
         assert!(wstat.n_bytes.is_none(), "n_bytes");
-        assert!(wstat.last_accesses.is_none(), "last_accessed");
+        assert!(wstat.last_accessed.is_none(), "last_accessed");
         assert!(wstat.last_modified.is_none(), "last_modified");
         assert!(wstat.group.is_none(), "group");
         assert!(wstat.last_modified_by.is_none(), "last_modified_by");
@@ -830,8 +809,8 @@ mod tests {
             name: Some("renamed".into()),
             perms: Some(Perm::OWNER_READ | Perm::OWNER_WRITE),
             n_bytes: Some(1_337),
-            last_accesses: Some(UNIX_EPOCH + Duration::from_secs(10)),
-            last_modified: Some(UNIX_EPOCH + Duration::from_secs(20)),
+            last_accessed: Some(Timestamp::UNIX_EPOCH + Duration::from_secs(10)),
+            last_modified: Some(Timestamp::UNIX_EPOCH + Duration::from_secs(20)),
             group: Some("wheel".into()),
             last_modified_by: Some("alice".into()),
             ..wstat()

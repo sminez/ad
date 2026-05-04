@@ -10,13 +10,12 @@ use crate::{
     input::Event,
 };
 use ninep::{
-    fs::{FileType, Perm, Stat},
+    fs::{FileType, Perm, Stat, Timestamp},
     sync::server::ReadOutcome,
 };
 use std::{
     collections::BTreeMap,
     sync::mpsc::{Receiver, Sender, channel},
-    time::SystemTime,
 };
 use tracing::{debug, error, trace};
 
@@ -235,7 +234,7 @@ impl BufferNodes {
             Some(b) => b,
             None => return,
         };
-        b.stat.last_modified = SystemTime::now();
+        b.stat.last_modified = Timestamp::now();
         b.stat.n_bytes = 0;
         let id = b.id;
 
@@ -250,7 +249,7 @@ impl BufferNodes {
             Some(b) => b,
             None => return Err(E_UNKNOWN_FILE.to_string()),
         };
-        b.stat.last_modified = SystemTime::now();
+        b.stat.last_modified = Timestamp::now();
         let id = b.id;
 
         let n_bytes = s.len();
