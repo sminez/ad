@@ -742,10 +742,33 @@ where
         let qid = self.qid_if_perms_hold_async(fid, mode).await?;
         self.try_add_client_id_to_open_qids(fid)?;
 
-        let iounit = self
-            .s
-            .open(self.client_id, qid.path, mode, &self.state.uname)
-            .await?;
+        let fut = async {
+            let iounit = self
+                .s
+                .open(self.client_id, qid.path, mode, &self.state.uname)
+                .await?;
+
+            if mode.contains(Mode::TRUNCATE) {
+                self.s
+                    .write_stat(
+                        self.client_id,
+                        qid.path,
+                        WStat::truncate(qid),
+                        &self.state.uname,
+                    )
+                    .await?;
+            }
+
+            Ok(iounit)
+        };
+
+        let iounit = match fut.await {
+            Ok(iounit) => iounit,
+            Err(e) => {
+                self.remove_client_id_from_open_qids(qid.path);
+                return Err(e);
+            }
+        };
 
         self.state
             .fids

@@ -128,6 +128,7 @@ macro_rules! generate_server_test_suite {
             flush_waits_for_blocked_read,
             open_known_fid_returns_ropen,
             open_unknown_fid_returns_error,
+            open_with_truncate_triggers_expected_wstat,
             permissions_gate_open_calls_for_group,
             permissions_gate_open_calls_for_other,
             permissions_gate_open_calls_for_owner,
@@ -417,6 +418,26 @@ pub(crate) fn open_known_fid_returns_ropen() -> TestCase {
             Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
             Call::stat(ClientId(0), HELLO_QID, "owner"),
             Call::open(ClientId(0), HELLO_QID, Mode::READ, "owner"),
+        ]),
+    ]
+}
+
+pub(crate) fn open_with_truncate_triggers_expected_wstat() -> TestCase {
+    vec![
+        Step::version_req(0),
+        Step::attach_req(1),
+        Step::walk_req(2, 0, 1, &["hello"], &[file_qid(HELLO_QID)]),
+        Step::open_req(3, 1, Mode::READ | Mode::TRUNCATE, HELLO_QID),
+        Step::assert_calls(&[
+            Call::walk(ClientId(0), ROOT_QID, "hello", "owner"),
+            Call::stat(ClientId(0), HELLO_QID, "owner"),
+            Call::open(ClientId(0), HELLO_QID, Mode::READ | Mode::TRUNCATE, "owner"),
+            Call::write_stat(
+                ClientId(0),
+                HELLO_QID,
+                WStat::truncate(file_qid(HELLO_QID)),
+                "owner",
+            ),
         ]),
     ]
 }

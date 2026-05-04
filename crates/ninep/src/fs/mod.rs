@@ -446,7 +446,9 @@ impl PermCheck {
             return PermCheck::Denied;
         }
 
-        if mode.contains(Mode::REMOVE_ON_CLOSE) {
+        if mode.contains(Mode::TRUNCATE) && !can_write {
+            PermCheck::Denied
+        } else if mode.contains(Mode::REMOVE_ON_CLOSE) {
             PermCheck::NeedWriteOnParent
         } else {
             PermCheck::Allowed
@@ -522,6 +524,20 @@ impl WStat {
             name: None,
             perms: None,
             n_bytes: None,
+            last_accesses: None,
+            last_modified: None,
+            group: None,
+            last_modified_by: None,
+        }
+    }
+
+    /// A [WStat] that requests the server to truncate the file.
+    pub fn truncate(qid: Qid) -> Self {
+        WStat {
+            qid,
+            name: None,
+            perms: None,
+            n_bytes: Some(0),
             last_accesses: None,
             last_modified: None,
             group: None,
@@ -992,5 +1008,16 @@ mod tests {
 
         // not a dir, only allow read
         assert_eq!(PermCheck::new(mode, false, true, false, false), expected);
+    }
+
+    #[test_case(true, PermCheck::Allowed; "with write perms")]
+    #[test_case(false, PermCheck::Denied; "without write perms")]
+    #[test]
+    fn perm_check_for_allowed_mode_handles_truncate(can_write: bool, expected: PermCheck) {
+        // not a dir, allow read for the base check to pass
+        assert_eq!(
+            PermCheck::new(Mode::READ | Mode::TRUNCATE, false, true, can_write, false),
+            expected
+        );
     }
 }
