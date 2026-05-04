@@ -3,14 +3,14 @@ use crate::{
     fsys::{
         BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER,
         INDEX_BUFFER_QID, InternalRead, Message, QID_OFFSET, Req, Result, apply_offset,
-        empty_dir_stat, empty_file_stat,
+        empty_dir_stat, empty_file_stat, empty_file_stat_with_perms,
         event::{InputFilter, InputRequest, run_threaded_input_listener, send_event_to_editor},
         log::{Log, LogEvent},
     },
     input::Event,
 };
 use ninep::{
-    fs::{FileType, Stat},
+    fs::{FileType, Perm, Stat},
     sync::server::ReadOutcome,
 };
 use std::{
@@ -85,7 +85,11 @@ impl BufferNodes {
             current_buffid: 1,
             stat: empty_dir_stat(BUFFERS_QID, BUFFERS_DIR),
             current_buff_stat: empty_file_stat(CURRENT_BUFFER_QID, CURRENT_BUFFER),
-            index_stat: empty_file_stat(INDEX_BUFFER_QID, INDEX_BUFFER),
+            index_stat: empty_file_stat_with_perms(
+                INDEX_BUFFER_QID,
+                INDEX_BUFFER,
+                Perm::OWNER_READ,
+            ),
             tx,
             brx,
         }

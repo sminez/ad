@@ -333,10 +333,14 @@ impl AdFs {
                 minibuffer_content: MiniBufferContent::Data(Vec::new()),
                 minibuffer_prompt: None,
                 mount_dir_stat: empty_dir_stat(MOUNT_ROOT_QID, "/"),
-                control_file_stat: empty_file_stat(CONTROL_FILE_QID, CONTROL_FILE),
+                control_file_stat: empty_file_stat_with_perms(
+                    CONTROL_FILE_QID,
+                    CONTROL_FILE,
+                    Perm::OWNER_WRITE | Perm::APPEND_ONLY,
+                ),
                 minibuffer_stat: empty_file_stat(MINIBUFFER_QID, MINIBUFFER),
                 scratch_stat: empty_file_stat(SCRATCH_QID, SCRATCH),
-                log_file_stat: empty_file_stat(LOG_FILE_QID, LOG_FILE),
+                log_file_stat: empty_file_stat_with_perms(LOG_FILE_QID, LOG_FILE, Perm::OWNER_READ),
                 mount_path,
                 auto_mount,
             })),
@@ -651,18 +655,26 @@ fn empty_dir_stat(qid: u64, name: &str) -> Stat {
     }
 }
 
-fn empty_file_stat(qid: u64, name: &str) -> Stat {
+fn empty_file_stat_with_perms(qid: u64, name: &str, perms: Perm) -> Stat {
     Stat {
         qid: Qid::file(qid),
         name: name.into(),
         owner: UNAME.to_string(),
         group: "ad".into(),
-        perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
+        perms,
         n_bytes: 0,
         last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
         last_modified_by: UNAME.to_string(),
     }
+}
+
+fn empty_file_stat(qid: u64, name: &str) -> Stat {
+    empty_file_stat_with_perms(
+        qid,
+        name,
+        Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::APPEND_ONLY,
+    )
 }
 
 #[cfg(test)]
