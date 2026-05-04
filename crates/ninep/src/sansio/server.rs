@@ -87,10 +87,10 @@ impl<S> Server<S>
 where
     S: Send,
 {
-    /// Create a new file server with a single anonymous root (name will be "/") and
+    /// Create a new file server with a single anonymous root (aname will be "") and
     /// qid of [QID_ROOT].
     pub fn new(s: S) -> Self {
-        Self::new_with_roots(s, [("/".to_string(), QID_ROOT)].into_iter().collect())
+        Self::new_with_roots(s, [("".to_string(), QID_ROOT)].into_iter().collect())
     }
 
     /// Create a new file server with the given roots for clients to attach to.
@@ -821,7 +821,7 @@ mod tests {
         SessionState {
             client_id: ClientId(0),
             msize: DEFAULT_MSIZE,
-            roots: BTreeMap::from([("/".to_string(), QID_ROOT)]),
+            roots: BTreeMap::from([("".to_string(), QID_ROOT)]),
             qids: qids.clone(),
             state: Attached {
                 uname: "testuser".to_string(),
@@ -838,7 +838,7 @@ mod tests {
             name: name.into(),
             owner: "owner".to_string(),
             group: "group".to_string(),
-            perms: Perm::root(),
+            perms: Perm::any_read() | Perm::any_exec(),
             n_bytes: 0,
             last_accessed: SystemTime::UNIX_EPOCH,
             last_modified: SystemTime::UNIX_EPOCH,
@@ -889,12 +889,12 @@ mod tests {
     fn handle_attach_with_valid_root_initialises_state() {
         let mut session = Server::new(()).new_session(());
         assert!(
-            session.roots.contains_key("/"),
+            session.roots.contains_key(""),
             "expected default root is not present"
         );
 
         let (attached, qid) = session
-            .handle_attach(5, AFID_NO_AUTH, "testuser".into(), "/".into())
+            .handle_attach(5, AFID_NO_AUTH, "testuser".into(), "".into())
             .unwrap();
 
         assert_eq!(
@@ -944,7 +944,7 @@ mod tests {
 
         let resp = session.handle_tmessage_unattached(Tmessage::new(
             0,
-            Tdata::attach(0, AFID_NO_AUTH, "user", "/"),
+            Tdata::attach(0, AFID_NO_AUTH, "user", ""),
         ));
 
         match resp {

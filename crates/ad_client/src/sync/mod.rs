@@ -28,7 +28,7 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "/")?,
+            inner: UnixClient::new_unix(&ns, "")?,
         })
     }
 
@@ -41,7 +41,7 @@ impl Client {
         let ns = format!("ad-{pid}");
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "/")?,
+            inner: UnixClient::new_unix(&ns, "")?,
         })
     }
 
@@ -53,7 +53,7 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix_with_explicit_path(uname, path, "/")?,
+            inner: UnixClient::new_unix_with_explicit_path(uname, path, "")?,
         })
     }
 

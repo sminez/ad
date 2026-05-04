@@ -81,7 +81,7 @@ impl Step {
     fn connect_valid() -> Self {
         Step::Connect {
             uname: "owner",
-            aname: "/",
+            aname: "",
             res: Ok(()),
         }
     }
@@ -436,7 +436,7 @@ pub(crate) fn write_without_permission_fails() -> TestCase {
     );
 
     vec![
-        Step::connect("not-owner", "/", Ok(())),
+        Step::connect("not-owner", "", Ok(())),
         Step::write("/hello", 0, b"data", Err(Error::r(E_PERMISSION_DENIED))),
         // Should still have walked to the file and cached the fid
         Step::assert_state(2, &[("/", 0), ("/hello", 1)]),

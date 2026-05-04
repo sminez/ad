@@ -64,7 +64,7 @@ impl Step {
     fn attach_as_req(tag: u16, uname: &str) -> Step {
         Step::req(
             tag,
-            Tdata::attach(0, AFID_NO_AUTH, uname, "/"),
+            Tdata::attach(0, AFID_NO_AUTH, uname, ""),
             Rdata::attach(Qid::dir(ROOT_QID)),
         )
     }
@@ -185,7 +185,7 @@ pub(crate) fn attach_before_version_returns_error() -> TestCase {
     vec![
         Step::err(
             0,
-            Tdata::attach(0, AFID_NO_AUTH, "owner", "/"),
+            Tdata::attach(0, AFID_NO_AUTH, "owner", ""),
             E_NO_VERSION_MESSAGE,
         ),
         Step::assert_calls(&[]),
@@ -206,7 +206,7 @@ pub(crate) fn duplicate_attach_returns_error() -> TestCase {
         Step::attach_req(1),
         Step::err(
             2,
-            Tdata::attach(1, AFID_NO_AUTH, "owner", "/"),
+            Tdata::attach(1, AFID_NO_AUTH, "owner", ""),
             E_ALREADY_ATTACHED,
         ),
         Step::assert_calls(&[]),

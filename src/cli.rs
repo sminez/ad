@@ -201,7 +201,7 @@ fn parse_9p(parser: &mut Parser) -> Result<CliAction, lexopt::Error> {
         option: Some("9p".into()),
     })?;
 
-    let mut aname = "/".to_string();
+    let mut aname = "".to_string();
 
     let next = match arg {
         Short('A') => {

@@ -683,8 +683,8 @@ mod tests {
         }
 
         let mut server = Server::new(adfs);
-        let (mut client1, _handle1) = server.session_with_attached_client("client1", "/").unwrap();
-        let (mut client2, _handle2) = server.session_with_attached_client("client2", "/").unwrap();
+        let (mut client1, _handle1) = server.session_with_attached_client("client1", "").unwrap();
+        let (mut client2, _handle2) = server.session_with_attached_client("client2", "").unwrap();
 
         // First client to try to grab the event file should succeed
         let res = client1.iter_lines("buffers/1/event");
