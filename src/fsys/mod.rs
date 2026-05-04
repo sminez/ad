@@ -43,7 +43,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        Arc, Mutex,
+        Arc, LazyLock, Mutex,
         mpsc::{Receiver, Sender, channel},
     },
     thread::{JoinHandle, spawn},
@@ -63,6 +63,7 @@ pub(crate) use message::{Message, Req};
 use buffer::{BufferNodes, QidCheck};
 use log::spawn_log_listener;
 
+static UNAME: LazyLock<String> = LazyLock::new(|| env::var("USER").expect("$USER to be set"));
 const DEFAULT_SOCKET_NAME: &str = "ad";
 const MOUNT_DIR: &str = ".ad/mnt";
 const IO_UNIT: u32 = 8168;
@@ -640,13 +641,13 @@ fn empty_dir_stat(qid: u64, name: &str) -> Stat {
     Stat {
         qid: Qid::dir(qid),
         name: name.into(),
-        owner: "ad".into(),
+        owner: UNAME.to_string(),
         group: "ad".into(),
-        perms: Perm::any_read() | Perm::any_exec(),
+        perms: Perm::OWNER_READ | Perm::OWNER_WRITE | Perm::OWNER_WRITE,
         n_bytes: 0,
         last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
-        last_modified_by: "ad".into(),
+        last_modified_by: UNAME.to_string(),
     }
 }
 
@@ -654,13 +655,13 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
     Stat {
         qid: Qid::file(qid),
         name: name.into(),
-        owner: "ad".into(),
+        owner: UNAME.to_string(),
         group: "ad".into(),
-        perms: Perm::any_read() | Perm::any_write(),
+        perms: Perm::OWNER_READ | Perm::OWNER_WRITE,
         n_bytes: 0,
         last_accessed: SystemTime::now(),
         last_modified: SystemTime::now(),
-        last_modified_by: "ad".into(),
+        last_modified_by: UNAME.to_string(),
     }
 }
 
@@ -683,8 +684,8 @@ mod tests {
         }
 
         let mut server = Server::new(adfs);
-        let (mut client1, _handle1) = server.session_with_attached_client("client1", "").unwrap();
-        let (mut client2, _handle2) = server.session_with_attached_client("client2", "").unwrap();
+        let (mut client1, _handle1) = server.session_with_attached_client(&*UNAME, "").unwrap();
+        let (mut client2, _handle2) = server.session_with_attached_client(&*UNAME, "").unwrap();
 
         // First client to try to grab the event file should succeed
         let res = client1.iter_lines("buffers/1/event");
