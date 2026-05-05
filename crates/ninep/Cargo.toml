@@ -14,16 +14,19 @@ include = [
 ]
 
 [features]
-default = ["tokio"]
+default = ["tokio", "util_fs"]
 tokio = ["dep:tokio"]
+util_fs = ["dep:uzers"]
 
 [dependencies]
 bitflags = "2"
-tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync"], optional = true }
+jiff = "0.2"
 simple_coro = "0.1.5"
-jiff = "0.2.24"
+tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync"], optional = true }
+uzers = { version = "0.12", optional = true }
 
 [dev-dependencies]
+assert_fs = "1.1"
 lexopt = "0.3.2"
 simple_test_case = "1"
 tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync", "time", "rt-multi-thread", "net", "io-util"] }

@@ -123,13 +123,23 @@ where
 /// A simple file implementation for use in a [FileTree].
 #[derive(Debug, Clone)]
 pub struct File<T> {
-    stat: Stat,
+    parent: Option<u64>,
+    /// The stat associated with this [File] node.
+    pub stat: Stat,
     /// User defined additional data per [File] node.
     pub aux: T,
 }
 
 impl<T> File<T> {
-    fn new(qid: Qid, name: &str, owner: &str, group: &str, perms: Perm, aux: T) -> Self {
+    fn new(
+        qid: Qid,
+        name: &str,
+        owner: &str,
+        group: &str,
+        perms: Perm,
+        aux: T,
+        parent: Option<u64>,
+    ) -> Self {
         File {
             stat: Stat {
                 qid,
@@ -143,12 +153,15 @@ impl<T> File<T> {
                 last_modified_by: owner.into(),
             },
             aux,
+            parent,
         }
     }
 
-    /// The [Stat] for this file.
-    pub fn stat(&self) -> &Stat {
-        &self.stat
+    /// The `qid` of the parent node for this file.
+    ///
+    /// Returns [None] for the root node.
+    pub fn parent(&self) -> Option<u64> {
+        self.parent
     }
 
     /// Attempt to apply a [WStat] to the [Stat] of this file.
@@ -179,7 +192,7 @@ where
     T: Send + Sync + 'static,
 {
     fn new(owner: &str, group: &str, perms: Perm, aux: T) -> Self {
-        let root = File::new(Qid::dir(0), "/", owner, group, perms, aux);
+        let root = File::new(Qid::dir(0), "/", owner, group, perms, aux, None);
 
         Self {
             entries: BTreeMap::from_iter([(0, root)]),
@@ -231,7 +244,15 @@ where
 
         self.entries.insert(
             qid_path,
-            File::new(qid, name, &pstat.owner, &pstat.group, perms, aux),
+            File::new(
+                qid,
+                name,
+                &pstat.owner,
+                &pstat.group,
+                perms,
+                aux,
+                Some(parent),
+            ),
         );
         self.children
             .entry(pstat.qid.path)

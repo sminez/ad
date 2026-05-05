@@ -204,7 +204,7 @@ impl Mode {
     }
 
     fn is_allowed(&self, read: bool, write: bool, exec: bool) -> bool {
-        let m = Mode::new(self.bits() & 0x03); // Mask off the additional truncate and remove bits
+        let m = self.base(); // Mask off the additional truncate and remove bits
 
         (m == Mode::READ && read)
             || (m == Mode::WRITE && write)
@@ -213,12 +213,17 @@ impl Mode {
             || false
     }
 
+    /// The base [Mode] without [Mode::TRUNCATE] and [Mode::REMOVE_ON_CLOSE] bits.
+    pub fn base(&self) -> Mode {
+        Mode::new(self.bits() & 0x03)
+    }
+
     pub(crate) fn allows_read(&self) -> bool {
-        *self == Mode::READ || *self == Mode::READ_WRITE
+        self.base() == Mode::READ || self.base() == Mode::READ_WRITE
     }
 
     pub(crate) fn allows_write(&self) -> bool {
-        *self == Mode::WRITE || *self == Mode::READ_WRITE
+        self.base() == Mode::WRITE || self.base() == Mode::READ_WRITE
     }
 }
 
