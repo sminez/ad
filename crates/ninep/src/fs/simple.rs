@@ -64,6 +64,29 @@ where
         self.with_nodes_mut(|nodes| nodes.remove(qid))
     }
 
+    /// Attempt to map a path within this file tree to a qid.
+    ///
+    /// Returns `Some(qid)` for a known path, otherwise `None`.
+    pub fn qid_for_path(&self, path: &str) -> Option<u64> {
+        if !path.starts_with('/') {
+            return None;
+        }
+
+        let mut qid = 0;
+
+        // Need to skip the empty string from the leading slash
+        for elem in path.split('/').skip(1) {
+            qid = self.walk_one(qid, elem).ok()?.path;
+        }
+
+        Some(qid)
+    }
+
+    /// Whether or not this file tree contains the given qid
+    pub fn contains_qid(&self, qid: u64) -> bool {
+        self.with_nodes(|nodes| nodes.entries.contains_key(&qid))
+    }
+
     /// Run a closure with access to the [File] associated with the given `qid`.
     pub fn with_file<F, U>(&self, qid: u64, f: F) -> Result<U>
     where
