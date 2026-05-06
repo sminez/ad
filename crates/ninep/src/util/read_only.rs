@@ -40,42 +40,28 @@ impl<T> Serve9p for ReadOnlyFs<T>
 where
     T: Serve9p,
 {
-    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
-        self.inner.open(cid, qid, mode, uname)
+    fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
+        self.inner.open(qid, mode, cid)
     }
 
-    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid> {
-        self.inner.walk_one(cid, parent_qid, child, uname)
+    fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid> {
+        self.inner.walk_one(parent_qid, child, cid)
     }
 
-    fn read(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        count: usize,
-        uname: &str,
-    ) -> Result<ReadOutcome> {
-        self.inner.read(cid, qid, offset, count, uname)
+    fn read(&self, qid: u64, offset: usize, count: usize, cid: ClientId) -> Result<ReadOutcome> {
+        self.inner.read(qid, offset, count, cid)
     }
 
-    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        self.inner.read_dir(cid, qid, uname)
+    fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>> {
+        self.inner.read_dir(qid, cid)
     }
 
-    fn write(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Result<usize> {
-        self.inner.write(cid, qid, offset, data, uname)
+    fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize> {
+        self.inner.write(qid, offset, data, cid)
     }
 
-    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
-        let mut stat = self.inner.stat(cid, qid, uname)?;
+    fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat> {
+        let mut stat = self.inner.stat(qid, cid)?;
         if self.read_only {
             stat.perms
                 .remove(Perm::OWNER_WRITE | Perm::GROUP_WRITE | Perm::OTHER_WRITE);
@@ -84,27 +70,26 @@ where
         Ok(stat)
     }
 
-    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
-        self.inner.write_stat(cid, qid, wstat, uname)
+    fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()> {
+        self.inner.write_stat(qid, wstat, cid)
     }
 
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
-        self.inner.remove(cid, qid, uname)
+    fn remove(&self, qid: u64, cid: ClientId) -> Result<()> {
+        self.inner.remove(qid, cid)
     }
 
     fn create(
         &self,
-        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<(Qid, IoUnit)> {
         if self.read_only && mode.allows_write() {
             return Err(E_PERMISSION_DENIED.to_string());
         }
 
-        self.inner.create(cid, parent, name, perm, mode, uname)
+        self.inner.create(parent, name, perm, mode, cid)
     }
 }

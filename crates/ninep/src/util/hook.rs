@@ -50,103 +50,79 @@ impl<T> Serve9p for HookFs<T>
 where
     T: Serve9p,
 {
-    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
-        (self.hook)(FsOp::Open {
-            cid,
-            qid,
-            mode,
-            uname,
-        })?;
+    fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
+        (self.hook)(FsOp::Open { cid, qid, mode })?;
 
-        self.inner.open(cid, qid, mode, uname)
+        self.inner.open(qid, mode, cid)
     }
 
-    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid> {
+    fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid> {
         (self.hook)(FsOp::WalkOne {
             cid,
             parent_qid,
             child,
-            uname,
         })?;
 
-        self.inner.walk_one(cid, parent_qid, child, uname)
+        self.inner.walk_one(parent_qid, child, cid)
     }
 
-    fn read(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        count: usize,
-        uname: &str,
-    ) -> Result<ReadOutcome> {
+    fn read(&self, qid: u64, offset: usize, count: usize, cid: ClientId) -> Result<ReadOutcome> {
         (self.hook)(FsOp::Read {
             cid,
             qid,
             offset,
             count,
-            uname,
         })?;
 
-        self.inner.read(cid, qid, offset, count, uname)
+        self.inner.read(qid, offset, count, cid)
     }
 
-    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        (self.hook)(FsOp::ReadDir { cid, qid, uname })?;
+    fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>> {
+        (self.hook)(FsOp::ReadDir { cid, qid })?;
 
-        self.inner.read_dir(cid, qid, uname)
+        self.inner.read_dir(qid, cid)
     }
 
-    fn write(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Result<usize> {
+    fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize> {
         (self.hook)(FsOp::Write {
             cid,
             qid,
             offset,
             n_bytes: data.len(),
-            uname,
         })?;
 
-        self.inner.write(cid, qid, offset, data, uname)
+        self.inner.write(qid, offset, data, cid)
     }
 
-    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
-        (self.hook)(FsOp::Stat { cid, qid, uname })?;
+    fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat> {
+        (self.hook)(FsOp::Stat { cid, qid })?;
 
-        self.inner.stat(cid, qid, uname)
+        self.inner.stat(qid, cid)
     }
 
-    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
+    fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()> {
         (self.hook)(FsOp::WriteStat {
             cid,
             qid,
             wstat: &wstat,
-            uname,
         })?;
 
-        self.inner.write_stat(cid, qid, wstat, uname)
+        self.inner.write_stat(qid, wstat, cid)
     }
 
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
-        (self.hook)(FsOp::Remove { cid, qid, uname })?;
+    fn remove(&self, qid: u64, cid: ClientId) -> Result<()> {
+        (self.hook)(FsOp::Remove { cid, qid })?;
 
-        self.inner.remove(cid, qid, uname)
+        self.inner.remove(qid, cid)
     }
 
     fn create(
         &self,
-        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<(Qid, IoUnit)> {
         (self.hook)(FsOp::Create {
             cid,
@@ -154,10 +130,9 @@ where
             name,
             perm,
             mode,
-            uname,
         })?;
 
-        self.inner.create(cid, parent, name, perm, mode, uname)
+        self.inner.create(parent, name, perm, mode, cid)
     }
 }
 
@@ -169,48 +144,40 @@ pub enum FsOp<'a> {
         cid: ClientId,
         parent_qid: u64,
         child: &'a str,
-        uname: &'a str,
     },
     Open {
         cid: ClientId,
         qid: u64,
         mode: Mode,
-        uname: &'a str,
     },
     Read {
         cid: ClientId,
         qid: u64,
         offset: usize,
         count: usize,
-        uname: &'a str,
     },
     ReadDir {
         cid: ClientId,
         qid: u64,
-        uname: &'a str,
     },
     Write {
         cid: ClientId,
         qid: u64,
         offset: usize,
         n_bytes: usize,
-        uname: &'a str,
     },
     Stat {
         cid: ClientId,
         qid: u64,
-        uname: &'a str,
     },
     WriteStat {
         cid: ClientId,
         qid: u64,
         wstat: &'a WStat,
-        uname: &'a str,
     },
     Remove {
         cid: ClientId,
         qid: u64,
-        uname: &'a str,
     },
     Create {
         cid: ClientId,
@@ -218,6 +185,5 @@ pub enum FsOp<'a> {
         name: &'a str,
         perm: Perm,
         mode: Mode,
-        uname: &'a str,
     },
 }

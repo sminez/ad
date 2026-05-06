@@ -32,7 +32,7 @@ pub struct LocalProxyFs {
 }
 
 impl LocalProxyFs {
-    /// Construct a new [ProxyFs] pointed at the provided root directory
+    /// Construct a new [LocalProxyFs] pointed at the provided root directory.
     pub fn new(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = fs::canonicalize(root.into())?;
         let root_meta = fs::metadata(&root)?;
@@ -138,7 +138,13 @@ impl LocalProxyFs {
             let perms = perms_from_meta(&pm.meta);
             let meta = pm.meta.clone();
             let qid = self.ft.try_add_node(qid, &name, perms, ty, pm)?;
-            self.try_sync_file_with_meta(qid.path, meta)?;
+
+            // FIXME: this is too eager: we don't want to sync the full tree!
+            if meta.is_dir() {
+                self.try_sync_dir(qid.path)?
+            } else {
+                self.try_sync_file_with_meta(qid.path, meta)?;
+            }
         }
 
         Ok(())
@@ -204,7 +210,7 @@ impl LocalProxyFs {
 }
 
 impl Serve9p for LocalProxyFs {
-    fn open(&self, _cid: ClientId, qid: u64, _mode: Mode, _uname: &str) -> Result<IoUnit> {
+    fn open(&self, qid: u64, _mode: Mode, _cid: ClientId) -> Result<IoUnit> {
         if self.modified_since_cache_or_prune(qid)? {
             self.try_sync_file(qid)?;
         }
@@ -212,7 +218,7 @@ impl Serve9p for LocalProxyFs {
         Ok(self.iounit)
     }
 
-    fn walk_one(&self, _cid: ClientId, parent_qid: u64, child: &str, _uname: &str) -> Result<Qid> {
+    fn walk_one(&self, parent_qid: u64, child: &str, _cid: ClientId) -> Result<Qid> {
         if self.modified_since_cache_or_prune(parent_qid)? {
             self.try_sync_dir(parent_qid)?;
         }
@@ -220,14 +226,7 @@ impl Serve9p for LocalProxyFs {
         self.ft.walk_one(parent_qid, child)
     }
 
-    fn read(
-        &self,
-        _cid: ClientId,
-        qid: u64,
-        offset: usize,
-        count: usize,
-        _uname: &str,
-    ) -> Result<ReadOutcome> {
+    fn read(&self, qid: u64, offset: usize, count: usize, _cid: ClientId) -> Result<ReadOutcome> {
         if self.modified_since_cache_or_prune(qid)? {
             self.try_sync_file(qid)?;
         }
@@ -248,7 +247,7 @@ impl Serve9p for LocalProxyFs {
         Ok(ReadOutcome::Immediate(buf))
     }
 
-    fn read_dir(&self, _cid: ClientId, qid: u64, _uname: &str) -> Result<Vec<Stat>> {
+    fn read_dir(&self, qid: u64, _cid: ClientId) -> Result<Vec<Stat>> {
         if self.modified_since_cache_or_prune(qid)? {
             self.try_sync_dir(qid)?;
         }
@@ -256,14 +255,7 @@ impl Serve9p for LocalProxyFs {
         self.ft.read_dir(qid)
     }
 
-    fn write(
-        &self,
-        _cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        _uname: &str,
-    ) -> Result<usize> {
+    fn write(&self, qid: u64, offset: usize, data: Vec<u8>, _cid: ClientId) -> Result<usize> {
         if self.modified_since_cache_or_prune(qid)? {
             self.try_sync_file(qid)?;
         }
@@ -280,7 +272,7 @@ impl Serve9p for LocalProxyFs {
         f.write(data.as_slice()).map_err(|e| e.to_string())
     }
 
-    fn stat(&self, _cid: ClientId, qid: u64, _uname: &str) -> Result<Stat> {
+    fn stat(&self, qid: u64, _cid: ClientId) -> Result<Stat> {
         if self.modified_since_cache_or_prune(qid)? {
             let pm = self.meta_for_qid(qid);
             if pm.meta.is_dir() {
@@ -293,7 +285,7 @@ impl Serve9p for LocalProxyFs {
         self.ft.stat(qid)
     }
 
-    fn write_stat(&self, _cid: ClientId, qid: u64, wstat: WStat, _uname: &str) -> Result<()> {
+    fn write_stat(&self, qid: u64, wstat: WStat, _cid: ClientId) -> Result<()> {
         if wstat.last_accessed.is_some()
             || wstat.last_modified.is_some()
             || wstat.group.is_some()
@@ -342,7 +334,7 @@ impl Serve9p for LocalProxyFs {
         Ok(())
     }
 
-    fn remove(&self, _cid: ClientId, qid: u64, _uname: &str) -> Result<()> {
+    fn remove(&self, qid: u64, _cid: ClientId) -> Result<()> {
         if qid == 0 {
             return Err(E_PERMISSION_DENIED.to_string());
         }
@@ -367,12 +359,11 @@ impl Serve9p for LocalProxyFs {
 
     fn create(
         &self,
-        _cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         _mode: Mode,
-        _uname: &str,
+        _cid: ClientId,
     ) -> Result<(Qid, IoUnit)> {
         if self.modified_since_cache_or_prune(parent)? {
             self.try_sync_dir(parent)?;
@@ -430,10 +421,4 @@ fn owner_and_group_from_meta(meta: &Metadata) -> (String, String) {
         .unwrap_or_else(|| "unknown".into());
 
     (owner, group)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use assert_fs::TempDir;
 }
