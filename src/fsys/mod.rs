@@ -379,8 +379,8 @@ impl AdFs {
 }
 
 impl Serve9p for AdFs {
-    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
-        trace!(?cid, %qid, %uname, "handling stat request");
+    fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat> {
+        trace!(?cid, %qid, "handling stat request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -398,13 +398,13 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
-        trace!(?cid, %qid, %uname, "handling write stat request");
+    fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()> {
+        trace!(?cid, %qid, "handling write stat request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
         if wstat.n_bytes == Some(0) {
-            trace!(%qid, %uname, "wstat n_bytes=0, truncating file");
+            trace!(%qid, "wstat n_bytes=0, truncating file");
             match qid {
                 MOUNT_ROOT_QID | CONTROL_FILE_QID | MINIBUFFER_QID | LOG_FILE_QID => (),
                 qid => s.buffer_nodes.truncate(qid),
@@ -416,8 +416,8 @@ impl Serve9p for AdFs {
         Ok(())
     }
 
-    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid> {
-        trace!(?cid, %parent_qid, %child, %uname, "handling walk request");
+    fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid> {
+        trace!(?cid, %parent_qid, %child, "handling walk request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -445,8 +445,8 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
-        trace!(?cid, %qid, %uname, ?mode, "handling open request");
+    fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
+        trace!(?cid, %qid,  ?mode, "handling open request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -459,7 +459,7 @@ impl Serve9p for AdFs {
         Ok(IO_UNIT)
     }
 
-    fn clunk(&self, cid: ClientId, qid: u64) {
+    fn clunk(&self, qid: u64, cid: ClientId) {
         trace!(?cid, %qid, "handling clunk request");
         let mut s = self.state.lock().unwrap();
 
@@ -470,15 +470,8 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn read(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        count: usize,
-        uname: &str,
-    ) -> Result<ReadOutcome> {
-        trace!(?cid, %qid, %offset, %count, %uname, "handling read request");
+    fn read(&self, qid: u64, offset: usize, count: usize, cid: ClientId) -> Result<ReadOutcome> {
+        trace!(?cid, %qid, %offset, %count, "handling read request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -506,8 +499,8 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        trace!(?cid, %qid, %uname, "handling read dir request");
+    fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>> {
+        trace!(?cid, %qid, "handling read dir request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -527,15 +520,8 @@ impl Serve9p for AdFs {
         }
     }
 
-    fn write(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Result<usize> {
-        trace!(?cid, %qid, %offset, n_bytes=%data.len(), %uname, "handling write request");
+    fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize> {
+        trace!(?cid, %qid, %offset, n_bytes=%data.len(), "handling write request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -572,8 +558,8 @@ impl Serve9p for AdFs {
 
     // If this qid is a buffer directory then removing it closes the buffer. All other removes
     // are forbidden.
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
-        trace!(?cid, %qid, %uname, "handling remove request");
+    fn remove(&self, qid: u64, cid: ClientId) -> Result<()> {
+        trace!(?cid, %qid, "handling remove request");
         let mut s = self.state.lock().unwrap();
         s.buffer_nodes.update();
 
@@ -595,14 +581,13 @@ impl Serve9p for AdFs {
 
     fn create(
         &self,
-        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<(Qid, IoUnit)> {
-        trace!(?cid, %parent, %name, ?perm, ?mode, %uname, "handling create request");
+        trace!(?cid, %parent, %name, ?perm, ?mode, "handling create request");
         Err(E_NOT_ALLOWED.to_string())
     }
 }

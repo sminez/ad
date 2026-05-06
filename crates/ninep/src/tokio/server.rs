@@ -113,10 +113,9 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// element of the path returns an error.
     fn walk_one(
         &self,
-        cid: ClientId,
         parent_qid: u64,
         child: &str,
-        uname: &str,
+        cid: ClientId,
     ) -> impl Future<Output = Result<Qid>> + Send;
 
     /// Open an existing file for subsequent I/O via [read](AsyncServe9p::read) and
@@ -131,10 +130,9 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// returned if access is denied, mode is unsupported, or the target cannot be opened.
     fn open(
         &self,
-        cid: ClientId,
         qid: u64,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> impl Future<Output = Result<IoUnit>> + Send;
 
     /// Release client specific server-side resources associated with with provided qid.
@@ -147,7 +145,7 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// Implementations should be resilient to repeated calls for the same qid. (The default
     /// implementation is a no-op.)
     #[expect(unused_variables)]
-    fn clunk(&self, cid: ClientId, qid: u64) -> impl Future<Output = ()> + Send {
+    fn clunk(&self, qid: u64, cid: ClientId) -> impl Future<Output = ()> + Send {
         async {}
     }
 
@@ -161,7 +159,7 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// implementations of this method should be resilient to being called multiple times with the
     /// same arguments. (The default implementation is a no-op.)
     #[expect(unused_variables)]
-    fn flush(&self, cid: ClientId, old_tag: u16) -> impl Future<Output = ()> + Send {
+    fn flush(&self, old_tag: u16, cid: ClientId) -> impl Future<Output = ()> + Send {
         async {}
     }
 
@@ -177,12 +175,11 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// or creation cannot be completed for any reason.
     fn create(
         &self,
-        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> impl Future<Output = Result<(Qid, IoUnit)>> + Send;
 
     /// Read up to `count` bytes from `qid` starting at `offset`.
@@ -197,11 +194,10 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// [flush](AsyncServe9p::flush)) and must respect client specified byte `count` limit.
     fn read(
         &self,
-        cid: ClientId,
         qid: u64,
         offset: usize,
         count: usize,
-        uname: &str,
+        cid: ClientId,
     ) -> impl Future<Output = Result<ReadOutcome>> + Send;
 
     /// List [Stat] entries for a given client's view of a directory.
@@ -210,12 +206,7 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// limits automatically (unlike [read][AsyncServe9p::read]). Implementations should return the
     /// full logical entry list in stable order for the client's view of the directory (as
     /// identified by `cid`).
-    fn read_dir(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        uname: &str,
-    ) -> impl Future<Output = Result<Vec<Stat>>> + Send;
+    fn read_dir(&self, qid: u64, cid: ClientId) -> impl Future<Output = Result<Vec<Stat>>> + Send;
 
     /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
     /// `offset`.
@@ -229,11 +220,10 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// are not permitted.
     fn write(
         &self,
-        cid: ClientId,
         qid: u64,
         offset: usize,
         data: Vec<u8>,
-        uname: &str,
+        cid: ClientId,
     ) -> impl Future<Output = Result<usize>> + Send;
 
     /// Remove the entry identified by `qid` from the filesystem.
@@ -241,23 +231,13 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// [Server] calls this for each `remove` message received from the client followed by
     /// [clunking][AsyncServe9p::clunk] the `qid` regardless of success. Implementations should
     /// return `Err` when removal is not permitted or fails.
-    fn remove(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        uname: &str,
-    ) -> impl Future<Output = Result<()>> + Send;
+    fn remove(&self, qid: u64, cid: ClientId) -> impl Future<Output = Result<()>> + Send;
 
     /// Fetch the current [Stat] metadata for the filesystem entry identified by `qid`.
     ///
     /// [Server] uses this for client `stat` messages and internally for
     /// [create][AsyncServe9p::create] permission masking against parent directories.
-    fn stat(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        uname: &str,
-    ) -> impl Future<Output = Result<Stat>> + Send;
+    fn stat(&self, qid: u64, cid: ClientId) -> impl Future<Output = Result<Stat>> + Send;
 
     /// Apply a [WStat] update to the [Stat] of the filesystem entry identified by `qid`.
     ///
@@ -266,10 +246,9 @@ pub trait AsyncServe9p: Send + Sync + 'static {
     /// supported field semantics, returning `Err` for invalid or disallowed changes.
     fn write_stat(
         &self,
-        cid: ClientId,
         qid: u64,
         wstat: WStat,
-        uname: &str,
+        cid: ClientId,
     ) -> impl Future<Output = Result<()>> + Send;
 }
 
@@ -287,51 +266,43 @@ where
         <T as Serve9p>::user_is_in_group(self, uname, group)
     }
 
-    async fn walk_one(
-        &self,
-        cid: ClientId,
-        parent_qid: u64,
-        child: &str,
-        uname: &str,
-    ) -> Result<Qid> {
-        <T as Serve9p>::walk_one(self, cid, parent_qid, child, uname)
+    async fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid> {
+        <T as Serve9p>::walk_one(self, parent_qid, child, cid)
     }
 
-    async fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
-        <T as Serve9p>::open(self, cid, qid, mode, uname)
+    async fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
+        <T as Serve9p>::open(self, qid, mode, cid)
     }
 
-    async fn clunk(&self, cid: ClientId, qid: u64) {
-        <T as Serve9p>::clunk(self, cid, qid);
+    async fn clunk(&self, qid: u64, cid: ClientId) {
+        <T as Serve9p>::clunk(self, qid, cid);
     }
 
-    async fn flush(&self, cid: ClientId, old_tag: u16) {
-        <T as Serve9p>::flush(self, cid, old_tag);
+    async fn flush(&self, old_tag: u16, cid: ClientId) {
+        <T as Serve9p>::flush(self, old_tag, cid);
     }
 
     async fn create(
         &self,
-        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<(Qid, IoUnit)> {
-        <T as Serve9p>::create(self, cid, parent, name, perm, mode, uname)
+        <T as Serve9p>::create(self, parent, name, perm, mode, cid)
     }
 
     async fn read(
         &self,
-        cid: ClientId,
         qid: u64,
         offset: usize,
         count: usize,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<ReadOutcome> {
         use crate::sync::server::ReadOutcome as SyncReadOutcome;
 
-        let ro = match <T as Serve9p>::read(self, cid, qid, offset, count, uname)? {
+        let ro = match <T as Serve9p>::read(self, qid, offset, count, cid)? {
             SyncReadOutcome::Immediate(data) => ReadOutcome::Immediate(data),
             SyncReadOutcome::Blocked(srx) => {
                 let (tx, rx) = channel(1);
@@ -349,31 +320,24 @@ where
         Ok(ro)
     }
 
-    async fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        <T as Serve9p>::read_dir(self, cid, qid, uname)
+    async fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>> {
+        <T as Serve9p>::read_dir(self, qid, cid)
     }
 
-    async fn write(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Result<usize> {
-        <T as Serve9p>::write(self, cid, qid, offset, data, uname)
+    async fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize> {
+        <T as Serve9p>::write(self, qid, offset, data, cid)
     }
 
-    async fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
-        <T as Serve9p>::remove(self, cid, qid, uname)
+    async fn remove(&self, qid: u64, cid: ClientId) -> Result<()> {
+        <T as Serve9p>::remove(self, qid, cid)
     }
 
-    async fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
-        <T as Serve9p>::stat(self, cid, qid, uname)
+    async fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat> {
+        <T as Serve9p>::stat(self, qid, cid)
     }
 
-    async fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
-        <T as Serve9p>::write_stat(self, cid, qid, wstat, uname)
+    async fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()> {
+        <T as Serve9p>::write_stat(self, qid, wstat, cid)
     }
 }
 
@@ -578,7 +542,7 @@ where
                             }
                             CoroState::Complete(sent_flush) => {
                                 if !sent_flush {
-                                    self.s.flush(self.client_id, old_tag).await;
+                                    self.s.flush(old_tag, self.client_id).await;
                                 }
                                 break;
                             }
@@ -645,7 +609,6 @@ where
         wnames: Vec<String>,
     ) -> Result<Rdata> {
         let client_id = self.client_id;
-        let uname = self.state.uname.clone();
         let mut coro = self
             .session_state
             .handle_attached_walk(fid, new_fid, wnames);
@@ -654,7 +617,7 @@ where
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res.map(Rdata::walk),
                 CoroState::Pending(c, (qid, name)) => {
-                    let res = self.s.walk_one(client_id, qid, &name, &uname).await;
+                    let res = self.s.walk_one(qid, &name, client_id).await;
                     c.send(res)
                 }
             };
@@ -663,10 +626,7 @@ where
 
     async fn handle_stat_async(&mut self, fid: u32) -> Result<Rdata> {
         let qid = self.try_map_fid(fid)?;
-        let s = self
-            .s
-            .stat(self.client_id, qid.path, &self.state.uname)
-            .await?;
+        let s = self.s.stat(qid.path, self.client_id).await?;
         let stat: RawStat = s.into();
         let size = stat.size + size_of::<u16>() as u16;
 
@@ -676,7 +636,7 @@ where
     async fn handle_wstat_async(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
         let qid = self.try_map_fid(fid)?;
         let uname = &self.state.uname;
-        let stat = self.s.stat(self.client_id, qid.path, uname).await?;
+        let stat = self.s.stat(qid.path, self.client_id).await?;
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
 
         let wstat: WStat = raw_stat.into();
@@ -686,9 +646,7 @@ where
         )
         .await?;
 
-        self.s
-            .write_stat(self.client_id, qid.path, wstat, &self.state.uname)
-            .await?;
+        self.s.write_stat(qid.path, wstat, self.client_id).await?;
 
         Ok(Rdata::Wstat {})
     }
@@ -696,7 +654,7 @@ where
     async fn qid_if_perms_hold_async(&self, fid: u32, mode: Mode) -> Result<Qid> {
         let qid = self.try_map_fid(fid)?;
         let uname = &self.state.uname;
-        let stat = self.s.stat(self.client_id, qid.path, uname).await?;
+        let stat = self.s.stat(qid.path, self.client_id).await?;
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
 
         self.run_perm_check_coro_async(qid, self.handle_perm_check(&stat, user_is_in_group, mode))
@@ -709,7 +667,7 @@ where
         let parent = self
             .parent_qid(qid.path)
             .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
-        let stat = self.s.stat(self.client_id, parent, uname).await?;
+        let stat = self.s.stat(parent, self.client_id).await?;
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
 
         if stat.can_rename_or_remove_child(&self.state.uname, user_is_in_group) {
@@ -732,7 +690,7 @@ where
                 let parent = self
                     .parent_qid(qid.path)
                     .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
-                let stat = self.s.stat(self.client_id, parent, uname).await?;
+                let stat = self.s.stat(parent, self.client_id).await?;
                 let user_is_in_group = self.s.user_is_in_group(uname, &stat.group).await;
 
                 c.send((stat, user_is_in_group)).resume().unwrap()?;
@@ -747,19 +705,11 @@ where
         self.try_add_client_id_to_open_qids(fid)?;
 
         let fut = async {
-            let iounit = self
-                .s
-                .open(self.client_id, qid.path, mode, &self.state.uname)
-                .await?;
+            let iounit = self.s.open(qid.path, mode, self.client_id).await?;
 
             if mode.contains(Mode::TRUNCATE) {
                 self.s
-                    .write_stat(
-                        self.client_id,
-                        qid.path,
-                        WStat::truncate(qid),
-                        &self.state.uname,
-                    )
+                    .write_stat(qid.path, WStat::truncate(qid), self.client_id)
                     .await?;
             }
 
@@ -799,19 +749,15 @@ where
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
-        let parent = self
-            .s
-            .stat(self.client_id, qid.path, &self.state.uname)
-            .await?;
+        let parent = self.s.stat(qid.path, self.client_id).await?;
         let (qid, iounit) = self
             .s
             .create(
-                self.client_id,
                 qid.path,
                 &name,
                 perm.apply_create_mask(parent.perms),
                 mode,
-                &self.state.uname,
+                self.client_id,
             )
             .await?;
 
@@ -854,12 +800,12 @@ where
 
         match coro.resume() {
             CoroState::Complete(res) => res,
-            CoroState::Pending(c, Either::L((qid, uname))) => {
-                let stats = self.s.read_dir(cid, qid, &uname).await?;
+            CoroState::Pending(c, Either::L(qid)) => {
+                let stats = self.s.read_dir(qid, cid).await?;
                 c.send(stats).resume().unwrap()
             }
-            CoroState::Pending(_, Either::R((qid, uname))) => {
-                let outcome = self.s.read(cid, qid, offset, count, &uname).await?;
+            CoroState::Pending(_, Either::R(qid)) => {
+                let outcome = self.s.read(qid, offset, count, cid).await?;
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::read(data))),
                     ReadOutcome::Blocked(mut chan) => {
@@ -891,13 +837,7 @@ where
 
         let count = self
             .s
-            .write(
-                self.client_id,
-                qid.path,
-                offset as usize,
-                data,
-                &self.state.uname,
-            )
+            .write(qid.path, offset as usize, data, self.client_id)
             .await? as u32;
 
         Ok(Rdata::write(count))
@@ -910,7 +850,7 @@ where
         match self.state.fids.remove(&fid) {
             Some(meta) => {
                 let res = f(self, meta.qid).await;
-                self.s.clunk(self.client_id, meta.qid).await;
+                self.s.clunk(meta.qid, self.client_id).await;
                 self.remove_client_id_from_open_qids(meta.qid);
 
                 res
@@ -932,10 +872,8 @@ where
 
     async fn handle_remove_async(&mut self, fid: u32) -> Result<Rdata> {
         self.check_rename_or_remove_async(fid).await?;
-        self._clunk_async(fid, async |sa, qid| {
-            sa.s.remove(sa.client_id, qid, &sa.state.uname).await
-        })
-        .await?;
+        self._clunk_async(fid, async |sa, qid| sa.s.remove(qid, sa.client_id).await)
+            .await?;
 
         Ok(Rdata::Remove {})
     }

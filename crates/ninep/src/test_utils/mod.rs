@@ -91,8 +91,8 @@ impl Serve9p for TestFs {
         uname == "group-member"
     }
 
-    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid> {
-        self.calls.push(Call::walk(cid, parent_qid, child, uname));
+    fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid> {
+        self.calls.push(Call::walk(cid, parent_qid, child));
 
         match (parent_qid, child) {
             (ROOT_QID, "hello") => Ok(Qid::file(HELLO_QID)),
@@ -104,44 +104,35 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit> {
-        self.calls.push(Call::open(cid, qid, mode, uname));
+    fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
+        self.calls.push(Call::open(cid, qid, mode));
 
         Ok(TEST_IOUNIT)
     }
 
-    fn clunk(&self, cid: ClientId, qid: u64) {
+    fn clunk(&self, qid: u64, cid: ClientId) {
         self.calls.push(Call::clunk(cid, qid));
     }
 
-    fn flush(&self, cid: ClientId, old_tag: u16) {
+    fn flush(&self, old_tag: u16, cid: ClientId) {
         self.calls.push(Call::flush(cid, old_tag));
     }
 
     fn create(
         &self,
-        cid: ClientId,
         parent: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<(Qid, IoUnit)> {
-        self.calls
-            .push(Call::create(cid, parent, name, perm, mode, uname));
+        self.calls.push(Call::create(cid, parent, name, perm, mode));
 
         Ok((Qid::file(CREATED_QID), TEST_IOUNIT))
     }
 
-    fn read(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        count: usize,
-        uname: &str,
-    ) -> Result<ReadOutcome> {
-        self.calls.push(Call::read(cid, qid, offset, count, uname));
+    fn read(&self, qid: u64, offset: usize, count: usize, cid: ClientId) -> Result<ReadOutcome> {
+        self.calls.push(Call::read(cid, qid, offset, count));
 
         match qid {
             HELLO_QID => {
@@ -170,8 +161,8 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>> {
-        self.calls.push(Call::read_dir(cid, qid, uname));
+    fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>> {
+        self.calls.push(Call::read_dir(cid, qid));
 
         match qid {
             ROOT_QID => Ok(vec![
@@ -186,29 +177,21 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn write(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Result<usize> {
+    fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize> {
         let n = data.len();
-
-        self.calls.push(Call::write(cid, qid, offset, data, uname));
+        self.calls.push(Call::write(cid, qid, offset, data));
 
         Ok(n)
     }
 
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()> {
-        self.calls.push(Call::remove(cid, qid, uname));
+    fn remove(&self, qid: u64, cid: ClientId) -> Result<()> {
+        self.calls.push(Call::remove(cid, qid));
 
         Ok(())
     }
 
-    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat> {
-        self.calls.push(Call::stat(cid, qid, uname));
+    fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat> {
+        self.calls.push(Call::stat(cid, qid));
 
         match qid {
             ROOT_QID => Ok(Stat::stub(Qid::dir(ROOT_QID), "/")),
@@ -221,8 +204,8 @@ impl Serve9p for TestFs {
         }
     }
 
-    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()> {
-        self.calls.push(Call::write_stat(cid, qid, wstat, uname));
+    fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()> {
+        self.calls.push(Call::write_stat(cid, qid, wstat));
 
         Ok(())
     }
@@ -291,16 +274,16 @@ impl RecordedCalls {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Call {
     Clunk { cid: ClientId, qid: u64 },
-    Create { cid: ClientId, parent: u64, name: String, perm: Perm, mode: Mode, uname: String },
+    Create { cid: ClientId, parent: u64, name: String, perm: Perm, mode: Mode  },
     Flush { cid: ClientId, old_tag: u16 },
-    Open { cid: ClientId, qid: u64, mode: Mode, uname: String },
-    Read { cid: ClientId, qid: u64, offset: usize, count: usize, uname: String },
-    ReadDir { cid: ClientId, qid: u64, uname: String },
-    Remove { cid: ClientId, qid: u64, uname: String },
-    Stat { cid: ClientId, qid: u64, uname: String },
-    Walk { cid: ClientId, parent_qid: u64, child: String, uname: String },
-    Write { cid: ClientId, qid: u64, offset: usize, data: Vec<u8>, uname: String },
-    WriteStat { cid: ClientId, qid: u64, wstat: WStat, uname: String },
+    Open { cid: ClientId, qid: u64, mode: Mode },
+    Read { cid: ClientId, qid: u64, offset: usize, count: usize },
+    ReadDir { cid: ClientId, qid: u64 },
+    Remove { cid: ClientId, qid: u64 },
+    Stat { cid: ClientId, qid: u64 },
+    Walk { cid: ClientId, parent_qid: u64, child: String, },
+    Write { cid: ClientId, qid: u64, offset: usize, data: Vec<u8> },
+    WriteStat { cid: ClientId, qid: u64, wstat: WStat },
 }
 
 impl Call {
@@ -308,21 +291,13 @@ impl Call {
         Self::Clunk { cid, qid }
     }
 
-    pub(crate) fn create(
-        cid: ClientId,
-        parent: u64,
-        name: &str,
-        perm: Perm,
-        mode: Mode,
-        uname: &str,
-    ) -> Self {
+    pub(crate) fn create(cid: ClientId, parent: u64, name: &str, perm: Perm, mode: Mode) -> Self {
         Self::Create {
             cid,
             parent,
             name: name.into(),
             perm,
             mode,
-            uname: uname.into(),
         }
     }
 
@@ -330,80 +305,49 @@ impl Call {
         Self::Flush { cid, old_tag }
     }
 
-    pub(crate) fn open(cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Self {
-        Self::Open {
-            cid,
-            qid,
-            mode,
-            uname: uname.into(),
-        }
+    pub(crate) fn open(cid: ClientId, qid: u64, mode: Mode) -> Self {
+        Self::Open { cid, qid, mode }
     }
 
-    pub(crate) fn read(cid: ClientId, qid: u64, offset: usize, count: usize, uname: &str) -> Self {
+    pub(crate) fn read(cid: ClientId, qid: u64, offset: usize, count: usize) -> Self {
         Self::Read {
             cid,
             qid,
             offset,
             count,
-            uname: uname.into(),
         }
     }
 
-    pub(crate) fn read_dir(cid: ClientId, qid: u64, uname: &str) -> Self {
-        Self::ReadDir {
-            cid,
-            qid,
-            uname: uname.into(),
-        }
+    pub(crate) fn read_dir(cid: ClientId, qid: u64) -> Self {
+        Self::ReadDir { cid, qid }
     }
 
-    pub(crate) fn remove(cid: ClientId, qid: u64, uname: &str) -> Self {
-        Self::Remove {
-            cid,
-            qid,
-            uname: uname.into(),
-        }
+    pub(crate) fn remove(cid: ClientId, qid: u64) -> Self {
+        Self::Remove { cid, qid }
     }
 
-    pub(crate) fn stat(cid: ClientId, qid: u64, uname: &str) -> Self {
-        Self::Stat {
-            cid,
-            qid,
-            uname: uname.into(),
-        }
+    pub(crate) fn stat(cid: ClientId, qid: u64) -> Self {
+        Self::Stat { cid, qid }
     }
 
-    pub(crate) fn walk(cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Self {
+    pub(crate) fn walk(cid: ClientId, parent_qid: u64, child: &str) -> Self {
         Self::Walk {
             cid,
             parent_qid,
             child: child.into(),
-            uname: uname.into(),
         }
     }
 
-    pub(crate) fn write(
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Self {
+    pub(crate) fn write(cid: ClientId, qid: u64, offset: usize, data: Vec<u8>) -> Self {
         Self::Write {
             cid,
             qid,
             offset,
             data,
-            uname: uname.into(),
         }
     }
 
-    pub(crate) fn write_stat(cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Self {
-        Self::WriteStat {
-            cid,
-            qid,
-            wstat,
-            uname: uname.into(),
-        }
+    pub(crate) fn write_stat(cid: ClientId, qid: u64, wstat: WStat) -> Self {
+        Self::WriteStat { cid, qid, wstat }
     }
 }

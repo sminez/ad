@@ -352,26 +352,22 @@ impl SessionState<Attached> {
         offset: u64,
         count: u32,
     ) -> ReadyCoro<
-        Either<(u64, String), (u64, String)>, // L=read_dir R=read
-        Vec<Stat>, // we never send or use a value in response to a read, only read-dir
+        Either<u64, u64>, // L=read_dir R=read
+        Vec<Stat>,        // we never send or use a value in response to a read, only read-dir
         Result<Option<Rdata>>,
         impl Future<Output = Result<Option<Rdata>>> + use<'s>,
     > {
         Coro::from(
-            move |handle: Handle<Either<(u64, String), (u64, String)>, Vec<Stat>>| async move {
+            move |handle: Handle<Either<u64, u64>, Vec<Stat>>| async move {
                 let qid = self.try_map_fid(fid)?;
                 if offset > u32::MAX as u64 {
                     return Err(format!("offset too large: {offset} > {}", u32::MAX));
                 }
 
                 let stats = if qid.ty == FileType::DIRECTORY {
-                    handle
-                        .yield_value(Either::L((qid.path, self.state.uname.clone())))
-                        .await
+                    handle.yield_value(Either::L(qid.path)).await
                 } else {
-                    handle
-                        .yield_value(Either::R((qid.path, self.state.uname.clone())))
-                        .await;
+                    handle.yield_value(Either::R(qid.path)).await;
                     return Ok(None); // processing of the ReadOutcome is handled by the caller
                 };
 
@@ -1105,7 +1101,7 @@ mod tests {
         let coro = ss.handle_attached_read(2, 0, 1024);
 
         match coro.resume() {
-            CoroState::Pending(_, Either::R((qid, _))) => assert_eq!(qid, 1, "wrong qid"),
+            CoroState::Pending(_, Either::R(qid)) => assert_eq!(qid, 1, "wrong qid"),
             CoroState::Pending(_, s) => panic!("unexpected pending coro state: {s:?}"),
             CoroState::Complete(res) => panic!("unexpected complete coro result: {res:?}"),
         }

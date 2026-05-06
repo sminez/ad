@@ -125,7 +125,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// (of file type [Directory][FileType::DIRECTORY]) to a target `child`. This method is called
     /// for each element of that path in order, stopping either when the target is reached or some
     /// element of the path returns an error.
-    fn walk_one(&self, cid: ClientId, parent_qid: u64, child: &str, uname: &str) -> Result<Qid>;
+    fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid>;
 
     /// Open an existing file for subsequent I/O via [read](Serve9p::read) and
     /// [write](Serve9p::write) messages.
@@ -137,7 +137,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// The return of this method is an [IoUnit] used to inform the client of the maximum number of
     /// bytes that will be supported per read/write call on this resource. An `Err` should be
     /// returned if access is denied, mode is unsupported, or the target cannot be opened.
-    fn open(&self, cid: ClientId, qid: u64, mode: Mode, uname: &str) -> Result<IoUnit>;
+    fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit>;
 
     /// Release client specific server-side resources associated with with provided qid.
     ///
@@ -149,7 +149,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// Implementations should be resilient to repeated calls for the same qid. (The default
     /// implementation is a no-op.)
     #[expect(unused_variables)]
-    fn clunk(&self, cid: ClientId, qid: u64) {}
+    fn clunk(&self, qid: u64, cid: ClientId) {}
 
     /// Handle "best effort" cancellation of an in-flight message identified by `old_tag`.
     ///
@@ -161,7 +161,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// implementations of this method should be resilient to being called multiple times with the
     /// same arguments. (The default implementation is a no-op.)
     #[expect(unused_variables)]
-    fn flush(&self, cid: ClientId, old_tag: u16) {}
+    fn flush(&self, old_tag: u16, cid: ClientId) {}
 
     /// Create a new entry in `parent`, returning its [Qid] and [IoUnit].
     ///
@@ -175,12 +175,11 @@ pub trait Serve9p: Send + Sync + 'static {
     /// or creation cannot be completed for any reason.
     fn create(
         &self,
-        cid: ClientId,
-        parent: u64,
+        parent_qid: u64,
         name: &str,
         perm: Perm,
         mode: Mode,
-        uname: &str,
+        cid: ClientId,
     ) -> Result<(Qid, IoUnit)>;
 
     /// Read up to `count` bytes from `qid` starting at `offset`.
@@ -193,14 +192,7 @@ pub trait Serve9p: Send + Sync + 'static {
     ///
     /// Implementations should tolerate flush hints while blocked (see [flush](Serve9p::flush)) and
     /// must respect client specified byte `count` limit.
-    fn read(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        count: usize,
-        uname: &str,
-    ) -> Result<ReadOutcome>;
+    fn read(&self, qid: u64, offset: usize, count: usize, cid: ClientId) -> Result<ReadOutcome>;
 
     /// List [Stat] entries for a given client's view of a directory.
     ///
@@ -208,7 +200,7 @@ pub trait Serve9p: Send + Sync + 'static {
     /// limits automatically (unlike [read][Serve9p::read]). Implementations should return the full
     /// logical entry list in stable order for the client's view of the directory (as identified by
     /// `cid`).
-    fn read_dir(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Vec<Stat>>;
+    fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>>;
 
     /// Write the provided `data` to the file denoted by `qid` starting at the provided byte
     /// `offset`.
@@ -220,34 +212,27 @@ pub trait Serve9p: Send + Sync + 'static {
     ///
     /// Implementations are required to enforce mode/permission rules and return `Err` when writes
     /// are not permitted.
-    fn write(
-        &self,
-        cid: ClientId,
-        qid: u64,
-        offset: usize,
-        data: Vec<u8>,
-        uname: &str,
-    ) -> Result<usize>;
+    fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize>;
 
     /// Remove the entry identified by `qid` from the filesystem.
     ///
     /// [Server] calls this for each `remove` request received from the client followed by
     /// [clunking][Serve9p::clunk] the `qid` regardless of success. Implementations should return
     /// `Err` when removal is not permitted or fails.
-    fn remove(&self, cid: ClientId, qid: u64, uname: &str) -> Result<()>;
+    fn remove(&self, qid: u64, cid: ClientId) -> Result<()>;
 
     /// Fetch the current [Stat] metadata for the filesystem entry identified by `qid`.
     ///
     /// [Server] uses this for client `stat` messages and internally for [create][Serve9p::create]
     /// permission masking against parent directories.
-    fn stat(&self, cid: ClientId, qid: u64, uname: &str) -> Result<Stat>;
+    fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat>;
 
     /// Apply a [WStat] update to the [Stat] of the filesystem entry identified by `qid`.
     ///
     /// [Server] validates fid/qid identity before calling this and passes a [WStat] containing
     /// only caller-requested field changes. Implementations must enforce authorization and
     /// supported field semantics, returning `Err` for invalid or disallowed changes.
-    fn write_stat(&self, cid: ClientId, qid: u64, wstat: WStat, uname: &str) -> Result<()>;
+    fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()>;
 }
 
 impl<S> Server<S>
@@ -474,7 +459,7 @@ where
                     });
 
                     if !sent_flush {
-                        self.s.flush(self.client_id, old_tag);
+                        self.s.flush(old_tag, self.client_id);
                     }
 
                     continue;
@@ -532,7 +517,6 @@ where
     /// only the number that may be transmitted in a single message.
     fn handle_walk(&mut self, fid: u32, new_fid: u32, wnames: Vec<String>) -> Result<Rdata> {
         let client_id = self.client_id;
-        let uname = self.state.uname.clone();
         let mut coro = self
             .session_state
             .handle_attached_walk(fid, new_fid, wnames);
@@ -541,7 +525,7 @@ where
             coro = match coro.resume() {
                 CoroState::Complete(res) => return res.map(Rdata::walk),
                 CoroState::Pending(c, (qid, name)) => {
-                    let res = self.s.walk_one(client_id, qid, &name, &uname);
+                    let res = self.s.walk_one(qid, &name, client_id);
                     c.send(res)
                 }
             };
@@ -550,7 +534,7 @@ where
 
     fn handle_stat(&mut self, fid: u32) -> Result<Rdata> {
         let qid = self.try_map_fid(fid)?;
-        let s = self.s.stat(self.client_id, qid.path, &self.state.uname)?;
+        let s = self.s.stat(qid.path, self.client_id)?;
         let stat: RawStat = s.into();
         let size = stat.size + size_of::<u16>() as u16;
 
@@ -560,14 +544,12 @@ where
     fn handle_wstat(&mut self, fid: u32, raw_stat: RawStat) -> Result<Rdata> {
         let qid = self.try_map_fid(fid)?;
         let uname = &self.state.uname;
-        let stat = self.s.stat(self.client_id, qid.path, uname)?;
+        let stat = self.s.stat(qid.path, self.client_id)?;
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group);
 
         let wstat: WStat = raw_stat.into();
         self.run_perm_check_coro(qid, self.check_wstat_perms(&stat, &wstat, user_is_in_group))?;
-
-        self.s
-            .write_stat(self.client_id, qid.path, wstat, &self.state.uname)?;
+        self.s.write_stat(qid.path, wstat, self.client_id)?;
 
         Ok(Rdata::Wstat {})
     }
@@ -575,7 +557,7 @@ where
     fn qid_if_perms_hold(&self, fid: u32, mode: Mode) -> Result<Qid> {
         let qid = self.try_map_fid(fid)?;
         let uname = &self.state.uname;
-        let stat = self.s.stat(self.client_id, qid.path, uname)?;
+        let stat = self.s.stat(qid.path, self.client_id)?;
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group);
 
         self.run_perm_check_coro(qid, self.handle_perm_check(&stat, user_is_in_group, mode))
@@ -587,7 +569,7 @@ where
         let parent = self
             .parent_qid(qid.path)
             .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
-        let stat = self.s.stat(self.client_id, parent, uname)?;
+        let stat = self.s.stat(parent, self.client_id)?;
         println!("{stat}");
         let user_is_in_group = self.s.user_is_in_group(uname, &stat.group);
 
@@ -611,7 +593,7 @@ where
                 let parent = self
                     .parent_qid(qid.path)
                     .ok_or_else(|| E_PERMISSION_DENIED.to_string())?;
-                let stat = self.s.stat(self.client_id, parent, uname)?;
+                let stat = self.s.stat(parent, self.client_id)?;
                 let user_is_in_group = self.s.user_is_in_group(uname, &stat.group);
 
                 c.send((stat, user_is_in_group)).resume().unwrap()?;
@@ -626,17 +608,11 @@ where
         self.try_add_client_id_to_open_qids(fid)?;
 
         let res = (|| {
-            let iounit = self
-                .s
-                .open(self.client_id, qid.path, mode, &self.state.uname)?;
+            let iounit = self.s.open(qid.path, mode, self.client_id)?;
 
             if mode.contains(Mode::TRUNCATE) {
-                self.s.write_stat(
-                    self.client_id,
-                    qid.path,
-                    WStat::truncate(qid),
-                    &self.state.uname,
-                )?;
+                self.s
+                    .write_stat(qid.path, WStat::truncate(qid), self.client_id)?;
             }
 
             Ok(iounit)
@@ -669,14 +645,13 @@ where
             return Err(E_CREATE_NON_DIR.to_string());
         }
 
-        let parent = self.s.stat(self.client_id, qid.path, &self.state.uname)?;
+        let parent = self.s.stat(qid.path, self.client_id)?;
         let (qid, iounit) = self.s.create(
-            self.client_id,
             qid.path,
             &name,
             perm.apply_create_mask(parent.perms),
             mode,
-            &self.state.uname,
+            self.client_id,
         )?;
 
         // fid is now changed to point to the newly created file rather than the parent
@@ -718,12 +693,12 @@ where
 
         match coro.resume() {
             CoroState::Complete(res) => res,
-            CoroState::Pending(c, Either::L((qid, uname))) => {
-                let stats = self.s.read_dir(cid, qid, &uname)?;
+            CoroState::Pending(c, Either::L(qid)) => {
+                let stats = self.s.read_dir(qid, cid)?;
                 c.send(stats).resume().unwrap()
             }
-            CoroState::Pending(_, Either::R((qid, uname))) => {
-                let outcome = self.s.read(cid, qid, offset, count, &uname)?;
+            CoroState::Pending(_, Either::R(qid)) => {
+                let outcome = self.s.read(qid, offset, count, cid)?;
                 match outcome {
                     ReadOutcome::Immediate(data) => Ok(Some(Rdata::Read { data: Data(data) })),
                     ReadOutcome::Blocked(chan) => {
@@ -753,13 +728,9 @@ where
             return Err(format!("offset too large: {offset} > {}", u32::MAX));
         }
 
-        let count = self.s.write(
-            self.client_id,
-            qid.path,
-            offset as usize,
-            data,
-            &self.state.uname,
-        )? as u32;
+        let count = self
+            .s
+            .write(qid.path, offset as usize, data, self.client_id)? as u32;
 
         Ok(Rdata::write(count))
     }
@@ -771,7 +742,7 @@ where
         match self.state.fids.remove(&fid) {
             Some(meta) => {
                 let res = f(self, meta.qid);
-                self.s.clunk(self.client_id, meta.qid);
+                self.s.clunk(meta.qid, self.client_id);
                 self.remove_client_id_from_open_qids(meta.qid);
 
                 res
@@ -793,9 +764,7 @@ where
 
     fn handle_remove(&mut self, fid: u32) -> Result<Rdata> {
         self.check_rename_or_remove(fid)?;
-        self._clunk(fid, |sa, qid| {
-            sa.s.remove(sa.client_id, qid, &sa.state.uname)
-        })?;
+        self._clunk(fid, |sa, qid| sa.s.remove(qid, sa.client_id))?;
 
         Ok(Rdata::Remove {})
     }
