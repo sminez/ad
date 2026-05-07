@@ -42,6 +42,7 @@ pub enum ViewPort {
 }
 
 /// Supported actions for interacting with the editor state
+#[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Noop,
@@ -106,7 +107,7 @@ pub enum Action {
     OpenFile { path: String },
     OpenFileInNewWindow { path: String },
     OpenTransientScratch { name: String, txt: String },
-    OpenVirtualFile { name: String, txt: String },
+    OpenVirtualFile { name: String, txt: String, new_window: bool },
     Paste,
     Plumb { txt: String, new_window: bool },
     PreviousBuffer,

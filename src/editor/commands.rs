@@ -143,6 +143,20 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
                 Ok(Single(OpenVirtualFile {
                     name: name.to_string(),
                     txt: txt.to_string(),
+                    new_window: false,
+                }))
+            }
+        }
+
+        "open-virtual-in-new-window" => {
+            if args.is_empty() {
+                Err("No filename provided".to_string())
+            } else {
+                let (name, txt) = args.split_once(' ').unwrap_or((args, ""));
+                Ok(Single(OpenVirtualFile {
+                    name: name.to_string(),
+                    txt: txt.to_string(),
+                    new_window: true,
                 }))
             }
         }

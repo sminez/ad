@@ -280,6 +280,26 @@ impl Client {
         self._id_for_path(name).await
     }
 
+    /// Open a new virtual file showing the given content in a new window, returning its ID.
+    pub async fn open_virtual_in_new_window(
+        &mut self,
+        name: impl AsRef<str>,
+        content: impl AsRef<str>,
+    ) -> Result<usize> {
+        let name = name.as_ref();
+        let content = content.as_ref();
+
+        self.inner
+            .write(
+                "ctl",
+                0,
+                format!("open-virtual-in-new-window {name} {content}").as_bytes(),
+            )
+            .await?;
+
+        self._id_for_path(name).await
+    }
+
     /// Reload the currently active buffer.
     pub async fn reload_current_buffer(&mut self) -> Result<()> {
         self.ctl("reload", "").await

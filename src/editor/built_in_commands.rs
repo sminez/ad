@@ -117,6 +117,10 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
             "open a new virtual file with the provided name and content ('open-virtual +my-file initial content')",
         ),
         (
+            vec!["open-virtual-in-new-window"],
+            "open a new virtual file with the provided name and content in a new window ('open-virtual-in-new-window +my-file initial content')",
+        ),
+        (
             vec!["plumb"],
             "plumb the provided string as if it had been loaded within the active buffer",
         ),
