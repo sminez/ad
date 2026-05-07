@@ -8,6 +8,7 @@ use crate::{
 use std::cmp::min;
 
 const DEFAULT_IOUNIT: IoUnit = 8168;
+const E_OCCUPIED_DIR: &str = "cannot remove occupied directory";
 
 /// A simple in-memory file server implementation.
 #[derive(Debug, Clone)]
@@ -81,10 +82,6 @@ impl Serve9p for RamFs {
 
     fn write(&self, qid: u64, offset: usize, data: Vec<u8>, _cid: ClientId) -> Result<usize> {
         self.ft.with_file_mut(qid, |f| {
-            if offset > f.aux.len() {
-                return Err("offset beyond end of file".to_string());
-            }
-
             let n = data.len();
             if offset + data.len() > f.aux.len() {
                 f.aux.resize(offset + data.len(), 0);
@@ -106,6 +103,11 @@ impl Serve9p for RamFs {
     }
 
     fn remove(&self, qid: u64, _cid: ClientId) -> Result<()> {
+        let ty = self.ft.with_file(qid, |f| f.stat.qid.ty)?;
+        if ty == FileType::DIRECTORY && !self.ft.read_dir(qid)?.is_empty() {
+            return Err(E_OCCUPIED_DIR.to_string());
+        }
+
         self.ft.remove(qid);
 
         Ok(())
@@ -208,6 +210,7 @@ mod tests {
     #[test_case(1, b"ZZ", b"aZZ"; "overwrite existing bytes")]
     #[test_case(3, b"X", b"abcX"; "append at end")]
     #[test_case(0, b"", b"abc"; "empty write")]
+    #[test_case(5, b"X", b"abc\0\0X"; "write past EOF null pads")]
     #[test]
     fn write_updates_content(offset: usize, payload: &[u8], expected: &[u8]) {
         let fs = RamFs::new("user", "group");
@@ -222,23 +225,6 @@ mod tests {
             .unwrap();
 
         assert_eq!(&data, expected);
-    }
-
-    #[test]
-    fn write_offset_past_end_returns_error() {
-        let fs = RamFs::new("user", "group");
-        let qid = add_file(&fs, 0, "test", b"abc");
-
-        assert_eq!(
-            fs.write(qid.path, 5, b"X".to_vec(), CID).unwrap_err(),
-            "offset beyond end of file"
-        );
-
-        let data = fs
-            .file_tree()
-            .with_file(qid.path, |f| f.aux.clone())
-            .unwrap();
-        assert_eq!(data, b"abc".to_vec());
     }
 
     #[test]
@@ -273,18 +259,44 @@ mod tests {
     }
 
     #[test]
-    fn remove_prunes_subtree() {
+    fn remove_works_for_file() {
+        let fs = RamFs::new("user", "group");
+        let qid = fs
+            .file_tree()
+            .try_add_node(0, "test-file", Perm::FILE, FileType::FILE, Vec::new())
+            .unwrap();
+
+        let res = fs.remove(qid.path, CID);
+
+        assert!(res.is_ok(), "{res:?}");
+        assert!(!fs.ft.contains_qid(qid.path));
+    }
+
+    #[test]
+    fn remove_works_for_empty_dir() {
+        let fs = RamFs::new("user", "group");
+        let qid = fs
+            .file_tree()
+            .try_add_node(0, "dir", Perm::DIRECTORY, FileType::DIRECTORY, Vec::new())
+            .unwrap();
+
+        let res = fs.remove(qid.path, CID);
+
+        assert!(res.is_ok(), "{res:?}");
+        assert!(!fs.ft.contains_qid(qid.path));
+    }
+
+    #[test]
+    fn remove_errors_for_occupied_directories() {
         let fs = RamFs::new("user", "group");
         let dir = fs
             .file_tree()
             .try_add_node(0, "dir", Perm::DIRECTORY, FileType::DIRECTORY, Vec::new())
             .unwrap();
-        let child = add_file(&fs, dir.path, "nested", b"");
+        add_file(&fs, dir.path, "nested", b"");
 
-        fs.remove(dir.path, CID).unwrap();
-
-        assert_eq!(fs.stat(dir.path, CID).unwrap_err(), E_UNKNOWN_FILE);
-        assert_eq!(fs.stat(child.path, CID).unwrap_err(), E_UNKNOWN_FILE);
+        let e = fs.remove(dir.path, CID).unwrap_err();
+        assert_eq!(&e, E_OCCUPIED_DIR);
     }
 
     #[test_case(Perm::OWNER_READ, FileType::FILE, "file"; "file create")]
