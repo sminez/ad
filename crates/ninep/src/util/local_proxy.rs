@@ -1,7 +1,7 @@
 //! A 9p filesystem proxy over a local directory.
 use crate::{
     Result,
-    fs::{FileTree, FileType, IoUnit, Mode, Perm, Qid, Stat, Timestamp, WStat},
+    fs::{FileTree, FileType, IoUnit, Mode, Perm, QID_ROOT, Qid, Stat, Timestamp, WStat},
     sansio::server::{E_PERMISSION_DENIED, E_UNKNOWN_FILE},
     sync::server::{ClientId, ReadOutcome, Serve9p},
 };
@@ -16,13 +16,6 @@ use uzers::{get_group_by_gid, get_user_by_uid};
 
 const DEFAULT_IOUNIT: IoUnit = 8168;
 
-/// The metadata we store per-node in the file tree
-#[derive(Debug, Clone)]
-struct PathMeta {
-    path: PathBuf,
-    meta: Metadata,
-}
-
 /// A filesystem proxy that exposes a local directory over 9p.
 #[derive(Debug)]
 pub struct LocalProxyFs {
@@ -35,27 +28,26 @@ impl LocalProxyFs {
     /// Construct a new [LocalProxyFs] pointed at the provided root directory.
     pub fn new(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = fs::canonicalize(root.into())?;
-        let root_meta = fs::metadata(&root)?;
-        if !root_meta.is_dir() {
+        let meta = fs::metadata(&root)?;
+        if !meta.is_dir() {
             return Err(io::Error::other("proxy root must be a directory"));
         }
 
-        let (owner, group) = owner_and_group_from_meta(&root_meta);
-        let perms = perms_from_meta(&root_meta);
+        let (owner, group) = owner_and_group_from_meta(&meta);
+        let perms = perms_from_meta(&meta);
         let pm = PathMeta {
             path: root.clone(),
-            meta: root_meta,
+            meta,
+            needs_sync: false,
         };
-
-        let ft = FileTree::new(&owner, &group, perms, pm);
 
         let fs = Self {
             root,
-            ft,
+            ft: FileTree::new(&owner, &group, perms, pm),
             iounit: DEFAULT_IOUNIT,
         };
 
-        fs.try_sync_dir(0).map_err(io::Error::other)?;
+        fs.try_sync_dir(QID_ROOT).map_err(io::Error::other)?;
 
         Ok(fs)
     }
@@ -81,6 +73,14 @@ impl LocalProxyFs {
         self.ft.with_file(qid, |f| f.parent().unwrap()).unwrap()
     }
 
+    fn needs_sync(&self, qid: u64) -> bool {
+        self.ft.with_file(qid, |f| f.aux.needs_sync).unwrap()
+    }
+
+    fn is_dir(&self, qid: u64) -> bool {
+        self.ft.with_file(qid, |f| f.aux.meta.is_dir()).unwrap()
+    }
+
     /// Check to see if the given node has been modified since we cached metadata for it.
     /// If we are unable to read metadata from disk, prune this node.
     fn modified_since_cache_or_prune(&self, qid: u64) -> Result<bool> {
@@ -102,7 +102,6 @@ impl LocalProxyFs {
         }
     }
 
-    // TODO: re-run perm checks if perms are now different
     fn try_sync_dir(&self, qid: u64) -> Result<()> {
         let path = self.meta_for_qid(qid).path;
         let mut on_disk = self.on_disk_entries_for(&path).map_err(|e| e.to_string())?;
@@ -121,7 +120,8 @@ impl LocalProxyFs {
                         f.stat.perms = perms_from_meta(&pm.meta);
                         f.stat.last_accessed = Timestamp::from_second(pm.meta.atime()).unwrap();
                         f.stat.last_modified = Timestamp::from_second(pm.meta.mtime()).unwrap();
-                        f.aux = pm;
+                        f.aux.path = pm.path;
+                        f.aux.meta = pm.meta;
                     })
                 }
                 None => self.ft.remove(qid),
@@ -138,14 +138,10 @@ impl LocalProxyFs {
             let perms = perms_from_meta(&pm.meta);
             let meta = pm.meta.clone();
             let qid = self.ft.try_add_node(qid, &name, perms, ty, pm)?;
-
-            // FIXME: this is too eager: we don't want to sync the full tree!
-            if meta.is_dir() {
-                self.try_sync_dir(qid.path)?
-            } else {
-                self.try_sync_file_with_meta(qid.path, meta)?;
-            }
+            self.try_sync_file_with_meta(qid.path, meta)?;
         }
+
+        _ = self.ft.with_file_mut(qid, |f| f.aux.needs_sync = false);
 
         Ok(())
     }
@@ -159,7 +155,6 @@ impl LocalProxyFs {
         self.try_sync_file_with_meta(qid, meta)
     }
 
-    // TODO: re-run perm checks if perms are now different (will require Mode)
     fn try_sync_file_with_meta(&self, qid: u64, meta: Metadata) -> Result<()> {
         let path = self.path_for_qid(qid);
         let name = path
@@ -178,7 +173,7 @@ impl LocalProxyFs {
             f.stat.perms = perms_from_meta(&meta);
             f.stat.last_accessed = Timestamp::from_second(meta.atime()).unwrap();
             f.stat.last_modified = Timestamp::from_second(meta.mtime()).unwrap();
-            f.aux = PathMeta { path, meta };
+            f.aux = PathMeta::new(path, meta);
         })
     }
 
@@ -192,7 +187,7 @@ impl LocalProxyFs {
 
             // Only include entries that resolve to being under our root
             if let Some(meta) = self.meta_if_under_root(&path) {
-                m.insert(name, PathMeta { path, meta });
+                m.insert(name, PathMeta::new(path, meta));
             };
         }
 
@@ -219,7 +214,7 @@ impl Serve9p for LocalProxyFs {
     }
 
     fn walk_one(&self, parent_qid: u64, child: &str, _cid: ClientId) -> Result<Qid> {
-        if self.modified_since_cache_or_prune(parent_qid)? {
+        if self.needs_sync(parent_qid) || self.modified_since_cache_or_prune(parent_qid)? {
             self.try_sync_dir(parent_qid)?;
         }
 
@@ -231,24 +226,14 @@ impl Serve9p for LocalProxyFs {
             self.try_sync_file(qid)?;
         }
 
-        let path = self.path_for_qid(qid);
-
-        let mut f = OpenOptions::new()
-            .read(true)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
-        f.seek(SeekFrom::Start(offset as u64))
-            .map_err(|e| e.to_string())?;
-
-        let mut buf = vec![0; count];
-        let n = f.read(&mut buf).map_err(|e| e.to_string())?;
-        buf.truncate(n);
-
-        Ok(ReadOutcome::Immediate(buf))
+        match io_read(&self.path_for_qid(qid), offset, count) {
+            Ok(data) => Ok(ReadOutcome::Immediate(data)),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     fn read_dir(&self, qid: u64, _cid: ClientId) -> Result<Vec<Stat>> {
-        if self.modified_since_cache_or_prune(qid)? {
+        if self.needs_sync(qid) || self.modified_since_cache_or_prune(qid)? {
             self.try_sync_dir(qid)?;
         }
 
@@ -260,22 +245,15 @@ impl Serve9p for LocalProxyFs {
             self.try_sync_file(qid)?;
         }
 
-        let path = self.path_for_qid(qid);
-
-        let mut f = OpenOptions::new()
-            .write(true)
-            .open(&path)
-            .map_err(|e| e.to_string())?;
-        f.seek(SeekFrom::Start(offset as u64))
-            .map_err(|e| e.to_string())?;
-
-        f.write(data.as_slice()).map_err(|e| e.to_string())
+        match io_write(&self.path_for_qid(qid), offset, &data) {
+            Ok(count) => Ok(count),
+            Err(e) => Err(e.to_string()),
+        }
     }
 
     fn stat(&self, qid: u64, _cid: ClientId) -> Result<Stat> {
         if self.modified_since_cache_or_prune(qid)? {
-            let pm = self.meta_for_qid(qid);
-            if pm.meta.is_dir() {
+            if self.is_dir(qid) {
                 self.try_sync_dir(qid)?;
             } else {
                 self.try_sync_file(qid)?;
@@ -290,7 +268,7 @@ impl Serve9p for LocalProxyFs {
             || wstat.last_modified.is_some()
             || wstat.group.is_some()
             || wstat.last_modified_by.is_some()
-            || qid == 0
+            || qid == QID_ROOT
         {
             return Err(E_PERMISSION_DENIED.to_string());
         }
@@ -303,31 +281,15 @@ impl Serve9p for LocalProxyFs {
         }
 
         if let Some(perms) = wstat.perms {
-            let mode = perms.bits() & 0o777;
-            let mut permissions = fs::metadata(&pm.path)
-                .map_err(|e| e.to_string())?
-                .permissions();
-            permissions.set_mode(mode);
-            fs::set_permissions(&pm.path, permissions).map_err(|e| e.to_string())?;
+            io_set_perms(&pm.path, perms).map_err(|e| e.to_string())?;
         }
 
-        if let Some(size) = wstat.n_bytes {
-            if pm.meta.is_dir() {
-                return Err(E_PERMISSION_DENIED.to_string());
-            }
-
-            let f = OpenOptions::new()
-                .write(true)
-                .open(&pm.path)
-                .map_err(|e| e.to_string())?;
-            f.set_len(size).map_err(|e| e.to_string())?;
+        if let Some(n_bytes) = wstat.n_bytes {
+            io_set_len(&pm.path, n_bytes).map_err(|e| e.to_string())?;
         }
 
         if let Some(name) = wstat.name {
-            let parent = pm.path.parent().unwrap();
-            let new_path = parent.join(&name);
-            fs::rename(&pm.path, &new_path).map_err(|e| e.to_string())?;
-
+            io_rename(&pm.path, &name).map_err(|e| e.to_string())?;
             self.try_sync_dir(self.parent_qid(qid))?;
         }
 
@@ -343,15 +305,15 @@ impl Serve9p for LocalProxyFs {
             self.try_sync_file(qid)?;
         }
 
-        let is_dir = self.ft.with_file(qid, |f| f.aux.meta.is_dir())?;
         let path = self.path_for_qid(qid);
 
-        if is_dir {
-            fs::remove_dir(&path).map_err(|e| e.to_string())?;
+        let res = if self.is_dir(qid) {
+            fs::remove_dir(&path)
         } else {
-            fs::remove_file(&path).map_err(|e| e.to_string())?;
-        }
+            fs::remove_file(&path)
+        };
 
+        res.map_err(|e| e.to_string())?;
         self.ft.remove(qid);
 
         Ok(())
@@ -369,36 +331,34 @@ impl Serve9p for LocalProxyFs {
             self.try_sync_dir(parent)?;
         }
 
-        let parent_path = self.path_for_qid(parent);
-        let path = parent_path.join(name);
-        if path.exists() {
-            return Err("file already exists".to_string());
-        }
-
-        let is_dir = perm.contains(Perm::DIRECTORY);
-        if is_dir {
-            fs::create_dir(&path).map_err(|e| e.to_string())?;
-        } else {
-            OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&path)
-                .map_err(|e| e.to_string())?;
-        }
-
-        let mode_bits = perm.bits() & 0o777;
-        let mut permissions = fs::metadata(&path)
-            .map_err(|e| e.to_string())?
-            .permissions();
-        permissions.set_mode(mode_bits);
-        fs::set_permissions(&path, permissions).map_err(|e| e.to_string())?;
+        let path = self.path_for_qid(parent).join(name);
+        io_create(&path, perm).map_err(|e| e.to_string())?;
 
         // Sync to allow our normal logic to pick up the new file details and create the qid
         self.try_sync_dir(parent)?;
-
         let qid = self.ft.walk_one(parent, name)?;
 
         Ok((qid, self.iounit))
+    }
+}
+
+/// The metadata we store per-node in the file tree
+#[derive(Debug, Clone)]
+struct PathMeta {
+    path: PathBuf,
+    meta: Metadata,
+    needs_sync: bool,
+}
+
+impl PathMeta {
+    fn new(path: PathBuf, meta: Metadata) -> Self {
+        let needs_sync = meta.is_dir();
+
+        Self {
+            path,
+            meta,
+            needs_sync,
+        }
     }
 }
 
@@ -421,4 +381,63 @@ fn owner_and_group_from_meta(meta: &Metadata) -> (String, String) {
         .unwrap_or_else(|| "unknown".into());
 
     (owner, group)
+}
+
+// io::Result returning functions for use in the Serve9p methods above.
+
+fn io_read(path: &Path, offset: usize, count: usize) -> io::Result<Vec<u8>> {
+    let mut f = OpenOptions::new().read(true).open(path)?;
+    f.seek(SeekFrom::Start(offset as u64))?;
+
+    let mut buf = vec![0; count];
+    let n = f.read(&mut buf)?;
+    buf.truncate(n);
+
+    Ok(buf)
+}
+
+fn io_write(path: &Path, offset: usize, data: &[u8]) -> io::Result<usize> {
+    let mut f = OpenOptions::new().write(true).open(path)?;
+    f.seek(SeekFrom::Start(offset as u64))?;
+
+    f.write(data)
+}
+
+fn io_set_perms(path: &Path, perms: Perm) -> io::Result<()> {
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(perms.bits() & 0o777);
+
+    fs::set_permissions(path, permissions)
+}
+
+fn io_set_len(path: &Path, n_bytes: u64) -> io::Result<()> {
+    OpenOptions::new().write(true).open(path)?.set_len(n_bytes)
+}
+
+fn io_rename(path: &Path, name: &str) -> io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no parent"))?;
+
+    fs::rename(path, parent.join(name))
+}
+
+fn io_create(path: &Path, perm: Perm) -> io::Result<()> {
+    if path.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "file already exists",
+        ));
+    }
+
+    if perm.contains(Perm::DIRECTORY) {
+        fs::create_dir(path)?;
+    } else {
+        fs::File::create_new(path)?;
+    }
+
+    let mut permissions = fs::metadata(path)?.permissions();
+    permissions.set_mode(perm.bits() & 0o777);
+
+    fs::set_permissions(path, permissions)
 }
