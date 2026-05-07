@@ -261,7 +261,9 @@ impl SessionState<Attached> {
         let qid = self.try_fid_meta(fid)?.qid;
 
         self.with_shared_qids_mut(|qids| match qids.get_mut(&qid) {
-            Some(meta) if meta.is_exclusive_and_open() => Err(E_EXCLUSIVE_ALREADY_OPEN.into()),
+            Some(meta) if meta.is_exclusive_and_open(self.client_id) => {
+                Err(E_EXCLUSIVE_ALREADY_OPEN.into())
+            }
             Some(meta) => {
                 meta.opened_by.insert(self.client_id);
                 Ok(())
@@ -756,8 +758,8 @@ impl QidMeta {
         }
     }
 
-    pub(crate) fn is_exclusive_and_open(&self) -> bool {
-        self.qid.ty == FileType::EXCLUSIVE && !self.opened_by.is_empty()
+    pub(crate) fn is_exclusive_and_open(&self, cid: ClientId) -> bool {
+        self.qid.ty == FileType::EXCLUSIVE && self.opened_by.iter().any(|id| *id != cid)
     }
 }
 
