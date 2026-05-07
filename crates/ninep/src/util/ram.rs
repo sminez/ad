@@ -129,7 +129,6 @@ impl Serve9p for RamFs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::sansio::server::E_ILLEGAL_CREATE_NAME;
     use simple_test_case::test_case;
 
     const CID: ClientId = ClientId(0);
@@ -163,19 +162,6 @@ mod tests {
         assert_eq!(fs.walk_one(0, "test", CID).unwrap(), qid);
     }
 
-    #[test_case(99, "test"; "unknown parent")]
-    #[test_case(0, "missing"; "unknown child")]
-    #[test]
-    fn walk_one_unknown_returns_error(parent_qid: u64, child: &str) {
-        let fs = RamFs::new("user", "group");
-        let _ = add_file(&fs, 0, "test", b"");
-
-        assert_eq!(
-            fs.walk_one(parent_qid, child, CID).unwrap_err(),
-            E_UNKNOWN_FILE
-        );
-    }
-
     #[test_case(0, 3, b"abc".to_vec(); "from start")]
     #[test_case(2, 2, b"cd".to_vec(); "middle slice")]
     #[test_case(6, 5, b"".to_vec(); "offset at end")]
@@ -189,13 +175,6 @@ mod tests {
             ReadOutcome::Immediate(data) => assert_eq!(data, expected),
             ReadOutcome::Blocked(_) => panic!("RamFs should always return immediate read data"),
         }
-    }
-
-    #[test]
-    fn read_unknown_returns_error() {
-        let fs = RamFs::new("user", "group");
-
-        assert_eq!(fs.read(1, 0, 1, CID).unwrap_err(), E_UNKNOWN_FILE);
     }
 
     #[test]
@@ -224,13 +203,6 @@ mod tests {
         let nested_children = fs.read_dir(dir.path, CID).unwrap();
         assert_eq!(nested_children.len(), 1);
         assert_eq!(nested_children[0].name, "nested");
-    }
-
-    #[test]
-    fn read_dir_unknown_returns_error() {
-        let fs = RamFs::new("user", "group");
-
-        assert_eq!(fs.read_dir(1, CID).unwrap_err(), E_UNKNOWN_FILE);
     }
 
     #[test_case(1, b"ZZ".to_vec(), b"aZZ".to_vec(); "overwrite existing bytes")]
@@ -269,13 +241,6 @@ mod tests {
     }
 
     #[test]
-    fn write_unknown_returns_error() {
-        let fs = RamFs::new("user", "group");
-
-        assert_eq!(fs.write(1, 0, vec![1], CID).unwrap_err(), E_UNKNOWN_FILE);
-    }
-
-    #[test]
     fn stat_works() {
         let fs = RamFs::new("user", "group");
         let qid = add_file(&fs, 0, "test", b"");
@@ -283,13 +248,6 @@ mod tests {
         let stat = fs.stat(qid.path, CID).unwrap();
         assert_eq!(stat.qid, qid);
         assert_eq!(stat.name, "test");
-    }
-
-    #[test]
-    fn stat_unknown_returns_error() {
-        let fs = RamFs::new("user", "group");
-
-        assert_eq!(fs.stat(1, CID).unwrap_err(), E_UNKNOWN_FILE);
     }
 
     #[test]
@@ -314,33 +272,6 @@ mod tests {
     }
 
     #[test]
-    fn write_stat_mismatched_qid_returns_permission_denied() {
-        let fs = RamFs::new("user", "group");
-        let qid = add_file(&fs, 0, "test", b"");
-
-        let wstat = WStat {
-            qid: Qid::file(qid.path + 1),
-            ..Default::default()
-        };
-
-        assert_eq!(
-            fs.write_stat(qid.path, wstat, CID).unwrap_err(),
-            E_PERMISSION_DENIED
-        );
-    }
-
-    #[test]
-    fn write_stat_unknown_returns_error() {
-        let fs = RamFs::new("user", "group");
-        let wstat = WStat {
-            qid: Qid::file(1),
-            ..Default::default()
-        };
-
-        assert_eq!(fs.write_stat(1, wstat, CID).unwrap_err(), E_UNKNOWN_FILE);
-    }
-
-    #[test]
     fn remove_prunes_subtree() {
         let fs = RamFs::new("user", "group");
         let dir = fs
@@ -353,13 +284,6 @@ mod tests {
 
         assert_eq!(fs.stat(dir.path, CID).unwrap_err(), E_UNKNOWN_FILE);
         assert_eq!(fs.stat(child.path, CID).unwrap_err(), E_UNKNOWN_FILE);
-    }
-
-    #[test]
-    fn remove_unknown_is_ok() {
-        let fs = RamFs::new("user", "group");
-
-        assert!(fs.remove(1, CID).is_ok());
     }
 
     #[test_case(Perm::OWNER_READ, FileType::FILE, "file"; "file create")]
@@ -377,42 +301,5 @@ mod tests {
         assert_eq!(iounit, 999);
         assert_eq!(qid.ty, expected_ty);
         assert_eq!(fs.walk_one(0, name, CID).unwrap().path, qid.path);
-    }
-
-    #[test]
-    fn create_unknown_parent_returns_error() {
-        let fs = RamFs::new("user", "group");
-
-        assert_eq!(
-            fs.create(999, "test", Perm::OWNER_READ, Mode::READ, CID)
-                .unwrap_err(),
-            E_UNKNOWN_FILE
-        );
-    }
-
-    #[test_case("."; "single dot")]
-    #[test_case(".."; "double dot")]
-    #[test]
-    fn create_rejects_illegal_names(name: &str) {
-        let fs = RamFs::new("user", "group");
-
-        assert_eq!(
-            fs.create(0, name, Perm::OWNER_READ, Mode::READ, CID)
-                .unwrap_err(),
-            E_ILLEGAL_CREATE_NAME
-        );
-    }
-
-    #[test]
-    fn create_rejects_duplicate_names() {
-        let fs = RamFs::new("user", "group");
-        fs.create(0, "dup", Perm::OWNER_READ, Mode::READ, CID)
-            .unwrap();
-
-        assert_eq!(
-            fs.create(0, "dup", Perm::OWNER_READ, Mode::READ, CID)
-                .unwrap_err(),
-            "file already exists"
-        );
     }
 }

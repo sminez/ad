@@ -55,8 +55,8 @@ impl LocalProxyFs {
     /// On-disk path and metadata for `qid`.
     ///
     /// Panics if called for an unknown qid
-    fn meta_for_qid(&self, qid: u64) -> PathMeta {
-        self.ft.with_file(qid, |f| f.aux.clone()).unwrap()
+    fn try_meta_for_qid(&self, qid: u64) -> Result<PathMeta> {
+        self.ft.with_file(qid, |f| f.aux.clone())
     }
 
     /// On-disk path for `qid`.
@@ -84,8 +84,7 @@ impl LocalProxyFs {
     /// Check to see if the given node has been modified since we cached metadata for it.
     /// If we are unable to read metadata from disk, prune this node.
     fn modified_since_cache_or_prune(&self, qid: u64) -> Result<bool> {
-        let modified_since_cache = |qid: u64| -> io::Result<bool> {
-            let cached = self.meta_for_qid(qid);
+        let modified_since_cache = |cached: PathMeta| -> io::Result<bool> {
             let t_cached = cached.meta.modified()?;
             let current = fs::metadata(&cached.path)?;
             let t_current = current.modified()?;
@@ -93,7 +92,8 @@ impl LocalProxyFs {
             Ok(t_current != t_cached)
         };
 
-        match modified_since_cache(qid) {
+        let cached = self.try_meta_for_qid(qid)?;
+        match modified_since_cache(cached) {
             Ok(opt) => Ok(opt),
             Err(e) => {
                 self.ft.remove(qid);
@@ -103,7 +103,7 @@ impl LocalProxyFs {
     }
 
     fn try_sync_dir(&self, qid: u64) -> Result<()> {
-        let path = self.meta_for_qid(qid).path;
+        let path = self.try_meta_for_qid(qid)?.path;
         let mut on_disk = self.on_disk_entries_for(&path).map_err(|e| e.to_string())?;
 
         // Update known cache entries and prune entries that are no longer present on disk
@@ -273,7 +273,7 @@ impl Serve9p for LocalProxyFs {
             return Err(E_PERMISSION_DENIED.to_string());
         }
 
-        let pm = self.meta_for_qid(qid);
+        let pm = self.try_meta_for_qid(qid)?;
         if pm.meta.is_dir() {
             self.try_sync_dir(qid)?;
         } else {
@@ -440,4 +440,342 @@ fn io_create(path: &Path, perm: Perm) -> io::Result<()> {
     permissions.set_mode(perm.bits() & 0o777);
 
     fs::set_permissions(path, permissions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use assert_fs::{
+        TempDir,
+        prelude::{FileWriteStr, PathChild},
+    };
+    use simple_test_case::test_case;
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt, symlink},
+        path::{Path, PathBuf},
+        time::SystemTime,
+    };
+
+    const CID: ClientId = ClientId(0);
+    const ROOT_PATH: &str = "root";
+    const HELLO_PATH: &str = "hello";
+    const SUBDIR_PATH: &str = "subdir";
+    const NESTED_PATH: &str = "subdir/nested";
+
+    struct FsWithTempDir {
+        tmp: TempDir,
+        root: PathBuf,
+        proxy_fs: LocalProxyFs,
+    }
+
+    impl FsWithTempDir {
+        fn new() -> Self {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path().join(ROOT_PATH);
+
+            fs::create_dir(&root).unwrap();
+            fs::write(root.join(HELLO_PATH), b"hello world").unwrap();
+            fs::create_dir(root.join(SUBDIR_PATH)).unwrap();
+            fs::write(root.join(NESTED_PATH), b"nested").unwrap();
+
+            let proxy_fs = LocalProxyFs::new(&root).unwrap();
+
+            Self {
+                tmp,
+                root,
+                proxy_fs,
+            }
+        }
+
+        fn chmod(&self, child_path: impl AsRef<Path>, mode: u32) -> io::Result<()> {
+            let path = self.root.join(child_path);
+            let mut perms = fs::metadata(&path)?.permissions();
+            perms.set_mode(mode);
+
+            fs::set_permissions(path, perms)
+        }
+
+        fn symlink_in_root(
+            &self,
+            link_rel: impl AsRef<Path>,
+            target: impl AsRef<Path>,
+        ) -> io::Result<()> {
+            symlink(target, self.root.join(link_rel))
+        }
+
+        fn qid_for_path(&self, path: &str) -> u64 {
+            self.proxy_fs.ft.qid_for_path(&format!("/{path}")).unwrap()
+        }
+    }
+
+    #[test]
+    fn new_rejects_non_directory_root() {
+        let tmp = TempDir::new().unwrap();
+        let child = tmp.child("not-a-dir");
+        child.write_str("content").unwrap();
+        fs::write(&child, b"content").unwrap();
+
+        let err = LocalProxyFs::new(child.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::Other);
+        assert!(err.to_string().contains("proxy root must be a directory"));
+    }
+
+    #[test]
+    fn new_populates_root_and_marks_root_as_synced() {
+        let FsWithTempDir {
+            tmp: _tmp,
+            proxy_fs,
+            ..
+        } = FsWithTempDir::new();
+
+        let ft = &proxy_fs.ft;
+        assert!(ft.qid_for_path(&format!("/{HELLO_PATH}")).is_some());
+        let subdir_qid = ft.qid_for_path(&format!("/{SUBDIR_PATH}")).unwrap();
+
+        assert!(!proxy_fs.needs_sync(QID_ROOT));
+        assert!(proxy_fs.needs_sync(subdir_qid));
+    }
+
+    #[test]
+    fn meta_if_under_root_handles_is_some_for_path_under_root() {
+        let t = FsWithTempDir::new();
+
+        assert!(
+            t.proxy_fs
+                .meta_if_under_root(&t.root.join(HELLO_PATH))
+                .is_some()
+        );
+        assert!(
+            t.proxy_fs
+                .meta_if_under_root(&t.root.join(SUBDIR_PATH))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn meta_if_under_root_is_none_for_path_out_of_root() {
+        let t = FsWithTempDir::new();
+        let outside = t.tmp.path().join("outside-file");
+        fs::write(&outside, b"outside").unwrap();
+
+        assert!(t.proxy_fs.meta_if_under_root(&outside).is_none());
+    }
+
+    #[test]
+    fn meta_if_under_root_is_none_for_symlink_to_path_out_of_root() {
+        let t = FsWithTempDir::new();
+        let outside = t.tmp.path().join("outside-file");
+        fs::write(&outside, b"outside").unwrap();
+
+        t.symlink_in_root("escape", &outside).unwrap();
+        assert!(
+            t.proxy_fs
+                .meta_if_under_root(&t.root.join("escape"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn on_disk_entries_for_filters_symlinks_out_of_root() {
+        let t = FsWithTempDir::new();
+        let outside = t.tmp.path().join("outside-file");
+        fs::write(&outside, b"outside").unwrap();
+        t.symlink_in_root("escape", &outside).unwrap();
+
+        let entries = t.proxy_fs.on_disk_entries_for(&t.root).unwrap();
+
+        assert!(entries.contains_key(HELLO_PATH));
+        assert!(entries.contains_key(SUBDIR_PATH));
+        assert!(!entries.contains_key("escape"));
+    }
+
+    #[test]
+    fn modified_since_cache_or_prune_reports_changes() {
+        let FsWithTempDir {
+            tmp: _tmp,
+            root,
+            proxy_fs,
+        } = FsWithTempDir::new();
+        let qid = proxy_fs.ft.qid_for_path(&format!("/{HELLO_PATH}")).unwrap();
+
+        let modified = proxy_fs.modified_since_cache_or_prune(qid);
+        assert_eq!(modified, Ok(false));
+
+        fs::File::open(root.join(HELLO_PATH))
+            .unwrap()
+            .set_modified(SystemTime::UNIX_EPOCH)
+            .unwrap();
+
+        let modified = proxy_fs.modified_since_cache_or_prune(qid);
+        assert_eq!(modified, Ok(true));
+    }
+
+    #[test]
+    fn modified_since_cache_or_prune_prunes_when_entry_missing() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        fs::remove_file(t.root.join(HELLO_PATH)).unwrap();
+
+        assert!(t.proxy_fs.modified_since_cache_or_prune(qid).is_err());
+        assert_eq!(t.proxy_fs.ft.stat(qid).unwrap_err(), E_UNKNOWN_FILE);
+    }
+
+    #[test]
+    fn try_sync_file_updates_cached_metadata() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        fs::write(t.root.join(HELLO_PATH), b"hi").unwrap();
+        t.chmod(HELLO_PATH, 0o600).unwrap();
+
+        t.proxy_fs.try_sync_file(qid).unwrap();
+
+        let stat = t.proxy_fs.ft.stat(qid).unwrap();
+        assert_eq!(stat.n_bytes, 2);
+        assert_eq!(stat.perms.bits() & 0o777, 0o600);
+    }
+
+    #[test]
+    fn try_sync_file_returns_unknown_file_for_missing_path() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        fs::remove_file(t.root.join(HELLO_PATH)).unwrap();
+
+        assert_eq!(t.proxy_fs.try_sync_file(qid).unwrap_err(), E_UNKNOWN_FILE);
+    }
+
+    #[test]
+    fn try_sync_dir_prunes_missing_entries() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        fs::remove_file(t.root.join(HELLO_PATH)).unwrap();
+
+        t.proxy_fs.try_sync_dir(QID_ROOT).unwrap();
+
+        assert_eq!(t.proxy_fs.ft.stat(qid).unwrap_err(), E_UNKNOWN_FILE);
+        assert!(!t.proxy_fs.needs_sync(QID_ROOT));
+    }
+
+    #[test]
+    fn try_sync_dir_adds_entries_and_updates_existing_metadata() {
+        let t = FsWithTempDir::new();
+        let hello_qid = t.qid_for_path(HELLO_PATH);
+
+        t.chmod(HELLO_PATH, 0o600).unwrap();
+        fs::write(t.root.join("new-file"), b"new").unwrap();
+        fs::create_dir(t.root.join("new-dir")).unwrap();
+
+        t.proxy_fs.try_sync_dir(QID_ROOT).unwrap();
+
+        let hello_perms = t.proxy_fs.ft.stat(hello_qid).unwrap().perms;
+        assert_eq!(hello_perms.bits() & 0o777, 0o600);
+
+        let new_file_qid = t.qid_for_path("new-file");
+        let new_dir_qid = t.qid_for_path("new-dir");
+
+        assert!(!t.proxy_fs.needs_sync(QID_ROOT));
+        assert!(!t.proxy_fs.needs_sync(new_file_qid));
+        assert!(t.proxy_fs.needs_sync(new_dir_qid));
+    }
+
+    #[test]
+    fn open_works() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        assert_eq!(
+            t.proxy_fs.open(qid, Mode::READ, CID).unwrap(),
+            DEFAULT_IOUNIT
+        );
+        assert_eq!(
+            t.proxy_fs.open(42, Mode::READ, CID).unwrap_err(),
+            E_UNKNOWN_FILE
+        );
+    }
+
+    #[test]
+    fn walk_one_works() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        assert_eq!(
+            t.proxy_fs.walk_one(QID_ROOT, HELLO_PATH, CID).unwrap().path,
+            qid
+        );
+    }
+
+    #[test_case(0, 3, b"hel"; "from start")] // typos:ignore
+    #[test_case(2, 5, b"llo w"; "middle slice")]
+    #[test_case(11, 5, b""; "offset at end")]
+    #[test_case(100, 5, b""; "offset beyond end")]
+    #[test]
+    fn read_returns_expected_data(offset: usize, count: usize, expected: &[u8]) {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        match t.proxy_fs.read(qid, offset, count, CID).unwrap() {
+            ReadOutcome::Immediate(data) => assert_eq!(&data, expected),
+            ReadOutcome::Blocked(_) => {
+                panic!("LocalProxyFs should always return immediate read data")
+            }
+        }
+    }
+
+    #[test]
+    fn read_dir_returns_children_for_directory() {
+        let t = FsWithTempDir::new();
+
+        let mut root_children = t
+            .proxy_fs
+            .read_dir(QID_ROOT, CID)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.name)
+            .collect::<Vec<_>>();
+        root_children.sort();
+
+        assert_eq!(
+            root_children,
+            vec![HELLO_PATH.to_string(), SUBDIR_PATH.to_string()]
+        );
+
+        let qid = t.qid_for_path(SUBDIR_PATH);
+        let nested_children = t.proxy_fs.read_dir(qid, CID).unwrap();
+        assert_eq!(nested_children.len(), 1);
+        assert_eq!(nested_children[0].name, "nested");
+    }
+
+    #[test_case(1, b"ZZ", b"hZZlo world"; "overwrite existing bytes")]
+    #[test_case(11, b"X", b"hello worldX"; "append at end")]
+    #[test_case(0, b"", b"hello world"; "empty write")]
+    #[test_case(12, b"X", b"hello world\0X"; "past current end")]
+    #[test]
+    fn write_updates_content(offset: usize, payload: &[u8], expected: &[u8]) {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        let n = t
+            .proxy_fs
+            .write(qid, offset, payload.to_vec(), CID)
+            .unwrap();
+        assert_eq!(n, payload.len());
+
+        let path = t.proxy_fs.try_meta_for_qid(qid).unwrap().path;
+        let data = fs::read(path).unwrap();
+        assert_eq!(&data, expected);
+    }
+
+    #[test]
+    fn stat_works() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+
+        let stat = t.proxy_fs.stat(qid, CID).unwrap();
+        assert_eq!(stat.qid.path, qid);
+        assert_eq!(stat.name, HELLO_PATH);
+    }
 }
