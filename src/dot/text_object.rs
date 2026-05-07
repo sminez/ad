@@ -370,4 +370,19 @@ mod tests {
         assert!(matches!(expanded, Dot::Cur { c: Cur { idx: 16 } }));
         assert_eq!(content, " ");
     }
+
+    #[test]
+    fn find_delimited() {
+        let b = Buffer::new_virtual(
+            0,
+            "test",
+            "│ (EX:40727d6d-32a6-4ebc-ae4f-4d92e326a8c9) │",
+            Default::default(),
+        );
+        let dot = Dot::Cur { c: Cur { idx: 3 } };
+        let expanded = FindDelimited::new("(", ")").expand(dot, &b);
+        let content = expanded.content(&b);
+
+        assert_eq!(content, "EX:40727d6d-32a6-4ebc-ae4f-4d92e326a8c9");
+    }
 }

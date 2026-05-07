@@ -81,13 +81,7 @@ fn find_between<F: Find>(f: &F, from: usize, to: usize, b: &Buffer) -> Option<Do
 }
 
 fn rev_find_between<F: Find>(f: &F, from: usize, to: usize, b: &Buffer) -> Option<Dot> {
-    let ch_from = b.txt.byte_to_char(from);
-    let ch_to = b.txt.byte_to_char(to);
-
-    match_to_dot(
-        f.reversed()
-            .try_find(b.rev_iter_between_chars(ch_from, ch_to)),
-    )
+    match_to_dot(f.reversed().try_find(b.rev_iter_between_chars(from, to)))
 }
 
 // Functions that check a single character
