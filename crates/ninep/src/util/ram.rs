@@ -162,17 +162,17 @@ mod tests {
         assert_eq!(fs.walk_one(0, "test", CID).unwrap(), qid);
     }
 
-    #[test_case(0, 3, b"abc".to_vec(); "from start")]
-    #[test_case(2, 2, b"cd".to_vec(); "middle slice")]
-    #[test_case(6, 5, b"".to_vec(); "offset at end")]
-    #[test_case(100, 5, b"".to_vec(); "offset beyond end")]
+    #[test_case(0, 3, b"abc"; "from start")]
+    #[test_case(2, 2, b"cd"; "middle slice")]
+    #[test_case(6, 5, b""; "offset at end")]
+    #[test_case(100, 5, b""; "offset beyond end")]
     #[test]
-    fn read_returns_expected_data(offset: usize, count: usize, expected: Vec<u8>) {
+    fn read_returns_expected_data(offset: usize, count: usize, expected: &[u8]) {
         let fs = RamFs::new("user", "group");
         let qid = add_file(&fs, 0, "test", b"abcdef");
 
         match fs.read(qid.path, offset, count, CID).unwrap() {
-            ReadOutcome::Immediate(data) => assert_eq!(data, expected),
+            ReadOutcome::Immediate(data) => assert_eq!(&data, expected),
             ReadOutcome::Blocked(_) => panic!("RamFs should always return immediate read data"),
         }
     }
@@ -205,22 +205,23 @@ mod tests {
         assert_eq!(nested_children[0].name, "nested");
     }
 
-    #[test_case(1, b"ZZ".to_vec(), b"aZZ".to_vec(); "overwrite existing bytes")]
-    #[test_case(3, b"X".to_vec(), b"abcX".to_vec(); "append at end")]
-    #[test_case(0, b"".to_vec(), b"abc".to_vec(); "empty write")]
+    #[test_case(1, b"ZZ", b"aZZ"; "overwrite existing bytes")]
+    #[test_case(3, b"X", b"abcX"; "append at end")]
+    #[test_case(0, b"", b"abc"; "empty write")]
     #[test]
-    fn write_updates_content(offset: usize, payload: Vec<u8>, expected: Vec<u8>) {
+    fn write_updates_content(offset: usize, payload: &[u8], expected: &[u8]) {
         let fs = RamFs::new("user", "group");
         let qid = add_file(&fs, 0, "test", b"abc");
 
-        let n = fs.write(qid.path, offset, payload.clone(), CID).unwrap();
+        let n = fs.write(qid.path, offset, payload.to_vec(), CID).unwrap();
         assert_eq!(n, payload.len());
 
         let data = fs
             .file_tree()
             .with_file(qid.path, |f| f.aux.clone())
             .unwrap();
-        assert_eq!(data, expected);
+
+        assert_eq!(&data, expected);
     }
 
     #[test]
