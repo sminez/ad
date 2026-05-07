@@ -60,51 +60,51 @@ pub(super) async fn run_filter<F>(buffer: usize, mut filter: F, client: &mut Cli
 where
     F: AsyncEventFilter,
 {
-    let mut stream = client.event_lines(buffer).await?;
+    loop {
+        let mut stream = client.event_lines(buffer).await?;
 
-    while let Some(line) = stream.next().await {
-        let evt = FsysEvent::try_from_str(&line).map_err(io::Error::other)?;
+        while let Some(line) = stream.next().await {
+            let evt = FsysEvent::try_from_str(&line).map_err(io::Error::other)?;
 
-        let outcome = match evt.kind {
-            Kind::LoadBody => {
-                filter
-                    .handle_load(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
-                    .await?
-            }
-            Kind::ExecuteBody => {
-                filter
-                    .handle_execute(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
-                    .await?
-            }
-            Kind::InsertBody => {
-                filter
-                    .handle_insert(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
-                    .await?
-            }
-            Kind::DeleteBody => {
-                filter
-                    .handle_delete(evt.source, evt.ch_from, evt.ch_to, client)
-                    .await?
-            }
-            _ => EventOutcome::Passthrough,
-        };
+            let outcome = match evt.kind {
+                Kind::LoadBody => {
+                    filter
+                        .handle_load(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
+                        .await?
+                }
+                Kind::ExecuteBody => {
+                    filter
+                        .handle_execute(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
+                        .await?
+                }
+                Kind::InsertBody => {
+                    filter
+                        .handle_insert(evt.source, evt.ch_from, evt.ch_to, &evt.txt, client)
+                        .await?
+                }
+                Kind::DeleteBody => {
+                    filter
+                        .handle_delete(evt.source, evt.ch_from, evt.ch_to, client)
+                        .await?
+                }
+                _ => EventOutcome::Passthrough,
+            };
 
-        match outcome {
-            EventOutcome::Handled => (),
-            EventOutcome::Passthrough => {
-                client
-                    .write_event(buffer, &evt.as_event_file_line())
-                    .await?
+            match outcome {
+                EventOutcome::Handled => (),
+                EventOutcome::Passthrough => {
+                    client
+                        .write_event(buffer, &evt.as_event_file_line())
+                        .await?
+                }
+                EventOutcome::PassthroughAndExit => {
+                    client
+                        .write_event(buffer, &evt.as_event_file_line())
+                        .await?;
+                    return Ok(());
+                }
+                EventOutcome::Exit => return Ok(()),
             }
-            EventOutcome::PassthroughAndExit => {
-                client
-                    .write_event(buffer, &evt.as_event_file_line())
-                    .await?;
-                return Ok(());
-            }
-            EventOutcome::Exit => return Ok(()),
         }
     }
-
-    Ok(())
 }
