@@ -7,6 +7,8 @@ use std::{
     os::unix::net::UnixStream,
     path::Path,
     str::FromStr,
+    thread::sleep,
+    time::Duration,
 };
 
 mod event;
@@ -221,6 +223,8 @@ impl Client {
     }
 
     fn _id_for_path(&mut self, path: &str) -> Result<usize> {
+        sleep(Duration::from_millis(5));
+
         for BufferMeta { id, filename } in self.open_buffers()?.into_iter() {
             if filename.ends_with(path) {
                 return Ok(id);

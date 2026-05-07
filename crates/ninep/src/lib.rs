@@ -14,6 +14,8 @@
 pub mod fs;
 pub mod sansio;
 pub mod sync;
+#[cfg(feature = "util_fs")]
+pub mod util;
 
 #[cfg(feature = "tokio")]
 pub mod tokio;

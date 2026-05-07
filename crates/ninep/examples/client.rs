@@ -145,7 +145,7 @@ impl Args {
         };
 
         let (socket_path, path) = match path.split_once('/') {
-            Some((ns, path)) => (ns, path),
+            Some((socket_path, path)) => (socket_path, path),
             None => (path.as_str(), "/"),
         };
 

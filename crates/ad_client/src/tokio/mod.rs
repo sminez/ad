@@ -1,8 +1,8 @@
 //! An asynchronous client implementation.
 use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
 use ninep::tokio::client::{Error, ReadLineStream, Result, UnixClient};
-use std::{env, io, path::Path, str::FromStr};
-use tokio::net::UnixStream;
+use std::{env, io, path::Path, str::FromStr, time::Duration};
+use tokio::{net::UnixStream, time::sleep};
 
 mod event;
 
@@ -232,6 +232,7 @@ impl Client {
     }
 
     async fn _id_for_path(&mut self, path: &str) -> Result<usize> {
+        sleep(Duration::from_millis(5)).await;
         for BufferMeta { id, filename } in self.open_buffers().await?.into_iter() {
             if filename.ends_with(path) {
                 return Ok(id);
