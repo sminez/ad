@@ -13,7 +13,7 @@
 use lexopt::{Parser, prelude::*};
 use ninep::{
     fs::{Mode, Perm},
-    sync::client::UnixClient,
+    sync::client::Client,
 };
 use std::io::{self, Read};
 
@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         path,
     } = Args::try_parse()?;
 
-    let mut client = UnixClient::new_unix_with_explicit_path("user", socket_path, aname)?;
+    let mut client = Client::new_unix_with_explicit_path("user", socket_path, aname)?;
 
     match cmd {
         Cmd::List => {

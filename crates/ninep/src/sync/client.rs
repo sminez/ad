@@ -9,11 +9,17 @@ use crate::{
 };
 use simple_coro::CoroState;
 use std::{
+    collections::HashMap,
     env, mem,
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
     path::Path,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicU32, Ordering},
+        mpsc::{Receiver, Sender, channel},
+    },
+    thread::spawn,
 };
 
 // re-export
@@ -24,31 +30,37 @@ pub use crate::sansio::client::{Error, Result};
 /// Support for each of the operations exposed by this client is determined by the server
 /// implementation that it is connected to.
 #[derive(Debug)]
-pub struct Client<S> {
+pub struct Client {
     state: Arc<Mutex<State>>,
-    stream: Arc<Mutex<S>>,
-    buf: SharedBuf,
-    msize: u32,
+    tx: Sender<Req>,
+    msize: Arc<AtomicU32>,
 }
 
-impl<S> Clone for Client<S> {
+impl Clone for Client {
     fn clone(&self) -> Self {
+        let _ = self.tx.send(Req::AddClient);
         Self {
             state: Arc::clone(&self.state),
-            stream: Arc::clone(&self.stream),
-            buf: SharedBuf::default(),
-            msize: self.msize,
+            tx: self.tx.clone(),
+            msize: Arc::clone(&self.msize),
         }
     }
 }
 
-impl<S> Client<S> {
-    fn new(stream: S) -> Self {
+impl Client {
+    fn new<S>(stream: S) -> Self
+    where
+        S: SyncStream,
+    {
+        let (tx, rx) = channel();
+        let msize = Arc::new(AtomicU32::new(MSIZE));
+        let conn = Connection::new(stream, rx, Arc::clone(&msize));
+        spawn(move || conn.run());
+
         Self {
             state: Default::default(),
-            stream: Arc::new(Mutex::new(stream)),
-            buf: SharedBuf::default(),
-            msize: MSIZE,
+            tx,
+            msize,
         }
     }
 
@@ -60,22 +72,22 @@ impl<S> Client<S> {
         }
     }
 
-    #[inline]
-    fn stream(&self) -> MutexGuard<'_, S> {
-        match self.stream.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
+    fn send_raw(&self, data: Tdata) -> Result<Rmessage> {
+        let (tx, rx) = channel();
+        let req = Req::Send { data, tx };
+        self.tx.send(req).map_err(|_| Error::ConnectionClosed)?;
+
+        rx.recv().map_err(|_| Error::ConnectionClosed)?
     }
 }
 
-/// A client that operates over an underlying [UnixStream].
-pub type UnixClient = Client<UnixStream>;
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Req::RemoveClient);
+    }
+}
 
-/// A client that operates over an underlying [TcpStream].
-pub type TcpClient = Client<TcpStream>;
-
-impl Client<UnixStream> {
+impl Client {
     /// Create a new [Client] connected to a unix socket at the specified path.
     pub fn new_unix_with_explicit_path(
         uname: impl Into<String>,
@@ -117,9 +129,7 @@ impl Client<UnixStream> {
 
         Ok(client)
     }
-}
 
-impl Client<TcpStream> {
     /// Create a new [Client] connected to a tcp socket at the specified address.
     pub fn new_tcp(
         uname: impl Into<String>,
@@ -138,30 +148,22 @@ impl Client<TcpStream> {
 macro_rules! run_9p_coro {
     ($self:ident, $method:ident, $($arg:expr),*) => {{
         let mut state = $self.state();
-        let msize = state.msize;
         let mut coro = state.$method($($arg),*);
         loop {
             coro = match coro.resume() {
                 CoroState::Complete(res) => break res,
                 CoroState::Pending(c, t) => {
-                    let mut stream = $self.stream();
-                    t.write_to(&mut *stream)?;
-                    c.send(Rmessage::read_from(msize, &$self.buf, &mut *stream)?)
+                    let rmsg = $self.send_raw(t.content)?;
+                    c.send(rmsg)
                 }
             }
         }
     }};
 }
 
-impl<S> Client<S>
-where
-    S: SyncStream,
-{
-    fn send(&mut self, tag: u16, content: Tdata) -> Result<Rmessage> {
-        let mut stream = self.stream();
-        Tmessage { tag, content }.write_to(&mut *stream)?;
-
-        match Rmessage::read_from(self.msize, &self.buf, &mut *stream)? {
+impl Client {
+    fn send(&self, content: Tdata) -> Result<Rmessage> {
+        match self.send_raw(content)? {
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
@@ -174,7 +176,7 @@ where
     fn connect(&mut self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_connect, uname.into(), aname.into())?;
         let msize = self.state().msize;
-        self.msize = msize;
+        self.msize.store(msize, Ordering::Release);
 
         Ok(())
     }
@@ -189,7 +191,7 @@ where
     /// Clunks of the root fid (0) will be ignored
     pub fn clunk(&mut self, fid: u32) -> Result<()> {
         if fid != 0 {
-            self.send(0, Tdata::Clunk { fid })?;
+            self.send(Tdata::Clunk { fid })?;
             self.state().fids.remove(fid);
         }
 
@@ -283,11 +285,11 @@ where
     ///
     /// The size of each chunk is determined by the supported message size of the server replying
     /// to the requests.
-    pub fn iter_chunks(&mut self, path: impl Into<String>) -> Result<ChunkIter<S>> {
+    pub fn iter_chunks(&mut self, path: impl Into<String>) -> Result<ChunkIter> {
         let fid = self.walk(path)?;
         let mode = Mode::READ.bits();
         let count = self.state().msize;
-        self.send(0, Tdata::Open { fid, mode })?;
+        self.send(Tdata::Open { fid, mode })?;
 
         Ok(ChunkIter {
             client: self.clone(),
@@ -298,11 +300,11 @@ where
     }
 
     /// Iterate over newline delimited lines of utf-8 encoded text from the file at `path`.
-    pub fn iter_lines(&mut self, path: impl Into<String>) -> Result<ReadLineIter<S>> {
+    pub fn iter_lines(&mut self, path: impl Into<String>) -> Result<ReadLineIter> {
         let fid = self.walk(path)?;
         let mode = Mode::READ.bits();
         let count = self.state().msize;
-        self.send(0, Tdata::Open { fid, mode })?;
+        self.send(Tdata::Open { fid, mode })?;
 
         Ok(ReadLineIter {
             client: self.clone(),
@@ -319,22 +321,133 @@ where
     }
 }
 
-/// An iterator of [`Vec<u8>`] chunks out of a given file.
-#[derive(Debug)]
-pub struct ChunkIter<S>
+pub(crate) enum Req {
+    AddClient,
+    RemoveClient,
+    Send {
+        data: Tdata,
+        tx: Sender<Result<Rmessage>>,
+    },
+}
+
+pub(crate) struct Connection<S>
 where
     S: SyncStream,
 {
-    client: Client<S>,
+    stream: S,
+    rx: Receiver<Req>,
+    msize: Arc<AtomicU32>,
+    pending: HashMap<u16, Sender<Result<Rmessage>>>,
+    buf: SharedBuf,
+    n_clients: usize,
+    next_tag: u16,
+}
+
+impl<S> Connection<S>
+where
+    S: SyncStream,
+{
+    fn new(stream: S, rx: Receiver<Req>, msize: Arc<AtomicU32>) -> Self {
+        Self {
+            stream,
+            rx,
+            msize,
+            pending: HashMap::new(),
+            buf: SharedBuf::default(),
+            n_clients: 1,
+            next_tag: 0,
+        }
+    }
+
+    fn tag_for(&mut self, data: &Tdata) -> u16 {
+        if matches!(data, Tdata::Version { .. }) {
+            return u16::MAX;
+        }
+
+        let tag = self.next_tag;
+        self.next_tag = self.next_tag.saturating_add(1);
+        if self.next_tag == u16::MAX {
+            self.next_tag = 0;
+        }
+
+        tag
+    }
+
+    fn run(mut self) {
+        while self.n_clients > 0 {
+            if self.pending.is_empty() {
+                let req = match self.rx.recv() {
+                    Ok(req) => req,
+                    Err(_) => return,
+                };
+
+                self.handle_req(req);
+                continue;
+            }
+
+            while let Ok(req) = self.rx.try_recv() {
+                self.handle_req(req);
+                if self.n_clients == 0 {
+                    return;
+                }
+            }
+
+            let size = self.msize.load(Ordering::Acquire);
+            let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream) {
+                Ok(rmsg) => rmsg,
+                Err(e) => {
+                    let msg = e.to_string();
+                    for tx in self.pending.drain().map(|(_, s)| s) {
+                        let _ = tx.send(err(msg.clone()));
+                    }
+                    break;
+                }
+            };
+
+            if let Some(sender) = self.pending.remove(&rmsg.tag) {
+                let _ = sender.send(Ok(rmsg));
+            }
+        }
+    }
+
+    fn handle_req(&mut self, req: Req)
+    where
+        S: SyncStream,
+    {
+        match req {
+            Req::AddClient => self.n_clients += 1,
+            Req::RemoveClient => self.n_clients = self.n_clients.saturating_sub(1),
+            Req::Send { data, tx } => {
+                let tag = self.tag_for(&data);
+                let msg = Tmessage::new(tag, data);
+                if let Err(e) = msg.write_to(&mut self.stream) {
+                    let msg = e.to_string();
+                    let _ = tx.send(err(msg.clone()));
+
+                    for tx in self.pending.drain().map(|(_, s)| s) {
+                        let _ = tx.send(err(msg.clone()));
+                    }
+
+                    self.n_clients = 0;
+                    return;
+                }
+
+                self.pending.insert(tag, tx);
+            }
+        }
+    }
+}
+
+/// An iterator of [`Vec<u8>`] chunks out of a given file.
+#[derive(Debug)]
+pub struct ChunkIter {
+    client: Client,
     fid: u32,
     offset: u64,
     count: u32,
 }
 
-impl<S> Iterator for ChunkIter<S>
-where
-    S: SyncStream,
-{
+impl Iterator for ChunkIter {
     type Item = Vec<u8>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -356,11 +469,8 @@ where
 
 /// An iterator of [String] lines out of a given file.
 #[derive(Debug)]
-pub struct ReadLineIter<S>
-where
-    S: SyncStream,
-{
-    client: Client<S>,
+pub struct ReadLineIter {
+    client: Client,
     buf: Vec<u8>,
     fid: u32,
     offset: u64,
@@ -368,10 +478,7 @@ where
     at_eof: bool,
 }
 
-impl<S> Iterator for ReadLineIter<S>
-where
-    S: SyncStream,
-{
+impl Iterator for ReadLineIter {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -425,7 +532,7 @@ mod tests {
             client_cases::{Step, TestCase},
         },
     };
-    use std::{net::Shutdown, os::unix::net::UnixStream, thread};
+    use std::{os::unix::net::UnixStream, thread};
 
     // We stamp out the test suite using this helper macro rather than using simple_test_case in
     // order to ensure that both the sync and tokio implementations run exactly the same cases
@@ -445,11 +552,11 @@ mod tests {
             handle_step(i, step, &mut client);
         }
 
-        let _ = client.stream().shutdown(Shutdown::Both);
+        drop(client);
         handle.join().expect("server thread join failed");
     }
 
-    fn handle_step(i: usize, step: Step, client: &mut UnixClient) {
+    fn handle_step(i: usize, step: Step, client: &mut Client) {
         match step {
             Step::Connect { uname, aname, res } => {
                 let actual = client.connect(uname, aname);

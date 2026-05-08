@@ -18,6 +18,9 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// An error that can be encountered by a 9p client.
 #[derive(Debug)]
 pub enum Error {
+    /// The connection to the server has been closed
+    ConnectionClosed,
+
     /// An unexpected response was received for a message sent by the client
     ProtocolViolation {
         /// The expected response type
@@ -54,6 +57,7 @@ impl Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ConnectionClosed => write!(f, "connection closed"),
             Self::ProtocolViolation { expected, received } => write!(
                 f,
                 "9p protocol violation: expected {expected}, but received {received:?}"

@@ -298,7 +298,7 @@ where
         &mut self,
         uname: impl Into<String>,
         aname: impl Into<String>,
-    ) -> Result<(Client<UnixStream>, JoinHandle<()>)> {
+    ) -> Result<(Client, JoinHandle<()>)> {
         let (client_stream, server_stream) = UnixStream::pair().unwrap();
         let session = self.new_session(server_stream);
         let handle = spawn(|| session.handle_connection());

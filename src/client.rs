@@ -7,7 +7,7 @@
 use ninep::{
     fs::{Mode, Perm},
     sansio::server::socket_dir,
-    sync::client::{Error, Result, UnixClient},
+    sync::client::{Client, Error, Result},
 };
 use std::{
     env, fs,
@@ -109,14 +109,14 @@ fn err(s: impl Into<String>) -> Error {
     Error::Rerror { ename: s.into() }
 }
 
-fn client_and_path<'a>(raw_path: &'a str, aname: &str) -> Result<(UnixClient, &'a str)> {
+fn client_and_path<'a>(raw_path: &'a str, aname: &str) -> Result<(Client, &'a str)> {
     let (ns, path) = match raw_path.split_once('/') {
         Some((ns, path)) => (ns, path),
         None => (raw_path, "/"),
     };
 
     if ns != "ad" {
-        return Ok((UnixClient::new_unix(ns, aname)?, path));
+        return Ok((Client::new_unix(ns, aname)?, path));
     }
 
     // Depending on the requested namespace and the presence or absence of an "AD_PID" env var we
@@ -147,7 +147,7 @@ fn client_and_path<'a>(raw_path: &'a str, aname: &str) -> Result<(UnixClient, &'
         }
     };
 
-    Ok((UnixClient::new_unix(ns, aname)?, path))
+    Ok((Client::new_unix(ns, aname)?, path))
 }
 
 fn open_9p_sockets() -> io::Result<Vec<String>> {
@@ -171,7 +171,7 @@ pub fn list_open_sessions() {
         let mut had_unresponsive = false;
 
         for ns in open_9p_sockets()?.into_iter() {
-            let mut client = match UnixClient::new_unix(&ns, "") {
+            let mut client = match Client::new_unix(&ns, "") {
                 Ok(client) => client,
                 Err(e) => {
                     println!("{ns}\tunresponsive: {e}");
@@ -202,7 +202,7 @@ pub fn remove_open_sockets() {
     fn inner() -> io::Result<()> {
         let d = socket_dir();
         for ns in open_9p_sockets()?.into_iter() {
-            if UnixClient::new_unix(&ns, "").is_err() {
+            if Client::new_unix(&ns, "").is_err() {
                 let path = d.join(ns);
                 println!("removing unresponsive ad socket at {}", path.display());
                 fs::remove_file(path)?;

@@ -10,7 +10,7 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
-use ninep::{sansio::server::socket_dir, sync::client::UnixClient};
+use ninep::{sansio::server::socket_dir, sync::client::Client};
 use std::{fs, io, str::FromStr};
 
 pub mod sync;
@@ -176,7 +176,7 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
     let mut sessions = Vec::new();
 
     for ns in open_9p_sockets()?.into_iter() {
-        let mut client = match UnixClient::new_unix(&ns, "") {
+        let mut client = match Client::new_unix(&ns, "") {
             Ok(client) => client,
             Err(_) => {
                 sessions.push(SessionMeta {

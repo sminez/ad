@@ -1,10 +1,9 @@
 //! A synchronous client implementation.
 use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
-use ninep::sync::client::{Error, ReadLineIter, Result, UnixClient};
+use ninep::sync::client::{Client as NinepClient, Error, ReadLineIter, Result};
 use std::{
     env,
     io::{self, Write},
-    os::unix::net::UnixStream,
     path::Path,
     str::FromStr,
     thread::sleep,
@@ -18,7 +17,7 @@ pub use event::EventFilter;
 /// A simple synchronous 9p client for ad
 #[derive(Debug, Clone)]
 pub struct Client {
-    inner: UnixClient,
+    inner: NinepClient,
 }
 
 impl Client {
@@ -30,7 +29,7 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "")?,
+            inner: NinepClient::new_unix(&ns, "")?,
         })
     }
 
@@ -43,7 +42,7 @@ impl Client {
         let ns = format!("ad-{pid}");
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "")?,
+            inner: NinepClient::new_unix(&ns, "")?,
         })
     }
 
@@ -55,11 +54,11 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix_with_explicit_path(uname, path, "")?,
+            inner: NinepClient::new_unix_with_explicit_path(uname, path, "")?,
         })
     }
 
-    pub(crate) fn event_lines(&mut self, buffer_id: usize) -> Result<ReadLineIter<UnixStream>> {
+    pub(crate) fn event_lines(&mut self, buffer_id: usize) -> Result<ReadLineIter> {
         self.inner.iter_lines(format!("buffers/{buffer_id}/event"))
     }
 
@@ -366,7 +365,7 @@ impl SessionMeta {
     /// Create a new [Client] for this session.
     pub fn client_for_session(&self) -> Result<Client> {
         Ok(Client {
-            inner: UnixClient::new_unix(&self.socket_name, "/")?,
+            inner: NinepClient::new_unix(&self.socket_name, "/")?,
         })
     }
 }
@@ -375,7 +374,7 @@ impl SessionMeta {
 #[derive(Debug)]
 pub struct BodyWriter {
     path: String,
-    client: UnixClient,
+    client: NinepClient,
 }
 
 impl BodyWriter {
