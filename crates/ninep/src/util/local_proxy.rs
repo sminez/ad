@@ -9,12 +9,14 @@ use std::{
     collections::BTreeMap,
     fs::{self, Metadata, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
+    mem::take,
     os::unix::fs::{MetadataExt, PermissionsExt},
     path::{Path, PathBuf},
 };
 use uzers::{get_group_by_gid, get_user_by_uid};
 
 const DEFAULT_IOUNIT: IoUnit = 8168;
+const E_ALREADY_EXISTS: &str = "file already exists";
 
 /// A filesystem proxy that exposes a local directory over 9p.
 #[derive(Debug)]
@@ -27,6 +29,12 @@ pub struct LocalProxyFs {
 impl LocalProxyFs {
     /// Construct a new [LocalProxyFs] pointed at the provided root directory.
     pub fn new(root: impl Into<PathBuf>) -> io::Result<Self> {
+        Self::new_with_io_unit(root, DEFAULT_IOUNIT)
+    }
+
+    /// Construct a new [LocalProxyFs] pointed at the provided root directory using the given
+    /// [IoUnit].
+    pub fn new_with_io_unit(root: impl Into<PathBuf>, iounit: IoUnit) -> io::Result<Self> {
         let root = fs::canonicalize(root.into())?;
         let meta = fs::metadata(&root)?;
         if !meta.is_dir() {
@@ -44,7 +52,7 @@ impl LocalProxyFs {
         let fs = Self {
             root,
             ft: FileTree::new(&owner, &group, perms, pm),
-            iounit: DEFAULT_IOUNIT,
+            iounit,
         };
 
         fs.try_sync_dir(QID_ROOT).map_err(io::Error::other)?;
@@ -110,16 +118,21 @@ impl LocalProxyFs {
         for stat in self.ft.read_dir(qid)?.iter() {
             let qid = stat.qid.path;
 
-            match on_disk.remove(&stat.name) {
-                Some(pm) => {
+            match on_disk.remove(&qid) {
+                Some((name, pm)) => {
                     _ = self.ft.with_file_mut(qid, |f| {
                         let (owner, group) = owner_and_group_from_meta(&pm.meta);
-                        f.stat.owner = owner;
-                        f.stat.group = group;
-                        f.stat.n_bytes = pm.meta.len();
-                        f.stat.perms = perms_from_meta(&pm.meta);
-                        f.stat.last_accessed = Timestamp::from_second(pm.meta.atime()).unwrap();
-                        f.stat.last_modified = Timestamp::from_second(pm.meta.mtime()).unwrap();
+                        f.stat = Stat {
+                            qid: f.stat.qid,
+                            name,
+                            owner,
+                            group,
+                            perms: perms_from_meta(&pm.meta),
+                            n_bytes: pm.meta.len(),
+                            last_accessed: Timestamp::from_second(pm.meta.atime()).unwrap(),
+                            last_modified: Timestamp::from_second(pm.meta.mtime()).unwrap(),
+                            last_modified_by: take(&mut f.stat.last_modified_by),
+                        };
                         f.aux.path = pm.path;
                         f.aux.meta = pm.meta;
                     })
@@ -129,7 +142,7 @@ impl LocalProxyFs {
         }
 
         // Anything remaining in on_disk is something new so insert it
-        for (name, pm) in on_disk.into_iter() {
+        for (qid_path, (name, pm)) in on_disk.into_iter() {
             let ty = if pm.meta.is_dir() {
                 FileType::DIRECTORY
             } else {
@@ -137,7 +150,9 @@ impl LocalProxyFs {
             };
             let perms = perms_from_meta(&pm.meta);
             let meta = pm.meta.clone();
-            let qid = self.ft.try_add_node(qid, &name, perms, ty, pm)?;
+            let qid = self
+                .ft
+                .try_add_node_with_qid(qid, qid_path, &name, perms, ty, pm)?;
             self.try_sync_file_with_meta(qid.path, meta)?;
         }
 
@@ -177,7 +192,10 @@ impl LocalProxyFs {
         })
     }
 
-    fn on_disk_entries_for(&self, dir_path: &Path) -> io::Result<BTreeMap<String, PathMeta>> {
+    fn on_disk_entries_for(
+        &self,
+        dir_path: &Path,
+    ) -> io::Result<BTreeMap<u64, (String, PathMeta)>> {
         let mut m = BTreeMap::new();
 
         for entry in fs::read_dir(dir_path)? {
@@ -187,7 +205,8 @@ impl LocalProxyFs {
 
             // Only include entries that resolve to being under our root
             if let Some(meta) = self.meta_if_under_root(&path) {
-                m.insert(name, PathMeta::new(path, meta));
+                let ino = meta.ino();
+                m.insert(ino, (name, PathMeta::new(path, meta)));
             };
         }
 
@@ -426,7 +445,7 @@ fn io_create(path: &Path, perm: Perm) -> io::Result<()> {
     if path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::AlreadyExists,
-            "file already exists",
+            E_ALREADY_EXISTS,
         ));
     }
 
@@ -479,7 +498,7 @@ mod tests {
             fs::create_dir(root.join(SUBDIR_PATH)).unwrap();
             fs::write(root.join(NESTED_PATH), b"nested").unwrap();
 
-            let proxy_fs = LocalProxyFs::new(&root).unwrap();
+            let proxy_fs = LocalProxyFs::new_with_io_unit(&root, 1024).unwrap();
 
             Self {
                 tmp,
@@ -584,10 +603,11 @@ mod tests {
         t.symlink_in_root("escape", &outside).unwrap();
 
         let entries = t.proxy_fs.on_disk_entries_for(&t.root).unwrap();
+        let names: Vec<_> = entries.values().map(|(name, _)| name.as_str()).collect();
 
-        assert!(entries.contains_key(HELLO_PATH));
-        assert!(entries.contains_key(SUBDIR_PATH));
-        assert!(!entries.contains_key("escape"));
+        assert!(names.contains(&HELLO_PATH));
+        assert!(names.contains(&SUBDIR_PATH));
+        assert!(!names.contains(&"escape"));
     }
 
     #[test]
@@ -689,7 +709,7 @@ mod tests {
 
         assert_eq!(
             t.proxy_fs.open(qid, Mode::READ, CID).unwrap(),
-            DEFAULT_IOUNIT
+            t.proxy_fs.iounit
         );
         assert_eq!(
             t.proxy_fs.open(42, Mode::READ, CID).unwrap_err(),
@@ -777,5 +797,105 @@ mod tests {
         let stat = t.proxy_fs.stat(qid, CID).unwrap();
         assert_eq!(stat.qid.path, qid);
         assert_eq!(stat.name, HELLO_PATH);
+    }
+
+    #[test]
+    fn write_stat_updates_file_metadata() {
+        let t = FsWithTempDir::new();
+        let qid_path = t.qid_for_path(HELLO_PATH);
+        let qid = t.proxy_fs.ft.with_file(qid_path, |f| f.stat.qid).unwrap();
+
+        let new_perms = Perm::OWNER_READ | Perm::OWNER_WRITE;
+        let wstat = WStat {
+            qid,
+            name: Some("renamed".into()),
+            perms: Some(new_perms),
+            n_bytes: Some(123),
+            ..Default::default()
+        };
+
+        t.proxy_fs.write_stat(qid.path, wstat, CID).unwrap();
+
+        let stat = t.proxy_fs.stat(qid.path, CID).unwrap();
+        assert_eq!(stat.name, "renamed");
+        assert_eq!(stat.perms, new_perms);
+        assert_eq!(stat.n_bytes, 123);
+    }
+
+    #[test]
+    fn remove_works_for_file() {
+        let t = FsWithTempDir::new();
+        let qid = t.qid_for_path(HELLO_PATH);
+        let path = t.proxy_fs.path_for_qid(qid);
+
+        let res = t.proxy_fs.remove(qid, CID);
+
+        assert!(res.is_ok(), "{res:?}");
+
+        let err = fs::read(path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn remove_works_for_empty_dir() {
+        let t = FsWithTempDir::new();
+        let dir_qid = t.qid_for_path(SUBDIR_PATH);
+        t.proxy_fs.try_sync_dir(dir_qid).unwrap();
+
+        // Remove the nested file we create to leave us with an empty dir
+        let qid = t.qid_for_path(NESTED_PATH);
+        let path = t.proxy_fs.path_for_qid(qid);
+        fs::remove_file(path).unwrap();
+
+        // Now remove the dir using proxy_fs
+        let path = t.proxy_fs.path_for_qid(dir_qid);
+        let res = t.proxy_fs.remove(dir_qid, CID);
+
+        assert!(res.is_ok(), "{res:?}");
+
+        let err = fs::read_dir(path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn remove_errors_for_occupied_dir() {
+        let t = FsWithTempDir::new();
+
+        // Now remove the dir using proxy_fs
+        let qid = t.qid_for_path(SUBDIR_PATH);
+        let path = t.proxy_fs.path_for_qid(qid);
+        let res = t.proxy_fs.remove(qid, CID);
+
+        assert!(res.is_err(), "{res:?}");
+
+        // will panic if dir is missing
+        fs::read_dir(path).unwrap();
+    }
+
+    #[test_case(Perm::OWNER_READ, FileType::FILE; "file create")]
+    #[test_case(Perm::DIRECTORY | Perm::OWNER_READ, FileType::DIRECTORY; "directory create")]
+    #[test]
+    fn create_produces_correct_filetypes(perm: Perm, expected_ty: FileType) {
+        let t = FsWithTempDir::new();
+
+        let (qid, iounit) = t
+            .proxy_fs
+            .create(QID_ROOT, "new", perm, Mode::READ, CID)
+            .unwrap();
+
+        assert_eq!(iounit, 1024);
+        assert_eq!(qid.ty, expected_ty);
+        assert_eq!(t.proxy_fs.walk_one(0, "new", CID).unwrap().path, qid.path);
+    }
+
+    #[test]
+    fn create_errors_when_target_already_exists() {
+        let t = FsWithTempDir::new();
+        let err = t
+            .proxy_fs
+            .create(QID_ROOT, HELLO_PATH, Perm::OWNER_READ, Mode::READ, CID)
+            .unwrap_err();
+
+        assert_eq!(err, E_ALREADY_EXISTS);
     }
 }

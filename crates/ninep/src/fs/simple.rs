@@ -3,13 +3,15 @@ use jiff::Timestamp;
 
 use crate::{
     Result,
-    fs::{FileType, Perm, Qid, Stat, WStat},
+    fs::{FileType, Perm, QID_ROOT, Qid, Stat, WStat},
     sansio::server::{E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME, E_UNKNOWN_FILE},
 };
 use std::{
     collections::BTreeMap,
     sync::{Arc, RwLock},
 };
+
+const E_ALREADY_EXISTS: &str = "file already exists";
 
 /// A minimal file tree implementation that can be used to implement a simple 9p file server.
 #[derive(Debug, Clone)]
@@ -57,6 +59,29 @@ where
         aux: T,
     ) -> Result<Qid> {
         self.with_nodes_mut(|nodes| nodes.try_insert(parent, name, perms, ty, aux))
+    }
+
+    /// Add a new node to the tree, returning its `qid`.
+    ///
+    /// Errors if `parent` is not a known node.
+    ///
+    /// Panics if `qid` is already in the tree.
+    pub fn try_add_node_with_qid(
+        &self,
+        parent: u64,
+        qid: u64,
+        name: &str,
+        perms: Perm,
+        ty: FileType,
+        aux: T,
+    ) -> Result<Qid> {
+        self.with_nodes_mut(|nodes| {
+            if nodes.entries.contains_key(&qid) || qid <= nodes.next_qid {
+                panic!("qid={qid} already exists within this tree");
+            }
+
+            nodes.try_insert_with_qid(parent, qid, name, perms, ty, aux)
+        })
     }
 
     /// Remove a node and all of its children from the tree.
@@ -215,10 +240,10 @@ where
     T: Send + Sync + 'static,
 {
     fn new(owner: &str, group: &str, perms: Perm, aux: T) -> Self {
-        let root = File::new(Qid::dir(0), "/", owner, group, perms, aux, None);
+        let root = File::new(Qid::dir(QID_ROOT), "/", owner, group, perms, aux, None);
 
         Self {
-            entries: BTreeMap::from_iter([(0, root)]),
+            entries: BTreeMap::from_iter([(QID_ROOT, root)]),
             children: BTreeMap::new(),
             next_qid: 1,
         }
@@ -227,6 +252,21 @@ where
     fn try_insert(
         &mut self,
         parent: u64,
+        name: &str,
+        perms: Perm,
+        ty: FileType,
+        aux: T,
+    ) -> Result<Qid> {
+        let qid = self.try_insert_with_qid(parent, self.next_qid + 1, name, perms, ty, aux)?;
+        self.next_qid += 1;
+
+        Ok(qid)
+    }
+
+    fn try_insert_with_qid(
+        &mut self,
+        parent: u64,
+        qid_path: u64,
         name: &str,
         perms: Perm,
         ty: FileType,
@@ -250,14 +290,12 @@ where
         if let Some(siblings) = self.children.get(&parent) {
             for qid in siblings.iter() {
                 if name == self.entries.get(qid).unwrap().stat.name {
-                    return Err("file already exists".to_string());
+                    return Err(E_ALREADY_EXISTS.to_string());
                 }
             }
         }
 
         let perms = perms.apply_create_mask(pstat.perms);
-        let qid_path = self.next_qid;
-        self.next_qid += 1;
 
         let qid = Qid {
             ty,
@@ -290,6 +328,9 @@ where
 
         while let Some(qid) = to_remove.pop() {
             self.entries.remove(&qid);
+            for child_list in self.children.values_mut() {
+                child_list.retain(|child| *child != qid);
+            }
             if let Some(children) = self.children.remove(&qid) {
                 to_remove.extend(children);
             }

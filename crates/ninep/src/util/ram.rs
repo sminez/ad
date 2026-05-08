@@ -287,7 +287,7 @@ mod tests {
     }
 
     #[test]
-    fn remove_errors_for_occupied_directories() {
+    fn remove_errors_for_occupied_dir() {
         let fs = RamFs::new("user", "group");
         let dir = fs
             .file_tree()
@@ -314,5 +314,19 @@ mod tests {
         assert_eq!(iounit, 999);
         assert_eq!(qid.ty, expected_ty);
         assert_eq!(fs.walk_one(0, name, CID).unwrap().path, qid.path);
+    }
+
+    #[test]
+    fn create_errors_when_target_already_exists() {
+        let fs = RamFs::new("user", "group");
+        fs.ft
+            .try_add_node(0, "test", Perm::OWNER_READ, FileType::FILE, Vec::new())
+            .unwrap();
+
+        let err = fs
+            .create(0, "test", Perm::OWNER_READ, Mode::READ, CID)
+            .unwrap_err();
+
+        assert_eq!(err, "file already exists");
     }
 }
