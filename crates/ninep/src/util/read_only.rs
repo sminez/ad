@@ -40,6 +40,10 @@ impl<T> Serve9p for ReadOnlyFs<T>
 where
     T: Serve9p,
 {
+    fn user_is_in_group(&self, uname: &str, group: &str) -> bool {
+        self.inner.user_is_in_group(uname, group)
+    }
+
     fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
         self.inner.open(qid, mode, cid)
     }
@@ -91,5 +95,13 @@ where
         }
 
         self.inner.create(parent, name, perm, mode, cid)
+    }
+
+    fn clunk(&self, qid: u64, cid: ClientId) {
+        self.inner.clunk(qid, cid)
+    }
+
+    fn flush(&self, old_tag: u16, cid: ClientId) {
+        self.inner.flush(old_tag, cid)
     }
 }

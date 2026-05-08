@@ -50,6 +50,10 @@ impl<T> Serve9p for HookFs<T>
 where
     T: Serve9p,
 {
+    fn user_is_in_group(&self, uname: &str, group: &str) -> bool {
+        self.inner.user_is_in_group(uname, group)
+    }
+
     fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
         (self.hook)(FsOp::open(cid, qid, mode))?;
 
@@ -110,6 +114,18 @@ where
 
         self.inner.create(parent, name, perm, mode, cid)
     }
+
+    fn clunk(&self, qid: u64, cid: ClientId) {
+        _ = (self.hook)(FsOp::clunk(cid, qid));
+
+        self.inner.clunk(qid, cid)
+    }
+
+    fn flush(&self, old_tag: u16, cid: ClientId) {
+        _ = (self.hook)(FsOp::flush(cid, old_tag));
+
+        self.inner.flush(old_tag, cid)
+    }
 }
 
 /// Events emitted for each filesystem operation.
@@ -161,6 +177,14 @@ pub enum FsOp<'a> {
         name: &'a str,
         perm: Perm,
         mode: Mode,
+    },
+    Clunk {
+        cid: ClientId,
+        qid: u64,
+    },
+    Flush {
+        cid: ClientId,
+        old_tag: u16,
     },
 }
 
@@ -219,6 +243,14 @@ impl<'a> FsOp<'a> {
             perm,
             mode,
         }
+    }
+
+    fn clunk(cid: ClientId, qid: u64) -> Self {
+        Self::Clunk { cid, qid }
+    }
+
+    fn flush(cid: ClientId, old_tag: u16) -> Self {
+        Self::Flush { cid, old_tag }
     }
 }
 
@@ -462,5 +494,34 @@ mod tests {
                 E_UNKNOWN_FILE
             );
         }
+    }
+
+    #[test_case(true; "hook ok")]
+    #[test_case(false; "hook err")]
+    #[test]
+    fn clunk_hook_doesnt_affect_execution(hook_ok: bool) {
+        let inner = RamFs::new("user", "group");
+        let qid = add_file(&inner, 0, "f", b"");
+
+        let fs = HookFs::new(inner, move |op| {
+            assert_eq!(op, FsOp::clunk(CID, qid.path));
+            hook_result(hook_ok)
+        });
+
+        fs.clunk(qid.path, CID);
+    }
+
+    #[test_case(true; "hook ok")]
+    #[test_case(false; "hook err")]
+    #[test]
+    fn flush_hook_doesnt_affect_execution(hook_ok: bool) {
+        let inner = RamFs::new("user", "group");
+
+        let fs = HookFs::new(inner, move |op| {
+            assert_eq!(op, FsOp::flush(CID, 42));
+            hook_result(hook_ok)
+        });
+
+        fs.flush(42, CID);
     }
 }
