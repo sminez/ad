@@ -37,6 +37,7 @@ use ninep::{
     sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
 use std::{
+    cmp::min,
     env,
     fs::{create_dir_all, remove_file},
     mem::take,
@@ -618,11 +619,12 @@ fn spawn_minibuffer_listener(
 }
 
 fn apply_offset(data: &[u8], offset: usize, count: usize) -> Vec<u8> {
-    data.iter()
-        .skip(offset)
-        .take(count)
-        .copied()
-        .collect::<Vec<u8>>()
+    if offset > data.len() {
+        Vec::new()
+    } else {
+        let to = min(offset + count, data.len());
+        data[offset..to].to_vec()
+    }
 }
 
 fn empty_dir_stat(qid: u64, name: &str) -> Stat {
