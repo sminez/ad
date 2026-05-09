@@ -48,6 +48,10 @@ pub enum MiniBufferSelection {
 pub struct EventData<'a> {
     /// The source of the event
     pub source: Source,
+    /// The starting byte offset within the buffer of `txt`
+    pub byte_from: usize,
+    /// The ending byte offset within the buffer of `txt`
+    pub byte_to: usize,
     /// The starting character offset within the buffer of `txt`
     pub ch_from: usize,
     /// The ending character offset within the buffer of `txt`
@@ -64,6 +68,8 @@ impl<'a> From<&'a FsysEvent> for EventData<'a> {
     fn from(evt: &'a FsysEvent) -> Self {
         Self {
             source: evt.source,
+            byte_from: evt.byte_from,
+            byte_to: evt.byte_to,
             ch_from: evt.ch_from,
             ch_to: evt.ch_to,
             txt: &evt.txt,
@@ -86,9 +92,15 @@ impl<'a> EventData<'a> {
             return Ok(self.txt.to_string());
         }
 
-        client.write_xaddr(&format!("#{},#{}", self.ch_from, self.ch_to))?;
+        let offset = self.byte_from as u64;
+        let count = (self.byte_to - self.byte_from) as u32;
+        let bytes = if self.from_scratch {
+            client.read_scratch_from(offset, count)?
+        } else {
+            client.read_body_from(offset, count)?
+        };
 
-        client.read_xdot()
+        Ok(String::from_utf8(bytes).map_err(io::Error::other)?)
     }
 
     #[cfg(feature = "tokio")]
@@ -98,11 +110,15 @@ impl<'a> EventData<'a> {
             return Ok(self.txt.to_string());
         }
 
-        client
-            .write_xaddr(&format!("#{},#{}", self.ch_from, self.ch_to))
-            .await?;
+        let offset = self.byte_from as u64;
+        let count = (self.byte_to - self.byte_from) as u32;
+        let bytes = if self.from_scratch {
+            client.read_scratch_from(offset, count).await?
+        } else {
+            client.read_body_from(offset, count).await?
+        };
 
-        client.read_xdot().await
+        Ok(String::from_utf8(bytes).map_err(io::Error::other)?)
     }
 }
 

@@ -99,6 +99,11 @@ impl Client {
         self.inner.read_str("scratch").await
     }
 
+    /// Read `count` bytes from the contents of the scratch buffer from a particular offset.
+    pub async fn read_scratch_from(&self, byte_offset: u64, count: u32) -> Result<Vec<u8>> {
+        self.inner.read_from("scratch", byte_offset, count).await
+    }
+
     /// Append to the scratch buffer
     pub async fn append_scratch(&self, content: &str) -> Result<()> {
         self.inner.write_str("scratch", 0, content).await?;
@@ -328,6 +333,13 @@ impl BufferClient {
     /// Read the body of the given buffer.
     pub async fn read_body(&self) -> Result<String> {
         self._read_buffer_file("body").await
+    }
+
+    /// Read `count` bytes from the contents of the buffer body from a particular offset.
+    pub async fn read_body_from(&self, byte_offset: u64, count: u32) -> Result<Vec<u8>> {
+        self.inner
+            .read_from(format!("buffers/{}/body", self.bufid), byte_offset, count)
+            .await
     }
 
     /// Read the current dot address of the given buffer.
@@ -736,6 +748,8 @@ mod tests {
 
         let evt = EventData {
             source: Source::Fsys,
+            byte_from: 0,
+            byte_to: 2,
             ch_from: 0,
             ch_to: 2,
             txt: "foo",
