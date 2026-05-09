@@ -1,4 +1,7 @@
-use ad_client::{LogEvent, sync::Client};
+use ad_client::{
+    LogEvent,
+    sync::{BufferClient, Client},
+};
 use anyhow::Context;
 use std::{
     env,
@@ -29,11 +32,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let buffer_id = client
+    let client = client
         .open_in_new_window(format!("{dir}/+watch"))
         .context("unable to open +watch buffer")?;
+    let buffer_id = client.id();
 
-    clear_and_rerun(&client, buffer_id, &cmd, &args)?;
+    clear_and_rerun(&client, &cmd, &args)?;
 
     for evt in client.log_events()? {
         match evt? {
@@ -41,10 +45,11 @@ fn main() -> anyhow::Result<()> {
 
             LogEvent::Save(id) => {
                 let fname = client
-                    .read_filename(id)
+                    .for_buffer(id)
+                    .read_filename()
                     .context("unable to read filename of saved buffer")?;
                 if fname.starts_with(&dir) {
-                    clear_and_rerun(&client, buffer_id, &cmd, &args)?;
+                    clear_and_rerun(&client, &cmd, &args)?;
                 }
             }
 
@@ -55,8 +60,8 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn clear_and_rerun(client: &Client, id: usize, cmd: &str, args: &[String]) -> anyhow::Result<()> {
-    client.clear(id).context("unable to clear buffer")?;
+fn clear_and_rerun(client: &BufferClient, cmd: &str, args: &[String]) -> anyhow::Result<()> {
+    client.clear().context("unable to clear buffer")?;
     client.mark_clean().context("unable to mark buffer clean")?;
 
     let mut child = Exec::cmd(cmd)
@@ -68,7 +73,7 @@ fn clear_and_rerun(client: &Client, id: usize, cmd: &str, args: &[String]) -> an
 
     let stdout = BufReader::new(child.stdout.take().unwrap());
     let mut w = client
-        .body_writer(id)
+        .body_writer()
         .context("unable to create body writer")?;
 
     spawn(move || {

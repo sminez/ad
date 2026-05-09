@@ -5,8 +5,8 @@
 //! - Running "clear" will clear the ad buffer
 //! - Running "exit" will close the shell subprocess as well as the ad buffer
 use ad_client::{
-    EventOutcome, Result, Source,
-    sync::{Client, EventFilter},
+    EventData, EventOutcome, Result, Source,
+    sync::{BufferClient, Client, EventFilter},
 };
 use anyhow::Context;
 use std::{
@@ -29,7 +29,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let buffer_id = client
+    let client = client
         .open_in_new_window("+repl")
         .context("unable to create +repl window")?;
     let mut env_vars: Vec<(String, String)> = env::vars().collect();
@@ -47,7 +47,7 @@ fn main() -> anyhow::Result<()> {
     let stdin = child.stdin.take().unwrap();
     let mut stdout = child.stdout.take().unwrap();
     let mut w = client
-        .body_writer(buffer_id)
+        .body_writer()
         .context("unable to create body writer")?;
 
     spawn(move || {
@@ -55,14 +55,7 @@ fn main() -> anyhow::Result<()> {
     });
 
     client
-        .run_event_filter(
-            buffer_id,
-            Filter {
-                child,
-                buffer_id,
-                stdin,
-            },
-        )
+        .run_event_filter(Filter { child, stdin })
         .context("event filter died")?;
 
     Ok(())
@@ -70,7 +63,6 @@ fn main() -> anyhow::Result<()> {
 
 struct Filter {
     child: Job,
-    buffer_id: usize,
     stdin: File,
 }
 
@@ -81,16 +73,16 @@ impl Drop for Filter {
 }
 
 impl Filter {
-    fn clear_buffer(&mut self, client: &Client) -> io::Result<()> {
-        client.write_xaddr(self.buffer_id, ",")?;
-        client.write_xdot(self.buffer_id, PROMPT)?;
-        client.write_addr(self.buffer_id, "$")?;
+    fn clear_buffer(&mut self, client: &BufferClient) -> io::Result<()> {
+        client.write_xaddr(",")?;
+        client.write_xdot(PROMPT)?;
+        client.write_addr("$")?;
         client.ctl("mark-clean", "")?;
 
         Ok(())
     }
 
-    fn send_input(&mut self, input: &str, client: &Client) -> Result<EventOutcome> {
+    fn send_input(&mut self, input: &str, client: &BufferClient) -> Result<EventOutcome> {
         match input.trim() {
             "clear" => {
                 self.clear_buffer(client)?;
@@ -116,30 +108,23 @@ impl Filter {
 }
 
 impl EventFilter for Filter {
-    fn handle_insert(
-        &mut self,
-        src: Source,
-        _from: usize,
-        _to: usize,
-        txt: &str,
-        client: &Client,
-    ) -> Result<EventOutcome> {
+    fn on_insert(&mut self, data: EventData<'_>, client: &BufferClient) -> Result<EventOutcome> {
         client.mark_clean()?;
 
-        if src == Source::Fsys {
+        if data.source == Source::Fsys {
             // This is us writing to the body so move dot to EOF
-            client.write_addr(self.buffer_id, "$")?;
+            client.write_addr("$")?;
             return Ok(EventOutcome::Handled);
         }
 
-        if txt == "\n" {
-            client.write_xaddr(self.buffer_id, "$")?;
-            let xaddr = client.read_xaddr(self.buffer_id)?;
-            let addr = client.read_addr(self.buffer_id)?;
+        if data.txt == "\n" {
+            client.write_xaddr("$")?;
+            let xaddr = client.read_xaddr()?;
+            let addr = client.read_addr()?;
 
             if xaddr == addr {
-                client.write_xaddr(self.buffer_id, "$-1")?;
-                let raw = client.read_xdot(self.buffer_id)?;
+                client.write_xaddr("$-1")?;
+                let raw = client.read_xdot()?;
                 return self.send_input(strip_prompt(&raw), client);
             }
         }
@@ -147,28 +132,24 @@ impl EventFilter for Filter {
         Ok(EventOutcome::Handled)
     }
 
-    fn handle_delete(
-        &mut self,
-        _src: Source,
-        _from: usize,
-        _to: usize,
-        client: &Client,
-    ) -> Result<EventOutcome> {
+    fn on_delete(&mut self, _data: EventData<'_>, client: &BufferClient) -> Result<EventOutcome> {
         client.mark_clean()?;
 
         Ok(EventOutcome::Handled)
     }
 
-    fn handle_execute(
+    fn on_execute(
         &mut self,
-        _src: Source,
-        _from: usize,
-        _to: usize,
-        txt: &str,
-        client: &Client,
+        data: EventData<'_>,
+        arg: Option<EventData<'_>>,
+        client: &BufferClient,
     ) -> Result<EventOutcome> {
-        let s = strip_prompt(txt).trim();
-        client.append_to_body(self.buffer_id, &format!("\n{PROMPT}{s}\n"))?;
+        if arg.is_some() {
+            return Ok(EventOutcome::Passthrough);
+        }
+
+        let s = strip_prompt(data.txt).trim();
+        client.append_to_body(&format!("\n{PROMPT}{s}\n"))?;
         let outcome = self.send_input(s, client)?;
 
         Ok(outcome)

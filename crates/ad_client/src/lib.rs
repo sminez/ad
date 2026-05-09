@@ -10,6 +10,7 @@
     rustdoc::all,
     clippy::undocumented_unsafe_blocks
 )]
+use ad_event::{FsysEvent, Kind};
 use ninep::{sansio::server::socket_dir, sync::client::Client};
 use std::{fs, io, str::FromStr};
 
@@ -40,6 +41,69 @@ pub enum MiniBufferSelection {
     },
     /// The user dismissed the minibuffer without providing input
     Cancelled,
+}
+
+/// Event data received from an ad buffer's `events` file.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct EventData<'a> {
+    /// The source of the event
+    pub source: Source,
+    /// The starting character offset within the buffer of `txt`
+    pub ch_from: usize,
+    /// The ending character offset within the buffer of `txt`
+    pub ch_to: usize,
+    /// The text content for the event (truncated if `ch_from`...`ch_to` exceeds 256 characters)
+    pub txt: &'a str,
+    /// Whether or not `txt` is truncated.
+    pub truncated: bool,
+    /// Whether or not this event originated from the scratch buffer
+    pub from_scratch: bool,
+}
+
+impl<'a> From<&'a FsysEvent> for EventData<'a> {
+    fn from(evt: &'a FsysEvent) -> Self {
+        Self {
+            source: evt.source,
+            ch_from: evt.ch_from,
+            ch_to: evt.ch_to,
+            txt: &evt.txt,
+            truncated: evt.truncated,
+            from_scratch: matches!(
+                evt.kind,
+                Kind::LoadScratch
+                    | Kind::ExecuteScratch
+                    | Kind::InsertScratch
+                    | Kind::DeleteScratch
+            ),
+        }
+    }
+}
+
+impl<'a> EventData<'a> {
+    /// Attempt to read the full text of this event from the underlying buffer
+    pub fn try_full_text(&self, client: &sync::BufferClient) -> Result<String> {
+        if self.txt.len() < ad_event::MAX_CHARS {
+            return Ok(self.txt.to_string());
+        }
+
+        client.write_xaddr(&format!("#{},#{}", self.ch_from, self.ch_to))?;
+
+        client.read_xdot()
+    }
+
+    #[cfg(feature = "tokio")]
+    /// Attempt to read the full text of this event from the underlying buffer
+    pub async fn try_full_text_async(&self, client: &tokio::BufferClient) -> Result<String> {
+        if self.txt.len() < ad_event::MAX_CHARS {
+            return Ok(self.txt.to_string());
+        }
+
+        client
+            .write_xaddr(&format!("#{},#{}", self.ch_from, self.ch_to))
+            .await?;
+
+        client.read_xdot().await
+    }
 }
 
 /// Outcome of handling an event within an event filter

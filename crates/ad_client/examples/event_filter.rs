@@ -1,6 +1,6 @@
 use ad_client::{
-    EventOutcome, Result, Source,
-    sync::{Client, EventFilter},
+    EventData, EventOutcome, Result,
+    sync::{BufferClient, Client, EventFilter},
 };
 use std::io;
 
@@ -8,7 +8,7 @@ fn main() -> io::Result<()> {
     let client = Client::new()?;
     client.open(".")?;
     let bufid = client.current_buffer()?;
-    client.run_event_filter(bufid, Filter)?;
+    client.for_buffer(bufid).run_event_filter(Filter)?;
 
     Ok(())
 }
@@ -16,19 +16,12 @@ fn main() -> io::Result<()> {
 struct Filter;
 
 impl EventFilter for Filter {
-    fn handle_load(
-        &mut self,
-        _src: Source,
-        from: usize,
-        to: usize,
-        txt: &str,
-        _client: &Client,
-    ) -> Result<EventOutcome> {
-        println!("got load: {from}->{to} {txt:?}");
-        match txt {
+    fn on_load(&mut self, data: EventData<'_>, _client: &BufferClient) -> Result<EventOutcome> {
+        println!("got load: {}->{} {:?}", data.ch_from, data.ch_to, data.txt);
+        match data.txt {
             "README.md" => Ok(EventOutcome::Passthrough),
             _ => {
-                println!("  > suppressing load of {txt}");
+                println!("  > suppressing load of {}", data.txt);
                 Ok(EventOutcome::Handled)
             }
         }

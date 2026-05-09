@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "ad_client"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "ad-editor",
  "ad_event",
@@ -64,7 +64,7 @@ dependencies = [
 
 [[package]]
 name = "ad_repl"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ad_client",
  "anyhow",
@@ -73,7 +73,7 @@ dependencies = [
 
 [[package]]
 name = "ad_watch"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ad_client",
  "anyhow",
