@@ -401,7 +401,7 @@ mod tests {
         "some text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
+            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 0, "some"),
         ];
         "right click drag selection complete"
     )]
@@ -416,7 +416,7 @@ mod tests {
         "some text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 0, "some"),
         ];
         "middle click drag selection complete"
     )]
@@ -468,7 +468,7 @@ mod tests {
         "some text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 3, "some"),
+            FsysEvent::new(Source::Mouse, Kind::LoadBody, 0, 0, "some"),
         ];
         "right click expand in existing selection"
     )]
@@ -484,7 +484,7 @@ mod tests {
         "some text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 0, "some"),
         ];
         "middle click expand in existing selection"
     )]
@@ -502,8 +502,8 @@ mod tests {
         "some text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::ChordedArgument, 5, 8, "text"),
-            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 3, "some"),
+            FsysEvent::new(Source::Mouse, Kind::ChordedArgument, 5, 5, "text"),
+            FsysEvent::new(Source::Mouse, Kind::ExecuteBody, 0, 0, "some"),
         ];
         "middle click with dot arg"
     )]
@@ -520,7 +520,7 @@ mod tests {
         " text to test with",
         "some",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
         ];
         "chord cut"
     )]
@@ -537,8 +537,8 @@ mod tests {
         "X text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
-            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 0, "X"),
         ];
         "chord paste"
     )]
@@ -557,8 +557,8 @@ mod tests {
         "some text to test with",
         "some",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
-            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 4, "some"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 0, "some"),
         ];
         "chord cut then paste"
     )]
@@ -579,9 +579,9 @@ mod tests {
         "Xtext to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
-            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 1, 2, " "),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 0, "X"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 1, 1, " "),
         ];
         "chord paste then cut"
     )]
@@ -600,7 +600,7 @@ mod tests {
         " text to test with",
         "some",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
         ];
         "repeated chord cut"
     )]
@@ -619,8 +619,8 @@ mod tests {
         "X text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
-            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 0, "X"),
         ];
         "repeated chord paste"
     )]
@@ -638,8 +638,8 @@ mod tests {
         "X text to test with",
         "X",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
-            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 1, "X"),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
+            FsysEvent::new(Source::Mouse, Kind::InsertBody, 0, 0, "X"),
         ];
         "motion after chord paste is ignored"
     )]
@@ -657,7 +657,7 @@ mod tests {
         " text to test with",
         "some",
         &[
-            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 4, ""),
+            FsysEvent::new(Source::Mouse, Kind::DeleteBody, 0, 0, "some"),
         ];
         "motion after chord cut is ignored"
     )]

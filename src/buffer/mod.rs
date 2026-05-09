@@ -1125,9 +1125,11 @@ impl Buffer {
     pub(crate) fn notify_load(&self, source: Source) -> bool {
         match self.input_filter.as_ref() {
             Some(f) => {
-                let (ch_from, ch_to) = self.dot.as_char_indices();
+                let ch_from = self.dot.first_cur().idx;
+                let byte_from = self.txt.char_to_byte(ch_from);
                 let txt = self.dot.content(self);
-                f.notify_load(source, ch_from, ch_to, &txt);
+                f.notify_load(source, ch_from, byte_from, &txt);
+
                 true
             }
             None => false,
@@ -1138,9 +1140,12 @@ impl Buffer {
     pub(crate) fn notify_execute(&self, source: Source, arg: Option<(Range, String)>) -> bool {
         match self.input_filter.as_ref() {
             Some(f) => {
-                let (ch_from, ch_to) = self.dot.as_char_indices();
+                let ch_from = self.dot.first_cur().idx;
+                let byte_from = self.txt.char_to_byte(ch_from);
                 let txt = self.dot.content(self);
-                f.notify_execute(source, ch_from, ch_to, &txt, arg);
+                let arg = arg.map(|(r, s)| (r.start.idx, self.txt.char_to_byte(r.start.idx), s));
+                f.notify_execute(source, ch_from, byte_from, &txt, arg);
+
                 true
             }
             None => false,
@@ -1168,6 +1173,12 @@ impl Buffer {
         }
 
         let idx = cur.idx;
+        let byte_from = if self.input_filter.is_some() {
+            Some(self.txt.char_to_byte(idx))
+        } else {
+            None
+        };
+
         if let Some(s) = self.syntax_state.as_mut() {
             s.prepare_insert_char(idx, ch, &self.txt);
         }
@@ -1175,7 +1186,7 @@ impl Buffer {
         self.txt.insert_char(idx, ch);
 
         if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
-            f.notify_insert(source, idx, idx + 1, &ch.to_string());
+            f.notify_insert(source, idx, byte_from.unwrap(), &ch.to_string());
         }
 
         self.edit_log.insert_char(cur, ch);
@@ -1217,6 +1228,12 @@ impl Buffer {
         }
 
         let idx = cur.idx;
+        let byte_from = if self.input_filter.is_some() {
+            Some(self.txt.char_to_byte(idx))
+        } else {
+            None
+        };
+
         have_prepared_edit = false;
         if !s.is_empty()
             && let Some(ts) = self.syntax_state.as_mut()
@@ -1232,7 +1249,7 @@ impl Buffer {
             self.txt.insert_str(idx, &s);
 
             if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
-                f.notify_insert(source, idx, idx + len, &s);
+                f.notify_insert(source, idx, byte_from.unwrap(), &s);
             }
 
             self.edit_log.insert_string(cur, s);
@@ -1280,12 +1297,18 @@ impl Buffer {
 
     fn delete_cur(&mut self, cur: Cur, source: Option<Source>) -> Cur {
         let idx = cur.idx;
+        let byte_from = if self.input_filter.is_some() {
+            Some(self.txt.char_to_byte(idx))
+        } else {
+            None
+        };
+
         if idx < self.txt.len_chars() {
             let ch = self.txt.char(idx);
             self.txt.remove_char(idx);
 
             if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
-                f.notify_delete(source, idx, idx + 1);
+                f.notify_delete(source, idx, byte_from.unwrap(), &ch.to_string());
             }
 
             self.edit_log.delete_char(cur, ch);
@@ -1298,13 +1321,19 @@ impl Buffer {
 
     fn delete_range(&mut self, r: Range, source: Option<Source>) -> (Cur, Option<String>) {
         let (from, to) = (r.start.idx, min(r.end.idx + 1, self.txt.len_chars()));
+        let byte_from = if self.input_filter.is_some() {
+            Some(self.txt.char_to_byte(from))
+        } else {
+            None
+        };
+
         let is_single_char = r.start.idx == r.end.idx;
 
         let s = self.txt.slice(from, to).to_string();
         self.txt.remove_range(from, to);
 
         if let (Some(source), Some(f)) = (source, self.input_filter.as_ref()) {
-            f.notify_delete(source, from, to);
+            f.notify_delete(source, from, byte_from.unwrap(), &s);
         }
 
         self.edit_log.delete_string(r.start, s.clone());

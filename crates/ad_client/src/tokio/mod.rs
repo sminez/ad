@@ -171,13 +171,7 @@ impl Client {
     ) -> Result<BufferClient> {
         let name = name.as_ref();
         let content = content.as_ref();
-
-        self.inner
-            .write(
-                "ctl",
-                0,
-                format!("open-virtual {name} {content}").as_bytes(),
-            )
+        self.ctl("open-virtual", &format!("{name} {content}"))
             .await?;
 
         Ok(BufferClient {
@@ -194,13 +188,7 @@ impl Client {
     ) -> Result<BufferClient> {
         let name = name.as_ref();
         let content = content.as_ref();
-
-        self.inner
-            .write(
-                "ctl",
-                0,
-                format!("open-virtual-in-new-window {name} {content}").as_bytes(),
-            )
+        self.ctl("open-virtual-in-new-window", &format!("{name} {content}"))
             .await?;
 
         Ok(BufferClient {

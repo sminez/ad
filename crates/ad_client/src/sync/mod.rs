@@ -177,7 +177,7 @@ impl Client {
     ) -> Result<BufferClient> {
         let name = name.as_ref();
         let content = content.as_ref();
-        self.ctl("open-virual", &format!("{name} {content}"))?;
+        self.ctl("open-virtual", &format!("{name} {content}"))?;
 
         Ok(BufferClient {
             bufid: self._id_for_path(name)?,
@@ -193,7 +193,7 @@ impl Client {
     ) -> Result<BufferClient> {
         let name = name.as_ref();
         let content = content.as_ref();
-        self.ctl("open-virual-in-new-window", &format!("{name} {content}"))?;
+        self.ctl("open-virtual-in-new-window", &format!("{name} {content}"))?;
 
         Ok(BufferClient {
             bufid: self._id_for_path(name)?,

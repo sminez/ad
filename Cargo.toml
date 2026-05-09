@@ -53,7 +53,7 @@ lto = false
 codegen-units = 16
 
 [dependencies]
-ad_event = { version = "0.4", path = "crates/ad_event" }
+ad_event = { version = "0.5", path = "crates/ad_event" }
 aho-corasick = "1.1.4"
 arbitrary = { version = "1", features = ["derive"], optional = true }
 lexopt = "0.3.2"

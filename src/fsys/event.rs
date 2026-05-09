@@ -1,6 +1,5 @@
 //! Message formats for the events file
 use crate::{
-    dot::Range,
     fsys::{
         Result,
         message::{Message, Req},
@@ -38,33 +37,33 @@ impl InputFilter {
         }
     }
 
-    pub fn notify_insert(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
+    pub fn notify_insert(&self, source: Source, ch_from: usize, byte_from: usize, txt: &str) {
         let k = if self.is_scratch {
             Kind::InsertScratch
         } else {
             Kind::InsertBody
         };
-        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
         _ = self.tx.send(evt);
     }
 
-    pub fn notify_delete(&self, source: Source, ch_from: usize, ch_to: usize) {
+    pub fn notify_delete(&self, source: Source, ch_from: usize, byte_from: usize, txt: &str) {
         let k = if self.is_scratch {
             Kind::DeleteScratch
         } else {
             Kind::DeleteBody
         };
-        let evt = FsysEvent::new(source, k, ch_from, ch_to, "");
+        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
         _ = self.tx.send(evt);
     }
 
-    pub fn notify_load(&self, source: Source, ch_from: usize, ch_to: usize, txt: &str) {
+    pub fn notify_load(&self, source: Source, ch_from: usize, byte_from: usize, txt: &str) {
         let k = if self.is_scratch {
             Kind::LoadScratch
         } else {
             Kind::LoadBody
         };
-        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
         _ = self.tx.send(evt);
     }
 
@@ -72,13 +71,12 @@ impl InputFilter {
         &self,
         source: Source,
         ch_from: usize,
-        ch_to: usize,
+        byte_from: usize,
         txt: &str,
-        arg: Option<(Range, String)>,
+        arg: Option<(usize, usize, String)>,
     ) {
-        if let Some((rng, arg)) = arg {
-            let (from, to) = (rng.start.idx, rng.end.idx);
-            let evt = FsysEvent::new(source, Kind::ChordedArgument, from, to, &arg);
+        if let Some((ch_from, byte_from, arg)) = arg {
+            let evt = FsysEvent::new(source, Kind::ChordedArgument, ch_from, byte_from, &arg);
             _ = self.tx.send(evt);
         }
         let k = if self.is_scratch {
@@ -87,7 +85,7 @@ impl InputFilter {
             Kind::ExecuteBody
         };
 
-        let evt = FsysEvent::new(source, k, ch_from, ch_to, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
         _ = self.tx.send(evt);
     }
 }
