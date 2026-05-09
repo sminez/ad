@@ -52,13 +52,13 @@ impl Client {
         })
     }
 
-    pub(crate) async fn event_lines(&mut self, buffer: usize) -> Result<ReadLineStream> {
+    pub(crate) async fn event_lines(&self, buffer: usize) -> Result<ReadLineStream> {
         self.inner
             .stream_lines(format!("buffers/{buffer}/event"))
             .await
     }
 
-    pub(crate) async fn write_event(&mut self, buffer: usize, event_line: &str) -> Result<()> {
+    pub(crate) async fn write_event(&self, buffer: usize, event_line: &str) -> Result<()> {
         self.inner
             .write_str(format!("buffers/{buffer}/event"), 0, event_line)
             .await?;
@@ -67,21 +67,21 @@ impl Client {
     }
 
     /// Iterate over the log events emitted by ad
-    pub async fn log_events(&mut self) -> Result<LogStream> {
+    pub async fn log_events(&self) -> Result<LogStream> {
         Ok(LogStream {
             inner: self.inner.stream_lines("log").await?,
         })
     }
 
     /// Get the currently active buffer id.
-    pub async fn current_buffer(&mut self) -> Result<usize> {
+    pub async fn current_buffer(&self) -> Result<usize> {
         let id = parse_bufid(&self.inner.read_str("buffers/current").await?)?;
 
         Ok(id)
     }
 
     /// Get the list of currently open buffers
-    pub async fn open_buffers(&mut self) -> Result<Vec<BufferMeta>> {
+    pub async fn open_buffers(&self) -> Result<Vec<BufferMeta>> {
         let buffers = self
             .inner
             .read_str("buffers/index")
@@ -99,29 +99,29 @@ impl Client {
         Ok(buffers)
     }
 
-    async fn _read_buffer_file(&mut self, buffer_id: usize, file: &str) -> Result<String> {
+    async fn _read_buffer_file(&self, buffer_id: usize, file: &str) -> Result<String> {
         self.inner
             .read_str(format!("buffers/{buffer_id}/{file}"))
             .await
     }
 
     /// Read the contents of the dot of the given buffer
-    pub async fn read_dot(&mut self, buffer_id: usize) -> Result<String> {
+    pub async fn read_dot(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "dot").await
     }
 
     /// Read the body of the given buffer.
-    pub async fn read_body(&mut self, buffer_id: usize) -> Result<String> {
+    pub async fn read_body(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "body").await
     }
 
     /// Read the current dot address of the given buffer.
-    pub async fn read_addr(&mut self, buffer_id: usize) -> Result<String> {
+    pub async fn read_addr(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "addr").await
     }
 
     /// Read the filename of the given buffer
-    pub async fn read_filename(&mut self, buffer_id: usize) -> Result<String> {
+    pub async fn read_filename(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "filename").await
     }
 
@@ -129,7 +129,7 @@ impl Client {
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub async fn read_xaddr(&mut self, buffer_id: usize) -> Result<String> {
+    pub async fn read_xaddr(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "xaddr").await
     }
 
@@ -137,12 +137,12 @@ impl Client {
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub async fn read_xdot(&mut self, buffer_id: usize) -> Result<String> {
+    pub async fn read_xdot(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "xdot").await
     }
 
     async fn _write_buffer_file(
-        &mut self,
+        &self,
         buffer_id: usize,
         file: &str,
         offset: u64,
@@ -154,37 +154,37 @@ impl Client {
     }
 
     /// Replace the dot of the given buffer with the provided string.
-    pub async fn write_dot(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub async fn write_dot(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "dot", 0, content.as_bytes())
             .await
     }
 
     /// Append the provided string to the given buffer.
-    pub async fn append_to_body(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub async fn append_to_body(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "body", 0, content.as_bytes())
             .await
     }
 
     /// Set the addr of the given buffer.
-    pub async fn write_addr(&mut self, buffer_id: usize, addr: &str) -> Result<usize> {
+    pub async fn write_addr(&self, buffer_id: usize, addr: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "addr", 0, addr.as_bytes())
             .await
     }
 
     /// Replace the xdot of the given buffer with the provided string.
-    pub async fn write_xdot(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub async fn write_xdot(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xdot", 0, content.as_bytes())
             .await
     }
 
     /// Set the xaddr of the given buffer.
-    pub async fn write_xaddr(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub async fn write_xaddr(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xaddr", 0, content.as_bytes())
             .await
     }
 
     /// Clear the contents of the given buffer
-    pub async fn clear(&mut self, buffer_id: usize) -> Result<()> {
+    pub async fn clear(&self, buffer_id: usize) -> Result<()> {
         self.write_xaddr(buffer_id, ",").await?;
         self.write_xdot(buffer_id, "").await?;
 
@@ -192,7 +192,7 @@ impl Client {
     }
 
     /// Focus the given buffer
-    pub async fn focus_buffer(&mut self, buffer_id: usize) -> Result<()> {
+    pub async fn focus_buffer(&self, buffer_id: usize) -> Result<()> {
         self.inner
             .write_str("buffers/current", 0, &buffer_id.to_string())
             .await?;
@@ -201,21 +201,21 @@ impl Client {
     }
 
     /// Set the cursor position for the given buffer to the beginning of the file
-    pub async fn cur_to_bof(&mut self, buffer_id: usize) -> Result<()> {
+    pub async fn cur_to_bof(&self, buffer_id: usize) -> Result<()> {
         self.write_addr(buffer_id, "0").await?;
 
         Ok(())
     }
 
     /// Set the cursor position for the given buffer to the end of the file
-    pub async fn cur_to_eof(&mut self, buffer_id: usize) -> Result<()> {
+    pub async fn cur_to_eof(&self, buffer_id: usize) -> Result<()> {
         self.write_addr(buffer_id, "$").await?;
 
         Ok(())
     }
 
     /// Send a control message to ad.
-    pub async fn ctl(&mut self, command: &str, args: &str) -> Result<()> {
+    pub async fn ctl(&self, command: &str, args: &str) -> Result<()> {
         self.inner
             .write("ctl", 0, format!("{command} {args}").as_bytes())
             .await?;
@@ -224,11 +224,11 @@ impl Client {
     }
 
     /// Echo a string message in the status line.
-    pub async fn echo(&mut self, msg: impl AsRef<str>) -> Result<()> {
+    pub async fn echo(&self, msg: impl AsRef<str>) -> Result<()> {
         self.ctl("echo", msg.as_ref()).await
     }
 
-    async fn _id_for_path(&mut self, path: &str) -> Result<usize> {
+    async fn _id_for_path(&self, path: &str) -> Result<usize> {
         sleep(Duration::from_millis(5)).await;
         for BufferMeta { id, filename } in self.open_buffers().await?.into_iter() {
             if filename.ends_with(path) {
@@ -242,7 +242,7 @@ impl Client {
     }
 
     /// Open the requested file, returning its ID.
-    pub async fn open(&mut self, path: impl AsRef<str>) -> Result<usize> {
+    pub async fn open(&self, path: impl AsRef<str>) -> Result<usize> {
         let path = path.as_ref();
         self.ctl("open", path).await?;
 
@@ -250,7 +250,7 @@ impl Client {
     }
 
     /// Open the requested file in a new window, returning its ID.
-    pub async fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<usize> {
+    pub async fn open_in_new_window(&self, path: impl AsRef<str>) -> Result<usize> {
         let path = path.as_ref();
         self.ctl("open-in-new-window", path).await?;
 
@@ -259,7 +259,7 @@ impl Client {
 
     /// Open a new virtual file showing the given content, returning its ID.
     pub async fn open_virtual(
-        &mut self,
+        &self,
         name: impl AsRef<str>,
         content: impl AsRef<str>,
     ) -> Result<usize> {
@@ -279,7 +279,7 @@ impl Client {
 
     /// Open a new virtual file showing the given content in a new window, returning its ID.
     pub async fn open_virtual_in_new_window(
-        &mut self,
+        &self,
         name: impl AsRef<str>,
         content: impl AsRef<str>,
     ) -> Result<usize> {
@@ -298,22 +298,22 @@ impl Client {
     }
 
     /// Reload the currently active buffer.
-    pub async fn reload_current_buffer(&mut self) -> Result<()> {
+    pub async fn reload_current_buffer(&self) -> Result<()> {
         self.ctl("reload", "").await
     }
 
     /// Mark the currently active buffer as being clean.
-    pub async fn mark_clean(&mut self) -> Result<()> {
+    pub async fn mark_clean(&self) -> Result<()> {
         self.ctl("mark-clean", "").await
     }
 
     /// Run the provided ad Edit script against the current buffer
-    pub async fn run_edit_script(&mut self, script: impl AsRef<str>) -> Result<()> {
+    pub async fn run_edit_script(&self, script: impl AsRef<str>) -> Result<()> {
         self.ctl("Edit", script.as_ref()).await
     }
 
     /// Run a provided [AsyncEventFilter] until it exits or errors.
-    pub async fn run_event_filter<F>(&mut self, buffer_id: usize, filter: F) -> Result<()>
+    pub async fn run_event_filter<F>(&self, buffer_id: usize, filter: F) -> Result<()>
     where
         F: AsyncEventFilter,
     {
@@ -332,7 +332,7 @@ impl Client {
     ///
     /// If the user makes a selection (either from the provided lines or
     pub async fn minibuffer_select<I, S>(
-        &mut self,
+        &self,
         prompt: &str,
         lines: I,
     ) -> Result<MiniBufferSelection>
@@ -365,7 +365,7 @@ impl Client {
     /// Prompt the user for input via the minibuffer.
     ///
     /// Returns `Ok(None)` if the user dismisses the minibuffer without input.
-    pub async fn minibuffer_prompt(&mut self, prompt: &str) -> Result<Option<String>> {
+    pub async fn minibuffer_prompt(&self, prompt: &str) -> Result<Option<String>> {
         self.inner.write_str("minibuffer", 0, "").await?;
         self.ctl("minibuffer-prompt", prompt).await?;
         let mut s = self.inner.read_str("minibuffer").await?;
@@ -453,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn ctl_works() {
-        let (mut client, _ted) = prepare(&[("foo", "foo content")]).await;
+        let (client, _ted) = prepare(&[("foo", "foo content")]).await;
 
         let fname = client.read_filename(1).await.unwrap();
         assert!(fname.ends_with("foo"), "{fname:?}");
@@ -465,7 +465,7 @@ mod tests {
 
     #[tokio::test]
     async fn manipulating_current_buffer_works() {
-        let (mut client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]).await;
+        let (client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]).await;
         assert_eq!(
             client.current_buffer().await.unwrap(),
             2,
@@ -484,7 +484,7 @@ mod tests {
 
     #[tokio::test]
     async fn manipulating_body_file_works() {
-        let (mut client, _ted) = prepare(&[("foo", "foo content")]).await;
+        let (client, _ted) = prepare(&[("foo", "foo content")]).await;
 
         let s = client.read_body(1).await.unwrap();
         assert_eq!(s, "foo content", "initial content");
@@ -500,7 +500,7 @@ mod tests {
 
     #[tokio::test]
     async fn manipulating_addr_and_dot_works() {
-        let (mut client, _ted) = prepare(&[("test", "This is a test")]).await;
+        let (client, _ted) = prepare(&[("test", "This is a test")]).await;
 
         assert_eq!(client.read_addr(1).await.unwrap(), "1:1", "initial");
         assert_eq!(client.read_dot(1).await.unwrap(), "T", "initial");
@@ -518,7 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn manipulating_xaddr_and_xdot_works() {
-        let (mut client, _ted) = prepare(&[("test", "This is a test")]).await;
+        let (client, _ted) = prepare(&[("test", "This is a test")]).await;
 
         assert_eq!(client.read_xaddr(1).await.unwrap(), "1:1", "initial");
         assert_eq!(client.read_xdot(1).await.unwrap(), "T", "initial");
@@ -549,7 +549,7 @@ mod tests {
     #[test_case(&[Input::Esc], mbs_cancelled(); "cancelled")]
     #[tokio::test]
     async fn minibuffer_select_works(inputs: &[Input], expected: MiniBufferSelection) {
-        let (mut client, ted) = prepare(&[]).await;
+        let (client, ted) = prepare(&[]).await;
         let handle = spawn(async move { client.minibuffer_select("> ", ["alpha", "bravo"]).await });
         sleep(Duration::from_millis(10)).await; // wait for the minibuffer to open
 
@@ -566,7 +566,7 @@ mod tests {
     #[test_case(&[Input::Esc], None; "cancelled")]
     #[tokio::test]
     async fn minibuffer_prompt_works(inputs: &[Input], expected: Option<&str>) {
-        let (mut client, ted) = prepare(&[]).await;
+        let (client, ted) = prepare(&[]).await;
         let handle = spawn(async move { client.minibuffer_prompt("> ").await });
         sleep(Duration::from_millis(10)).await; // wait for the minibuffer to open
 
@@ -591,7 +591,7 @@ mod tests {
             _from: usize,
             _to: usize,
             _txt: &str,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("load");
 
@@ -604,7 +604,7 @@ mod tests {
             _from: usize,
             _to: usize,
             _txt: &str,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("execute");
 
@@ -617,7 +617,7 @@ mod tests {
             _from: usize,
             _to: usize,
             _txt: &str,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("insert");
 
@@ -629,7 +629,7 @@ mod tests {
             _src: Source,
             _from: usize,
             _to: usize,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("delete");
 
@@ -643,7 +643,7 @@ mod tests {
     #[test_case(Action::Delete, "delete"; "delete")]
     #[tokio::test]
     async fn run_event_filter_works(action: Action, expected: &str) {
-        let (mut client, ted) = prepare(&[("foo", "foo content")]).await;
+        let (client, ted) = prepare(&[("foo", "foo content")]).await;
 
         let filter = TestFilter::default();
         let calls = Arc::clone(&filter.inner);
@@ -662,7 +662,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_returns_correct_id() {
-        let (mut client, ted) = prepare(&[]).await;
+        let (client, ted) = prepare(&[]).await;
         let path = ted.write_file("test", "test content");
 
         let id = client.open(path).await.unwrap();
@@ -674,7 +674,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_in_new_window_returns_correct_id() {
-        let (mut client, ted) = prepare(&[]).await;
+        let (client, ted) = prepare(&[]).await;
         let path = ted.write_file("test", "test content");
 
         let id = client.open_in_new_window(path).await.unwrap();
@@ -686,7 +686,7 @@ mod tests {
 
     #[tokio::test]
     async fn open_virtual_returns_correct_id() {
-        let (mut client, _ted) = prepare(&[]).await;
+        let (client, _ted) = prepare(&[]).await;
 
         let id = client.open_virtual("+test", "test content").await.unwrap();
         assert_eq!(id, 1);

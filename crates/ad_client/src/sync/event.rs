@@ -15,7 +15,7 @@ pub trait EventFilter {
         from: usize,
         to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         Ok(EventOutcome::Handled)
     }
@@ -26,7 +26,7 @@ pub trait EventFilter {
         src: Source,
         from: usize,
         to: usize,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         Ok(EventOutcome::Handled)
     }
@@ -38,7 +38,7 @@ pub trait EventFilter {
         from: usize,
         to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         Ok(EventOutcome::Passthrough)
     }
@@ -50,13 +50,13 @@ pub trait EventFilter {
         from: usize,
         to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         Ok(EventOutcome::Passthrough)
     }
 }
 
-pub(super) fn run_filter<F>(buffer: usize, mut filter: F, client: &mut Client) -> Result<()>
+pub(super) fn run_filter<F>(buffer: usize, mut filter: F, client: &Client) -> Result<()>
 where
     F: EventFilter,
 {

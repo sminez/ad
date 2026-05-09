@@ -58,11 +58,11 @@ impl Client {
         })
     }
 
-    pub(crate) fn event_lines(&mut self, buffer_id: usize) -> Result<ReadLineIter> {
+    pub(crate) fn event_lines(&self, buffer_id: usize) -> Result<ReadLineIter> {
         self.inner.iter_lines(format!("buffers/{buffer_id}/event"))
     }
 
-    pub(crate) fn write_event(&mut self, buffer_id: usize, event_line: &str) -> Result<()> {
+    pub(crate) fn write_event(&self, buffer_id: usize, event_line: &str) -> Result<()> {
         self.inner
             .write_str(format!("buffers/{buffer_id}/event"), 0, event_line)?;
 
@@ -70,7 +70,7 @@ impl Client {
     }
 
     /// Iterate over the log events emitted by ad
-    pub fn log_events(&mut self) -> Result<impl Iterator<Item = Result<LogEvent>> + use<>> {
+    pub fn log_events(&self) -> Result<impl Iterator<Item = Result<LogEvent>> + use<>> {
         Ok(self
             .inner
             .iter_lines("log")?
@@ -78,14 +78,14 @@ impl Client {
     }
 
     /// Get the currently active buffer id.
-    pub fn current_buffer(&mut self) -> Result<usize> {
+    pub fn current_buffer(&self) -> Result<usize> {
         let id = parse_bufid(&self.inner.read_str("buffers/current")?)?;
 
         Ok(id)
     }
 
     /// Get the list of currently open buffers
-    pub fn open_buffers(&mut self) -> Result<Vec<BufferMeta>> {
+    pub fn open_buffers(&self) -> Result<Vec<BufferMeta>> {
         let buffers = self
             .inner
             .read_str("buffers/index")?
@@ -102,27 +102,27 @@ impl Client {
         Ok(buffers)
     }
 
-    fn _read_buffer_file(&mut self, buffer_id: usize, file: &str) -> Result<String> {
+    fn _read_buffer_file(&self, buffer_id: usize, file: &str) -> Result<String> {
         self.inner.read_str(format!("buffers/{buffer_id}/{file}"))
     }
 
     /// Read the contents of the dot of the given buffer
-    pub fn read_dot(&mut self, buffer_id: usize) -> Result<String> {
+    pub fn read_dot(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "dot")
     }
 
     /// Read the body of the given buffer.
-    pub fn read_body(&mut self, buffer_id: usize) -> Result<String> {
+    pub fn read_body(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "body")
     }
 
     /// Read the current dot address of the given buffer.
-    pub fn read_addr(&mut self, buffer_id: usize) -> Result<String> {
+    pub fn read_addr(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "addr")
     }
 
     /// Read the filename of the given buffer
-    pub fn read_filename(&mut self, buffer_id: usize) -> Result<String> {
+    pub fn read_filename(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "filename")
     }
 
@@ -130,7 +130,7 @@ impl Client {
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub fn read_xaddr(&mut self, buffer_id: usize) -> Result<String> {
+    pub fn read_xaddr(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "xaddr")
     }
 
@@ -138,12 +138,12 @@ impl Client {
     ///
     /// This is only used by the filesystem interface of `ad` and will not affect the current
     /// editor state.
-    pub fn read_xdot(&mut self, buffer_id: usize) -> Result<String> {
+    pub fn read_xdot(&self, buffer_id: usize) -> Result<String> {
         self._read_buffer_file(buffer_id, "xdot")
     }
 
     fn _write_buffer_file(
-        &mut self,
+        &self,
         buffer_id: usize,
         file: &str,
         offset: u64,
@@ -154,32 +154,32 @@ impl Client {
     }
 
     /// Replace the dot of the given buffer with the provided string.
-    pub fn write_dot(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub fn write_dot(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "dot", 0, content.as_bytes())
     }
 
     /// Set the addr of the given buffer.
-    pub fn write_addr(&mut self, buffer_id: usize, addr: &str) -> Result<usize> {
+    pub fn write_addr(&self, buffer_id: usize, addr: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "addr", 0, addr.as_bytes())
     }
 
     /// Replace the xdot of the given buffer with the provided string.
-    pub fn write_xdot(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub fn write_xdot(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xdot", 0, content.as_bytes())
     }
 
     /// Set the xaddr of the given buffer.
-    pub fn write_xaddr(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub fn write_xaddr(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "xaddr", 0, content.as_bytes())
     }
 
     /// Append the provided string to the given buffer.
-    pub fn append_to_body(&mut self, buffer_id: usize, content: &str) -> Result<usize> {
+    pub fn append_to_body(&self, buffer_id: usize, content: &str) -> Result<usize> {
         self._write_buffer_file(buffer_id, "body", 0, content.as_bytes())
     }
 
     /// Clear the contents of the given buffer
-    pub fn clear(&mut self, buffer_id: usize) -> Result<()> {
+    pub fn clear(&self, buffer_id: usize) -> Result<()> {
         self.write_xaddr(buffer_id, ",")?;
         self.write_xdot(buffer_id, "")?;
 
@@ -187,7 +187,7 @@ impl Client {
     }
 
     /// Focus the given buffer
-    pub fn focus_buffer(&mut self, buffer_id: usize) -> Result<()> {
+    pub fn focus_buffer(&self, buffer_id: usize) -> Result<()> {
         self.inner
             .write_str("buffers/current", 0, &buffer_id.to_string())?;
 
@@ -195,21 +195,21 @@ impl Client {
     }
 
     /// Set the cursor position for the given buffer to the beginning of the file
-    pub fn cur_to_bof(&mut self, buffer_id: usize) -> Result<()> {
+    pub fn cur_to_bof(&self, buffer_id: usize) -> Result<()> {
         self.write_addr(buffer_id, "0")?;
 
         Ok(())
     }
 
     /// Set the cursor position for the given buffer to the end of the file
-    pub fn cur_to_eof(&mut self, buffer_id: usize) -> Result<()> {
+    pub fn cur_to_eof(&self, buffer_id: usize) -> Result<()> {
         self.write_addr(buffer_id, "$")?;
 
         Ok(())
     }
 
     /// Send a control message to ad.
-    pub fn ctl(&mut self, command: &str, args: &str) -> Result<()> {
+    pub fn ctl(&self, command: &str, args: &str) -> Result<()> {
         self.inner
             .write("ctl", 0, format!("{command} {args}").as_bytes())?;
 
@@ -217,11 +217,11 @@ impl Client {
     }
 
     /// Echo a string message in the status line.
-    pub fn echo(&mut self, msg: impl AsRef<str>) -> Result<()> {
+    pub fn echo(&self, msg: impl AsRef<str>) -> Result<()> {
         self.ctl("echo", msg.as_ref())
     }
 
-    fn _id_for_path(&mut self, path: &str) -> Result<usize> {
+    fn _id_for_path(&self, path: &str) -> Result<usize> {
         sleep(Duration::from_millis(5));
 
         for BufferMeta { id, filename } in self.open_buffers()?.into_iter() {
@@ -236,7 +236,7 @@ impl Client {
     }
 
     /// Open the requested file, returning its ID.
-    pub fn open(&mut self, path: impl AsRef<str>) -> Result<usize> {
+    pub fn open(&self, path: impl AsRef<str>) -> Result<usize> {
         let path = path.as_ref();
         self.ctl("open", path)?;
 
@@ -244,7 +244,7 @@ impl Client {
     }
 
     /// Open the requested file in a new window, returning its ID.
-    pub fn open_in_new_window(&mut self, path: impl AsRef<str>) -> Result<usize> {
+    pub fn open_in_new_window(&self, path: impl AsRef<str>) -> Result<usize> {
         let path = path.as_ref();
         self.ctl("open-in-new-window", path)?;
 
@@ -252,11 +252,7 @@ impl Client {
     }
 
     /// Open a new virtual file showing the given content, returning its ID.
-    pub fn open_virtual(
-        &mut self,
-        name: impl AsRef<str>,
-        content: impl AsRef<str>,
-    ) -> Result<usize> {
+    pub fn open_virtual(&self, name: impl AsRef<str>, content: impl AsRef<str>) -> Result<usize> {
         let name = name.as_ref();
         let content = content.as_ref();
 
@@ -271,7 +267,7 @@ impl Client {
 
     /// Open a new virtual file showing the given content in a new window, returning its ID.
     pub fn open_virtual_in_new_window(
-        &mut self,
+        &self,
         name: impl AsRef<str>,
         content: impl AsRef<str>,
     ) -> Result<usize> {
@@ -288,22 +284,22 @@ impl Client {
     }
 
     /// Reload the currently active buffer.
-    pub fn reload_current_buffer(&mut self) -> Result<()> {
+    pub fn reload_current_buffer(&self) -> Result<()> {
         self.ctl("reload", "")
     }
 
     /// Mark the currently active buffer as being clean.
-    pub fn mark_clean(&mut self) -> Result<()> {
+    pub fn mark_clean(&self) -> Result<()> {
         self.ctl("mark-clean", "")
     }
 
     /// Run the provided ad Edit script against the current buffer
-    pub fn run_edit_script(&mut self, script: impl AsRef<str>) -> Result<()> {
+    pub fn run_edit_script(&self, script: impl AsRef<str>) -> Result<()> {
         self.ctl("Edit", script.as_ref())
     }
 
     /// Run a provided [EventFilter] until it exits or errors
-    pub fn run_event_filter<F>(&mut self, buffer_id: usize, filter: F) -> Result<()>
+    pub fn run_event_filter<F>(&self, buffer_id: usize, filter: F) -> Result<()>
     where
         F: EventFilter,
     {
@@ -321,7 +317,7 @@ impl Client {
     /// Open the minibuffer with the provided `prompt` showing `lines`.
     ///
     /// If the user makes a selection (either from the provided lines or
-    pub fn minibuffer_select<I, S>(&mut self, prompt: &str, lines: I) -> Result<MiniBufferSelection>
+    pub fn minibuffer_select<I, S>(&self, prompt: &str, lines: I) -> Result<MiniBufferSelection>
     where
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
@@ -349,7 +345,7 @@ impl Client {
     /// Prompt the user for input via the minibuffer.
     ///
     /// Returns `Ok(None)` if the user dismisses the minibuffer without input.
-    pub fn minibuffer_prompt(&mut self, prompt: &str) -> Result<Option<String>> {
+    pub fn minibuffer_prompt(&self, prompt: &str) -> Result<Option<String>> {
         self.inner.write_str("minibuffer", 0, "")?;
         self.ctl("minibuffer-prompt", prompt)?;
         let mut s = self.inner.read_str("minibuffer")?;
@@ -379,7 +375,7 @@ pub struct BodyWriter {
 
 impl BodyWriter {
     /// Mark the buffer as being clean
-    pub fn mark_clean(&mut self) -> Result<()> {
+    pub fn mark_clean(&self) -> Result<()> {
         self.client.write("ctl", 0, "mark-clean".as_bytes())?;
 
         Ok(())
@@ -425,7 +421,7 @@ mod tests {
 
     #[test]
     fn ctl_works() {
-        let (mut client, _ted) = prepare(&[("foo", "foo content")]);
+        let (client, _ted) = prepare(&[("foo", "foo content")]);
 
         let fname = client.read_filename(1).unwrap();
         assert!(fname.ends_with("foo"), "{fname:?}");
@@ -437,7 +433,7 @@ mod tests {
 
     #[test]
     fn manipulating_current_buffer_works() {
-        let (mut client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]);
+        let (client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]);
         assert_eq!(
             client.current_buffer().unwrap(),
             2,
@@ -456,7 +452,7 @@ mod tests {
 
     #[test]
     fn manipulating_body_file_works() {
-        let (mut client, _ted) = prepare(&[("foo", "foo content")]);
+        let (client, _ted) = prepare(&[("foo", "foo content")]);
 
         let s = client.read_body(1).unwrap();
         assert_eq!(s, "foo content", "initial content");
@@ -472,7 +468,7 @@ mod tests {
 
     #[test]
     fn manipulating_addr_and_dot_works() {
-        let (mut client, _ted) = prepare(&[("test", "This is a test")]);
+        let (client, _ted) = prepare(&[("test", "This is a test")]);
 
         assert_eq!(client.read_addr(1).unwrap(), "1:1", "initial");
         assert_eq!(client.read_dot(1).unwrap(), "T", "initial");
@@ -490,7 +486,7 @@ mod tests {
 
     #[test]
     fn manipulating_xaddr_and_xdot_works() {
-        let (mut client, _ted) = prepare(&[("test", "This is a test")]);
+        let (client, _ted) = prepare(&[("test", "This is a test")]);
 
         assert_eq!(client.read_xaddr(1).unwrap(), "1:1", "initial");
         assert_eq!(client.read_xdot(1).unwrap(), "T", "initial");
@@ -517,7 +513,7 @@ mod tests {
     #[test_case(&[Input::Esc], mbs_cancelled(); "cancelled")]
     #[test]
     fn minibuffer_select_works(inputs: &[Input], expected: MiniBufferSelection) {
-        let (mut client, ted) = prepare(&[]);
+        let (client, ted) = prepare(&[]);
         let handle = spawn(move || client.minibuffer_select("> ", ["alpha", "bravo"]));
         sleep(Duration::from_millis(10)); // wait for the minibuffer to open
 
@@ -534,7 +530,7 @@ mod tests {
     #[test_case(&[Input::Esc], None; "cancelled")]
     #[test]
     fn minibuffer_prompt_works(inputs: &[Input], expected: Option<&str>) {
-        let (mut client, ted) = prepare(&[]);
+        let (client, ted) = prepare(&[]);
         let handle = spawn(move || client.minibuffer_prompt("> "));
         sleep(Duration::from_millis(10)); // wait for the minibuffer to open
 
@@ -559,7 +555,7 @@ mod tests {
             _from: usize,
             _to: usize,
             _txt: &str,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().unwrap().push("load");
 
@@ -572,7 +568,7 @@ mod tests {
             _from: usize,
             _to: usize,
             _txt: &str,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().unwrap().push("execute");
 
@@ -585,7 +581,7 @@ mod tests {
             _from: usize,
             _to: usize,
             _txt: &str,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().unwrap().push("insert");
 
@@ -597,7 +593,7 @@ mod tests {
             _src: Source,
             _from: usize,
             _to: usize,
-            _client: &mut Client,
+            _client: &Client,
         ) -> Result<EventOutcome> {
             self.inner.lock().unwrap().push("delete");
 
@@ -611,7 +607,7 @@ mod tests {
     #[test_case(Action::Delete, "delete"; "delete")]
     #[test]
     fn run_event_filter_works(action: Action, expected: &str) {
-        let (mut client, ted) = prepare(&[("foo", "foo content")]);
+        let (client, ted) = prepare(&[("foo", "foo content")]);
 
         let filter = TestFilter::default();
         let calls = Arc::clone(&filter.inner);
@@ -630,7 +626,7 @@ mod tests {
 
     #[test]
     fn open_returns_correct_id() {
-        let (mut client, ted) = prepare(&[]);
+        let (client, ted) = prepare(&[]);
         let path = ted.write_file("test", "test content");
 
         let id = client.open(path).unwrap();
@@ -642,7 +638,7 @@ mod tests {
 
     #[test]
     fn open_in_new_window_returns_correct_id() {
-        let (mut client, ted) = prepare(&[]);
+        let (client, ted) = prepare(&[]);
         let path = ted.write_file("test", "test content");
 
         let id = client.open_in_new_window(path).unwrap();
@@ -654,7 +650,7 @@ mod tests {
 
     #[test]
     fn open_virtual_returns_correct_id() {
-        let (mut client, _ted) = prepare(&[]);
+        let (client, _ted) = prepare(&[]);
 
         let id = client.open_virtual("+test", "test content").unwrap();
         assert_eq!(id, 1);

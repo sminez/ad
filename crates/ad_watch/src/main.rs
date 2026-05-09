@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
         .display()
         .to_string();
 
-    let mut client = match Client::new() {
+    let client = match Client::new() {
         Ok(client) => client,
         Err(e) => {
             eprintln!("unable to connect to ad\n{e}");
@@ -33,7 +33,7 @@ fn main() -> anyhow::Result<()> {
         .open_in_new_window(format!("{dir}/+watch"))
         .context("unable to open +watch buffer")?;
 
-    clear_and_rerun(&mut client, buffer_id, &cmd, &args)?;
+    clear_and_rerun(&client, buffer_id, &cmd, &args)?;
 
     for evt in client.log_events()? {
         match evt? {
@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
                     .read_filename(id)
                     .context("unable to read filename of saved buffer")?;
                 if fname.starts_with(&dir) {
-                    clear_and_rerun(&mut client, buffer_id, &cmd, &args)?;
+                    clear_and_rerun(&client, buffer_id, &cmd, &args)?;
                 }
             }
 
@@ -55,12 +55,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn clear_and_rerun(
-    client: &mut Client,
-    id: usize,
-    cmd: &str,
-    args: &[String],
-) -> anyhow::Result<()> {
+fn clear_and_rerun(client: &Client, id: usize, cmd: &str, args: &[String]) -> anyhow::Result<()> {
     client.clear(id).context("unable to clear buffer")?;
     client.mark_clean().context("unable to mark buffer clean")?;
 

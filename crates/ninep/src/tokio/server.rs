@@ -395,7 +395,7 @@ where
         self.new_session(stream).handle_connection_async().await;
     }
 
-    /// Run a single session using an in-memory [DuplexStream] connected to a [Client].
+    /// Run a single session using an in-memory `DuplexStream` connected to a [Client].
     pub async fn session_with_attached_client_async(
         &mut self,
         uname: impl Into<String>,

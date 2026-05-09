@@ -21,7 +21,7 @@ use subprocess::{Exec, Job, Redirection};
 const PROMPT: &str = "% ";
 
 fn main() -> anyhow::Result<()> {
-    let mut client = match Client::new() {
+    let client = match Client::new() {
         Ok(client) => client,
         Err(e) => {
             eprintln!("unable to connect to ad\n{e}");
@@ -81,7 +81,7 @@ impl Drop for Filter {
 }
 
 impl Filter {
-    fn clear_buffer(&mut self, client: &mut Client) -> io::Result<()> {
+    fn clear_buffer(&mut self, client: &Client) -> io::Result<()> {
         client.write_xaddr(self.buffer_id, ",")?;
         client.write_xdot(self.buffer_id, PROMPT)?;
         client.write_addr(self.buffer_id, "$")?;
@@ -90,7 +90,7 @@ impl Filter {
         Ok(())
     }
 
-    fn send_input(&mut self, input: &str, client: &mut Client) -> Result<EventOutcome> {
+    fn send_input(&mut self, input: &str, client: &Client) -> Result<EventOutcome> {
         match input.trim() {
             "clear" => {
                 self.clear_buffer(client)?;
@@ -122,7 +122,7 @@ impl EventFilter for Filter {
         _from: usize,
         _to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         client.mark_clean()?;
 
@@ -152,7 +152,7 @@ impl EventFilter for Filter {
         _src: Source,
         _from: usize,
         _to: usize,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         client.mark_clean()?;
 
@@ -165,7 +165,7 @@ impl EventFilter for Filter {
         _from: usize,
         _to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> Result<EventOutcome> {
         let s = strip_prompt(txt).trim();
         client.append_to_body(self.buffer_id, &format!("\n{PROMPT}{s}\n"))?;

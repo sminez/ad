@@ -15,7 +15,7 @@ pub trait AsyncEventFilter {
         from: usize,
         to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Handled) }
     }
@@ -26,7 +26,7 @@ pub trait AsyncEventFilter {
         src: Source,
         from: usize,
         to: usize,
-        client: &mut Client,
+        client: &Client,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Handled) }
     }
@@ -38,7 +38,7 @@ pub trait AsyncEventFilter {
         from: usize,
         to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Passthrough) }
     }
@@ -50,13 +50,13 @@ pub trait AsyncEventFilter {
         from: usize,
         to: usize,
         txt: &str,
-        client: &mut Client,
+        client: &Client,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Passthrough) }
     }
 }
 
-pub(super) async fn run_filter<F>(buffer: usize, mut filter: F, client: &mut Client) -> Result<()>
+pub(super) async fn run_filter<F>(buffer: usize, mut filter: F, client: &Client) -> Result<()>
 where
     F: AsyncEventFilter,
 {

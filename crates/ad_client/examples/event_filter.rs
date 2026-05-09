@@ -5,7 +5,7 @@ use ad_client::{
 use std::io;
 
 fn main() -> io::Result<()> {
-    let mut client = Client::new()?;
+    let client = Client::new()?;
     client.open(".")?;
     let bufid = client.current_buffer()?;
     client.run_event_filter(bufid, Filter)?;
@@ -22,7 +22,7 @@ impl EventFilter for Filter {
         from: usize,
         to: usize,
         txt: &str,
-        _client: &mut Client,
+        _client: &Client,
     ) -> Result<EventOutcome> {
         println!("got load: {from}->{to} {txt:?}");
         match txt {
