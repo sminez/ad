@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         path,
     } = Args::try_parse()?;
 
-    let mut client = Client::new_unix_with_explicit_path("user", socket_path, aname)?;
+    let client = Client::new_unix_with_explicit_path("user", socket_path, aname)?;
 
     match cmd {
         Cmd::List => {

@@ -19,7 +19,7 @@ use crate::{
 use simple_coro::{CoroState, ReadyCoro};
 use std::{fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
-    io::{DuplexStream, duplex},
+    io::duplex,
     net::{TcpListener, UnixListener},
     sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel},
     task::{JoinHandle, spawn},
@@ -401,7 +401,7 @@ where
         uname: impl Into<String>,
         aname: impl Into<String>,
         buf_size: usize,
-    ) -> Result<(Client<DuplexStream>, JoinHandle<()>)> {
+    ) -> Result<(Client, JoinHandle<()>)> {
         let (client_stream, server_stream) = duplex(buf_size);
         let session = self.new_session(server_stream);
 

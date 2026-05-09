@@ -52,7 +52,7 @@ pub fn oneshot_9p(cmd: Cmd, raw_path: String, aname: String) {
 }
 
 fn oneshot_9p_inner(cmd: Cmd, raw_path: String, aname: String) -> Result<()> {
-    let (mut client, path) = client_and_path(&raw_path, &aname)?;
+    let (client, path) = client_and_path(&raw_path, &aname)?;
 
     match cmd {
         Cmd::List => {
@@ -171,7 +171,7 @@ pub fn list_open_sessions() {
         let mut had_unresponsive = false;
 
         for ns in open_9p_sockets()?.into_iter() {
-            let mut client = match Client::new_unix(&ns, "") {
+            let client = match Client::new_unix(&ns, "") {
                 Ok(client) => client,
                 Err(e) => {
                     println!("{ns}\tunresponsive: {e}");

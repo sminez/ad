@@ -2,7 +2,7 @@
 use crate::{
     fs::{Mode, Perm, Stat, WStat},
     sansio::{
-        client::{MSIZE, State, err},
+        client::{State, err},
         protocol::{Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
     },
     sync::{SyncNineP, SyncStream},
@@ -15,7 +15,7 @@ use std::{
     os::unix::net::UnixStream,
     path::Path,
     sync::{
-        Arc, Mutex, MutexGuard,
+        Arc,
         atomic::{AtomicU32, Ordering},
         mpsc::{Receiver, Sender, channel},
     },
@@ -25,59 +25,39 @@ use std::{
 // re-export
 pub use crate::sansio::client::{Error, Result};
 
+macro_rules! run_9p_coro {
+    ($self:ident, $method:ident, $($arg:expr),*) => {{
+        let mut coro = $self.state.$method($($arg),*);
+        loop {
+            coro = match coro.resume() {
+                CoroState::Complete(res) => break res,
+                CoroState::Pending(c, t) => {
+                    let rmsg = $self.send_raw(t.content)?;
+                    c.send(rmsg)
+                }
+            }
+        }
+    }};
+}
+
 /// A synchronous 9p client.
 ///
 /// Support for each of the operations exposed by this client is determined by the server
 /// implementation that it is connected to.
 #[derive(Debug)]
 pub struct Client {
-    state: Arc<Mutex<State>>,
+    state: Arc<State>,
     tx: Sender<Req>,
-    msize: Arc<AtomicU32>,
 }
 
 impl Clone for Client {
     fn clone(&self) -> Self {
         let _ = self.tx.send(Req::AddClient);
+
         Self {
             state: Arc::clone(&self.state),
             tx: self.tx.clone(),
-            msize: Arc::clone(&self.msize),
         }
-    }
-}
-
-impl Client {
-    fn new<S>(stream: S) -> Self
-    where
-        S: SyncStream,
-    {
-        let (tx, rx) = channel();
-        let msize = Arc::new(AtomicU32::new(MSIZE));
-        let conn = Connection::new(stream, rx, Arc::clone(&msize));
-        spawn(move || conn.run());
-
-        Self {
-            state: Default::default(),
-            tx,
-            msize,
-        }
-    }
-
-    #[inline]
-    fn state(&self) -> MutexGuard<'_, State> {
-        match self.state.lock() {
-            Ok(guard) => guard,
-            Err(poisoned) => poisoned.into_inner(),
-        }
-    }
-
-    fn send_raw(&self, data: Tdata) -> Result<Rmessage> {
-        let (tx, rx) = channel();
-        let req = Req::Send { data, tx };
-        self.tx.send(req).map_err(|_| Error::ConnectionClosed)?;
-
-        rx.recv().map_err(|_| Error::ConnectionClosed)?
     }
 }
 
@@ -88,6 +68,22 @@ impl Drop for Client {
 }
 
 impl Client {
+    fn new<S>(stream: S) -> Self
+    where
+        S: SyncStream,
+    {
+        let (tx, rx) = channel();
+        let state = State::default();
+        let msize = Arc::clone(&state.msize);
+        let conn = Connection::new(stream, rx, msize);
+        spawn(move || conn.run());
+
+        Self {
+            state: Default::default(),
+            tx,
+        }
+    }
+
     /// Create a new [Client] connected to a unix socket at the specified path.
     pub fn new_unix_with_explicit_path(
         uname: impl Into<String>,
@@ -96,7 +92,7 @@ impl Client {
     ) -> Result<Self> {
         let stream = UnixStream::connect(path.as_ref())?;
 
-        let mut client = Self::new(stream);
+        let client = Self::new(stream);
         client.connect(uname, aname)?;
 
         Ok(client)
@@ -124,7 +120,7 @@ impl Client {
         aname: impl Into<String>,
         stream: UnixStream,
     ) -> Result<Self> {
-        let mut client = Self::new(stream);
+        let client = Self::new(stream);
         client.connect(uname, aname)?;
 
         Ok(client)
@@ -138,30 +134,20 @@ impl Client {
     ) -> Result<Self> {
         let stream = TcpStream::connect(addr)?;
 
-        let mut client = Self::new(stream);
+        let client = Self::new(stream);
         client.connect(uname, aname)?;
 
         Ok(client)
     }
-}
 
-macro_rules! run_9p_coro {
-    ($self:ident, $method:ident, $($arg:expr),*) => {{
-        let mut state = $self.state();
-        let mut coro = state.$method($($arg),*);
-        loop {
-            coro = match coro.resume() {
-                CoroState::Complete(res) => break res,
-                CoroState::Pending(c, t) => {
-                    let rmsg = $self.send_raw(t.content)?;
-                    c.send(rmsg)
-                }
-            }
-        }
-    }};
-}
+    fn send_raw(&self, data: Tdata) -> Result<Rmessage> {
+        let (tx, rx) = channel();
+        let req = Req::Send { data, tx };
+        self.tx.send(req).map_err(|_| Error::ConnectionClosed)?;
 
-impl Client {
+        rx.recv().map_err(|_| Error::ConnectionClosed)?
+    }
+
     fn send(&self, content: Tdata) -> Result<Rmessage> {
         match self.send_raw(content)? {
             Rmessage {
@@ -173,34 +159,30 @@ impl Client {
     }
 
     /// Establish our connection to the target 9p server and begin the session.
-    fn connect(&mut self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
-        run_9p_coro!(self, handle_connect, uname.into(), aname.into())?;
-        let msize = self.state().msize;
-        self.msize.store(msize, Ordering::Release);
-
-        Ok(())
+    fn connect(&self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
+        run_9p_coro!(self, handle_connect, uname.into(), aname.into())
     }
 
     /// Associate the given path with a new fid.
-    pub fn walk(&mut self, path: impl Into<String>) -> Result<u32> {
+    pub fn walk(&self, path: impl Into<String>) -> Result<u32> {
         run_9p_coro!(self, handle_walk, path.into())
     }
 
     /// Free server side state for the given fid.
     ///
     /// Clunks of the root fid (0) will be ignored
-    pub fn clunk(&mut self, fid: u32) -> Result<()> {
+    pub fn clunk(&self, fid: u32) -> Result<()> {
         if fid != 0 {
             self.send(Tdata::Clunk { fid })?;
-            self.state().fids.remove(fid);
+            self.state.fids().remove(fid);
         }
 
         Ok(())
     }
 
     /// Free server side state for the given path.
-    pub fn clunk_path(&mut self, path: impl Into<String>) -> Result<()> {
-        let fid = match self.state().fids.fid_for_unnormalised_path(&path.into()) {
+    pub fn clunk_path(&self, path: impl Into<String>) -> Result<()> {
+        let fid = match self.state.fids().fid_for_unnormalised_path(&path.into()) {
             Some(fid) => fid,
             None => return Ok(()),
         };
@@ -209,33 +191,28 @@ impl Client {
     }
 
     /// Request the current [Stat] of the file or directory identified by the given path.
-    pub fn stat(&mut self, path: impl Into<String>) -> Result<Stat> {
+    pub fn stat(&self, path: impl Into<String>) -> Result<Stat> {
         run_9p_coro!(self, handle_stat, path.into())
     }
 
     /// Attempt to modify the current [Stat] of the file or directory identified by the given path
     /// using the given [WStat].
-    pub fn write_stat(&mut self, path: impl Into<String>, wstat: WStat) -> Result<()> {
+    pub fn write_stat(&self, path: impl Into<String>, wstat: WStat) -> Result<()> {
         run_9p_coro!(self, handle_wstat, path.into(), wstat)
     }
 
     /// Read the full contents of the file at `path` as bytes.
-    pub fn read(&mut self, path: impl Into<String>) -> Result<Vec<u8>> {
+    pub fn read(&self, path: impl Into<String>) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read, path.into())
     }
 
     /// Read up to `count` bytes from the file at `path` starting at byte `offset`.
-    pub fn read_from(
-        &mut self,
-        path: impl Into<String>,
-        offset: u64,
-        count: u32,
-    ) -> Result<Vec<u8>> {
+    pub fn read_from(&self, path: impl Into<String>, offset: u64, count: u32) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read_from, path.into(), offset, count)
     }
 
     /// Read the full contents of the file at `path` as utf-8 encoded text.
-    pub fn read_str(&mut self, path: impl Into<String>) -> Result<String> {
+    pub fn read_str(&self, path: impl Into<String>) -> Result<String> {
         let bytes = run_9p_coro!(self, handle_read, path.into())?;
         let s = match String::from_utf8(bytes) {
             Ok(s) => s,
@@ -246,28 +223,23 @@ impl Client {
     }
 
     /// Read the directory listing of the directory at `path`.
-    pub fn read_dir(&mut self, path: impl Into<String>) -> Result<Vec<Stat>> {
+    pub fn read_dir(&self, path: impl Into<String>) -> Result<Vec<Stat>> {
         run_9p_coro!(self, handle_read_dir, path.into())
     }
 
     /// Write the provided data to the file at `path` at the given offset.
-    pub fn write(&mut self, path: impl Into<String>, offset: u64, content: &[u8]) -> Result<usize> {
+    pub fn write(&self, path: impl Into<String>, offset: u64, content: &[u8]) -> Result<usize> {
         run_9p_coro!(self, handle_write, path.into(), offset, content)
     }
 
     /// Write the provided string data to the file at `path` at the given offset.
-    pub fn write_str(
-        &mut self,
-        path: impl Into<String>,
-        offset: u64,
-        content: &str,
-    ) -> Result<usize> {
+    pub fn write_str(&self, path: impl Into<String>, offset: u64, content: &str) -> Result<usize> {
         run_9p_coro!(self, handle_write, path.into(), offset, content.as_bytes())
     }
 
     /// Attempt to create a new file within the connected filesystem.
     pub fn create(
-        &mut self,
+        &self,
         dir: impl Into<String>,
         name: impl Into<String>,
         perms: Perm,
@@ -277,7 +249,7 @@ impl Client {
     }
 
     /// Attempt to remove a file from the connected filesystem.
-    pub fn remove(&mut self, path: impl Into<String>) -> Result<()> {
+    pub fn remove(&self, path: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_remove, path.into())
     }
 
@@ -285,10 +257,10 @@ impl Client {
     ///
     /// The size of each chunk is determined by the supported message size of the server replying
     /// to the requests.
-    pub fn iter_chunks(&mut self, path: impl Into<String>) -> Result<ChunkIter> {
+    pub fn iter_chunks(&self, path: impl Into<String>) -> Result<ChunkIter> {
         let fid = self.walk(path)?;
         let mode = Mode::READ.bits();
-        let count = self.state().msize;
+        let count = self.state.msize.load(Ordering::Relaxed);
         self.send(Tdata::Open { fid, mode })?;
 
         Ok(ChunkIter {
@@ -300,10 +272,10 @@ impl Client {
     }
 
     /// Iterate over newline delimited lines of utf-8 encoded text from the file at `path`.
-    pub fn iter_lines(&mut self, path: impl Into<String>) -> Result<ReadLineIter> {
+    pub fn iter_lines(&self, path: impl Into<String>) -> Result<ReadLineIter> {
         let fid = self.walk(path)?;
         let mode = Mode::READ.bits();
-        let count = self.state().msize;
+        let count = self.state.msize.load(Ordering::Relaxed);
         self.send(Tdata::Open { fid, mode })?;
 
         Ok(ReadLineIter {
@@ -316,12 +288,12 @@ impl Client {
         })
     }
 
-    fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
+    fn _read_count(&self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read_count, fid, offset, count)
     }
 }
 
-pub(crate) enum Req {
+enum Req {
     AddClient,
     RemoveClient,
     Send {
@@ -330,7 +302,7 @@ pub(crate) enum Req {
     },
 }
 
-pub(crate) struct Connection<S>
+struct Connection<S>
 where
     S: SyncStream,
 {
@@ -373,6 +345,14 @@ where
         tag
     }
 
+    fn shutdown(&mut self, msg: String) {
+        for tx in self.pending.drain().map(|(_, s)| s) {
+            let _ = tx.send(err(msg.clone()));
+        }
+
+        self.n_clients = 0;
+    }
+
     fn run(mut self) {
         while self.n_clients > 0 {
             if self.pending.is_empty() {
@@ -396,10 +376,7 @@ where
             let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream) {
                 Ok(rmsg) => rmsg,
                 Err(e) => {
-                    let msg = e.to_string();
-                    for tx in self.pending.drain().map(|(_, s)| s) {
-                        let _ = tx.send(err(msg.clone()));
-                    }
+                    self.shutdown(e.to_string());
                     break;
                 }
             };
@@ -420,19 +397,11 @@ where
             Req::Send { data, tx } => {
                 let tag = self.tag_for(&data);
                 let msg = Tmessage::new(tag, data);
-                if let Err(e) = msg.write_to(&mut self.stream) {
-                    let msg = e.to_string();
-                    let _ = tx.send(err(msg.clone()));
-
-                    for tx in self.pending.drain().map(|(_, s)| s) {
-                        let _ = tx.send(err(msg.clone()));
-                    }
-
-                    self.n_clients = 0;
-                    return;
-                }
-
                 self.pending.insert(tag, tx);
+
+                if let Err(e) = msg.write_to(&mut self.stream) {
+                    self.shutdown(e.to_string());
+                }
             }
         }
     }
@@ -630,9 +599,11 @@ mod tests {
             }
 
             Step::AssertState { next_fid, fids } => {
-                let st = client.state();
-                assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
-                assert_eq!(st.fids.path_to_fid(), &fids, "(step {i}) fids");
+                let actual_next_fid = client.state.next_fid.load(Ordering::Relaxed);
+                let fid_cache = client.state.fids();
+
+                assert_eq!(actual_next_fid, next_fid, "(step {i}) next_fid");
+                assert_eq!(fid_cache.path_to_fid(), &fids, "(step {i}) fids");
             }
         }
     }

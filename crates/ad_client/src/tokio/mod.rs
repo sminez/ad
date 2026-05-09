@@ -1,8 +1,8 @@
 //! An asynchronous client implementation.
 use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
-use ninep::tokio::client::{Error, ReadLineStream, Result, UnixClient};
+use ninep::tokio::client::{Client as NinepClient, Error, ReadLineStream, Result};
 use std::{env, io, path::Path, str::FromStr, time::Duration};
-use tokio::{net::UnixStream, time::sleep};
+use tokio::time::sleep;
 
 mod event;
 
@@ -11,7 +11,7 @@ pub use event::AsyncEventFilter;
 /// A simple synchronous 9p client for ad
 #[derive(Debug, Clone)]
 pub struct Client {
-    inner: UnixClient,
+    inner: NinepClient,
 }
 
 impl Client {
@@ -23,7 +23,7 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "").await?,
+            inner: NinepClient::new_unix(&ns, "").await?,
         })
     }
 
@@ -36,7 +36,7 @@ impl Client {
         let ns = format!("ad-{pid}");
 
         Ok(Self {
-            inner: UnixClient::new_unix(&ns, "").await?,
+            inner: NinepClient::new_unix(&ns, "").await?,
         })
     }
 
@@ -48,14 +48,11 @@ impl Client {
         };
 
         Ok(Self {
-            inner: UnixClient::new_unix_with_explicit_path(uname, path, "").await?,
+            inner: NinepClient::new_unix_with_explicit_path(uname, path, "").await?,
         })
     }
 
-    pub(crate) async fn event_lines(
-        &mut self,
-        buffer: usize,
-    ) -> Result<ReadLineStream<UnixStream>> {
+    pub(crate) async fn event_lines(&mut self, buffer: usize) -> Result<ReadLineStream> {
         self.inner
             .stream_lines(format!("buffers/{buffer}/event"))
             .await
@@ -383,7 +380,7 @@ impl Client {
 /// An asynchronous stream of [LogEvent]s from an `ad` instance.
 #[derive(Debug)]
 pub struct LogStream {
-    inner: ReadLineStream<UnixStream>,
+    inner: ReadLineStream,
 }
 
 impl LogStream {
@@ -402,7 +399,7 @@ impl SessionMeta {
     /// Create a new [Client] for this session.
     pub async fn async_client_for_session(&self) -> Result<Client> {
         Ok(Client {
-            inner: UnixClient::new_unix(&self.socket_name, "/").await?,
+            inner: NinepClient::new_unix(&self.socket_name, "/").await?,
         })
     }
 }
@@ -411,7 +408,7 @@ impl SessionMeta {
 #[derive(Debug)]
 pub struct BodyWriter {
     path: String,
-    client: UnixClient,
+    client: NinepClient,
 }
 
 impl BodyWriter {

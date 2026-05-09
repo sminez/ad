@@ -9,8 +9,19 @@ use crate::{
     },
     sync::SyncNineP,
 };
+use parking_lot::{Mutex, MutexGuard};
 use simple_coro::{Coro, Handle, ReadyCoro};
-use std::{cmp::min, collections::HashMap, fmt, future::Future, io};
+use std::{
+    cmp::min,
+    collections::HashMap,
+    fmt,
+    future::Future,
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+};
 
 /// Alias for a [Result][std::result::Result] containing a 9p client [Error].
 pub type Result<T> = std::result::Result<T, Error>;
@@ -138,32 +149,33 @@ where
 /// to implement a concrete Client.
 #[derive(Debug)]
 pub(crate) struct State {
-    pub(crate) msize: u32,
-    pub(crate) fids: FidCache,
-    pub(crate) next_fid: u32,
+    pub(crate) msize: Arc<AtomicU32>,
+    pub(crate) next_fid: AtomicU32,
+    fids: Mutex<FidCache>,
 }
 
 impl Default for State {
     fn default() -> Self {
         State {
-            msize: MSIZE,
-            fids: FidCache::default(),
-            next_fid: 1,
+            msize: Arc::new(AtomicU32::new(MSIZE)),
+            next_fid: AtomicU32::new(1),
+            fids: Mutex::new(FidCache::default()),
         }
     }
 }
 
 impl State {
-    fn next_fid(&mut self) -> u32 {
-        let fid = self.next_fid;
-        self.next_fid += 1;
+    fn next_fid(&self) -> u32 {
+        self.next_fid.fetch_add(1, Ordering::Relaxed)
+    }
 
-        fid
+    pub(crate) fn fids(&self) -> MutexGuard<'_, FidCache> {
+        self.fids.lock()
     }
 
     /// Establish our connection to the target 9p server and begin the session.
     pub(crate) fn handle_connect(
-        &mut self,
+        &self,
         uname: String,
         aname: String,
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
@@ -185,7 +197,7 @@ impl State {
                 .await;
 
             expect_rmessage!(rmessage, Attach { aqid })?;
-            self.msize = msize;
+            self.msize.store(msize, Ordering::Relaxed);
 
             Ok(())
         })
@@ -193,7 +205,7 @@ impl State {
 
     /// Run a walk from root
     pub(crate) fn handle_walk(
-        &mut self,
+        &self,
         path: String,
     ) -> Coro9p<u32, impl Future<Output = Result<u32>> + use<'_>> {
         self.handle_walk_from(0, path)
@@ -203,22 +215,26 @@ impl State {
     ///
     /// Panics if `fid` is not currently within the fid cache.
     pub(crate) fn handle_walk_from(
-        &mut self,
+        &self,
         mut fid: u32,
         path: String,
     ) -> Coro9p<u32, impl Future<Output = Result<u32>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
-            let base = self
-                .fids
-                .path_for(fid)
-                .unwrap_or_else(|| panic!("unknown base fid for walk: {fid}"));
+            let target = {
+                let guard = self.fids.lock();
+                let base = guard
+                    .path_for(fid)
+                    .unwrap_or_else(|| panic!("unknown base fid for walk: {fid}"));
 
-            let target = normalise_path(&format!("{base}/{path}"));
+                let target = normalise_path(&format!("{base}/{path}"));
 
-            // Already normalised so just key directly into the map
-            if let Some(fid) = self.fids.path_to_fid.get(&target) {
-                return Ok(*fid);
-            }
+                // Already normalised so just key directly into the map
+                if let Some(fid) = guard.path_to_fid.get(&target) {
+                    return Ok(*fid);
+                }
+
+                target
+            };
 
             let wnames: Vec<String> = path
                 .split('/')
@@ -243,14 +259,14 @@ impl State {
                 fid = new_fid;
             }
 
-            self.fids.insert(new_fid, target);
+            self.fids.lock().insert(new_fid, target);
 
             Ok(new_fid)
         })
     }
 
     fn walk_one(
-        &mut self,
+        &self,
         fid: u32,
         new_fid: u32,
         wnames: Vec<String>,
@@ -276,7 +292,7 @@ impl State {
 
     /// Request the current [Stat] of the file or directory identified by the given path.
     pub(crate) fn handle_stat(
-        &mut self,
+        &self,
         path: String,
     ) -> Coro9p<Stat, impl Future<Output = Result<Stat>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
@@ -292,7 +308,7 @@ impl State {
     /// Attempt to modify the current [Stat] of the file or directory identified by the given path
     /// using the given [WStat].
     pub(crate) fn handle_wstat(
-        &mut self,
+        &self,
         path: String,
         wstat: WStat,
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
@@ -307,14 +323,14 @@ impl State {
             // If our update was successful then our cached state is potentially invalid. Rather
             // than trying to be "smart" about how we handle the cache, we simply evict and re-walk
             // this path the next time it is needed.
-            self.fids.remove(fid);
+            self.fids.lock().remove(fid);
 
             Ok(())
         })
     }
 
     pub(crate) fn handle_open(
-        &mut self,
+        &self,
         fid: u32,
         mode: Mode,
     ) -> Coro9p<(Qid, IoUnit), impl Future<Output = Result<(Qid, IoUnit)>> + use<'_>> {
@@ -329,7 +345,7 @@ impl State {
     }
 
     pub(crate) fn handle_read_count(
-        &mut self,
+        &self,
         fid: u32,
         offset: u64,
         count: u32,
@@ -346,7 +362,7 @@ impl State {
 
     /// Read up to `count` bytes from the file at `path` starting at byte `offset`.
     pub(crate) fn handle_read_from(
-        &mut self,
+        &self,
         path: String,
         mut offset: u64,
         mut count: u32,
@@ -355,7 +371,7 @@ impl State {
             let fid = handle.yield_from(self.handle_walk(path)).await?;
             let (_qid, iounit) = handle.yield_from(self.handle_open(fid, Mode::READ)).await?;
 
-            let max_payload = self.msize - IOHDRSZ;
+            let max_payload = self.msize.load(Ordering::Relaxed) - IOHDRSZ;
             let iounit = if iounit == 0 {
                 max_payload
             } else {
@@ -382,7 +398,7 @@ impl State {
 
     /// Read the full contents of the file at `path` as bytes.
     pub(crate) fn handle_read(
-        &mut self,
+        &self,
         path: String,
     ) -> Coro9p<Vec<u8>, impl Future<Output = Result<Vec<u8>>> + use<'_>> {
         self.handle_read_from(path, 0, u32::MAX)
@@ -390,7 +406,7 @@ impl State {
 
     /// Read the directory listing of the directory at `path`.
     pub(crate) fn handle_read_dir(
-        &mut self,
+        &self,
         path: String,
     ) -> Coro9p<Vec<Stat>, impl Future<Output = Result<Vec<Stat>>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
@@ -400,9 +416,10 @@ impl State {
             let mut buf = io::Cursor::new(bytes);
             let mut stats: Vec<Stat> = Vec::new();
             let sb = SharedBuf::default();
+            let msize = self.msize.load(Ordering::Relaxed);
 
             loop {
-                match RawStat::read_from(self.msize, &sb, &mut buf) {
+                match RawStat::read_from(msize, &sb, &mut buf) {
                     Ok(rs) => stats.push(rs.into()),
                     Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => break,
                     Err(e) => return Err(Error::Io(e)),
@@ -415,7 +432,7 @@ impl State {
 
     /// Write the provided data to the file at `path` at the given offset.
     pub(crate) fn handle_write<'a, 's: 'a>(
-        &'s mut self,
+        &'s self,
         path: String,
         mut offset: u64,
         content: &'a [u8],
@@ -437,7 +454,7 @@ impl State {
 
             let len = content.len();
             let mut cur = 0;
-            let chunk_size = (self.msize - IOHDRSZ) as usize;
+            let chunk_size = (self.msize.load(Ordering::Relaxed) - IOHDRSZ) as usize;
 
             while cur < len {
                 let end = min(cur + chunk_size, len);
@@ -465,7 +482,7 @@ impl State {
 
     /// Attempt to create a new file within the connected filesystem.
     pub(crate) fn handle_create(
-        &mut self,
+        &self,
         dir: String,
         name: String,
         perms: Perm,
@@ -489,7 +506,7 @@ impl State {
 
             let _qid = expect_rmessage!(rmessage, Create { qid, .. })?;
 
-            self.fids.insert(fid, normalised_abspath);
+            self.fids.lock().insert(fid, normalised_abspath);
 
             Ok(())
         })
@@ -497,7 +514,7 @@ impl State {
 
     /// Attempt to remove a file from the connected filesystem.
     pub(crate) fn handle_remove(
-        &mut self,
+        &self,
         path: String,
     ) -> Coro9p<(), impl Future<Output = Result<()>> + use<'_>> {
         Coro::from(move |handle: Handle<Tmessage, Rmessage>| async move {
@@ -507,7 +524,7 @@ impl State {
                 .await;
 
             expect_rmessage!(rmessage, Remove {})?;
-            self.fids.remove(fid);
+            self.fids.lock().remove(fid);
 
             Ok(())
         })
@@ -585,7 +602,7 @@ mod tests {
         let parts: Vec<String> = (0..=MAXWELEM).map(|i| format!("n{i}")).collect();
         let full_path = parts.join("/");
 
-        let mut state = State::default();
+        let state = State::default();
         let mut coro = state.handle_walk(full_path.clone());
 
         // first walk should be MAXWELEM elements
@@ -603,12 +620,15 @@ mod tests {
         // the provided fid for the walk should now be bound to the full path
         let fid = coro.resume().unwrap().unwrap();
         assert_eq!(fid, 1);
-        assert_eq!(state.fids.fid_for_unnormalised_path(&full_path), Some(1));
+        assert_eq!(
+            state.fids.lock().fid_for_unnormalised_path(&full_path),
+            Some(1)
+        );
     }
 
     #[test]
     fn handle_read_from_respects_requested_count_and_iounit() {
-        let mut state = State::default();
+        let state = State::default();
         let mut coro = state.handle_read_from("/hello".to_string(), 0, 5);
 
         coro = coro.resume().unwrap_pending(|Tmessage { tag, content }| {
@@ -638,27 +658,27 @@ mod tests {
 
     #[test]
     fn fidcache_insert_updates_both_maps() {
-        let mut state = State::default();
-        state.fids.insert(1, "/hello".into());
+        let mut fids = FidCache::default();
+        fids.insert(1, "/hello".into());
 
-        assert_eq!(state.fids.fid_for_unnormalised_path("/hello"), Some(1));
-        assert_eq!(state.fids.path_for(1), Some("/hello"));
+        assert_eq!(fids.fid_for_unnormalised_path("/hello"), Some(1));
+        assert_eq!(fids.path_for(1), Some("/hello"));
     }
 
     #[test]
     fn fidcache_remove_updates_both_maps() {
-        let mut state = State::default();
-        state.fids.insert(1, "/hello".into());
+        let mut fids = FidCache::default();
+        fids.insert(1, "/hello".into());
 
-        assert_eq!(state.fids.remove(1), Some("/hello".into()));
-        assert_eq!(state.fids.fid_for_unnormalised_path("/hello"), None);
-        assert_eq!(state.fids.path_for(1), None);
+        assert_eq!(fids.remove(1), Some("/hello".into()));
+        assert_eq!(fids.fid_for_unnormalised_path("/hello"), None);
+        assert_eq!(fids.path_for(1), None);
     }
 
     #[test]
     fn handle_walk_from_empty_path_returns_base_fid() {
-        let mut state = State::default();
-        state.fids.insert(1, "/subdir".into());
+        let state = State::default();
+        state.fids.lock().insert(1, "/subdir".into());
 
         let fid = state
             .handle_walk_from(1, "".to_string())
@@ -667,15 +687,21 @@ mod tests {
             .unwrap();
 
         assert_eq!(fid, 1);
-        assert_eq!(state.next_fid, 1);
-        assert_eq!(state.fids.fid_for_unnormalised_path("/subdir"), Some(1));
+        assert_eq!(state.next_fid.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            state.fids.lock().fid_for_unnormalised_path("/subdir"),
+            Some(1)
+        );
     }
 
     #[test]
     fn handle_walk_from_uses_base_path_for_cache_key() {
-        let mut state = State::default();
-        state.fids.insert(1, "/subdir".into());
-        state.fids.insert(2, "/subdir/child".into());
+        let state = State::default();
+        {
+            let mut fids = state.fids.lock();
+            fids.insert(1, "/subdir".into());
+            fids.insert(2, "/subdir/child".into());
+        }
 
         let fid = state
             .handle_walk_from(1, "child".to_string())
@@ -684,13 +710,13 @@ mod tests {
             .unwrap();
 
         assert_eq!(fid, 2);
-        assert_eq!(state.next_fid, 1);
+        assert_eq!(state.next_fid.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     #[should_panic(expected = "unknown base fid for walk: 42")]
     fn handle_walk_from_panics_when_base_fid_not_cached() {
-        let mut state = State::default();
+        let state = State::default();
         _ = state.handle_walk_from(42, "child".to_string()).resume();
     }
 }

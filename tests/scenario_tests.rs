@@ -12,7 +12,7 @@ use ad_editor::{
     ui::{Layout, StateChange, UserInterface, style::CurShape},
 };
 use assert_fs::TempDir;
-use ninep::sync::client::UnixClient;
+use ninep::sync::client::Client;
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
 use std::{
@@ -359,7 +359,7 @@ impl ScriptedUi {
     }
 
     fn spawn_fsys(&self, f: Fsys) {
-        match UnixClient::new_unix_with_explicit_path(&self.uname, &self.socket_path, "") {
+        match Client::new_unix_with_explicit_path(&self.uname, &self.socket_path, "") {
             Ok(client) => {
                 // We need to mark that we are pending before spawning the background thread
                 // for running the fsys operation otherwise we race with the main editor
@@ -461,7 +461,7 @@ enum Fsys {
 }
 
 impl Fsys {
-    fn run(self, mut client: UnixClient, pending: Arc<Mutex<bool>>) {
+    fn run(self, client: Client, pending: Arc<Mutex<bool>>) {
         let inner = move || {
             match self {
                 Fsys::Read(path) => {

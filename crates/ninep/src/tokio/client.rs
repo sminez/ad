@@ -2,62 +2,95 @@
 use crate::{
     fs::{Mode, Perm, Stat, WStat},
     sansio::{
-        client::{MSIZE, State, err},
+        client::{State, err},
         protocol::{Rdata, Rmessage, SharedBuf, Tdata, Tmessage},
     },
     tokio::{AsyncNineP, AsyncStream},
 };
 use simple_coro::CoroState;
-use std::{env, mem, path::Path, sync::Arc};
+use std::{
+    collections::HashMap,
+    env, mem,
+    path::Path,
+    sync::{
+        Arc,
+        atomic::{AtomicU32, Ordering},
+    },
+};
 use tokio::{
     io::DuplexStream,
     net::{TcpStream, ToSocketAddrs, UnixStream},
-    sync::Mutex,
+    spawn,
+    sync::{
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
+        oneshot::{self, Sender},
+    },
 };
 
 pub use crate::sansio::client::{Error, Result};
+
+macro_rules! run_9p_coro {
+    ($self:ident, $method:ident, $($arg:expr),*) => {{
+        let mut coro = $self.state.$method($($arg),*);
+        loop {
+            coro = match coro.resume() {
+                CoroState::Complete(res) => break res,
+                CoroState::Pending(c, t) => {
+                    let rmsg = $self.send_raw(t.content).await?;
+                    c.send(rmsg)
+                }
+            }
+        }
+    }};
+}
 
 /// An asynchronous 9p client.
 ///
 /// Support for each of the operations exposed by this client is determined by the server
 /// implementation that it is connected to.
 #[derive(Debug)]
-pub struct Client<S> {
-    state: Arc<Mutex<State>>,
-    stream: Arc<Mutex<S>>,
-    buf: SharedBuf,
-    msize: u32,
+pub struct Client {
+    state: Arc<State>,
+    tx: UnboundedSender<Req>,
 }
 
-impl<S> Clone for Client<S> {
+impl Clone for Client {
     fn clone(&self) -> Self {
+        let _ = self.tx.send(Req::AddClient);
+
         Self {
             state: Arc::clone(&self.state),
-            stream: Arc::clone(&self.stream),
-            buf: SharedBuf::default(),
-            msize: self.msize,
+            tx: self.tx.clone(),
         }
     }
 }
 
-impl<S> Client<S> {
-    fn new(stream: S) -> Self {
+impl Drop for Client {
+    fn drop(&mut self) {
+        let _ = self.tx.send(Req::RemoveClient);
+    }
+}
+
+impl Client {
+    fn new<S>(stream: S) -> Self
+    where
+        S: AsyncStream,
+    {
+        let (tx, rx) = unbounded_channel();
+        let state = State::default();
+        let msize = Arc::clone(&state.msize);
+        let conn = Connection::new(stream, rx, msize);
+
+        spawn(conn.run());
+
         Self {
             state: Default::default(),
-            stream: Arc::new(Mutex::new(stream)),
-            buf: SharedBuf::default(),
-            msize: MSIZE,
+            tx,
         }
     }
 }
 
-/// A client that operates over an underlying tokio [UnixStream].
-pub type UnixClient = Client<UnixStream>;
-
-/// A client that operates over an underlying tokio [TcpStream].
-pub type TcpClient = Client<TcpStream>;
-
-impl Client<UnixStream> {
+impl Client {
     /// Create a new [Client] connected to a unix socket at the specified path.
     pub async fn new_unix_with_explicit_path(
         uname: impl Into<String>,
@@ -65,7 +98,7 @@ impl Client<UnixStream> {
         aname: impl Into<String>,
     ) -> Result<Self> {
         let stream = UnixStream::connect(path.as_ref()).await?;
-        let mut client = Self::new(stream);
+        let client = Self::new(stream);
         client.connect(uname, aname).await?;
 
         Ok(client)
@@ -86,23 +119,19 @@ impl Client<UnixStream> {
 
         Self::new_unix_with_explicit_path(uname, path, aname).await
     }
-}
 
-impl Client<DuplexStream> {
     /// Create a new [Client] using an existing [stream][UnixStream].
     pub async fn new_from_duplex_stream(
         uname: impl Into<String>,
         aname: impl Into<String>,
         stream: DuplexStream,
     ) -> Result<Self> {
-        let mut client = Self::new(stream);
+        let client = Self::new(stream);
         client.connect(uname, aname).await?;
 
         Ok(client)
     }
-}
 
-impl Client<TcpStream> {
     /// Create a new [Client] connected to a tcp socket at the specified address.
     pub async fn new_tcp(
         uname: impl Into<String>,
@@ -110,42 +139,22 @@ impl Client<TcpStream> {
         aname: impl Into<String>,
     ) -> Result<Self> {
         let stream = TcpStream::connect(addr).await?;
-        let mut client = Self::new(stream);
+        let client = Self::new(stream);
         client.connect(uname, aname).await?;
 
         Ok(client)
     }
-}
 
-macro_rules! run_9p_coro {
-    ($self:ident, $method:ident, $($arg:expr),*) => {
-        {
-            let mut state = $self.state.lock().await;
-            let msize = state.msize;
-            let mut coro = state.$method($($arg),*);
-            loop {
-                coro = match coro.resume() {
-                    CoroState::Complete(res) => break res,
-                    CoroState::Pending(c, t) => {
-                        let mut stream = $self.stream.lock().await;
-                        t.write_to(&mut *stream).await?;
-                        c.send(Rmessage::read_from(msize, &$self.buf, &mut *stream).await?)
-                    }
-                }
-            }
-        }
-    };
-}
+    async fn send_raw(&self, data: Tdata) -> Result<Rmessage> {
+        let (tx, rx) = oneshot::channel();
+        let req = Req::Send { data, tx };
+        self.tx.send(req).map_err(|_| Error::ConnectionClosed)?;
 
-impl<S> Client<S>
-where
-    S: AsyncStream,
-{
-    async fn send(&mut self, tag: u16, content: Tdata) -> Result<Rmessage> {
-        let mut stream = self.stream.lock().await;
-        Tmessage { tag, content }.write_to(&mut *stream).await?;
+        rx.await.map_err(|_| Error::ConnectionClosed)?
+    }
 
-        match Rmessage::read_from(self.msize, &self.buf, &mut *stream).await? {
+    async fn send(&self, content: Tdata) -> Result<Rmessage> {
+        match self.send_raw(content).await? {
             Rmessage {
                 content: Rdata::Error { ename },
                 ..
@@ -155,63 +164,56 @@ where
     }
 
     /// Establish our connection to the target 9p server and begin the session.
-    async fn connect(&mut self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
-        run_9p_coro!(self, handle_connect, uname.into(), aname.into())?;
-        let msize = self.state.lock().await.msize;
-        self.msize = msize;
-
-        Ok(())
+    async fn connect(&self, uname: impl Into<String>, aname: impl Into<String>) -> Result<()> {
+        run_9p_coro!(self, handle_connect, uname.into(), aname.into())
     }
 
     /// Associate the given path with a new fid.
-    pub async fn walk(&mut self, path: impl Into<String>) -> Result<u32> {
+    pub async fn walk(&self, path: impl Into<String>) -> Result<u32> {
         run_9p_coro!(self, handle_walk, path.into())
     }
 
     /// Free server side state for the given fid.
     ///
     /// Clunks of the root fid (0) will be ignored
-    pub async fn clunk(&mut self, fid: u32) -> Result<()> {
+    pub async fn clunk(&self, fid: u32) -> Result<()> {
         if fid != 0 {
-            self.send(0, Tdata::Clunk { fid }).await?;
-            self.state.lock().await.fids.remove(fid);
+            self.send(Tdata::Clunk { fid }).await?;
+            self.state.fids().remove(fid);
         }
 
         Ok(())
     }
 
     /// Free server side state for the given path.
-    pub async fn clunk_path(&mut self, path: impl Into<String>) -> Result<()> {
-        let fid = {
-            let state = self.state.lock().await;
-            match state.fids.fid_for_unnormalised_path(&path.into()) {
-                Some(fid) => fid,
-                None => return Ok(()),
-            }
+    pub async fn clunk_path(&self, path: impl Into<String>) -> Result<()> {
+        let fid = match self.state.fids().fid_for_unnormalised_path(&path.into()) {
+            Some(fid) => fid,
+            None => return Ok(()),
         };
 
         self.clunk(fid).await
     }
 
     /// Request the current [Stat] of the file or directory identified by the given path.
-    pub async fn stat(&mut self, path: impl Into<String>) -> Result<Stat> {
+    pub async fn stat(&self, path: impl Into<String>) -> Result<Stat> {
         run_9p_coro!(self, handle_stat, path.into())
     }
 
     /// Attempt to modify the current [Stat] of the file or directory identified by the given path
     /// using the given [WStat].
-    pub async fn write_stat(&mut self, path: impl Into<String>, wstat: WStat) -> Result<()> {
+    pub async fn write_stat(&self, path: impl Into<String>, wstat: WStat) -> Result<()> {
         run_9p_coro!(self, handle_wstat, path.into(), wstat)
     }
 
     /// Read the full contents of the file at `path` as bytes.
-    pub async fn read(&mut self, path: impl Into<String>) -> Result<Vec<u8>> {
+    pub async fn read(&self, path: impl Into<String>) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read, path.into())
     }
 
     /// Read up to `count` bytes from the file at `path` starting at byte `offset`.
     pub async fn read_from(
-        &mut self,
+        &self,
         path: impl Into<String>,
         offset: u64,
         count: u32,
@@ -220,7 +222,7 @@ where
     }
 
     /// Read the full contents of the file at `path` as utf-8 encoded text.
-    pub async fn read_str(&mut self, path: impl Into<String>) -> Result<String> {
+    pub async fn read_str(&self, path: impl Into<String>) -> Result<String> {
         let bytes = run_9p_coro!(self, handle_read, path.into())?;
         let s = match String::from_utf8(bytes) {
             Ok(s) => s,
@@ -231,13 +233,13 @@ where
     }
 
     /// Read the directory listing of the directory at `path`.
-    pub async fn read_dir(&mut self, path: impl Into<String>) -> Result<Vec<Stat>> {
+    pub async fn read_dir(&self, path: impl Into<String>) -> Result<Vec<Stat>> {
         run_9p_coro!(self, handle_read_dir, path.into())
     }
 
     /// Write the provided data to the file at `path` at the given offset.
     pub async fn write(
-        &mut self,
+        &self,
         path: impl Into<String>,
         offset: u64,
         content: &[u8],
@@ -247,7 +249,7 @@ where
 
     /// Write the provided string data to the file at `path` at the given offset.
     pub async fn write_str(
-        &mut self,
+        &self,
         path: impl Into<String>,
         offset: u64,
         content: &str,
@@ -257,7 +259,7 @@ where
 
     /// Attempt to create a new file within the connected filesystem.
     pub async fn create(
-        &mut self,
+        &self,
         dir: impl Into<String>,
         name: impl Into<String>,
         perms: Perm,
@@ -267,7 +269,7 @@ where
     }
 
     /// Attempt to remove a file from the connected filesystem.
-    pub async fn remove(&mut self, path: impl Into<String>) -> Result<()> {
+    pub async fn remove(&self, path: impl Into<String>) -> Result<()> {
         run_9p_coro!(self, handle_remove, path.into())
     }
 
@@ -278,11 +280,11 @@ where
     ///
     /// The [ChunkStream] returned by this method provides an asynchronous `next` method that can
     /// be called to await the next chunk.
-    pub async fn stream_chunks(&mut self, path: impl Into<String>) -> Result<ChunkStream<S>> {
+    pub async fn stream_chunks(&self, path: impl Into<String>) -> Result<ChunkStream> {
         let fid = self.walk(path).await?;
         let mode = Mode::READ.bits();
-        let count = self.state.lock().await.msize;
-        self.send(0, Tdata::Open { fid, mode }).await?;
+        let count = self.state.msize.load(Ordering::Relaxed);
+        self.send(Tdata::Open { fid, mode }).await?;
 
         Ok(ChunkStream {
             client: self.clone(),
@@ -296,11 +298,11 @@ where
     ///
     /// The [ReadLineStream] returned by this method provides an asynchronous `next` method that can
     /// be called to await the next chunk.
-    pub async fn stream_lines(&mut self, path: impl Into<String>) -> Result<ReadLineStream<S>> {
+    pub async fn stream_lines(&self, path: impl Into<String>) -> Result<ReadLineStream> {
         let fid = self.walk(path).await?;
         let mode = Mode::READ.bits();
-        let count = self.state.lock().await.msize;
-        self.send(0, Tdata::Open { fid, mode }).await?;
+        let count = self.state.msize.load(Ordering::Relaxed);
+        self.send(Tdata::Open { fid, mode }).await?;
 
         Ok(ReadLineStream {
             client: self.clone(),
@@ -312,27 +314,135 @@ where
         })
     }
 
-    async fn _read_count(&mut self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
+    async fn _read_count(&self, fid: u32, offset: u64, count: u32) -> Result<Vec<u8>> {
         run_9p_coro!(self, handle_read_count, fid, offset, count)
+    }
+}
+
+enum Req {
+    AddClient,
+    RemoveClient,
+    Send {
+        data: Tdata,
+        tx: Sender<Result<Rmessage>>,
+    },
+}
+
+struct Connection<S>
+where
+    S: AsyncStream,
+{
+    stream: S,
+    rx: UnboundedReceiver<Req>,
+    msize: Arc<AtomicU32>,
+    pending: HashMap<u16, Sender<Result<Rmessage>>>,
+    buf: SharedBuf,
+    n_clients: usize,
+    next_tag: u16,
+}
+
+impl<S> Connection<S>
+where
+    S: AsyncStream,
+{
+    fn new(stream: S, rx: UnboundedReceiver<Req>, msize: Arc<AtomicU32>) -> Self {
+        Self {
+            stream,
+            rx,
+            msize,
+            pending: HashMap::new(),
+            buf: SharedBuf::default(),
+            n_clients: 1,
+            next_tag: 0,
+        }
+    }
+
+    fn tag_for(&mut self, data: &Tdata) -> u16 {
+        if matches!(data, Tdata::Version { .. }) {
+            return u16::MAX;
+        }
+
+        let tag = self.next_tag;
+        self.next_tag = self.next_tag.saturating_add(1);
+        if self.next_tag == u16::MAX {
+            self.next_tag = 0;
+        }
+
+        tag
+    }
+
+    fn shutdown(&mut self, msg: String) {
+        for tx in self.pending.drain().map(|(_, s)| s) {
+            let _ = tx.send(err(msg.clone()));
+        }
+
+        self.n_clients = 0;
+    }
+
+    async fn run(mut self) {
+        while self.n_clients > 0 {
+            if self.pending.is_empty() {
+                let req = match self.rx.recv().await {
+                    Some(req) => req,
+                    None => return,
+                };
+
+                self.handle_req(req).await;
+                continue;
+            }
+
+            while let Ok(req) = self.rx.try_recv() {
+                self.handle_req(req).await;
+                if self.n_clients == 0 {
+                    return;
+                }
+            }
+
+            let size = self.msize.load(Ordering::Acquire);
+            let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream).await {
+                Ok(rmsg) => rmsg,
+                Err(e) => {
+                    self.shutdown(e.to_string());
+                    break;
+                }
+            };
+
+            if let Some(sender) = self.pending.remove(&rmsg.tag) {
+                let _ = sender.send(Ok(rmsg));
+            }
+        }
+    }
+
+    async fn handle_req(&mut self, req: Req)
+    where
+        S: AsyncStream,
+    {
+        match req {
+            Req::AddClient => self.n_clients += 1,
+            Req::RemoveClient => self.n_clients = self.n_clients.saturating_sub(1),
+            Req::Send { data, tx } => {
+                let tag = self.tag_for(&data);
+                let msg = Tmessage::new(tag, data);
+                self.pending.insert(tag, tx);
+
+                if let Err(e) = msg.write_to(&mut self.stream).await {
+                    self.shutdown(e.to_string());
+                }
+            }
+        }
     }
 }
 
 /// An asynchronous stream of [`Vec<u8>`] chunks out of a given file.
 #[derive(Debug)]
-pub struct ChunkStream<S>
-where
-    S: AsyncStream,
-{
-    client: Client<S>,
+pub struct ChunkStream {
+    client: Client,
     fid: u32,
     offset: u64,
     count: u32,
 }
 
-impl<S> ChunkStream<S>
-where
-    S: AsyncStream,
-{
+impl ChunkStream {
     /// Await the next chunk of data out of a file.
     pub async fn next(&mut self) -> Option<Vec<u8>> {
         let data = self
@@ -354,11 +464,8 @@ where
 
 /// An asynchronous stream of [String] lines out of a given file.
 #[derive(Debug)]
-pub struct ReadLineStream<S>
-where
-    S: AsyncStream,
-{
-    client: Client<S>,
+pub struct ReadLineStream {
+    client: Client,
     buf: Vec<u8>,
     fid: u32,
     offset: u64,
@@ -366,10 +473,7 @@ where
     at_eof: bool,
 }
 
-impl<S> ReadLineStream<S>
-where
-    S: AsyncStream,
-{
+impl ReadLineStream {
     /// Await the next newline delimited line out of a file.
     pub async fn next(&mut self) -> Option<String> {
         if self.at_eof {
@@ -423,10 +527,7 @@ mod tests {
         },
         tokio::server::Server,
     };
-    use tokio::{
-        io::{AsyncWriteExt, DuplexStream},
-        task,
-    };
+    use tokio::task;
 
     // We stamp out the test suite using this helper macro rather than using simple_test_case in
     // order to ensure that both the sync and tokio implementations run exactly the same cases
@@ -448,11 +549,11 @@ mod tests {
             handle_step(i, step, &mut client).await;
         }
 
-        let _ = client.stream.lock().await.shutdown().await;
+        drop(client);
         handle.await.expect("server task join failed");
     }
 
-    async fn handle_step(i: usize, step: Step, client: &mut Client<DuplexStream>) {
+    async fn handle_step(i: usize, step: Step, client: &mut Client) {
         match step {
             Step::Connect { uname, aname, res } => {
                 let actual = client.connect(uname, aname).await;
@@ -526,9 +627,11 @@ mod tests {
             }
 
             Step::AssertState { next_fid, fids } => {
-                let st = client.state.lock().await;
-                assert_eq!(st.next_fid, next_fid, "(step {i}) next_fid");
-                assert_eq!(st.fids.path_to_fid(), &fids, "(step {i}) fids");
+                let actual_next_fid = client.state.next_fid.load(Ordering::Relaxed);
+                let fid_cache = client.state.fids();
+
+                assert_eq!(actual_next_fid, next_fid, "(step {i}) next_fid");
+                assert_eq!(fid_cache.path_to_fid(), &fids, "(step {i}) fids");
             }
         }
     }

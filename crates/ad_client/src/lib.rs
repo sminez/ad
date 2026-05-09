@@ -176,7 +176,7 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
     let mut sessions = Vec::new();
 
     for ns in open_9p_sockets()?.into_iter() {
-        let mut client = match Client::new_unix(&ns, "") {
+        let client = match Client::new_unix(&ns, "") {
             Ok(client) => client,
             Err(_) => {
                 sessions.push(SessionMeta {
