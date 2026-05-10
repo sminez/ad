@@ -126,7 +126,7 @@ fn single_window_editor_scroll_inputs(
                 };
             }
 
-            e.refresh_screen_w_minibuffer(None);
+            e.refresh_screen();
             e.handle_input(Input::Mouse(MouseEvent {
                 k: MouseEventKind::Press,
                 m: MouseMod::NoMod,

@@ -95,7 +95,7 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
 
         "execute" => Ok(Single(ExecuteDot)),
         "help" => Ok(Single(ShowHelp)),
-        "kill" => Ok(Single(KillRunningChild)),
+        "kill" => Ok(Single(KillRunningChild { idx: None })),
         "load" => Ok(Single(LoadDot { new_window: false })),
         "plumb" => Ok(Single(Plumb {
             txt: args.to_string(),
@@ -121,6 +121,7 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             } else {
                 Ok(Single(OpenFile {
                     path: args.to_string(),
+                    new_window: false,
                 }))
             }
         }
@@ -129,8 +130,9 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             if args.is_empty() {
                 Err("No filename provided".to_string())
             } else {
-                Ok(Single(OpenFileInNewWindow {
+                Ok(Single(OpenFile {
                     path: args.to_string(),
+                    new_window: true,
                 }))
             }
         }

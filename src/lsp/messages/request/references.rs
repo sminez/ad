@@ -1,6 +1,6 @@
 use crate::{
     buffer::Buffers,
-    editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
+    editor::{Action, Actions, MbSelect, MiniBufferSelection, ViewPort},
     lsp::{
         LspManager, Pos, PositionEncoding,
         capabilities::Coords,
@@ -95,10 +95,6 @@ impl Reference {
 pub struct References(Vec<Reference>);
 
 impl MbSelect for References {
-    fn clone_selector(&self) -> MbSelector {
-        self.clone().into_selector()
-    }
-
     fn prompt_and_options(&self, buffers: &Buffers) -> (String, Vec<String>) {
         let width = self
             .0
@@ -119,6 +115,7 @@ impl MbSelect for References {
                 Actions::Multi(vec![
                     Action::OpenFile {
                         path: r.path.clone(),
+                        new_window: false,
                     },
                     Action::DotSetFromCoords { coords: r.coords },
                     Action::SetViewPort(ViewPort::Center),

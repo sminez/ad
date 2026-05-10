@@ -5,9 +5,9 @@
 use crate::{
     Config,
     buffer::{Buffer, Buffers, GapBuffer, Slice},
-    config_handle,
     dot::TextObject,
     editor::{Action, Actions, Editor},
+    input::Event,
     key::{Arrow, Input},
     system::System,
 };
@@ -15,10 +15,9 @@ use ad_event::Source;
 use std::{
     cmp::{self, min},
     fmt,
-    path::Path,
-    sync::{Arc, RwLock},
+    ops::ControlFlow,
+    sync::{Arc, Mutex, RwLock},
 };
-use tracing::trace;
 
 const MINIBUFFER_ID: usize = usize::MAX - 1;
 
@@ -40,11 +39,24 @@ pub(crate) enum MiniBufferSelection {
     Cancelled,
 }
 
+impl MiniBufferSelection {
+    /// Disgard any information around which line was selected by the user and only
+    /// return the content of the selected line itself.
+    pub(crate) fn into_content(self) -> Option<String> {
+        match self {
+            Self::Line { line, .. } => Some(line),
+            Self::UserInput { input } => Some(input),
+            Self::Cancelled => None,
+        }
+    }
+}
+
 /// A mini-buffer always has a single line prompt for accepting user input
 /// with the rest of the buffer content not being directly editable.
 ///
 /// Conceptually this is operates as an embedded dmenu.
 pub(crate) struct MiniBuffer {
+    sel: MbSelector,
     prompt: String,
     n_prompt_chars: usize,
     input: Buffer,
@@ -70,20 +82,20 @@ impl fmt::Debug for MiniBuffer {
 }
 
 impl MiniBuffer {
-    pub fn new(
-        prompt: String,
-        lines: Vec<String>,
-        max_height: usize,
-        config: Arc<RwLock<Config>>,
-    ) -> Self {
-        let line_indices = Vec::with_capacity(lines.len());
+    pub fn new(sel: MbSelector, config: Arc<RwLock<Config>>, buffers: &Buffers) -> Self {
+        let (prompt, options) = sel.0.prompt_and_options(buffers);
+        let initial_input = sel.0.initial_input(buffers).unwrap_or_default();
+
+        let line_indices = Vec::with_capacity(options.len());
         let n_prompt_chars = prompt.chars().count();
+        let max_height = config.read().unwrap().minibuffer_lines;
 
         Self {
+            sel,
             prompt,
             n_prompt_chars,
-            input: Buffer::new_unnamed(MINIBUFFER_ID, "", config.clone()),
-            initial_lines: lines,
+            input: Buffer::new_unnamed(MINIBUFFER_ID, initial_input, config.clone()),
+            initial_lines: options,
             line_indices,
             b: Buffer::new_minibuffer(config),
             max_height,
@@ -96,7 +108,35 @@ impl MiniBuffer {
         }
     }
 
-    #[inline]
+    pub fn handle_input(&mut self, inputs: Vec<Input>) -> ControlFlow<Option<Actions>> {
+        for input in inputs.into_iter() {
+            if let Some(selection) = self.handle_input_one(input) {
+                return ControlFlow::Break(self.sel.0.selected_actions(selection));
+            }
+        }
+
+        ControlFlow::Continue(())
+    }
+
+    pub fn updated_render_state(&mut self) -> MiniBufferState<'_> {
+        self.update_state();
+
+        MiniBufferState {
+            cx: self.input.dot.active_cur().idx + self.n_prompt_chars,
+            n_visible_lines: self.n_visible_lines,
+            prompt: &self.prompt,
+            input: self.input.txt.as_slice(),
+            selected_line_idx: self.selected_line_idx,
+            b: if self.show_buffer_content {
+                Some(&self.b)
+            } else {
+                None
+            },
+            top: self.top,
+            bottom: self.bottom,
+        }
+    }
+
     fn update_state(&mut self) {
         self.b.txt.clear();
         self.line_indices.clear();
@@ -142,26 +182,7 @@ impl MiniBuffer {
         self.bottom = bottom;
     }
 
-    #[inline]
-    fn current_state(&self) -> MiniBufferState<'_> {
-        MiniBufferState {
-            cx: self.input.dot.active_cur().idx + self.n_prompt_chars,
-            n_visible_lines: self.n_visible_lines,
-            prompt: &self.prompt,
-            input: self.input.txt.as_slice(),
-            selected_line_idx: self.selected_line_idx,
-            b: if self.show_buffer_content {
-                Some(&self.b)
-            } else {
-                None
-            },
-            top: self.top,
-            bottom: self.bottom,
-        }
-    }
-
-    #[inline]
-    fn handle_input(&mut self, input: Input) -> Option<MiniBufferSelection> {
+    fn handle_input_one(&mut self, input: Input) -> Option<MiniBufferSelection> {
         match input {
             Input::Char(c) => {
                 self.input
@@ -230,91 +251,41 @@ impl<S> Editor<S>
 where
     S: System,
 {
-    fn prompt_w_callback(
-        &mut self,
-        prompt: &str,
-        initial_lines: Vec<String>,
-        initial_input: Option<String>,
-    ) -> MiniBufferSelection {
-        let mut mb = MiniBuffer::new(
-            prompt.to_string(),
-            initial_lines,
-            config_handle!(self).minibuffer_lines,
-            self.config.clone(),
-        );
+    /// Push a new minibuffer onto the minibuffer stack.
+    ///
+    /// This minibuffer will be responsible for processing input events until it returns a
+    /// selection, at which point the minibuffer below it will resume processing.
+    pub(crate) fn push_minibuffer(&mut self, sel: MbSelector) {
+        let mb = MiniBuffer::new(sel, self.config.clone(), self.layout.buffers());
+        self.mb_stack.push(mb);
+    }
 
-        if let Some(s) = initial_input {
-            mb.input
-                .handle_action(Action::InsertString { s }, Source::Fsys);
+    /// If we have an open minibuffer then it is responsible for handling input and bracketed paste
+    /// events. All other events are handled by the main event loop even when a minibuffer is open.
+    pub(crate) fn try_handle_event_with_minibuffer(&mut self, event: Event) -> Option<Event> {
+        if self.mb_stack.is_empty() {
+            return Some(event);
         }
 
-        while self.running {
-            mb.update_state();
-            self.refresh_screen_w_minibuffer(Some(mb.current_state()));
-            let inputs = self.block_for_input();
-            for input in inputs.into_iter() {
-                if let Some(selection) = mb.handle_input(input) {
-                    return selection;
-                }
-            }
+        let inputs = match event {
+            Event::Input(i) => vec![i],
+            Event::BracketedPaste(s) => s.chars().map(Input::Char).collect(),
+            event => return Some(event),
+        };
+
+        let mb = self.mb_stack.last_mut().expect("checked non-empty above");
+        if let ControlFlow::Break(maybe_actions) = mb.handle_input(inputs) {
+            self.mb_stack.pop();
+            self.handle_actions(maybe_actions?, Source::Fsys);
         }
 
-        MiniBufferSelection::Cancelled
-    }
-
-    /// Use the minibuffer to prompt for user input
-    pub(crate) fn minibuffer_prompt(&mut self, prompt: &str) -> Option<String> {
-        trace!(%prompt, "opening mini-buffer");
-        match self.prompt_w_callback(prompt, vec![], None) {
-            MiniBufferSelection::UserInput { input } => Some(input),
-            _ => None,
-        }
-    }
-
-    /// Append ", continue? [y/n]: " to the prompt and return true if the user enters one of
-    /// y, Y, yes, YES, Yes (otherwise return false)
-    pub(crate) fn minibuffer_confirm(&mut self, prompt: &str) -> bool {
-        let resp = self.minibuffer_prompt(&format!("{prompt}, continue? [y/n]: "));
-
-        matches!(resp.as_deref(), Some("y" | "Y" | "yes"))
-    }
-
-    /// Use a [MiniBuffer] to select from a list of strings.
-    pub(crate) fn minibuffer_select_from(
-        &mut self,
-        prompt: &str,
-        initial_lines: Vec<String>,
-    ) -> MiniBufferSelection {
-        self.prompt_w_callback(prompt, initial_lines, None)
-    }
-
-    /// Use a [MiniBuffer] to select from the newline delimited output of running a shell command.
-    pub(crate) fn minibuffer_select_from_command_output(
-        &mut self,
-        prompt: &str,
-        cmd: &str,
-        dir: &Path,
-    ) -> MiniBufferSelection {
-        let initial_lines =
-            match self
-                .system
-                .run_command_blocking(cmd, dir, self.active_buffer_id())
-            {
-                Ok(s) => s.lines().map(String::from).collect(),
-                Err(e) => {
-                    self.set_status_message(format!("unable to get minibuffer input: {e}"));
-                    return MiniBufferSelection::Cancelled;
-                }
-            };
-
-        self.prompt_w_callback(prompt, initial_lines, None)
+        None
     }
 }
 
 /// Something that can be used to open a minibuffer and run subsequent actions based on
 /// a selection.
 pub(crate) trait MbSelect: Send + Sync {
-    fn clone_selector(&self) -> MbSelector;
     fn prompt_and_options(&self, buffers: &Buffers) -> (String, Vec<String>);
     fn selected_actions(&self, sel: MiniBufferSelection) -> Option<Actions>;
 
@@ -327,21 +298,16 @@ pub(crate) trait MbSelect: Send + Sync {
     where
         Self: Sized + 'static,
     {
-        MbSelector(Box::new(self))
+        MbSelector(Arc::new(self))
     }
 }
 
-pub struct MbSelector(Box<dyn MbSelect>);
+#[derive(Clone)]
+pub struct MbSelector(Arc<dyn MbSelect>);
 
 impl fmt::Debug for MbSelector {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("MbSelector").finish()
-    }
-}
-
-impl Clone for MbSelector {
-    fn clone(&self) -> Self {
-        self.0.clone_selector()
+        f.debug_struct("MbSelector").finish_non_exhaustive()
     }
 }
 
@@ -352,16 +318,42 @@ impl cmp::PartialEq for MbSelector {
     }
 }
 
-impl MbSelector {
-    pub(crate) fn run<S>(&self, ed: &mut Editor<S>)
+pub(crate) struct SimpleMbSelect {
+    prompt: String,
+    lines: Vec<String>,
+    selected_actions: Mutex<Box<dyn FnMut(MiniBufferSelection) -> Option<Actions> + Send + Sync>>,
+}
+
+impl fmt::Debug for SimpleMbSelect {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SimpleMbSelect")
+            .field("prompt", &self.prompt)
+            .field("lines", &self.lines)
+            .finish_non_exhaustive()
+    }
+}
+
+impl SimpleMbSelect {
+    pub fn new<F>(prompt: impl Into<String>, lines: Vec<String>, selected_actions: F) -> Self
     where
-        S: System,
+        F: FnMut(MiniBufferSelection) -> Option<Actions> + Send + Sync + 'static,
     {
-        let (prompt, options) = self.0.prompt_and_options(ed.layout.buffers());
-        let initial_input = self.0.initial_input(ed.layout.buffers());
-        let selection = ed.prompt_w_callback(&prompt, options, initial_input);
-        if let Some(actions) = self.0.selected_actions(selection) {
-            ed.handle_actions(actions, Source::Fsys);
+        Self {
+            prompt: prompt.into(),
+            lines,
+            selected_actions: Mutex::new(Box::new(selected_actions)),
         }
+    }
+}
+
+impl MbSelect for SimpleMbSelect {
+    fn prompt_and_options(&self, _: &Buffers) -> (String, Vec<String>) {
+        (self.prompt.clone(), self.lines.clone())
+    }
+
+    fn selected_actions(&self, selection: MiniBufferSelection) -> Option<Actions> {
+        let mut f = self.selected_actions.lock().unwrap();
+
+        (f)(selection)
     }
 }

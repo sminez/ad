@@ -1,0 +1,24 @@
+Attempting to save over an existing file by using "save as" should prompt for
+for confirmation via the minibuffer.
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- file-a.txt --
+a
+-- file-b.txt --
+b
+-- actions --
+# attempt to save
+type: :w a.txt\n
+# should be presented with the minibuffer asking for confirmation
+type: y\n
+-- buffer-list --
+1      a.txt
+2    * a.txt
+-- expected-windows --
+2
+-- expected-buffer-1 --
+a
+-- expected-buffer-2 --
+b
+

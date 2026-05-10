@@ -57,7 +57,10 @@ macro_rules! impl_goto_req {
                 };
 
                 Some(Actions::Multi(vec![
-                    Action::OpenFile { path },
+                    Action::OpenFile {
+                        path,
+                        new_window: false,
+                    },
                     Action::DotSetFromCoords { coords },
                     Action::SetViewPort(ViewPort::Center),
                 ]))

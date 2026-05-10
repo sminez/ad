@@ -3,7 +3,7 @@
 //! <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage>
 use crate::{
     buffer::Buffers,
-    editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection, ViewPort},
+    editor::{Action, Actions, MbSelect, MiniBufferSelection, ViewPort},
     input::Event,
     lsp::{
         LspManager,
@@ -194,6 +194,7 @@ impl Diagnostic {
         Actions::Multi(vec![
             Action::OpenFile {
                 path: self.path.clone(),
+                new_window: false,
             },
             Action::DotSetFromCoords {
                 coords: self.coords,
@@ -207,10 +208,6 @@ impl Diagnostic {
 pub struct Diagnostics(pub(crate) Vec<Diagnostic>);
 
 impl MbSelect for Diagnostics {
-    fn clone_selector(&self) -> MbSelector {
-        self.clone().into_selector()
-    }
-
     fn prompt_and_options(&self, _: &Buffers) -> (String, Vec<String>) {
         (
             "Diagnostics> ".to_owned(),

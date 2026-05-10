@@ -92,6 +92,10 @@ fn editor_scenarios(path: &str, content: &str) {
         &file_paths,
     );
 
+    e.handle_event(Event::Action(Action::ChangeDirectory {
+        path: Some(test_file_dir.to_string_lossy().to_string()),
+    }));
+
     e.run_with_explicit_fsys_path(socket_path);
 
     let status_hist = status_messages.lock().unwrap().join("\n");
@@ -164,7 +168,7 @@ impl TestCase {
 
         // -- buffer-list --
         // The buffer list is just a raw string that we compare to the final listing that
-        // the user can open in the minibuffer using 2"<space> b". We trim the working
+        // the user can open in the minibuffer using "<space> b". We trim the working
         // directory from the start of each path in the real listing so the content in a
         // test case should just be the paths as provided in -- file-X -- sections.
         // (See the file-X section below for more details)
@@ -550,6 +554,7 @@ fn parse_actions(raw: &str) -> Vec<TestAction> {
             // per line. ("normal" typing can be given as a concatenation).
             match s {
                 "<esc>" => actions.push(TestAction::Input(Input::Esc)),
+                "<space>" => actions.push(TestAction::Input(Input::Char(' '))),
 
                 s if s.starts_with("<alt>") => {
                     let tail = escape(s.strip_prefix("<alt>").unwrap().trim());

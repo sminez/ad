@@ -186,7 +186,6 @@ impl Buffers {
 
         if let Some(b) = removed {
             self.lsp_handle.document_closed(&b);
-            self.next_id += 1; // for the newly added unnamed buffer
         }
     }
 

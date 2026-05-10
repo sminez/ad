@@ -2,7 +2,7 @@ use crate::{
     buffer::Buffers,
     die,
     dot::{Cur, Dot, Range},
-    editor::{Action, Actions, MbSelect, MbSelector, MiniBufferSelection},
+    editor::{Action, Actions, MbSelect, MiniBufferSelection},
     lsp::{
         LspManager, Pos, PositionEncoding, PreparedMessage, Req,
         capabilities::Coords,
@@ -126,10 +126,6 @@ impl Completion {
 pub struct Completions(Vec<Completion>);
 
 impl MbSelect for Completions {
-    fn clone_selector(&self) -> MbSelector {
-        self.clone().into_selector()
-    }
-
     /// The initial filter input we want is the "word" so far under the cursor.
     fn initial_input(&self, buffers: &Buffers) -> Option<String> {
         let b = buffers.active();

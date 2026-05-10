@@ -1,12 +1,12 @@
 [editor]
-show_splash = true
+show_splash = false
 expand_tab = true
 tabstop = 4
 match_indent = true
 status_timeout = 3
 double_click_ms = 200
 minibuffer_lines = 8
-find_command = "fd -t f"
+find_command = "find -type f"
 
 [filesystem]
 enabled = false

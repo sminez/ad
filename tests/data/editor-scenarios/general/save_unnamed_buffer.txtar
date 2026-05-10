@@ -1,0 +1,20 @@
+Attempting to save an unnamed buffer should prompt for the filename via
+the minibuffer and then save to the given path.
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- actions --
+type: ihello, world!
+# return to normal mode
+type: <esc>
+# attempt to save
+type: :w\n
+# should be presented with the minibuffer asking for a path
+type: hello.txt\n
+-- buffer-list --
+0    * hello.txt
+-- expected-windows --
+0
+-- expected-buffer-0 --
+hello, world!
+

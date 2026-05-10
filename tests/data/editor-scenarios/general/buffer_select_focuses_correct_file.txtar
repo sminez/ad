@@ -1,0 +1,18 @@
+Using the built-in "select buffer" behaviour should focus the chosen buffer
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- file-a.txt --
+A
+-- file-b.txt --
+B
+-- file-c.txt --
+C
+-- actions --
+type: <space>
+type: b
+type: b.txt\n
+-- buffer-list --
+1      a.txt
+2    * b.txt
+3      c.txt

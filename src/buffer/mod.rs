@@ -905,6 +905,12 @@ impl Buffer {
             Action::Redo => return self.redo(),
             Action::Undo => return self.undo(),
 
+            Action::CurToLine { y } => {
+                self.dot = Dot::Cur {
+                    c: Cur::from_yx(y, 0, self),
+                };
+            }
+
             Action::DotCollapseFirst => self.collapse_dot(true),
             Action::DotCollapseLast => self.collapse_dot(false),
             Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),

@@ -1,0 +1,17 @@
+Running an exec script from the edit mode minibuffer should run against
+the currently focused buffer.
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- file-hello.txt --
+hello, world!
+-- actions --
+# Open the edit mode minibuffer and type the command
+type: .
+type: , x/world/ c/sailor/\n
+-- buffer-list --
+1    * hello.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+hello, sailor!

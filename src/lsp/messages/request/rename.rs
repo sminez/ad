@@ -37,7 +37,7 @@ impl LspRequest for PrepareRenameRequest {
                 Action::SetStatusMessage {
                     message: "triggering LSP rename".to_string(),
                 },
-                Action::LspRename,
+                Action::LspRename { new_name: None },
             ])),
 
             None => Some(Actions::Single(Action::SetStatusMessage {
@@ -96,7 +96,10 @@ impl LspRequest for Rename {
             let uri = text_document.uri;
             let path = uri.to_string().strip_prefix("file://").unwrap().to_owned();
 
-            actions.push(Action::OpenFile { path });
+            actions.push(Action::OpenFile {
+                path,
+                new_window: false,
+            });
             actions.extend(edit_actions_as_editor_actions(
                 edits
                     .into_iter()

@@ -3,8 +3,8 @@ use crate::{
     buffer::BufferKind,
     config::Config,
     config_handle,
-    dot::{Cur, Dot, Range, TextObject},
-    editor::{Editor, MbSelector, MiniBufferSelection},
+    dot::{Range, TextObject},
+    editor::{Editor, MbSelect, MbSelector, MiniBufferSelection, minibuffer::SimpleMbSelect},
     exec::{Addr, Address, EditorRunner, Program},
     fsys::LogEvent,
     key::{Arrow, Input},
@@ -18,6 +18,7 @@ use crate::{
 use ad_event::Source;
 use std::{
     env, fs,
+    mem::take,
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::mpsc::Sender,
@@ -54,8 +55,10 @@ pub enum Action {
     BalanceWindows,
     ChangeDirectory { path: Option<String> },
     CleanupChild { id: u32 },
+    ClearEphemeralMode { name: String },
     ClearScratch,
     CommandMode,
+    CurToLine { y:usize },
     Delete,
     DeleteBuffer { bufid: usize, force: bool },
     DeleteColumn { force: bool },
@@ -69,6 +72,7 @@ pub enum Action {
     DotSetFromCoords { coords: Coords },
     DragWindow { direction: Arrow },
     EditCommand { cmd: String },
+    EditorCommand { cmd: String },
     EnsureFileIsOpen { path: String },
     ExecuteDot,
     ExecuteString { s: String },
@@ -81,7 +85,7 @@ pub enum Action {
     InsertString { s: String },
     JumpListForward,
     JumpListBack,
-    KillRunningChild,
+    KillRunningChild { idx: Option<usize> },
     LoadDot { new_window: bool },
     LspCompletion,
     LspFormat,
@@ -90,7 +94,7 @@ pub enum Action {
     LspGotoTypeDefinition,
     LspHover,
     LspReferences,
-    LspRename,
+    LspRename { new_name: Option<String> },
     LspRenamePrepare,
     LspShowCapabilities,
     LspShowDiagnostics,
@@ -104,8 +108,7 @@ pub enum Action {
     NextBuffer,
     NextColumn,
     NextWindowInColumn,
-    OpenFile { path: String },
-    OpenFileInNewWindow { path: String },
+    OpenFile { path: String, new_window: bool },
     OpenTransientScratch { name: String, txt: String },
     OpenVirtualFile { name: String, txt: String, new_window: bool },
     Paste,
@@ -229,39 +232,34 @@ where
                 _ = self.tx_fsys.send(LogEvent::Focus(new_id));
             }
 
-            Ok(None) => {
-                match self
-                    .layout
-                    .active_buffer_ignoring_scratch()
-                    .state_changed_on_disk()
-                {
-                    Ok(true) => {
-                        let res = self.minibuffer_prompt("File changed on disk, reload? [y/n]: ");
-                        if let Some("y" | "Y" | "yes") = res.as_deref() {
-                            let b = self.layout.active_buffer_mut_ignoring_scratch();
-                            let msg = b.reload_from_disk();
-                            self.lsp_manager.document_changed(b);
-                            self.set_status_message(&msg);
-                        }
-                    }
-                    Ok(false) => (),
-                    Err(e) => self.set_status_message(e),
-                }
-                let id = self.active_buffer_id();
-                if id != current_id {
-                    _ = self.tx_fsys.send(LogEvent::Focus(id));
-                }
-            }
+            Ok(None) => self.prompt_to_reload_file_if_changed(current_id),
         };
     }
 
-    fn find_file_under_dir(&mut self, d: &Path, new_window: bool) {
+    fn find_file_under_dir(&mut self, dir: &Path, new_window: bool) {
         let cmd = config_handle!(self).find_command.clone();
-        let selection = self.minibuffer_select_from_command_output("> ", &cmd, d);
+        let res = self
+            .system
+            .run_command_blocking(&cmd, dir, self.active_buffer_id());
 
-        if let MiniBufferSelection::Line { line, .. } = selection {
-            self.open_file(d.join(line.trim()), new_window);
-        }
+        let lines = match res {
+            Ok(s) => s.lines().map(String::from).collect(),
+            Err(e) => {
+                self.set_status_message(format!("unable to get minibuffer input: {e}"));
+                return;
+            }
+        };
+
+        let dir = dir.to_path_buf();
+        let mb = SimpleMbSelect::new("> ", lines, move |selection| match selection {
+            MiniBufferSelection::Line { line, .. } => Some(Actions::Single(Action::OpenFile {
+                path: dir.join(line.trim()).to_string_lossy().to_string(),
+                new_window,
+            })),
+            _ => None,
+        });
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     /// This shells out to the fd command line program
@@ -329,7 +327,7 @@ where
 
     pub(super) fn save_current_buffer(&mut self, fname: Option<String>, force: bool) {
         trace!("attempting to save current buffer");
-        let p = match self.get_buffer_save_path(fname) {
+        let p = match self.get_buffer_save_path(fname, force) {
             Some(p) => p,
             None => return,
         };
@@ -391,31 +389,57 @@ where
         self.set_status_message(format!("{n_saved} buffers saved{error_msg}"));
     }
 
-    fn get_buffer_save_path(&mut self, fname: Option<String>) -> Option<PathBuf> {
+    fn get_buffer_save_path(&mut self, fname: Option<String>, force: bool) -> Option<PathBuf> {
         use BufferKind as Bk;
 
         let desired_path = match (fname, &self.layout.active_buffer_ignoring_scratch().kind) {
-            // File has a known name which is either where we loaded it from or a
-            // path that has been set and verified from the Some(s) case that follows
-            (None, Bk::File(p)) => return Some(p.clone()),
             // Renaming an existing file or attempting to save a new file created in
             // the editor: both need verifying
             (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
-            // Attempting to save without a name so we prompt for one and verify it
-            (None, Bk::Unnamed) => match self.minibuffer_prompt("Save As: ") {
-                Some(s) => s.into(),
-                None => return None,
-            },
+
+            // File has a known name which is either where we loaded it from or a
+            // path that has been set and verified from the Some(s) case that follows
+            (None, Bk::File(p)) => return Some(p.clone()),
+
             // virtual and minibuffer buffers don't support saving and have no save path
             (_, Bk::Directory(_) | Bk::Virtual(_) | Bk::Output(_) | Bk::MiniBuffer) => return None,
+
+            // Attempting to save without a name so we prompt for one and verify it
+            (None, Bk::Unnamed) => {
+                let mb = SimpleMbSelect::new("Save as: ", Vec::new(), move |sel| {
+                    Some(Actions::Single(Action::SaveBufferAs {
+                        path: sel.into_content()?,
+                        force,
+                    }))
+                });
+                self.push_minibuffer(mb.into_selector());
+
+                return None;
+            }
         };
 
         match desired_path.try_exists() {
             Ok(false) => (),
+            Ok(true) if force => (),
             Ok(true) => {
-                if !self.minibuffer_confirm("File already exists") {
-                    return None;
-                }
+                let name = desired_path.to_string_lossy().to_string();
+                let mb = SimpleMbSelect::new(
+                    "File already exists, continue? [y/n]: ",
+                    Vec::new(),
+                    move |sel| {
+                        if let Some("y" | "Y" | "yes") = sel.into_content().as_deref() {
+                            Some(Actions::Multi(vec![
+                                Action::RenameActiveBuffer { name: name.clone() },
+                                Action::SaveBuffer { force },
+                            ]))
+                        } else {
+                            None
+                        }
+                    },
+                );
+                self.push_minibuffer(mb.into_selector());
+
+                return None;
             }
             Err(e) => {
                 self.set_status_message(format!("Unable to check path: {e}"));
@@ -423,15 +447,20 @@ where
             }
         }
 
-        self.layout.active_buffer_mut_ignoring_scratch().kind =
-            BufferKind::File(desired_path.clone());
+        self.layout
+            .active_buffer_mut_ignoring_scratch()
+            .set_filename(desired_path.clone());
 
         Some(desired_path)
     }
 
     pub(super) fn reload_buffer(&mut self, id: usize) {
         let msg = match self.layout.buffer_with_id_mut(id) {
-            Some(b) => b.reload_from_disk(),
+            Some(b) => {
+                let msg = b.reload_from_disk();
+                self.lsp_manager.document_changed(b);
+                msg
+            }
             // Silently ignoring attempts to reload unknown buffers
             None => return,
         };
@@ -474,7 +503,10 @@ where
         let dirty_buffers = self.layout.dirty_buffers();
         if !dirty_buffers.is_empty() && !force {
             self.set_status_message("No write since last change. Use ':q!' to force exit");
-            self.minibuffer_select_from("No write since last change> ", dirty_buffers);
+            self.push_minibuffer(
+                SimpleMbSelect::new("No write since last change> ", dirty_buffers, |_| None)
+                    .into_selector(),
+            );
             return;
         }
 
@@ -507,14 +539,16 @@ where
             .map(|(i, line)| format!("{:>4} | {}", i + 1, line))
             .collect();
 
-        let selection = self.minibuffer_select_from("> ", numbered_lines);
-        if let MiniBufferSelection::Line { cy, .. } = selection {
-            self.layout.active_buffer_mut_ignoring_scratch().dot = Dot::Cur {
-                c: Cur::from_yx(cy, 0, self.layout.active_buffer_ignoring_scratch()),
-            };
-            self.handle_action(Action::DotSet(TextObject::Line, 1), Source::Fsys);
-            self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
-        }
+        let mb = SimpleMbSelect::new("> ", numbered_lines, |selection| match selection {
+            MiniBufferSelection::Line { cy, .. } => Some(Actions::Multi(vec![
+                Action::CurToLine { y: cy },
+                Action::DotSet(TextObject::Line, 1),
+                Action::SetViewPort(ViewPort::Center),
+            ])),
+            _ => None,
+        });
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn fsys_minibuffer(
@@ -533,34 +567,49 @@ where
         };
 
         let prompt: &str = prompt.as_deref().unwrap_or("> ");
-        let selection = self.minibuffer_select_from(prompt, lines);
-        let s = match selection {
-            MiniBufferSelection::Line { line, .. } => line,
-            MiniBufferSelection::UserInput { input } => input,
-            MiniBufferSelection::Cancelled => String::new(),
-        };
+        let mb = SimpleMbSelect::new(prompt, lines, move |selection| {
+            let s = match selection {
+                MiniBufferSelection::Line { line, .. } => line,
+                MiniBufferSelection::UserInput { input } => input,
+                MiniBufferSelection::Cancelled => String::new(),
+            };
 
-        _ = tx.send(s);
+            _ = tx.send(s);
+
+            None
+        });
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     /// Use the minibuffer to select an open buffer and focus it in the active window
     pub(super) fn select_buffer(&mut self) {
-        let selection = self.minibuffer_select_from("> ", self.layout.as_buffer_list());
-        if let MiniBufferSelection::Line { line, .. } = selection {
-            // unwrap is fine here because we know the format of the buf list we are supplying
-            if let Ok(id) = line.split_once(' ').unwrap().0.parse::<usize>() {
-                self.focus_buffer(id, true);
-            }
-        }
+        let mb = SimpleMbSelect::new(
+            "> ",
+            self.layout.as_buffer_list(),
+            |selection| match selection {
+                MiniBufferSelection::Line { line, .. } => line
+                    .split_once(' ')
+                    .expect("buffer list format contains a space")
+                    .0
+                    .parse::<usize>()
+                    .ok()
+                    .map(|id| Actions::Single(Action::FocusBuffer { id })),
+                _ => None,
+            },
+        );
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn focus_buffer(&mut self, id: usize, force_active: bool) {
+        let current_id = self.active_buffer_id();
         self.layout.focus_id(id, force_active);
-        _ = self.tx_fsys.send(LogEvent::Focus(id));
+        self.prompt_to_reload_file_if_changed(current_id);
     }
 
     pub(super) fn debug_buffer_contents(&mut self) {
-        self.minibuffer_select_from(
+        let mb = SimpleMbSelect::new(
             "<RAW BUFFER> ",
             self.layout
                 .active_buffer_ignoring_scratch()
@@ -568,7 +617,10 @@ where
                 .into_iter()
                 .map(|l| format!("{:?}", l))
                 .collect(),
+            |_| None,
         );
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn view_logs(&mut self) {
@@ -591,7 +643,13 @@ where
     }
 
     pub(super) fn debug_edit_log(&mut self) {
-        self.minibuffer_select_from("<EDIT LOG> ", self.layout.active_buffer().debug_edit_log());
+        let mb = SimpleMbSelect::new(
+            "<EDIT LOG> ",
+            self.layout.active_buffer().debug_edit_log(),
+            |_| None,
+        );
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn expand_current_dot(&mut self) {
@@ -849,35 +907,56 @@ where
         }
     }
 
+    #[must_use]
+    fn set_ephemeral_mode(&mut self, name: &str) -> Vec<Action> {
+        self.modes.insert(0, Mode::ephemeral_mode(name));
+
+        vec![Action::ClearEphemeralMode {
+            name: name.to_string(),
+        }]
+    }
+
+    pub(super) fn clear_ephemeral_mode(&mut self, name: &str) {
+        self.modes.retain(|m| m.name != name);
+    }
+
     pub(super) fn command_mode(&mut self) {
-        self.modes.insert(0, Mode::ephemeral_mode("COMMAND"));
+        let mut actions = self.set_ephemeral_mode("COMMAND");
+        let mb = SimpleMbSelect::new(":", Vec::new(), move |selection| {
+            if let Some(cmd) = selection.into_content() {
+                actions.push(Action::EditorCommand { cmd });
+            };
 
-        if let Some(input) = self.minibuffer_prompt(":") {
-            self.execute_command(&input);
-        }
+            Some(Actions::Multi(take(&mut actions)))
+        });
 
-        self.modes.remove(0);
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn run_mode(&mut self) {
-        self.modes.insert(0, Mode::ephemeral_mode("RUN"));
+        let mut actions = self.set_ephemeral_mode("RUN");
+        let mb = SimpleMbSelect::new("!", Vec::new(), move |selection| {
+            if let Some(cmd) = selection.into_content() {
+                actions.push(Action::ShellRun { cmd });
+            };
 
-        if let Some(input) = self.minibuffer_prompt("!") {
-            self.set_status_message(format!("running {input:?}..."));
-            self.run_shell_cmd(&input);
-        }
+            Some(Actions::Multi(take(&mut actions)))
+        });
 
-        self.modes.remove(0);
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn sam_mode(&mut self) {
-        self.modes.insert(0, Mode::ephemeral_mode("EDIT"));
+        let mut actions = self.set_ephemeral_mode("EDIT");
+        let mb = SimpleMbSelect::new("% ", Vec::new(), move |selection| {
+            if let Some(cmd) = selection.into_content() {
+                actions.push(Action::EditCommand { cmd });
+            };
 
-        if let Some(input) = self.minibuffer_prompt("Edit> ") {
-            self.execute_edit_command(&input);
-        };
+            Some(Actions::Multi(take(&mut actions)))
+        });
 
-        self.modes.remove(0);
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn prepare_lsp_rename(&mut self) {
@@ -886,15 +965,25 @@ where
             .prepare_rename(self.layout.active_buffer_ignoring_scratch());
     }
 
-    pub(super) fn lsp_rename(&mut self) {
-        self.modes.insert(0, Mode::ephemeral_mode("LSP-RENAME"));
-
-        if let Some(input) = self.minibuffer_prompt("LSP Rename> ") {
+    pub(super) fn lsp_rename(&mut self, new_name: Option<String>) {
+        if let Some(new_name) = new_name {
             let b = self.layout.active_buffer_ignoring_scratch();
-            self.lsp_manager.rename(b, input);
-        };
+            self.lsp_manager.rename(b, new_name);
+            return;
+        }
 
-        self.modes.remove(0);
+        let mut actions = self.set_ephemeral_mode("LSP-RENAME");
+        let mb = SimpleMbSelect::new("LSP Rename> ", Vec::new(), move |selection| {
+            if let Some(new_name) = selection.into_content() {
+                actions.push(Action::LspRename {
+                    new_name: Some(new_name),
+                });
+            };
+
+            Some(Actions::Multi(take(&mut actions)))
+        });
+
+        self.push_minibuffer(mb.into_selector());
     }
 
     pub(super) fn pipe_dot_through_shell_cmd(&mut self, raw_cmd_str: &str) {
@@ -940,10 +1029,62 @@ where
         }
     }
 
-    pub(super) fn kill_running_child(&mut self) {
+    pub(super) fn kill_running_child(&mut self, idx: Option<usize>) {
+        if let Some(idx) = idx {
+            self.system.kill_child(idx);
+            return;
+        }
+
         let known = self.system.running_children();
-        if let MiniBufferSelection::Line { cy, .. } = self.minibuffer_select_from("kill", known) {
-            self.system.kill_child(cy);
+        let mb = SimpleMbSelect::new("Kill", known, |selection| match selection {
+            MiniBufferSelection::Line { cy, .. } => {
+                Some(Actions::Single(Action::KillRunningChild { idx: Some(cy) }))
+            }
+            _ => None,
+        });
+
+        self.push_minibuffer(mb.into_selector());
+    }
+
+    fn prompt_to_reload_file_if_changed(&mut self, current_id: usize) {
+        let id = self.active_buffer_id();
+        let res = self
+            .layout
+            .active_buffer_ignoring_scratch()
+            .state_changed_on_disk();
+
+        match res {
+            Ok(true) => {
+                let mb = SimpleMbSelect::new(
+                    "File changed on disk, reload? [y/n]: ",
+                    Vec::new(),
+                    move |sel| {
+                        let mut actions = match sel.into_content().as_deref() {
+                            Some("y" | "Y" | "yes") => {
+                                vec![Action::ReloadBuffer { id }]
+                            }
+                            _ => return None,
+                        };
+
+                        if id != current_id {
+                            actions.push(Action::FocusBuffer { id });
+                        }
+
+                        Some(Actions::Multi(actions))
+                    },
+                );
+
+                self.push_minibuffer(mb.into_selector());
+                return;
+            }
+
+            Ok(false) => (),
+
+            Err(e) => self.set_status_message(e),
+        }
+
+        if id != current_id {
+            _ = self.tx_fsys.send(LogEvent::Focus(id));
         }
     }
 }

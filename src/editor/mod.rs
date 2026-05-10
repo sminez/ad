@@ -5,6 +5,7 @@ use crate::{
     config::Config,
     config_handle, die,
     dot::TextObject,
+    editor::minibuffer::MiniBuffer,
     exec::{Addr, Address},
     fsys::{AdFs, LogEvent, Message, Req},
     input::Event,
@@ -71,6 +72,7 @@ where
     S: System,
 {
     config: Arc<RwLock<Config>>,
+    mb_stack: Vec<MiniBuffer>,
     system: S,
     ui: Ui,
     cwd: PathBuf,
@@ -165,6 +167,7 @@ where
 
         Self {
             config,
+            mb_stack: Vec::new(),
             system,
             ui,
             cwd,
@@ -324,7 +327,7 @@ where
         self.ui.set_cursor_shape(self.current_cursor_shape());
 
         while self.running {
-            self.refresh_screen_w_minibuffer(None);
+            self.refresh_screen();
 
             match self.rx_events.recv() {
                 Ok(next_event) => self.handle_event(next_event),
@@ -341,6 +344,11 @@ where
 
     #[inline]
     pub fn handle_event(&mut self, event: Event) {
+        let event = match self.try_handle_event_with_minibuffer(event) {
+            Some(event) => event,
+            None => return, // handled in minibuffer
+        };
+
         match event {
             Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Actions(a) => self.handle_actions(a, Source::Fsys),
@@ -354,15 +362,16 @@ where
         }
     }
 
-    pub fn refresh_screen_w_minibuffer(&mut self, mb: Option<MiniBufferState<'_>>) {
+    pub fn refresh_screen(&mut self) {
         self.layout.clamp_scroll();
+
         self.ui.refresh(
             &self.modes[0].name,
             &mut self.layout,
             self.system.n_running_children(),
             &self.pending_keys,
             self.held_click.as_ref(),
-            mb,
+            self.mb_stack.last_mut().map(|mb| mb.updated_render_state()),
         );
     }
 
@@ -374,22 +383,6 @@ where
 
     pub(crate) fn current_cursor_shape(&self) -> CurShape {
         self.modes[0].cur_shape
-    }
-
-    pub(crate) fn block_for_input(&mut self) -> Vec<Input> {
-        while self.running {
-            match self.rx_events.recv().unwrap() {
-                Event::Input(i) => return vec![i],
-                Event::BracketedPaste(s) => return s.chars().map(Input::Char).collect(),
-                Event::Action(a) => self.handle_action(a, Source::Fsys),
-                Event::Actions(a) => self.handle_actions(a, Source::Fsys),
-                Event::Message(msg) => self.handle_message(msg),
-                Event::StatusMessage(msg) => self.set_status_message(msg),
-                Event::WinsizeChanged { rows, cols } => self.update_window_size(rows, cols),
-            }
-        }
-
-        Vec::new()
     }
 
     fn send_buffer_resp(
@@ -572,6 +565,7 @@ where
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
             ClearScratch => self.layout.scratch.b.clear(),
+            ClearEphemeralMode { name } => self.clear_ephemeral_mode(&name),
             CommandMode => self.command_mode(),
             DeleteBuffer { bufid, force } => self.delete_buffer(bufid, force),
             DeleteColumn { force } => self.delete_active_column(force),
@@ -589,6 +583,7 @@ where
                 direction: Arrow::Right,
             } => self.layout.drag_right(),
             EditCommand { cmd } => self.execute_edit_command(&cmd),
+            EditorCommand { cmd } => self.execute_command(&cmd),
             EnsureFileIsOpen { path } => self.layout.ensure_file_is_open(&path),
             ExecuteDot => self.default_execute_dot(None, source),
             ExecuteString { s } => {
@@ -601,7 +596,7 @@ where
             FocusBuffer { id } => self.focus_buffer(id, false), // allow focusing another window
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
-            KillRunningChild => self.kill_running_child(),
+            KillRunningChild { idx } => self.kill_running_child(idx),
             LoadDot { new_window } => self.default_load_dot(source, new_window),
             LspShowCapabilities => {
                 if let Some((name, txt)) = self
@@ -646,10 +641,10 @@ where
             LspReferences => self
                 .lsp_manager
                 .find_references(self.layout.active_buffer_ignoring_scratch()),
-            LspRename => self.lsp_rename(),
+            LspRename { new_name } => self.lsp_rename(new_name),
             LspRenamePrepare => self.prepare_lsp_rename(),
             MarkClean { bufid } => self.mark_clean(bufid),
-            MbSelect(selector) => selector.run(self),
+            MbSelect(sel) => self.push_minibuffer(sel),
             NewEditLogTransaction => self.layout.active_buffer_mut().new_edit_log_transaction(),
             NewColumn => self.layout.new_column(),
             NewWindow => self.layout.new_window(),
@@ -667,9 +662,8 @@ where
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
-            OpenFile { path } => self.open_file_relative_to_effective_directory(&path, false),
-            OpenFileInNewWindow { path } => {
-                self.open_file_relative_to_effective_directory(&path, true)
+            OpenFile { path, new_window } => {
+                self.open_file_relative_to_effective_directory(&path, new_window)
             }
             OpenTransientScratch { name, txt } => self.layout.open_transient_scratch(name, txt),
             OpenVirtualFile {

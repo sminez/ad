@@ -1,0 +1,17 @@
+Using the built-in "open file" behaviour should load the file from disk
+
+-- config --
+path: tests/data/config/without-fsys.toml
+-- file-a.txt --
+A
+-- file-b.txt --
+B
+-- actions --
+# close file b
+type: :db\n
+# re-open file b (should have ID=3 not ID=2)
+type: -
+type: b.txt\n
+-- buffer-list --
+1      a.txt
+3    * b.txt
