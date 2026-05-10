@@ -44,11 +44,7 @@ pub(crate) enum MiniBufferSelection {
 /// with the rest of the buffer content not being directly editable.
 ///
 /// Conceptually this is operates as an embedded dmenu.
-pub(crate) struct MiniBuffer<F>
-where
-    F: Fn(&GapBuffer) -> Option<Vec<String>>,
-{
-    on_change: F,
+pub(crate) struct MiniBuffer {
     prompt: String,
     n_prompt_chars: usize,
     input: Buffer,
@@ -64,10 +60,7 @@ where
     show_buffer_content: bool,
 }
 
-impl<F> fmt::Debug for MiniBuffer<F>
-where
-    F: Fn(&GapBuffer) -> Option<Vec<String>>,
-{
+impl fmt::Debug for MiniBuffer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MiniBuffer")
             .field("prompt", &self.prompt)
@@ -76,22 +69,17 @@ where
     }
 }
 
-impl<F> MiniBuffer<F>
-where
-    F: Fn(&GapBuffer) -> Option<Vec<String>>,
-{
+impl MiniBuffer {
     pub fn new(
         prompt: String,
         lines: Vec<String>,
         max_height: usize,
-        on_change: F,
         config: Arc<RwLock<Config>>,
     ) -> Self {
         let line_indices = Vec::with_capacity(lines.len());
         let n_prompt_chars = prompt.chars().count();
 
         Self {
-            on_change,
             prompt,
             n_prompt_chars,
             input: Buffer::new_unnamed(MINIBUFFER_ID, "", config.clone()),
@@ -106,14 +94,6 @@ where
             bottom: 0,
             show_buffer_content: true,
         }
-    }
-
-    #[inline]
-    fn handle_on_change(&mut self) {
-        if let Some(lines) = (self.on_change)(&self.input.txt) {
-            self.b.txt = GapBuffer::from(lines.join("\n"));
-            self.b.dot.clamp_idx(self.b.txt.len_chars());
-        };
     }
 
     #[inline]
@@ -186,7 +166,6 @@ where
             Input::Char(c) => {
                 self.input
                     .handle_action(Action::InsertChar { c }, Source::Keyboard);
-                self.handle_on_change();
             }
             Input::Ctrl('h') | Input::Backspace | Input::Del => {
                 self.input.handle_action(
@@ -194,7 +173,6 @@ where
                     Source::Keyboard,
                 );
                 self.input.handle_action(Action::Delete, Source::Keyboard);
-                self.handle_on_change();
             }
 
             Input::Esc => return Some(MiniBufferSelection::Cancelled),
@@ -252,18 +230,16 @@ impl<S> Editor<S>
 where
     S: System,
 {
-    fn prompt_w_callback<F: Fn(&GapBuffer) -> Option<Vec<String>>>(
+    fn prompt_w_callback(
         &mut self,
         prompt: &str,
         initial_lines: Vec<String>,
         initial_input: Option<String>,
-        on_change: F,
     ) -> MiniBufferSelection {
         let mut mb = MiniBuffer::new(
             prompt.to_string(),
             initial_lines,
             config_handle!(self).minibuffer_lines,
-            on_change,
             self.config.clone(),
         );
 
@@ -289,7 +265,7 @@ where
     /// Use the minibuffer to prompt for user input
     pub(crate) fn minibuffer_prompt(&mut self, prompt: &str) -> Option<String> {
         trace!(%prompt, "opening mini-buffer");
-        match self.prompt_w_callback(prompt, vec![], None, |_| None) {
+        match self.prompt_w_callback(prompt, vec![], None) {
             MiniBufferSelection::UserInput { input } => Some(input),
             _ => None,
         }
@@ -309,7 +285,7 @@ where
         prompt: &str,
         initial_lines: Vec<String>,
     ) -> MiniBufferSelection {
-        self.prompt_w_callback(prompt, initial_lines, None, |_| None)
+        self.prompt_w_callback(prompt, initial_lines, None)
     }
 
     /// Use a [MiniBuffer] to select from the newline delimited output of running a shell command.
@@ -331,7 +307,7 @@ where
                 }
             };
 
-        self.prompt_w_callback(prompt, initial_lines, None, |_| None)
+        self.prompt_w_callback(prompt, initial_lines, None)
     }
 }
 
@@ -383,7 +359,7 @@ impl MbSelector {
     {
         let (prompt, options) = self.0.prompt_and_options(ed.layout.buffers());
         let initial_input = self.0.initial_input(ed.layout.buffers());
-        let selection = ed.prompt_w_callback(&prompt, options, initial_input, |_| None);
+        let selection = ed.prompt_w_callback(&prompt, options, initial_input);
         if let Some(actions) = self.0.selected_actions(selection) {
             ed.handle_actions(actions, Source::Fsys);
         }

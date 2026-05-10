@@ -38,6 +38,11 @@
 
 ## MINIBUFFER USAGE WITHIN THE EDITOR
 
+The existing `MbSelect` mechanism can be repurposed to become the _only_ way the minibuffer works:
+```
+/home/sminez/repos/personal/ad/src/editor/minibuffer.rs:340:18
+```
+
 > This one is in a tail position of a match with no follow on code so it can be factored out reasonably simply
 ```
 /home/sminez/repos/personal/ad/src/editor/actions.rs:239:40:                        let res = self.minibuffer_prompt("File changed on disk, reload? [y/n]: ");
