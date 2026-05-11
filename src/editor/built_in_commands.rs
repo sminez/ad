@@ -50,7 +50,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         ),
         (
             vec!["dc!", "delete-column!"],
-            "delete the active column discarding all pendings changes if this is the last column",
+            "delete the active column discarding all pending changes if this is the last column",
         ),
         (
             vec!["dw", "delete-window"],
@@ -58,7 +58,7 @@ pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
         ),
         (
             vec!["dw!", "delete-window!"],
-            "delete the active window discarding all pendings changes if this is the last window",
+            "delete the active window discarding all pending changes if this is the last window",
         ),
         (
             vec!["new-window"],

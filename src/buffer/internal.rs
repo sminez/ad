@@ -717,7 +717,7 @@ impl GapBuffer {
         self.raw_byte_to_byte(raw)
     }
 
-    /// Insert a single character at the specifified character index.
+    /// Insert a single character at the specified character index.
     ///
     /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
@@ -744,7 +744,7 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
-    /// Insert a string at the specifified character index.
+    /// Insert a string at the specified character index.
     ///
     /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.

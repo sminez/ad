@@ -40,7 +40,7 @@ pub(crate) enum MiniBufferSelection {
 }
 
 impl MiniBufferSelection {
-    /// Disgard any information around which line was selected by the user and only
+    /// Discard any information around which line was selected by the user and only
     /// return the content of the selected line itself.
     pub(crate) fn into_content(self) -> Option<String> {
         match self {
