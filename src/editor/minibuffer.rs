@@ -189,13 +189,34 @@ impl MiniBuffer {
                     .handle_action(Action::InsertChar { c }, Source::Keyboard);
             }
             Input::Ctrl('h') | Input::Backspace | Input::Del => {
-                self.input.handle_action(
+                for action in [
                     Action::DotSet(TextObject::Arr(Arrow::Left), 1),
-                    Source::Keyboard,
-                );
-                self.input.handle_action(Action::Delete, Source::Keyboard);
+                    Action::Delete,
+                ] {
+                    self.input.handle_action(action, Source::Keyboard);
+                }
             }
 
+            // Readline style bindings
+            Input::Ctrl('a') => {
+                self.input
+                    .handle_action(Action::DotSet(TextObject::LineStart, 1), Source::Keyboard);
+            }
+            Input::Ctrl('e') => {
+                self.input
+                    .handle_action(Action::DotSet(TextObject::LineEnd, 1), Source::Keyboard);
+            }
+            Input::Ctrl('w') => {
+                for action in [
+                    Action::DotSet(TextObject::Arr(Arrow::Left), 1),
+                    Action::DotExtendBackward(TextObject::Word, 1),
+                    Action::Delete,
+                ] {
+                    self.input.handle_action(action, Source::Keyboard);
+                }
+            }
+
+            // Esc / Enter to cancel and accept
             Input::Esc => return Some(MiniBufferSelection::Cancelled),
             Input::Return => {
                 let selection = match self.b.line(self.y) {
@@ -213,6 +234,7 @@ impl MiniBuffer {
                 return Some(selection);
             }
 
+            // Alt-hjkl and arrows navigate the options
             Input::Alt('h') | Input::Arrow(Arrow::Left) => {
                 self.input.handle_action(
                     Action::DotSet(TextObject::Arr(Arrow::Left), 1),
