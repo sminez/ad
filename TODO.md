@@ -1,9 +1,5 @@
 # TODO
 
-- [ ] Support syntax highlighting in virtual buffers
-  - Currently this is determined based on the _path_ for a buffer, which only
-    exists for "real" buffers. Changing this to be based on the name should
-    fix it I think.
 - [ ] Rethink how UI works to allow for decoupling the main editor behaviour
   - Currently the editor has a concept of the "current buffer" that determines
     how many of the editors actions are resolved. Moving to a model where the

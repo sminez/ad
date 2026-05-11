@@ -98,6 +98,7 @@ impl BufferKind {
     fn path(&self) -> Option<&Path> {
         match &self {
             BufferKind::File(p) => Some(p.as_ref()),
+            BufferKind::Virtual(name) => Some(Path::new(name)),
             _ => None,
         }
     }
@@ -244,7 +245,7 @@ impl Buffer {
             content.pop();
         }
 
-        Self {
+        let mut b = Self {
             id,
             kind: BufferKind::Virtual(name.into()),
             dot: Dot::default(),
@@ -259,7 +260,11 @@ impl Buffer {
             config,
             version: AtomicUsize::new(1),
             edit_log: EditLog::default(),
-        }
+        };
+
+        b.try_set_ts_state();
+
+        b
     }
 
     /// Construct a new +output buffer with the given name which must be a valid output buffer name
