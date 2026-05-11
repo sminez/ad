@@ -6,7 +6,7 @@ match_indent = true
 status_timeout = 3
 double_click_ms = 200
 minibuffer_lines = 8
-find_command = "find -type f"
+find_command = "find . -type f"
 
 [filesystem]
 enabled = false
