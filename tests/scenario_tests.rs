@@ -14,6 +14,7 @@ use ad_editor::{
 use assert_fs::TempDir;
 use ninep::sync::client::Client;
 use parking_lot::Mutex;
+use serial_test::serial;
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
 use std::{
@@ -43,7 +44,15 @@ const FSYS_MAX_TRIES: usize = 10;
     "tests/data/editor-scenarios/plumbing"
 )]
 #[test]
+#[serial]
 fn editor_scenarios(path: &str, content: &str) {
+    // When running under `cargo test` we need to execute each test sequentially (the "serial"
+    // macro above) and we also need to take care to reset the current directory once the scenario
+    // is complete (see below) due to the editor's manipulation of the process working directory.
+    //
+    // When running under nextest this is not a problem as each case runs in its own process.
+    let cwd = env::current_dir().unwrap();
+
     // Parse the given test case file and validate it before initialising the editor
     let TestCase {
         mut setup,
@@ -98,6 +107,9 @@ fn editor_scenarios(path: &str, content: &str) {
     }));
 
     e.run_with_explicit_fsys_path(socket_path);
+
+    // Reset working directory for the next test
+    env::set_current_dir(cwd).unwrap();
 
     let status_hist = status_messages.lock().join("\n");
     println!(">> STATUS HISTORY:\n{status_hist}");
