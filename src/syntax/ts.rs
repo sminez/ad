@@ -547,8 +547,22 @@ mod tests {
         }
     }
 
+    #[test_case(
+        |b| {
+            b.dot = Dot::Cur { c: Cur { idx: 9 } };
+            b.handle_action(Action::Delete, Source::Fsys);
+        };
+        "cur delete"
+    )]
+    #[test_case(
+        |b| {
+            b.xdot = Dot::from_char_indices(9, 9);
+            b.insert_xdot(String::new());
+        };
+        "LSP null range empty string insert"
+    )]
     #[test]
-    fn char_delete_correctly_update_state() {
+    fn char_delete_correctly_updates_state(delete_action: fn(&mut Buffer)) {
         // minimal query for the fn keyword and parens
         let query = r#"
 "fn" @keyword
@@ -584,12 +598,13 @@ mod tests {
             ]
         );
 
-        b.dot = Dot::Cur { c: Cur { idx: 9 } };
-        b.handle_action(Action::Delete, Source::Fsys);
+        (delete_action)(&mut b);
+
         b.syntax_state
             .as_mut()
             .unwrap()
             .update(&b.txt, 0, usize::MAX - 1);
+
         let ranges = match b.syntax_state.as_ref() {
             Some(SyntaxState {
                 inner: SyntaxStateInner::Ts(ts),

@@ -1222,11 +1222,16 @@ impl Buffer {
         let mut have_prepared_edit = false;
 
         if let Dot::Range { r } = &dot
-            && r.start.idx != r.end.idx
             && let Some(ts) = self.syntax_state.as_mut()
         {
-            ts.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
-            have_prepared_edit = true;
+            if r.start.idx != r.end.idx {
+                ts.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+                have_prepared_edit = true;
+            } else if r.start.idx < self.txt.len_chars() {
+                // r.start.idx == r.end.idx, so delete_range below still removes the char at r.start.idx
+                ts.prepare_delete_char(r.start.idx, &self.txt);
+                have_prepared_edit = true;
+            }
         }
 
         let (mut cur, deleted) = match dot {
