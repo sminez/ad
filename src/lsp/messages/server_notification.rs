@@ -139,8 +139,7 @@ impl LspServerNotification for PublishDiagnostics {
             .map(|d| Diagnostic::new(uri.clone(), d, encoding))
             .collect();
 
-        let mut guard = man.diagnostics.write().unwrap();
-        guard.insert(uri, new_diagnostics);
+        man.diagnostics.write().insert(uri, new_diagnostics);
 
         None
     }

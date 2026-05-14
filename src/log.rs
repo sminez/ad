@@ -1,7 +1,8 @@
 //! Handling of our internal logs so they can be viewed in the editor itself
+use parking_lot::{Mutex, MutexGuard};
 use std::{
     io::{self, Cursor, Read, Write},
-    sync::{Arc, Mutex, MutexGuard},
+    sync::Arc,
 };
 use tracing_subscriber::fmt::MakeWriter;
 
@@ -15,7 +16,7 @@ pub struct LogBuffer {
 impl LogBuffer {
     /// Return the full content of the log
     pub fn content(&self) -> String {
-        let mut guard = self.inner.lock().expect("lock poisoned");
+        let mut guard = self.inner.lock();
         let pos = guard.position();
         guard.set_position(0);
         let mut s = String::new();
@@ -27,7 +28,7 @@ impl LogBuffer {
 
     /// Clear the contents of the current log
     pub fn clear(&self) {
-        let mut guard = self.inner.lock().expect("lock poisoned");
+        let mut guard = self.inner.lock();
         *guard = Default::default();
     }
 }
@@ -67,7 +68,7 @@ impl<'a> MakeWriter<'a> for LogBuffer {
     type Writer = LogWriter<'a>;
 
     fn make_writer(&'a self) -> Self::Writer {
-        LogWriter(self.inner.lock().expect("lock poisoned"))
+        LogWriter(self.inner.lock())
     }
 }
 

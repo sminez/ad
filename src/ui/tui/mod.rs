@@ -2,7 +2,7 @@
 use crate::{
     buffer::{Buffer, Chars, GapBuffer},
     config::{ColorScheme, Config},
-    config_handle, die,
+    die,
     dot::Range,
     editor::{Click, MiniBufferState},
     input::Event,
@@ -15,6 +15,7 @@ use crate::{
     },
     ziplist,
 };
+use parking_lot::RwLock;
 use std::{
     char,
     cmp::Ordering,
@@ -23,7 +24,7 @@ use std::{
     io::{self, BufWriter, Read, Stdout, Write, stdin, stdout},
     iter::{Peekable, repeat_n},
     panic,
-    sync::{Arc, RwLock, mpsc::Sender},
+    sync::{Arc, mpsc::Sender},
     thread::{JoinHandle, spawn},
     time::Instant,
 };
@@ -113,7 +114,7 @@ where
         held_click: Option<&Click>,
         mb: Option<MiniBufferState<'_>>,
     ) {
-        let conf = config_handle!(self);
+        let conf = self.config.read();
         let (cs, status_timeout, tabstop, max_mb_lines) = (
             &conf.colorscheme,
             conf.status_timeout,
@@ -281,7 +282,7 @@ where
             }
         } else if self.frame.show_msg_bar {
             // match self.render in not showing the message bar if the minibuffer is open
-            let conf = config_handle!(self);
+            let conf = self.config.read();
             let (cs, status_timeout) = (&conf.colorscheme, conf.status_timeout);
             self.frame.render_message_bar(
                 cs,

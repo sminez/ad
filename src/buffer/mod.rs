@@ -2,7 +2,6 @@
 use crate::{
     Config, MAX_NAME_LEN, UNNAMED_BUFFER,
     config::ftype_config_for_path_and_first_line,
-    config_handle,
     dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
     editor::Action,
     exec::{Addr, Address},
@@ -13,13 +12,14 @@ use crate::{
     util::{normalize_line_endings, truncate_string_to_columns},
 };
 use ad_event::Source;
+use parking_lot::RwLock;
 use std::{
     cmp::min,
     fs,
     io::{self, ErrorKind},
     path::{Path, PathBuf},
     sync::{
-        Arc, RwLock,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     time::SystemTime,
@@ -298,7 +298,7 @@ impl Buffer {
     fn try_set_ts_state(&mut self) {
         self.syntax_state = None;
         if let Some(lang) = self.configured_filetype() {
-            let cfg = config_handle!(self);
+            let cfg = self.config.read();
             match SyntaxState::try_new(&lang, &self.txt, &cfg) {
                 Ok(state) => self.syntax_state = Some(state),
                 Err(msg) => error!("unable to initialise syntax state: {msg}"),
@@ -506,7 +506,7 @@ impl Buffer {
 
     /// Check the current [Config] to see if this buffer matches a known filetype configuration.
     pub fn configured_filetype(&self) -> Option<String> {
-        let lang_configs = &config_handle!(self).filetypes;
+        let lang_configs = &self.config.read().filetypes;
         let first_line = self.line(0).map(|l| l.to_string()).unwrap_or_default();
 
         self.path()
@@ -589,7 +589,7 @@ impl Buffer {
     }
 
     pub(crate) fn tabstop(&self) -> usize {
-        config_handle!(self).tabstop
+        self.config.read().tabstop
     }
 
     /// The number of lines currently held in the buffer.
@@ -634,7 +634,7 @@ impl Buffer {
     }
 
     pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
-        let tabstop = config_handle!(self).tabstop;
+        let tabstop = self.tabstop();
         if self.is_empty() {
             return 0;
         }
@@ -938,7 +938,7 @@ impl Buffer {
 
     fn handle_raw_input(&mut self, k: Input) -> Option<ActionOutcome> {
         let (match_indent, expand_tab, tabstop) = {
-            let cfg = config_handle!(self);
+            let cfg = self.config.read();
             (cfg.match_indent, cfg.expand_tab, cfg.tabstop)
         };
 

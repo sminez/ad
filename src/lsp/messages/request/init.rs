@@ -206,7 +206,7 @@ impl LspRequest for Initialize {
                 debug!(%lsp_id, "LSP initialized");
                 client.status = Status::Running;
                 client.position_encoding = c.position_encoding;
-                man.capabilities.write().unwrap().insert(ftype, (lsp_id, c));
+                man.capabilities.write().insert(ftype, (lsp_id, c));
 
                 Initialized::send(lsp_id, (), man);
 

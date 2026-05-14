@@ -6,9 +6,10 @@ use crate::{
     key::Input,
     ui::style::CurShape,
 };
+use parking_lot::RwLock;
 use std::{
     fmt,
-    sync::{Arc, RwLock, mpsc::Sender},
+    sync::{Arc, mpsc::Sender},
 };
 
 mod layout;

@@ -13,13 +13,14 @@ use ad_editor::{
 };
 use assert_fs::TempDir;
 use ninep::sync::client::Client;
+use parking_lot::Mutex;
 use simple_test_case::dir_cases;
 use simple_txtar::{Archive, File};
 use std::{
     env, fs, io,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{Arc, mpsc::Sender},
     thread::{sleep, spawn},
     time::Duration,
 };
@@ -98,7 +99,7 @@ fn editor_scenarios(path: &str, content: &str) {
 
     e.run_with_explicit_fsys_path(socket_path);
 
-    let status_hist = status_messages.lock().unwrap().join("\n");
+    let status_hist = status_messages.lock().join("\n");
     println!(">> STATUS HISTORY:\n{status_hist}");
 
     assertions.verify(&e, &test_file_dir);
@@ -369,7 +370,7 @@ impl ScriptedUi {
                 // for running the fsys operation otherwise we race with the main editor
                 // event loop and can fail to wait for the client to connect.
                 let pending = self.pending_fsys.clone();
-                *pending.lock().unwrap() = true;
+                *pending.lock() = true;
                 spawn(move || f.run(client, pending));
             }
             Err(e) => {
@@ -412,7 +413,7 @@ impl UserInterface for ScriptedUi {
         match change {
             StateChange::ConfigUpdated => (),
             StateChange::StatusMessage { msg } => {
-                self.status_messages.lock().unwrap().push(msg);
+                self.status_messages.lock().push(msg);
             }
         }
     }
@@ -426,7 +427,7 @@ impl UserInterface for ScriptedUi {
         _held_click: Option<&Click>,
         _mb: Option<MiniBufferState<'_>>,
     ) {
-        let event = if *self.pending_fsys.lock().unwrap() {
+        let event = if *self.pending_fsys.lock() {
             // We need to allow for the fsys thread to communicate with the main editor event loop
             // which triggers additional refreshes for when our message actually comes through to
             // the event loop
@@ -497,7 +498,7 @@ impl Fsys {
             println!(">>> FSYS ERROR: {e}");
         }
 
-        *pending.lock().unwrap() = false;
+        *pending.lock() = false;
     }
 }
 

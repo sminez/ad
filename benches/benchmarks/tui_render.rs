@@ -6,11 +6,12 @@ use ad_editor::{
     ui::{GenericTui, Layout, UserInterface},
 };
 use criterion::{BenchmarkGroup, Criterion, criterion_group, measurement::WallTime};
+use parking_lot::RwLock;
 use std::{
     env::current_dir,
     hint::black_box,
     io::{self, Write},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 fn criterion_benchmark(c: &mut Criterion) {

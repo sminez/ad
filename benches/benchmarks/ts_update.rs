@@ -2,10 +2,8 @@
 use ad_editor::{Config, buffer::Buffer, dot::TextObject, editor::Action};
 use ad_event::Source;
 use criterion::{Criterion, criterion_group};
-use std::{
-    env::current_dir,
-    sync::{Arc, RwLock},
-};
+use parking_lot::RwLock;
+use std::{env::current_dir, sync::Arc};
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("TS update");

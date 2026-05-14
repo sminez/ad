@@ -1,9 +1,7 @@
 use ad_editor::{Config, buffer::Buffer};
+use parking_lot::RwLock;
 use reference_tests::TestData;
-use std::{
-    env, fs,
-    sync::{Arc, RwLock},
-};
+use std::{env, fs, sync::Arc};
 
 fn main() {
     let mut args = env::args().skip(1);

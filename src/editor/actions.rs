@@ -2,7 +2,6 @@
 use crate::{
     buffer::BufferKind,
     config::Config,
-    config_handle,
     dot::{Range, TextObject},
     editor::{Editor, MbSelect, MbSelector, MiniBufferSelection, minibuffer::SimpleMbSelect},
     exec::{Addr, Address, EditorRunner, Program},
@@ -237,7 +236,7 @@ where
     }
 
     fn find_file_under_dir(&mut self, dir: &Path, new_window: bool) {
-        let cmd = config_handle!(self).find_command.clone();
+        let cmd = self.config.read().find_command.clone();
         let res = self
             .system
             .run_command_blocking(&cmd, dir, self.active_buffer_id());
@@ -472,7 +471,7 @@ where
         info!("reloading config");
         let msg = match Config::try_load() {
             Ok(config) => {
-                *self.config.write().unwrap() = config;
+                *self.config.write() = config;
                 "config reloaded".to_string()
             }
             Err(s) => s,

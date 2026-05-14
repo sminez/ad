@@ -17,6 +17,7 @@ dependencies = [
  "libloading",
  "lsp-types",
  "ninep",
+ "parking_lot",
  "serde",
  "serde_json",
  "simple_test_case",

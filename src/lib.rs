@@ -62,20 +62,6 @@ pub(crate) fn pid() -> u32 {
     *PID.get_or_init(process::id)
 }
 
-/// Helper for accessing config stored on self as an `Arc<Mutex<Config>>`
-#[macro_export]
-macro_rules! config_handle {
-    ($self:expr) => {{
-        match $self.config.read() {
-            Ok(config) => config,
-            Err(err) => {
-                $self.config.clear_poison();
-                err.into_inner()
-            }
-        }
-    }};
-}
-
 /// Wrapper around panic! to allow for additional logic
 #[macro_export]
 macro_rules! die {

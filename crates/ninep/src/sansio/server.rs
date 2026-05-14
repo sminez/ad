@@ -6,6 +6,7 @@ use crate::{
         DEFAULT_MSIZE, FileType, MAXWELEM, NineP, Qid, RawStat, Rdata, SharedBuf, Tdata, Tmessage,
     },
 };
+use parking_lot::RwLock;
 use simple_coro::{Coro, Handle, ReadyCoro};
 use std::{
     cmp::min,
@@ -14,7 +15,7 @@ use std::{
     future::Future,
     ops::{Deref, DerefMut},
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 /// Marker afid to denode that auth is not required for establishing connections
@@ -153,7 +154,7 @@ impl SessionType for Attached {}
 
 impl Drop for Attached {
     fn drop(&mut self) {
-        let mut guard = self.qids.write().unwrap();
+        let mut guard = self.qids.write();
         for fm in self.fids.values() {
             if let Some(meta) = guard.get_mut(&fm.qid) {
                 meta.opened_by.remove(&self.client_id);
@@ -219,7 +220,7 @@ where
     where
         F: FnOnce(&BTreeMap<u64, QidMeta>) -> U,
     {
-        f(&self.qids.read().unwrap())
+        f(&self.qids.read())
     }
 
     /// Run a closure with mutable access to the shared server-level Qid map.
@@ -231,7 +232,7 @@ where
     where
         F: FnOnce(&mut BTreeMap<u64, QidMeta>) -> U,
     {
-        f(&mut self.qids.write().unwrap())
+        f(&mut self.qids.write())
     }
 
     pub(crate) fn parent_qid(&self, qid: u64) -> Option<u64> {

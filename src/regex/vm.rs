@@ -15,12 +15,8 @@ use crate::regex::{
     matches::{Match, MatchIter},
 };
 use aho_corasick::AhoCorasick;
-use std::{
-    collections::HashSet,
-    fmt,
-    mem::swap,
-    sync::{Arc, Mutex},
-};
+use parking_lot::Mutex;
+use std::{collections::HashSet, fmt, mem::swap, sync::Arc};
 
 pub(super) const N_SLOTS: usize = 30;
 
@@ -37,7 +33,7 @@ pub struct Regex {
 
 impl Clone for Regex {
     fn clone(&self) -> Self {
-        let inner = self.inner.lock().unwrap().clone();
+        let inner = self.inner.lock().clone();
 
         Self {
             re: self.re.clone(),
@@ -141,7 +137,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.track_submatches = false;
         inner.match_from_byte_offset(haystack, 0).is_some()
     }
@@ -152,7 +148,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.track_submatches = false;
         inner.match_from_byte_offset(haystack, offset).is_some()
     }
@@ -163,7 +159,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.track_submatches = false;
         inner
             .match_between_byte_offsets(haystack, from, to)
@@ -179,7 +175,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.track_submatches = true;
         inner.match_from_byte_offset(haystack, 0)
     }
@@ -194,7 +190,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.track_submatches = true;
         inner.match_from_byte_offset(haystack, offset)
     }
@@ -209,7 +205,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        let mut inner = self.inner.lock().unwrap();
+        let mut inner = self.inner.lock();
         inner.track_submatches = true;
         inner.match_between_byte_offsets(haystack, from, to)
     }
@@ -220,7 +216,7 @@ impl Regex {
     where
         H: Haystack,
     {
-        self.inner.lock().unwrap().track_submatches = true;
+        self.inner.lock().track_submatches = true;
 
         MatchIter {
             haystack,
@@ -264,7 +260,7 @@ impl RevRegex {
     where
         H: Haystack,
     {
-        let mut inner = self.0.inner.lock().unwrap();
+        let mut inner = self.0.inner.lock();
         inner.track_submatches = true;
         inner.run_vm(&mut haystack.rev_iter_between(0, offset), offset)
     }

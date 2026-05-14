@@ -7,12 +7,13 @@ use crate::{
     ziplist::{Position, ZipList},
 };
 use ad_event::Source;
+use parking_lot::RwLock;
 use std::{
     collections::VecDeque,
     io::{self, ErrorKind},
     mem,
     path::Path,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 #[cfg(test)]

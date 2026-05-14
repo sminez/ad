@@ -21,11 +21,12 @@ use crate::{
     util::ReadOnlyLock,
 };
 use lsp_types::{NumberOrString, Uri, notification as notif, request as req, request::Initialize};
+use parking_lot::RwLock;
 use std::{
     collections::HashMap,
     path::Path,
     sync::{
-        Arc, RwLock,
+        Arc,
         mpsc::{Receiver, Sender, channel},
     },
     thread::{sleep, spawn},
@@ -106,7 +107,6 @@ impl LspManagerHandle {
 
         self.capabilities
             .read()
-            .unwrap()
             .get(ftype.as_str())
             .map(|(id, caps)| (*id, caps.position_encoding))
     }
@@ -114,7 +114,6 @@ impl LspManagerHandle {
     fn lsp_id_and_encoding_for_ftype(&self, ftype: &str) -> Option<(usize, PositionEncoding)> {
         self.capabilities
             .read()
-            .unwrap()
             .get(ftype)
             .map(|(id, caps)| (*id, caps.position_encoding))
     }
@@ -188,7 +187,6 @@ impl LspManagerHandle {
         let txt = self
             .capabilities
             .read()
-            .unwrap()
             .get(ftype.as_str())?
             .1
             .as_pretty_json()?;
@@ -204,7 +202,7 @@ impl LspManagerHandle {
         }
 
         debug!("showing LSP diagnostics");
-        let guard = self.diagnostics.read().unwrap();
+        let guard = self.diagnostics.read();
         let mut diags: Vec<Diagnostic> = guard.values().flatten().cloned().collect();
         diags.sort_unstable();
 

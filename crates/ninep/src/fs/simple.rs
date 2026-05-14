@@ -6,10 +6,8 @@ use crate::{
     fs::{FileType, Perm, QID_ROOT, Qid, Stat, WStat},
     sansio::server::{E_CREATE_NON_DIR, E_ILLEGAL_CREATE_NAME, E_UNKNOWN_FILE},
 };
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, RwLock},
-};
+use parking_lot::RwLock;
+use std::{collections::BTreeMap, sync::Arc};
 
 const E_ALREADY_EXISTS: &str = "file already exists";
 
@@ -37,14 +35,14 @@ where
     where
         F: FnOnce(&Nodes<T>) -> U,
     {
-        f(&self.nodes.read().unwrap())
+        f(&self.nodes.read())
     }
 
     fn with_nodes_mut<F, U>(&self, f: F) -> U
     where
         F: FnOnce(&mut Nodes<T>) -> U,
     {
-        f(&mut self.nodes.write().unwrap())
+        f(&mut self.nodes.write())
     }
 
     /// Add a new node to the tree, returning its `qid`.

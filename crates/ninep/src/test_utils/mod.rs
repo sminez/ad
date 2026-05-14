@@ -14,10 +14,11 @@ use crate::{
     tokio::{AsyncNineP, server::AsyncServe9pFromSync},
 };
 use jiff::Timestamp;
+use parking_lot::Mutex;
 use std::{
     io, mem,
     os::unix::net::UnixStream,
-    sync::{Arc, Mutex, mpsc},
+    sync::{Arc, mpsc},
     thread::{sleep, spawn},
     time::Duration,
 };
@@ -257,14 +258,14 @@ pub(crate) struct RecordedCalls(Arc<Mutex<Vec<Call>>>);
 
 impl RecordedCalls {
     fn push(&self, call: Call) {
-        self.0.lock().unwrap().push(call);
+        self.0.lock().push(call);
     }
 
     /// Extract the [Call]s that have been recorded up until this point.
     ///
     /// This method clears the internal log state of the associated [TestFs].
     pub(crate) fn take(&self) -> Vec<Call> {
-        mem::take(&mut self.0.lock().unwrap())
+        mem::take(&mut self.0.lock())
     }
 }
 

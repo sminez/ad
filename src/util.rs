@@ -1,11 +1,7 @@
 //! Utility functions
 use crate::{config::config_path, editor::built_in_commands, mode::keybindings};
-use std::{
-    fs,
-    os::unix::fs::PermissionsExt,
-    path::Path,
-    sync::{Arc, LockResult, RwLock, RwLockReadGuard},
-};
+use parking_lot::{RwLock, RwLockReadGuard};
+use std::{fs, os::unix::fs::PermissionsExt, path::Path, sync::Arc};
 use tracing::warn;
 use unicode_width::UnicodeWidthChar;
 
@@ -21,7 +17,7 @@ impl<T> ReadOnlyLock<T> {
     }
 
     /// Obtain a read guard from the underlying `RwLock`
-    pub fn read(&self) -> LockResult<RwLockReadGuard<'_, T>> {
+    pub fn read(&self) -> RwLockReadGuard<'_, T> {
         self.0.read()
     }
 }

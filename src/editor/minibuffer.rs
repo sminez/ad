@@ -12,11 +12,12 @@ use crate::{
     system::System,
 };
 use ad_event::Source;
+use parking_lot::{Mutex, RwLock};
 use std::{
     cmp::{self, min},
     fmt,
     ops::ControlFlow,
-    sync::{Arc, Mutex, RwLock},
+    sync::Arc,
 };
 
 const MINIBUFFER_ID: usize = usize::MAX - 1;
@@ -88,7 +89,7 @@ impl MiniBuffer {
 
         let line_indices = Vec::with_capacity(options.len());
         let n_prompt_chars = prompt.chars().count();
-        let max_height = config.read().unwrap().minibuffer_lines;
+        let max_height = config.read().minibuffer_lines;
 
         Self {
             sel,
@@ -374,7 +375,7 @@ impl MbSelect for SimpleMbSelect {
     }
 
     fn selected_actions(&self, selection: MiniBufferSelection) -> Option<Actions> {
-        let mut f = self.selected_actions.lock().unwrap();
+        let mut f = self.selected_actions.lock();
 
         (f)(selection)
     }

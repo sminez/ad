@@ -2,7 +2,7 @@
 use crate::{
     buffer::{Buffer, BufferId, Buffers},
     config::Config,
-    config_handle, die,
+    die,
     dot::{Cur, Dot},
     editor::ViewPort,
     fsys::InputFilter,
@@ -10,12 +10,13 @@ use crate::{
     ziplist,
     ziplist::{Position, ZipList},
 };
+use parking_lot::RwLock;
 use std::{
     cmp::min,
     io,
     mem::swap,
     path::Path,
-    sync::{Arc, RwLock, mpsc::channel},
+    sync::{Arc, mpsc::channel},
 };
 use tracing::{debug, warn};
 use unicode_width::UnicodeWidthChar;
@@ -962,7 +963,7 @@ impl Layout {
 
     pub(crate) fn force_cursor_to_be_in_view(&mut self) {
         self.changed_since_last_render = true;
-        let tabstop = config_handle!(self).tabstop;
+        let tabstop = self.config.read().tabstop;
 
         if self.scratch.is_focused {
             self.scratch.w.view.force_cursor_to_be_in_view(
@@ -993,7 +994,7 @@ impl Layout {
     /// inputs from systems such as the 9p filesystem and LSP servers can manipulate
     /// state for non-active buffers.
     pub(crate) fn clamp_scroll(&mut self) {
-        let tabstop = config_handle!(self).tabstop;
+        let tabstop = self.config.read().tabstop;
 
         // Clamp the scratch buffer if it is visible unconditionally as we can't have multiple
         // views of it.
@@ -1037,7 +1038,7 @@ impl Layout {
 
     pub(crate) fn set_viewport(&mut self, vp: ViewPort) {
         self.changed_since_last_render = true;
-        let tabstop = config_handle!(self).tabstop;
+        let tabstop = self.config.read().tabstop;
 
         if self.scratch.is_focused {
             self.scratch.w.view.set_viewport(
@@ -1275,7 +1276,7 @@ impl Layout {
     /// Scroll the `View` under the given cursor coordinates up or down by `scroll_rows`
     pub fn scroll_view(&mut self, x: usize, y: usize, up: bool, scroll_rows: usize) {
         self.changed_since_last_render = true;
-        let tabstop = config_handle!(self).tabstop;
+        let tabstop = self.config.read().tabstop;
         let mut x_offset = 0;
         let mut y_offset = 0;
 
@@ -1455,7 +1456,7 @@ impl ScratchBuf {
 impl Scratch {
     // n_rows is read from config on startup but then not modified after that
     fn new(config: Arc<RwLock<Config>>) -> Self {
-        let n_rows = config.read().unwrap().minibuffer_lines;
+        let n_rows = config.read().minibuffer_lines;
 
         Self {
             b: ScratchBuf {

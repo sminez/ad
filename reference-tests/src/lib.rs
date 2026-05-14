@@ -97,8 +97,9 @@ impl From<(usize, usize, String)> for TestPatch {
 mod tests {
     use super::*;
     use ad_editor::Config;
+    use parking_lot::RwLock;
     use pretty_assertions::assert_eq;
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     fn run_reference_test(name: &str) {
         let path = format!("{}/data/{name}.json.gz", env!("CARGO_MANIFEST_DIR"),);

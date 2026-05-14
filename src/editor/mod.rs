@@ -3,7 +3,7 @@ use crate::{
     LogBuffer,
     buffer::{ActionOutcome, Buffer, BufferId, WELCOME_SQUIRREL},
     config::Config,
-    config_handle, die,
+    die,
     dot::TextObject,
     editor::minibuffer::MiniBuffer,
     exec::{Addr, Address},
@@ -17,11 +17,12 @@ use crate::{
     ui::{Layout, SCRATCH_ID, StateChange, Ui, UserInterface, style::CurShape},
 };
 use ad_event::Source;
+use parking_lot::RwLock;
 use std::{
     env, fmt, panic,
     path::{Path, PathBuf},
     sync::{
-        Arc, RwLock,
+        Arc,
         mpsc::{Receiver, Sender, channel},
     },
     time::Instant,
@@ -306,7 +307,7 @@ where
 
     fn run_event_loop(&mut self, socket_path: Option<PathBuf>) {
         let (fs_enabled, auto_mount) = {
-            let cfg = config_handle!(self);
+            let cfg = self.config.read();
             (cfg.filesystem.enabled, cfg.filesystem.auto_mount)
         };
 

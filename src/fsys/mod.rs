@@ -36,6 +36,7 @@ use ninep::{
     fs::{IoUnit, Mode, Perm, Qid, Stat, Timestamp, WStat},
     sync::server::{ClientId, ReadOutcome, Serve9p, Server, socket_path},
 };
+use parking_lot::Mutex;
 use std::{
     cmp::min,
     env,
@@ -44,7 +45,7 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
     sync::{
-        Arc, LazyLock, Mutex,
+        Arc, LazyLock,
         mpsc::{Receiver, Sender, channel},
     },
     thread::{JoinHandle, spawn},
@@ -349,7 +350,7 @@ impl AdFs {
 
     /// Spawn a thread for running this filesystem and return a handle to it
     pub fn run_threaded(self, custom_socket_path: Option<PathBuf>) -> FsHandle {
-        let s = self.state.lock().unwrap();
+        let s = self.state.lock();
         let auto_mount = s.auto_mount;
         let mount_path = PathBuf::from(s.mount_path.clone());
         let socket_path = custom_socket_path.unwrap_or_else(default_socket_path_for_pid);
@@ -382,7 +383,7 @@ impl AdFs {
 impl Serve9p for AdFs {
     fn stat(&self, qid: u64, cid: ClientId) -> Result<Stat> {
         trace!(?cid, %qid, "handling stat request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         match qid {
@@ -401,7 +402,7 @@ impl Serve9p for AdFs {
 
     fn write_stat(&self, qid: u64, wstat: WStat, cid: ClientId) -> Result<()> {
         trace!(?cid, %qid, "handling write stat request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         if wstat.n_bytes == Some(0) {
@@ -419,7 +420,7 @@ impl Serve9p for AdFs {
 
     fn walk_one(&self, parent_qid: u64, child: &str, cid: ClientId) -> Result<Qid> {
         trace!(?cid, %parent_qid, %child, "handling walk request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         match parent_qid {
@@ -448,7 +449,7 @@ impl Serve9p for AdFs {
 
     fn open(&self, qid: u64, mode: Mode, cid: ClientId) -> Result<IoUnit> {
         trace!(?cid, %qid,  ?mode, "handling open request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         if qid == LOG_FILE_QID {
@@ -462,7 +463,7 @@ impl Serve9p for AdFs {
 
     fn clunk(&self, qid: u64, cid: ClientId) {
         trace!(?cid, %qid, "handling clunk request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
 
         if qid == LOG_FILE_QID {
             s.buffer_nodes.log.remove_client(cid);
@@ -473,7 +474,7 @@ impl Serve9p for AdFs {
 
     fn read(&self, qid: u64, offset: usize, count: usize, cid: ClientId) -> Result<ReadOutcome> {
         trace!(?cid, %qid, %offset, %count, "handling read request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         if qid == CONTROL_FILE_QID {
@@ -502,7 +503,7 @@ impl Serve9p for AdFs {
 
     fn read_dir(&self, qid: u64, cid: ClientId) -> Result<Vec<Stat>> {
         trace!(?cid, %qid, "handling read dir request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         match qid {
@@ -523,7 +524,7 @@ impl Serve9p for AdFs {
 
     fn write(&self, qid: u64, offset: usize, data: Vec<u8>, cid: ClientId) -> Result<usize> {
         trace!(?cid, %qid, %offset, n_bytes=%data.len(), "handling write request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         let n_bytes = data.len();
@@ -561,7 +562,7 @@ impl Serve9p for AdFs {
     // are forbidden.
     fn remove(&self, qid: u64, cid: ClientId) -> Result<()> {
         trace!(?cid, %qid, "handling remove request");
-        let mut s = self.state.lock().unwrap();
+        let mut s = self.state.lock();
         s.buffer_nodes.update();
 
         if let Some(bnode) = s.buffer_nodes.known.get(&qid) {
@@ -667,6 +668,7 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
 mod tests {
     use super::*;
     use ninep::sync::client::Error;
+    use std::{thread::sleep, time::Duration};
 
     #[test]
     fn event_files_are_exclusive() {
@@ -677,7 +679,8 @@ mod tests {
         {
             // Ensure that we have a buffer to work with
             _ = btx.send(LogEvent::Open(1));
-            let mut state = adfs.state.lock().unwrap();
+            sleep(Duration::from_millis(10));
+            let mut state = adfs.state.lock();
             state.buffer_nodes.update();
         }
 
