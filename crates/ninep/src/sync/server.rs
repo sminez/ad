@@ -15,7 +15,7 @@ use crate::{
             FlushHandle, QidMeta, Session, SessionType, Unattached,
         },
     },
-    sync::{SyncNineP, SyncServerStream, SyncStream, client::Client},
+    sync::{SyncNineP, SyncStream, client::Client},
 };
 use simple_coro::{CoroState, ReadyCoro};
 use std::{
@@ -278,7 +278,7 @@ where
         })
     }
 
-    /// Run a new session handling a connection on the provided [stream][SyncServerStream].
+    /// Run a new session handling a connection on the provided [stream][SyncStream].
     ///
     /// This method will run until the stream closes. To serve incoming connections in their own
     /// thread see [serve_tcp][Self::serve_tcp] and [serve_socket][Self::serve_socket].
@@ -288,7 +288,7 @@ where
     /// used to create an in-memory stream that can be passed to this method for running tests.
     pub fn handle_single_client_stream<U>(&mut self, stream: U)
     where
-        U: SyncServerStream,
+        U: SyncStream,
     {
         self.new_session(stream).handle_connection();
     }
@@ -326,7 +326,7 @@ where
 impl<S, U> Session<Unattached, S, U>
 where
     S: Serve9p,
-    U: SyncServerStream,
+    U: SyncStream,
 {
     fn handle_connection(mut self) {
         loop {
@@ -349,7 +349,7 @@ where
 impl<S, U> Session<Attached, S, U>
 where
     S: Serve9p,
-    U: SyncServerStream,
+    U: SyncStream,
 {
     /// Explicitly clunk all open fids
     fn clunk_and_clear(&mut self) {
@@ -367,7 +367,7 @@ where
 
     fn spawn_reader(&self, tx: Sender<Event>, msize: Arc<AtomicU32>) -> Option<JoinHandle<()>>
     where
-        U: SyncServerStream,
+        U: SyncStream,
     {
         let mut stream = self.stream.try_clone().ok()?;
         let h = spawn(move || {

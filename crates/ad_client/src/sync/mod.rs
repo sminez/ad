@@ -673,6 +673,24 @@ mod tests {
     }
 
     #[test]
+    fn run_event_filter_doesnt_block_calls_from_clones() {
+        let (client, ted) = prepare(&[("foo", "foo content")]);
+
+        let filter = TestFilter::default();
+        let filter_client = client.for_buffer(1);
+        let _handle = spawn(move || filter_client.run_event_filter(filter));
+        sleep(Duration::from_millis(10)); // wait for the filter to attach
+
+        let current_id = client.current_buffer().unwrap();
+        assert_eq!(current_id, 1);
+
+        _ = ted.tx.send(Event::Action(Action::InsertChar { c: 'a' }));
+
+        let body = client.for_buffer(1).read_body().unwrap();
+        assert_eq!(body, "afoo content");
+    }
+
+    #[test]
     fn open_returns_correct_id() {
         let (client, ted) = prepare(&[]);
         let path = ted.write_file("test", "test content");

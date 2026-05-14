@@ -707,6 +707,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn run_event_filter_doesnt_block_calls_from_clones() {
+        let (client, ted) = prepare(&[("foo", "foo content")]).await;
+
+        let filter = TestFilter::default();
+        let filter_client = client.for_buffer(1);
+        let _handle = spawn(async move { filter_client.run_event_filter(filter).await });
+        sleep(Duration::from_millis(10)).await; // wait for the filter to attach
+
+        let current_id = client.current_buffer().await.unwrap();
+        assert_eq!(current_id, 1);
+
+        _ = ted.tx.send(Event::Action(Action::InsertChar { c: 'a' }));
+
+        let body = client.for_buffer(1).read_body().await.unwrap();
+        assert_eq!(body, "afoo content");
+    }
+
+    #[tokio::test]
     async fn open_returns_correct_id() {
         let (client, ted) = prepare(&[]).await;
         let path = ted.write_file("test", "test content");

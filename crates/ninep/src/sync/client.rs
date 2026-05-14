@@ -7,10 +7,11 @@ use crate::{
     },
     sync::{SyncNineP, SyncStream},
 };
+use parking_lot::Mutex;
 use simple_coro::CoroState;
 use std::{
     collections::HashMap,
-    env, mem,
+    env, io, mem,
     net::{TcpStream, ToSocketAddrs},
     os::unix::net::UnixStream,
     path::Path,
@@ -68,20 +69,19 @@ impl Drop for Client {
 }
 
 impl Client {
-    fn new<S>(stream: S) -> Self
+    fn try_new<S>(stream: S) -> Result<Self>
     where
         S: SyncStream,
     {
         let (tx, rx) = channel();
         let state = State::default();
         let msize = Arc::clone(&state.msize);
-        let conn = Connection::new(stream, rx, msize);
-        spawn(move || conn.run());
+        spawn_connection(stream, rx, msize)?;
 
-        Self {
+        Ok(Self {
             state: Default::default(),
             tx,
-        }
+        })
     }
 
     /// Create a new [Client] connected to a unix socket at the specified path.
@@ -92,7 +92,7 @@ impl Client {
     ) -> Result<Self> {
         let stream = UnixStream::connect(path.as_ref())?;
 
-        let client = Self::new(stream);
+        let client = Self::try_new(stream)?;
         client.connect(uname, aname)?;
 
         Ok(client)
@@ -120,7 +120,7 @@ impl Client {
         aname: impl Into<String>,
         stream: UnixStream,
     ) -> Result<Self> {
-        let client = Self::new(stream);
+        let client = Self::try_new(stream)?;
         client.connect(uname, aname)?;
 
         Ok(client)
@@ -134,7 +134,7 @@ impl Client {
     ) -> Result<Self> {
         let stream = TcpStream::connect(addr)?;
 
-        let client = Self::new(stream);
+        let client = Self::try_new(stream)?;
         client.connect(uname, aname)?;
 
         Ok(client)
@@ -302,33 +302,118 @@ enum Req {
     },
 }
 
-struct Connection<S>
+fn spawn_connection<S>(stream: S, rx: Receiver<Req>, msize: Arc<AtomicU32>) -> Result<()>
+where
+    S: SyncStream,
+{
+    let rstream = stream
+        .try_clone()
+        .map_err(|msg| Error::Io(io::Error::other(msg)))?;
+    let pending = Default::default();
+
+    let reader = Reader {
+        stream: rstream,
+        msize,
+        pending: Arc::clone(&pending),
+        buf: Default::default(),
+    };
+
+    let writer = Writer {
+        stream,
+        pending,
+        rx,
+        n_clients: 1,
+        next_tag: 0,
+    };
+
+    spawn(move || reader.run());
+    spawn(move || writer.run());
+
+    Ok(())
+}
+
+struct Reader<S>
 where
     S: SyncStream,
 {
     stream: S,
-    rx: Receiver<Req>,
     msize: Arc<AtomicU32>,
-    pending: HashMap<u16, Sender<Result<Rmessage>>>,
+    pending: Arc<Mutex<HashMap<u16, Sender<Result<Rmessage>>>>>,
     buf: SharedBuf,
+}
+
+impl<S> Reader<S>
+where
+    S: SyncStream,
+{
+    fn run(mut self) {
+        loop {
+            let size = self.msize.load(Ordering::Acquire);
+            let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream) {
+                Ok(rmsg) => rmsg,
+                Err(e) => {
+                    self.shutdown(e.to_string());
+                    break;
+                }
+            };
+
+            if let Some(sender) = self.pending.lock().remove(&rmsg.tag) {
+                let _ = sender.send(Ok(rmsg));
+            }
+        }
+    }
+
+    fn shutdown(&mut self, msg: String) {
+        let senders: Vec<_> = self.pending.lock().drain().map(|(_, s)| s).collect();
+        for tx in senders.into_iter() {
+            let _ = tx.send(err(msg.clone()));
+        }
+
+        self.stream.shutdown();
+    }
+}
+
+struct Writer<S>
+where
+    S: SyncStream,
+{
+    stream: S,
+    pending: Arc<Mutex<HashMap<u16, Sender<Result<Rmessage>>>>>,
+    rx: Receiver<Req>,
     n_clients: usize,
     next_tag: u16,
 }
 
-impl<S> Connection<S>
+impl<S> Writer<S>
 where
     S: SyncStream,
 {
-    fn new(stream: S, rx: Receiver<Req>, msize: Arc<AtomicU32>) -> Self {
-        Self {
-            stream,
-            rx,
-            msize,
-            pending: HashMap::new(),
-            buf: SharedBuf::default(),
-            n_clients: 1,
-            next_tag: 0,
+    fn run(mut self) {
+        while self.n_clients > 0 {
+            let req = match self.rx.recv() {
+                Ok(req) => req,
+                Err(e) => {
+                    self.shutdown(e.to_string());
+                    return;
+                }
+            };
+
+            match req {
+                Req::AddClient => self.n_clients += 1,
+                Req::RemoveClient => self.n_clients = self.n_clients.saturating_sub(1),
+                Req::Send { data, tx } => {
+                    let tag = self.tag_for(&data);
+                    let msg = Tmessage::new(tag, data);
+                    self.pending.lock().insert(tag, tx);
+
+                    if let Err(e) = msg.write_to(&mut self.stream) {
+                        self.shutdown(e.to_string());
+                    }
+                }
+            }
         }
+
+        self.stream.shutdown();
     }
 
     fn tag_for(&mut self, data: &Tdata) -> u16 {
@@ -346,64 +431,13 @@ where
     }
 
     fn shutdown(&mut self, msg: String) {
-        for tx in self.pending.drain().map(|(_, s)| s) {
+        let senders: Vec<_> = self.pending.lock().drain().map(|(_, s)| s).collect();
+        for tx in senders.into_iter() {
             let _ = tx.send(err(msg.clone()));
         }
 
+        self.stream.shutdown();
         self.n_clients = 0;
-    }
-
-    fn run(mut self) {
-        while self.n_clients > 0 {
-            if self.pending.is_empty() {
-                let req = match self.rx.recv() {
-                    Ok(req) => req,
-                    Err(_) => return,
-                };
-
-                self.handle_req(req);
-                continue;
-            }
-
-            while let Ok(req) = self.rx.try_recv() {
-                self.handle_req(req);
-                if self.n_clients == 0 {
-                    return;
-                }
-            }
-
-            let size = self.msize.load(Ordering::Acquire);
-            let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream) {
-                Ok(rmsg) => rmsg,
-                Err(e) => {
-                    self.shutdown(e.to_string());
-                    break;
-                }
-            };
-
-            if let Some(sender) = self.pending.remove(&rmsg.tag) {
-                let _ = sender.send(Ok(rmsg));
-            }
-        }
-    }
-
-    fn handle_req(&mut self, req: Req)
-    where
-        S: SyncStream,
-    {
-        match req {
-            Req::AddClient => self.n_clients += 1,
-            Req::RemoveClient => self.n_clients = self.n_clients.saturating_sub(1),
-            Req::Send { data, tx } => {
-                let tag = self.tag_for(&data);
-                let msg = Tmessage::new(tag, data);
-                self.pending.insert(tag, tx);
-
-                if let Err(e) = msg.write_to(&mut self.stream) {
-                    self.shutdown(e.to_string());
-                }
-            }
-        }
     }
 }
 
@@ -512,7 +546,7 @@ mod tests {
         let fs = TestFs::default();
         let mut server = Server::new(fs);
         let (client_stream, server_stream) = UnixStream::pair().unwrap();
-        let mut client = Client::new(client_stream);
+        let mut client = Client::try_new(client_stream).unwrap();
         let handle = thread::spawn(move || {
             server.handle_single_client_stream(server_stream);
         });

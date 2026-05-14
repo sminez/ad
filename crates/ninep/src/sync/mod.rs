@@ -6,7 +6,7 @@ use crate::{
 use simple_coro::CoroState;
 use std::{
     io::{self, Read, Write},
-    net::TcpStream,
+    net::{Shutdown, TcpStream},
     os::unix::net::UnixStream,
 };
 
@@ -51,26 +51,31 @@ pub trait SyncNineP: NineP {
 impl<T> SyncNineP for T where T: NineP {}
 
 /// A Stream that makes use of the standard library [Read] and [Write] traits to perform IO
-pub trait SyncStream: Read + Write + Send + Sized + 'static {}
-
-impl SyncStream for UnixStream {}
-impl SyncStream for TcpStream {}
-
-/// A Stream that makes use of the standard library [Read] and [Write] traits to perform IO
 /// and additionally supports cloning the stream.
-pub trait SyncServerStream: SyncStream {
+pub trait SyncStream: Read + Write + Send + Sized + 'static {
     /// Clone this stream, accounting for operating system errors
     fn try_clone(&self) -> Result<Self>;
+
+    /// Shutdown this stream, closing both reader and writer halves of the connection.
+    fn shutdown(&self);
 }
 
-impl SyncServerStream for UnixStream {
+impl SyncStream for UnixStream {
     fn try_clone(&self) -> Result<Self> {
         self.try_clone().map_err(|e| e.to_string())
     }
+
+    fn shutdown(&self) {
+        _ = self.shutdown(Shutdown::Both);
+    }
 }
 
-impl SyncServerStream for TcpStream {
+impl SyncStream for TcpStream {
     fn try_clone(&self) -> Result<Self> {
         self.try_clone().map_err(|e| e.to_string())
+    }
+
+    fn shutdown(&self) {
+        _ = self.shutdown(Shutdown::Both);
     }
 }

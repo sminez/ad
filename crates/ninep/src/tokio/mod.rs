@@ -7,7 +7,7 @@ use simple_coro::CoroState;
 use std::{future::Future, io, marker::Unpin};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    net::{TcpStream, UnixStream},
+    net::{TcpStream, UnixStream, tcp, unix},
 };
 
 pub mod client;
@@ -84,6 +84,11 @@ where
 /// A Stream that makes use of the tokio [AsyncRead] and [AsyncWrite] traits to perform IO
 #[allow(async_fn_in_trait)]
 pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + Sized + 'static {
+    /// The read half of this stream
+    type ReadHalf: AsyncRead + Unpin + Send + Sized + 'static;
+    /// The write half of this stream
+    type WriteHalf: AsyncWrite + Unpin + Send + Sized + 'static;
+
     /// Reply to the specified tag with a given Result. Err's will be converted to 9p error
     /// messages automatically.
     async fn reply(&mut self, msize: u32, tag: u16, resp: Result<Rdata>) {
@@ -92,9 +97,24 @@ pub trait AsyncStream: AsyncRead + AsyncWrite + Unpin + Send + Sized + 'static {
         let _ = r.write_to(self).await;
     }
 
-    // /// Shutdown this stream, closing both reader and writer halves of the connection.
-    // fn shutdown(&self);
+    /// Split this stream into its read and write halves.
+    fn split(self) -> (Self::ReadHalf, Self::WriteHalf);
 }
 
-impl AsyncStream for UnixStream {}
-impl AsyncStream for TcpStream {}
+impl AsyncStream for UnixStream {
+    type ReadHalf = unix::OwnedReadHalf;
+    type WriteHalf = unix::OwnedWriteHalf;
+
+    fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
+        self.into_split()
+    }
+}
+
+impl AsyncStream for TcpStream {
+    type ReadHalf = tcp::OwnedReadHalf;
+    type WriteHalf = tcp::OwnedWriteHalf;
+
+    fn split(self) -> (Self::ReadHalf, Self::WriteHalf) {
+        self.into_split()
+    }
+}

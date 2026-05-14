@@ -18,9 +18,11 @@ use std::{
     },
 };
 use tokio::{
+    io::AsyncWriteExt,
     net::{TcpStream, ToSocketAddrs, UnixStream},
     spawn,
     sync::{
+        Mutex,
         mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
         oneshot::{self, Sender},
     },
@@ -78,9 +80,7 @@ impl Client {
         let (tx, rx) = unbounded_channel();
         let state = State::default();
         let msize = Arc::clone(&state.msize);
-        let conn = Connection::new(stream, rx, msize);
-
-        spawn(conn.run());
+        spawn_connection(stream, rx, msize);
 
         Self {
             state: Default::default(),
@@ -327,33 +327,112 @@ enum Req {
     },
 }
 
-struct Connection<S>
+fn spawn_connection<S>(stream: S, rx: UnboundedReceiver<Req>, msize: Arc<AtomicU32>)
 where
     S: AsyncStream,
 {
-    stream: S,
-    rx: UnboundedReceiver<Req>,
+    let (rstream, wstream) = stream.split();
+    let pending = Default::default();
+
+    let reader: Reader<S> = Reader {
+        stream: rstream,
+        msize,
+        pending: Arc::clone(&pending),
+        buf: Default::default(),
+    };
+
+    let writer: Writer<S> = Writer {
+        stream: wstream,
+        pending,
+        rx,
+        n_clients: 1,
+        next_tag: 0,
+    };
+
+    spawn(reader.run());
+    spawn(writer.run());
+}
+
+struct Reader<S>
+where
+    S: AsyncStream,
+{
+    stream: S::ReadHalf,
     msize: Arc<AtomicU32>,
-    pending: HashMap<u16, Sender<Result<Rmessage>>>,
+    pending: Arc<Mutex<HashMap<u16, Sender<Result<Rmessage>>>>>,
     buf: SharedBuf,
+}
+
+impl<S> Reader<S>
+where
+    S: AsyncStream,
+{
+    async fn run(mut self) {
+        loop {
+            let size = self.msize.load(Ordering::Acquire);
+            let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream).await {
+                Ok(rmsg) => rmsg,
+                Err(e) => {
+                    self.shutdown(e.to_string()).await;
+                    break;
+                }
+            };
+
+            if let Some(sender) = self.pending.lock().await.remove(&rmsg.tag) {
+                let _ = sender.send(Ok(rmsg));
+            }
+        }
+    }
+
+    async fn shutdown(&mut self, msg: String) {
+        let senders: Vec<_> = self.pending.lock().await.drain().map(|(_, s)| s).collect();
+        for tx in senders.into_iter() {
+            let _ = tx.send(err(msg.clone()));
+        }
+    }
+}
+
+struct Writer<S>
+where
+    S: AsyncStream,
+{
+    stream: S::WriteHalf,
+    pending: Arc<Mutex<HashMap<u16, Sender<Result<Rmessage>>>>>,
+    rx: UnboundedReceiver<Req>,
     n_clients: usize,
     next_tag: u16,
 }
 
-impl<S> Connection<S>
+impl<S> Writer<S>
 where
     S: AsyncStream,
 {
-    fn new(stream: S, rx: UnboundedReceiver<Req>, msize: Arc<AtomicU32>) -> Self {
-        Self {
-            stream,
-            rx,
-            msize,
-            pending: HashMap::new(),
-            buf: SharedBuf::default(),
-            n_clients: 1,
-            next_tag: 0,
+    async fn run(mut self) {
+        while self.n_clients > 0 {
+            let req = match self.rx.recv().await {
+                Some(req) => req,
+                None => {
+                    self.shutdown("stream closed".to_string()).await;
+                    return;
+                }
+            };
+
+            match req {
+                Req::AddClient => self.n_clients += 1,
+                Req::RemoveClient => self.n_clients = self.n_clients.saturating_sub(1),
+                Req::Send { data, tx } => {
+                    let tag = self.tag_for(&data);
+                    let msg = Tmessage::new(tag, data);
+                    self.pending.lock().await.insert(tag, tx);
+
+                    if let Err(e) = msg.write_to(&mut self.stream).await {
+                        self.shutdown(e.to_string()).await;
+                    }
+                }
+            }
         }
+
+        _ = self.stream.shutdown().await;
     }
 
     fn tag_for(&mut self, data: &Tdata) -> u16 {
@@ -370,65 +449,14 @@ where
         tag
     }
 
-    fn shutdown(&mut self, msg: String) {
-        for tx in self.pending.drain().map(|(_, s)| s) {
+    async fn shutdown(&mut self, msg: String) {
+        let senders: Vec<_> = self.pending.lock().await.drain().map(|(_, s)| s).collect();
+        for tx in senders.into_iter() {
             let _ = tx.send(err(msg.clone()));
         }
 
+        _ = self.stream.shutdown().await;
         self.n_clients = 0;
-    }
-
-    async fn run(mut self) {
-        while self.n_clients > 0 {
-            if self.pending.is_empty() {
-                let req = match self.rx.recv().await {
-                    Some(req) => req,
-                    None => return,
-                };
-
-                self.handle_req(req).await;
-                continue;
-            }
-
-            while let Ok(req) = self.rx.try_recv() {
-                self.handle_req(req).await;
-                if self.n_clients == 0 {
-                    return;
-                }
-            }
-
-            let size = self.msize.load(Ordering::Acquire);
-            let rmsg = match Rmessage::read_from(size, &self.buf, &mut self.stream).await {
-                Ok(rmsg) => rmsg,
-                Err(e) => {
-                    self.shutdown(e.to_string());
-                    break;
-                }
-            };
-
-            if let Some(sender) = self.pending.remove(&rmsg.tag) {
-                let _ = sender.send(Ok(rmsg));
-            }
-        }
-    }
-
-    async fn handle_req(&mut self, req: Req)
-    where
-        S: AsyncStream,
-    {
-        match req {
-            Req::AddClient => self.n_clients += 1,
-            Req::RemoveClient => self.n_clients = self.n_clients.saturating_sub(1),
-            Req::Send { data, tx } => {
-                let tag = self.tag_for(&data);
-                let msg = Tmessage::new(tag, data);
-                self.pending.insert(tag, tx);
-
-                if let Err(e) = msg.write_to(&mut self.stream).await {
-                    self.shutdown(e.to_string());
-                }
-            }
-        }
     }
 }
 
