@@ -18,7 +18,6 @@ use std::{
     },
 };
 use tokio::{
-    io::DuplexStream,
     net::{TcpStream, ToSocketAddrs, UnixStream},
     spawn,
     sync::{
@@ -121,10 +120,10 @@ impl Client {
     }
 
     /// Create a new [Client] using an existing [stream][UnixStream].
-    pub async fn new_from_duplex_stream(
+    pub async fn new_from_unix_stream(
         uname: impl Into<String>,
         aname: impl Into<String>,
-        stream: DuplexStream,
+        stream: UnixStream,
     ) -> Result<Self> {
         let client = Self::new(stream);
         client.connect(uname, aname).await?;
@@ -537,7 +536,7 @@ mod tests {
     async fn run_one(case: TestCase) {
         let fs = TestFs::default();
         let mut server = Server::new(fs);
-        let (client_stream, server_stream) = tokio::io::duplex(8192);
+        let (client_stream, server_stream) = UnixStream::pair().unwrap();
         let mut client = Client::new(client_stream);
         let handle = task::spawn(async move {
             server

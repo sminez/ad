@@ -21,7 +21,6 @@ use std::{
     thread::{sleep, spawn},
     time::Duration,
 };
-use tokio::io::DuplexStream;
 
 pub(crate) mod client_cases;
 pub(crate) mod server_cases;
@@ -242,8 +241,8 @@ impl SyncTestClient {
     }
 }
 
-/// A [TestClient] backed by a [DuplexStream].
-pub(crate) type AsyncTestClient = TestClient<DuplexStream>;
+/// A [TestClient] backed by a [tokio::net::UnixStream].
+pub(crate) type AsyncTestClient = TestClient<tokio::net::UnixStream>;
 
 impl AsyncTestClient {
     /// Asynchronously send a Tmessage and receive back the Rmessage reply from the server

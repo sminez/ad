@@ -19,8 +19,7 @@ use crate::{
 use simple_coro::{CoroState, ReadyCoro};
 use std::{fs, future::Future, mem::size_of, path::PathBuf};
 use tokio::{
-    io::duplex,
-    net::{TcpListener, UnixListener},
+    net::{TcpListener, UnixListener, UnixStream},
     sync::mpsc::{Receiver, UnboundedSender, channel, unbounded_channel},
     task::{JoinHandle, spawn},
 };
@@ -400,16 +399,15 @@ where
         &mut self,
         uname: impl Into<String>,
         aname: impl Into<String>,
-        buf_size: usize,
     ) -> Result<(Client, JoinHandle<()>)> {
-        let (client_stream, server_stream) = duplex(buf_size);
+        let (client_stream, server_stream) = UnixStream::pair().map_err(|e| e.to_string())?;
         let session = self.new_session(server_stream);
 
         let handle = spawn(async move {
             session.handle_connection_async().await;
         });
 
-        let client = Client::new_from_duplex_stream(uname, aname, client_stream)
+        let client = Client::new_from_unix_stream(uname, aname, client_stream)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -891,7 +889,7 @@ mod tests {
         },
     };
     use tokio::{
-        io::{AsyncWriteExt, duplex},
+        io::AsyncWriteExt,
         task::{self, JoinHandle},
     };
 
@@ -904,7 +902,7 @@ mod tests {
         // Setup the client and server
         let fs = TestFs::default();
         let recorded = fs.calls();
-        let (client_stream, server_stream) = duplex(8192);
+        let (client_stream, server_stream) = UnixStream::pair().unwrap();
         let mut client = AsyncTestClient::new(client_stream);
         let mut server = Server::new(fs);
 
