@@ -127,7 +127,7 @@ where
 
                 if self.last_click_was_left && click_in_active_buffer {
                     let delta = (self.last_click_time - last_click_time).as_millis();
-                    if delta < !self.config.read().double_click_ms as u128 {
+                    if delta < self.config.read().double_click_ms as u128 {
                         b.try_expand_delimited();
                         return;
                     }
