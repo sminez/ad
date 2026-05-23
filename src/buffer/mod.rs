@@ -1006,6 +1006,14 @@ impl Buffer {
         self.changed_since_last_render = true;
     }
 
+    /// Set this Buffer's dot from an [Addr] expression.
+    pub fn set_dot_from_addr_string(&mut self, s: &str) {
+        if let Ok(addr) = Addr::parse(s.trim_end()) {
+            self.dot = self.map_addr(&addr);
+            self.changed_since_last_render = true;
+        }
+    }
+
     /// Set this Buffer's dot to an explicit [Range], clamping to EOB.
     pub fn set_dot_from_range(&mut self, from: usize, to: usize) {
         self.dot = Dot::from(Range::from_cursors(Cur::new(from), Cur::new(to), false))
@@ -1026,6 +1034,13 @@ impl Buffer {
         let addr: Addr = coords.as_addr(self);
         self.xdot = self.map_addr(&addr);
         self.xdot.clamp_idx(self.txt.len_chars());
+    }
+
+    /// Set this Buffer's xdot from an [Addr] expression.
+    pub fn set_xdot_from_addr_string(&mut self, s: &str) {
+        if let Ok(addr) = Addr::parse(s.trim_end()) {
+            self.xdot = self.map_addr(&addr);
+        }
     }
 
     /// Extend dot forward and clamp to ensure it is within bounds

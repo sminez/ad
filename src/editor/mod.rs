@@ -6,7 +6,6 @@ use crate::{
     die,
     dot::TextObject,
     editor::minibuffer::MiniBuffer,
-    exec::{Addr, Address},
     fsys::{AdFs, LogEvent, Message, Req},
     input::Event,
     key::{Arrow, Input},
@@ -465,17 +464,13 @@ where
             }),
 
             SetBufferAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(addr) = Addr::parse(s.trim_end()) {
-                    b.dot = b.map_addr(&addr);
-                };
+                b.set_dot_from_addr_string(&s);
             }),
             SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 b.handle_action(Action::InsertString { s }, Source::Fsys);
             }),
             SetBufferXAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                if let Ok(addr) = Addr::parse(s.trim_end()) {
-                    b.xdot = b.map_addr(&addr);
-                };
+                b.set_xdot_from_addr_string(&s);
             }),
             SetBufferXDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 b.insert_xdot(s);
