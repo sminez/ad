@@ -2,7 +2,7 @@
 use crate::{
     buffer::{Buffer, GapBuffer},
     dot::{Cur, Dot},
-    editor::Action,
+    editor::BAction,
     parse::ParseInput,
     regex::{self, Regex},
 };
@@ -123,7 +123,7 @@ impl Edit for GapBuffer {
 impl Edit for Buffer {
     fn insert(&mut self, idx: usize, s: &str) {
         self.dot = Dot::Cur { c: Cur { idx } };
-        self.handle_action(Action::InsertString { s: s.to_string() }, Source::Fsys);
+        self.handle_action(BAction::InsertString { s: s.to_string() }, Source::Fsys);
     }
 
     fn remove(&mut self, from: usize, to: usize) {
@@ -131,7 +131,7 @@ impl Edit for Buffer {
             return;
         }
         self.dot = Dot::from_char_indices(from, to.saturating_sub(1)).collapse_null_range();
-        self.handle_action(Action::Delete, Source::Fsys);
+        self.handle_action(BAction::Delete, Source::Fsys);
     }
 
     fn begin_edit_transaction(&mut self) {
@@ -508,7 +508,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{buffer::Buffer, editor::Action};
+    use crate::buffer::Buffer;
     use simple_test_case::test_case;
     use std::{collections::HashMap, env, io};
 
@@ -680,7 +680,7 @@ mod tests {
 
         prog.execute(&mut b, &mut runner, "test", &mut vec![])
             .unwrap();
-        while b.handle_action(Action::Undo, Source::Keyboard).is_none() {}
+        while b.handle_action(BAction::Undo, Source::Keyboard).is_none() {}
         let final_content = b.str_contents();
 
         assert_eq!(&final_content, initial_content);

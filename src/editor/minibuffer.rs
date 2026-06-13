@@ -6,7 +6,7 @@ use crate::{
     Config,
     buffer::{Buffer, Buffers, GapBuffer, Slice},
     dot::TextObject,
-    editor::{Action, Actions, Editor},
+    editor::{Actions, BAction, Editor},
     input::Event,
     key::{Arrow, Input},
     system::System,
@@ -187,12 +187,12 @@ impl MiniBuffer {
         match input {
             Input::Char(c) => {
                 self.input
-                    .handle_action(Action::InsertChar { c }, Source::Keyboard);
+                    .handle_action(BAction::InsertChar { c }, Source::Keyboard);
             }
             Input::Ctrl('h') | Input::Backspace | Input::Del => {
                 for action in [
-                    Action::DotSet(TextObject::Arr(Arrow::Left), 1),
-                    Action::Delete,
+                    BAction::DotSet(TextObject::Arr(Arrow::Left), 1),
+                    BAction::Delete,
                 ] {
                     self.input.handle_action(action, Source::Keyboard);
                 }
@@ -201,17 +201,17 @@ impl MiniBuffer {
             // Readline style bindings
             Input::Ctrl('a') => {
                 self.input
-                    .handle_action(Action::DotSet(TextObject::LineStart, 1), Source::Keyboard);
+                    .handle_action(BAction::DotSet(TextObject::LineStart, 1), Source::Keyboard);
             }
             Input::Ctrl('e') => {
                 self.input
-                    .handle_action(Action::DotSet(TextObject::LineEnd, 1), Source::Keyboard);
+                    .handle_action(BAction::DotSet(TextObject::LineEnd, 1), Source::Keyboard);
             }
             Input::Ctrl('w') => {
                 for action in [
-                    Action::DotSet(TextObject::Arr(Arrow::Left), 1),
-                    Action::DotExtendBackward(TextObject::Word, 1),
-                    Action::Delete,
+                    BAction::DotSet(TextObject::Arr(Arrow::Left), 1),
+                    BAction::DotExtendBackward(TextObject::Word, 1),
+                    BAction::Delete,
                 ] {
                     self.input.handle_action(action, Source::Keyboard);
                 }
@@ -238,13 +238,13 @@ impl MiniBuffer {
             // Alt-hjkl and arrows navigate the options
             Input::Alt('h') | Input::Arrow(Arrow::Left) => {
                 self.input.handle_action(
-                    Action::DotSet(TextObject::Arr(Arrow::Left), 1),
+                    BAction::DotSet(TextObject::Arr(Arrow::Left), 1),
                     Source::Keyboard,
                 );
             }
             Input::Alt('l') | Input::Arrow(Arrow::Right) => {
                 self.input.handle_action(
-                    Action::DotSet(TextObject::Arr(Arrow::Right), 1),
+                    BAction::DotSet(TextObject::Arr(Arrow::Right), 1),
                     Source::Keyboard,
                 );
             }

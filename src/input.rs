@@ -23,3 +23,18 @@ pub enum Event {
     /// A signal that our window size has changed
     WinsizeChanged { rows: usize, cols: usize },
 }
+
+impl Event {
+    pub fn action(action: impl Into<Action>) -> Self {
+        Self::Action(action.into())
+    }
+
+    pub fn actions<T>(actions: Vec<T>) -> Self
+    where
+        T: Into<Action>,
+    {
+        Self::Actions(Actions::Multi(
+            actions.into_iter().map(Into::into).collect(),
+        ))
+    }
+}

@@ -3,10 +3,9 @@ use crate::{
     Config, MAX_NAME_LEN, UNNAMED_BUFFER,
     config::ftype_config_for_path_and_first_line,
     dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
-    editor::Action,
+    editor::BAction,
     exec::{Addr, Address},
     fsys::InputFilter,
-    key::Input,
     lsp::Coords,
     syntax::{LineIter, SyntaxState},
     util::{normalize_line_endings, truncate_string_to_columns},
@@ -616,12 +615,12 @@ impl Buffer {
 
     /// Fully clear the contents of this buffer, notifying fsys of the change
     pub fn clear(&mut self) {
-        self.handle_action(Action::DotSet(TextObject::BufferStart, 1), Source::Fsys);
+        self.handle_action(BAction::DotSet(TextObject::BufferStart, 1), Source::Fsys);
         self.handle_action(
-            Action::DotExtendForward(TextObject::BufferEnd, 1),
+            BAction::DotExtendForward(TextObject::BufferEnd, 1),
             Source::Fsys,
         );
-        self.handle_action(Action::Delete, Source::Fsys);
+        self.handle_action(BAction::Delete, Source::Fsys);
         self.xdot.clamp_idx(self.txt.len_chars());
     }
 
@@ -875,7 +874,7 @@ impl Buffer {
     pub(crate) fn append(&mut self, s: String, source: Source) {
         let dot = self.dot;
         self.set_dot(TextObject::BufferEnd, 1);
-        self.handle_action(Action::InsertString { s }, source);
+        self.handle_action(BAction::InsertString { s }, source);
         self.dot = dot;
         self.dot.clamp_idx(self.txt.len_chars());
         self.xdot.clamp_idx(self.txt.len_chars());
@@ -883,23 +882,28 @@ impl Buffer {
     }
 
     /// The error result of this function is an error string that should be displayed to the user
-    pub fn handle_action(&mut self, a: Action, source: Source) -> Option<ActionOutcome> {
-        match a {
-            Action::Delete => {
+    pub fn handle_action(&mut self, action: BAction, source: Source) -> Option<ActionOutcome> {
+        let (match_indent, expand_tab, tabstop) = {
+            let cfg = self.config.read();
+            (cfg.match_indent, cfg.expand_tab, cfg.tabstop)
+        };
+
+        match action {
+            BAction::Delete => {
                 let (c, deleted) = self.delete_dot(self.dot, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 self.xdot.clamp_idx(self.txt.len_chars());
                 return deleted.map(ActionOutcome::SetClipboard);
             }
-            Action::InsertChar { c } => {
+            BAction::InsertChar { c } => {
                 let (c, _) = self.insert_char(self.dot, c, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
                 self.xdot.clamp_idx(self.txt.len_chars());
                 return None;
             }
-            Action::InsertString { s } => {
+            BAction::InsertString { s } => {
                 let (c, _) = self.insert_string(self.dot, s, Some(source));
                 self.dot = Dot::Cur { c };
                 self.dot.clamp_idx(self.txt.len_chars());
@@ -907,43 +911,33 @@ impl Buffer {
                 return None;
             }
 
-            Action::Redo => return self.redo(),
-            Action::Undo => return self.undo(),
+            BAction::NewEditLogTransaction => self.new_edit_log_transaction(),
+            BAction::Redo => return self.redo(),
+            BAction::Undo => return self.undo(),
 
-            Action::CurToLine { y } => {
+            BAction::CurToLine { y } => {
                 self.dot = Dot::Cur {
                     c: Cur::from_yx(y, 0, self),
                 };
             }
 
-            Action::DotCollapseFirst => self.collapse_dot(true),
-            Action::DotCollapseLast => self.collapse_dot(false),
-            Action::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
-            Action::DotExtendForward(tobj, count) => self.extend_dot_forward(tobj, count),
-            Action::DotFlip => self.flip_dot(),
-            Action::DotSet(t, count) => self.set_dot(t, count),
-            Action::DotSetFromCoords { coords } => self.set_dot_from_coords(coords),
+            BAction::DotCollapseFirst => self.collapse_dot(true),
+            BAction::DotCollapseLast => self.collapse_dot(false),
+            BAction::DotExtendBackward(tobj, count) => self.extend_dot_backward(tobj, count),
+            BAction::DotExtendForward(tobj, count) => self.extend_dot_forward(tobj, count),
+            BAction::DotFlip => self.flip_dot(),
+            BAction::DotSet(t, count) => self.set_dot(t, count),
+            BAction::DotSetFromCoords { coords } => self.set_dot_from_coords(coords),
 
-            Action::XDotSetFromCoords { coords } => self.set_xdot_from_coords(coords),
-            Action::XInsertString { s } => self.insert_xdot(s),
+            BAction::XDotSetFromCoords { coords } => self.set_xdot_from_coords(coords),
+            BAction::XInsertString { s } => self.insert_xdot(s),
 
-            Action::RenameActiveBuffer { name } => return self.set_filename(name),
-            Action::RawInput { i } => return self.handle_raw_input(i),
+            BAction::ExpandDot => self.expand_cur_dot(),
 
-            _ => (),
-        }
+            BAction::Rename { name } => return self.set_filename(name),
+            BAction::MarkClean => self.dirty = false,
 
-        None
-    }
-
-    fn handle_raw_input(&mut self, k: Input) -> Option<ActionOutcome> {
-        let (match_indent, expand_tab, tabstop) = {
-            let cfg = self.config.read();
-            (cfg.match_indent, cfg.expand_tab, cfg.tabstop)
-        };
-
-        match k {
-            Input::Return => {
+            BAction::RawReturn => {
                 let mut s = "\n".to_string();
                 if match_indent {
                     let cur = self.dot.first_cur();
@@ -960,10 +954,9 @@ impl Buffer {
                 let c = self.insert_string(self.dot, s, Some(Source::Keyboard)).0;
 
                 self.dot = Dot::Cur { c };
-                return None;
             }
 
-            Input::Tab => {
+            BAction::RawTab => {
                 let (c, _) = if expand_tab {
                     self.insert_string(self.dot, " ".repeat(tabstop), Some(Source::Keyboard))
                 } else {
@@ -971,21 +964,16 @@ impl Buffer {
                 };
 
                 self.dot = Dot::Cur { c };
-                return None;
             }
 
-            Input::Char(ch) => {
+            BAction::RawChar(ch) => {
                 let (c, _) = self.insert_char(self.dot, ch, Some(Source::Keyboard));
                 self.dot = Dot::Cur { c };
-                return None;
             }
 
-            Input::Arrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
-
-            _ => return None,
+            BAction::RawArrow(arr) => self.set_dot(TextObject::Arr(arr), 1),
         }
 
-        self.changed_since_last_render = true;
         None
     }
 
@@ -1431,7 +1419,7 @@ impl Buffer {
 
         let dot_after_edit = self.dot.with_offset_saturating(offset);
         self.dot = self.xdot;
-        self.handle_action(Action::InsertString { s }, Source::Fsys);
+        self.handle_action(BAction::InsertString { s }, Source::Fsys);
         (self.xdot, self.dot) = (self.dot, dot_after_edit);
         self.dot.clamp_idx(self.txt.len_chars()); // xdot clamped as part of handling the insert
     }
@@ -1475,7 +1463,7 @@ pub(crate) mod tests {
         let s = lines.join("\n");
 
         for c in s.chars() {
-            b.handle_action(Action::InsertChar { c }, Source::Keyboard);
+            b.handle_action(BAction::InsertChar { c }, Source::Keyboard);
         }
 
         b
@@ -1518,20 +1506,20 @@ pub(crate) mod tests {
 
         // Insert from the start of the buffer
         for c in "hello w".chars() {
-            b.handle_action(Action::InsertChar { c }, Source::Keyboard);
+            b.handle_action(BAction::InsertChar { c }, Source::Keyboard);
         }
 
         // move back to insert a character inside of the text we already have
         b.handle_action(
-            Action::DotSet(TextObject::Arr(Arrow::Left), 2),
+            BAction::DotSet(TextObject::Arr(Arrow::Left), 2),
             Source::Keyboard,
         );
-        b.handle_action(Action::InsertChar { c: ',' }, Source::Keyboard);
+        b.handle_action(BAction::InsertChar { c: ',' }, Source::Keyboard);
 
         // move forward to the end of the line to finish inserting
-        b.handle_action(Action::DotSet(TextObject::LineEnd, 1), Source::Keyboard);
+        b.handle_action(BAction::DotSet(TextObject::LineEnd, 1), Source::Keyboard);
         for c in "orld!".chars() {
-            b.handle_action(Action::InsertChar { c }, Source::Keyboard);
+            b.handle_action(BAction::InsertChar { c }, Source::Keyboard);
         }
 
         // inserted characters should be in the correct positions
@@ -1539,19 +1527,19 @@ pub(crate) mod tests {
     }
 
     #[test_case(
-        Action::InsertChar { c: 'x' },
+        BAction::InsertChar { c: 'x' },
         in_c(LINE_1.len() + 1, 'x');
         "char"
     )]
     #[test_case(
-        Action::InsertString { s: "x".to_string() },
+        BAction::InsertString { s: "x".to_string() },
         in_s(LINE_1.len() + 1, "x");
         "string"
     )]
     #[test]
-    fn insert_w_range_dot_works(a: Action, edit: Edit) {
+    fn insert_w_range_dot_works(a: BAction, edit: Edit) {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line, 1), Source::Keyboard);
+        b.handle_action(BAction::DotSet(TextObject::Line, 1), Source::Keyboard);
 
         let outcome = b.handle_action(a, Source::Keyboard);
         assert_eq!(outcome, None);
@@ -1577,7 +1565,7 @@ pub(crate) mod tests {
     #[test]
     fn move_forward_at_end_of_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "", Default::default());
-        b.handle_raw_input(Input::Arrow(Arrow::Right));
+        b.handle_action(BAction::RawArrow(Arrow::Right), Source::Fsys);
 
         let c = Cur { idx: 0 };
         assert_eq!(b.dot, Dot::Cur { c });
@@ -1586,7 +1574,7 @@ pub(crate) mod tests {
     #[test]
     fn delete_in_empty_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "", Default::default());
-        b.handle_action(Action::Delete, Source::Keyboard);
+        b.handle_action(BAction::Delete, Source::Keyboard);
         let c = Cur { idx: 0 };
         let lines = b.string_lines();
 
@@ -1600,10 +1588,10 @@ pub(crate) mod tests {
     fn simple_delete_works() {
         let mut b = simple_initial_buffer();
         b.handle_action(
-            Action::DotSet(TextObject::Arr(Arrow::Left), 1),
+            BAction::DotSet(TextObject::Arr(Arrow::Left), 1),
             Source::Keyboard,
         );
-        b.handle_action(Action::Delete, Source::Keyboard);
+        b.handle_action(BAction::Delete, Source::Keyboard);
 
         let c = Cur::from_yx(1, LINE_2.len() - 1, &b);
         let lines = b.string_lines();
@@ -1624,8 +1612,8 @@ pub(crate) mod tests {
     #[test]
     fn delete_range_works() {
         let mut b = simple_initial_buffer();
-        b.handle_action(Action::DotSet(TextObject::Line, 1), Source::Keyboard);
-        b.handle_action(Action::Delete, Source::Keyboard);
+        b.handle_action(BAction::DotSet(TextObject::Line, 1), Source::Keyboard);
+        b.handle_action(BAction::Delete, Source::Keyboard);
 
         let c = Cur::from_yx(1, 0, &b);
         let lines = b.string_lines();
@@ -1661,19 +1649,19 @@ pub(crate) mod tests {
         b.new_edit_log_transaction();
 
         b.handle_action(
-            Action::DotExtendBackward(TextObject::Word, 1),
+            BAction::DotExtendBackward(TextObject::Word, 1),
             Source::Keyboard,
         );
-        b.handle_action(Action::Delete, Source::Keyboard);
+        b.handle_action(BAction::Delete, Source::Keyboard);
 
         b.set_dot(TextObject::BufferStart, 1);
         b.handle_action(
-            Action::DotExtendForward(TextObject::Word, 1),
+            BAction::DotExtendForward(TextObject::Word, 1),
             Source::Keyboard,
         );
-        b.handle_action(Action::Delete, Source::Keyboard);
+        b.handle_action(BAction::Delete, Source::Keyboard);
 
-        b.handle_action(Action::Undo, Source::Keyboard);
+        b.handle_action(BAction::Undo, Source::Keyboard);
 
         let lines = b.string_lines();
 
@@ -1686,7 +1674,7 @@ pub(crate) mod tests {
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
 
         b.insert_string(Dot::Cur { c: c(0) }, "bar".to_string(), None);
-        b.handle_action(Action::Undo, Source::Keyboard);
+        b.handle_action(BAction::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -1698,7 +1686,7 @@ pub(crate) mod tests {
 
         let r = Range::from_cursors(c(0), c(2), true);
         b.delete_dot(Dot::Range { r }, None);
-        b.handle_action(Action::Undo, Source::Keyboard);
+        b.handle_action(BAction::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -1714,8 +1702,8 @@ pub(crate) mod tests {
 
         assert_eq!(b.string_lines(), vec!["bar foo foo", ""]);
 
-        b.handle_action(Action::Undo, Source::Keyboard);
-        b.handle_action(Action::Undo, Source::Keyboard);
+        b.handle_action(BAction::Undo, Source::Keyboard);
+        b.handle_action(BAction::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
     }
@@ -1827,7 +1815,7 @@ pub(crate) mod tests {
         b.extend_dot_forward(TextObject::BufferEnd, 1);
 
         b.handle_action(
-            Action::InsertString {
+            BAction::InsertString {
                 s: "bar".to_owned(),
             },
             Source::Fsys,
@@ -1848,7 +1836,7 @@ pub(crate) mod tests {
         b.set_dot(TextObject::BufferStart, 1);
         b.extend_dot_forward(TextObject::BufferEnd, 1);
 
-        b.handle_action(Action::InsertChar { c: 'a' }, Source::Fsys);
+        b.handle_action(BAction::InsertChar { c: 'a' }, Source::Fsys);
 
         assert_eq!(b.txt.to_string(), "a");
         assert_eq!(b.dot, Dot::Cur { c: Cur { idx: 1 } });
@@ -1858,7 +1846,7 @@ pub(crate) mod tests {
     fn match_indent_works() {
         let mut b = Buffer::new_virtual(0, "test", "  foo", Default::default());
         b.set_dot(TextObject::BufferEnd, 1);
-        b.handle_raw_input(Input::Return);
+        b.handle_action(BAction::RawReturn, Source::Fsys);
         assert_eq!(b.txt.to_string(), "  foo\n  ");
     }
 
@@ -1871,7 +1859,7 @@ pub(crate) mod tests {
             Default::default(),
         );
         b.set_dot(TextObject::BufferEnd, 1);
-        b.handle_raw_input(Input::Return);
+        b.handle_action(BAction::RawReturn, Source::Fsys);
 
         assert_eq!(
             b.txt.to_string(),

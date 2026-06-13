@@ -34,7 +34,7 @@ mod commands;
 mod minibuffer;
 mod mouse;
 
-pub use actions::Action;
+pub use actions::{Action, BAction, EAction, UAction};
 pub use minibuffer::MiniBufferState;
 pub use mouse::Click;
 
@@ -160,7 +160,7 @@ where
         let mut layout = Layout::new(100, 100, lsp_manager.clone(), config.clone());
         if show_splash && layout.is_empty_squirrel() {
             layout
-                .active_buffer_mut_ignoring_scratch()
+                .active_buffer_ignoring_scratch_mut()
                 .txt
                 .insert_str(0, WELCOME_SQUIRREL);
         }
@@ -353,7 +353,7 @@ where
             Event::Action(a) => self.handle_action(a, Source::Fsys),
             Event::Actions(a) => self.handle_actions(a, Source::Fsys),
             Event::BracketedPaste(s) => {
-                self.handle_action(Action::InsertString { s }, Source::Fsys)
+                self.handle_action(BAction::InsertString { s }.for_active(), Source::Fsys)
             }
             Event::Input(i) => self.handle_input(i),
             Event::Message(msg) => self.handle_message(msg),
@@ -439,7 +439,7 @@ where
 
         match req {
             ControlMessage { msg } => {
-                self.execute_command(&msg);
+                self.execute_command(None, &msg);
                 default_handled();
             }
 
@@ -467,7 +467,7 @@ where
                 b.set_dot_from_addr_string(&s);
             }),
             SetBufferDot { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
-                b.handle_action(Action::InsertString { s }, Source::Fsys);
+                b.handle_action(BAction::InsertString { s }, Source::Fsys);
             }),
             SetBufferXAddr { id, s } => self.handle_buffer_mutation(id, tx, s, |b, s| {
                 b.set_xdot_from_addr_string(&s);
@@ -509,7 +509,7 @@ where
             }
 
             ExecuteInBuffer { id, txt } => {
-                self.execute_explicit_string(id, &txt, Source::Fsys);
+                self.execute_explicit_string(Some(id), &txt, Source::Fsys);
                 default_handled();
             }
         }
@@ -546,54 +546,43 @@ where
 
     /// Process a single action and update editor state accordingly
     pub fn handle_action(&mut self, action: Action, source: Source) {
-        use Action::*;
-
         match action {
+            Action::Buffer { bufid, action } => {
+                self.handle_buffer_action(bufid, action, source);
+            }
+            Action::Editor(eaction) => self.handle_editor_action(eaction, source),
+            Action::Ui(uaction) => self.handle_ui_action(uaction),
+        }
+    }
+
+    fn handle_editor_action(&mut self, eaction: EAction, source: Source) {
+        use EAction::*;
+
+        match eaction {
             Noop => (),
 
             AppendToOutputBuffer { bufid, content } => self
                 .layout
                 .write_output_for_buffer(bufid, content, &self.cwd),
-            BalanceActiveColumn => self.layout.balance_active_column(),
-            BalanceAll => self.layout.balance_all(),
-            BalanceColumns => self.layout.balance_columns(),
-            BalanceWindows => self.layout.balance_windows(),
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
             ClearScratch => self.layout.scratch.b.clear(),
             ClearEphemeralMode { name } => self.clear_ephemeral_mode(&name),
             CommandMode => self.command_mode(),
             DeleteBuffer { bufid, force } => self.delete_buffer(bufid, force),
-            DeleteColumn { force } => self.delete_active_column(force),
-            DeleteWindow { force } => self.delete_active_window(force),
-            DragWindow {
-                direction: Arrow::Up,
-            } => self.layout.drag_up(),
-            DragWindow {
-                direction: Arrow::Down,
-            } => self.layout.drag_down(),
-            DragWindow {
-                direction: Arrow::Left,
-            } => self.layout.drag_left(),
-            DragWindow {
-                direction: Arrow::Right,
-            } => self.layout.drag_right(),
-            EditCommand { cmd } => self.execute_edit_command(&cmd),
-            EditorCommand { cmd } => self.execute_command(&cmd),
+            EditCommand { bufid, cmd } => self.execute_edit_command(bufid, &cmd),
+            EditorCommand { bufid, cmd } => self.execute_command(bufid, &cmd),
             EnsureFileIsOpen { path } => self.layout.ensure_file_is_open(&path),
-            ExecuteDot => self.default_execute_dot(None, source),
-            ExecuteString { s } => {
-                self.execute_explicit_string(self.active_buffer_id(), &s, source)
-            }
+            ExecuteDot { bufid } => self.default_execute_dot(bufid, None, source),
+            ExecuteString { bufid, s } => self.execute_explicit_string(bufid, &s, source),
             Exit { force } => self.exit(force),
-            ExpandDot => self.expand_current_dot(),
             FindFile { new_window } => self.find_file(new_window),
             FindRepoFile { new_window } => self.find_repo_file(new_window),
             FocusBuffer { id } => self.focus_buffer(id, false), // allow focusing another window
             JumpListForward => self.jump_forward(),
             JumpListBack => self.jump_backward(),
             KillRunningChild { idx } => self.kill_running_child(idx),
-            LoadDot { new_window } => self.default_load_dot(source, new_window),
+            LoadDot { bufid, new_window } => self.default_load_dot(bufid, new_window, source),
             LspShowCapabilities => {
                 if let Some((name, txt)) = self
                     .lsp_manager
@@ -639,9 +628,117 @@ where
                 .find_references(self.layout.active_buffer_ignoring_scratch()),
             LspRename { new_name } => self.lsp_rename(new_name),
             LspRenamePrepare => self.prepare_lsp_rename(),
-            MarkClean { bufid } => self.mark_clean(bufid),
             MbSelect(sel) => self.push_minibuffer(sel),
-            NewEditLogTransaction => self.layout.active_buffer_mut().new_edit_log_transaction(),
+            OpenFile { path, new_window } => {
+                self.open_file_relative_to_effective_directory(&path, new_window)
+            }
+            OpenTransientScratch { name, txt } => self.layout.open_transient_scratch(name, txt),
+            OpenVirtualFile {
+                name,
+                txt,
+                new_window,
+            } => self.open_virtual(name, txt, new_window),
+            Paste => self.paste_from_clipboard(source),
+            Plumb { txt, new_window } => self.plumb(txt, new_window),
+            ReloadBuffer { bufid } => self.reload_buffer(bufid),
+            ReloadConfig => self.reload_config(),
+            RunMode => self.run_mode(),
+            SamMode => self.sam_mode(),
+            SaveBuffer { force } => self.save_current_buffer(None, force),
+            SaveBufferAll { force } => self.save_all_buffers(force),
+            SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),
+            SearchInCurrentBuffer => self.search_in_current_buffer(),
+            SendKeys { ks } => self.handle_explicit_inputs(ks),
+            SelectBuffer => self.select_buffer(),
+            SetMode { m } => self.set_mode(m),
+            SetStatusMessage { message } => self.set_status_message(&message),
+            ShellPipe { bufid, cmd } => self.pipe_dot_through_shell_cmd(bufid, &cmd),
+            ShellReplace { bufid, cmd } => self.replace_dot_with_shell_cmd(bufid, &cmd),
+            ShellRun { bufid, cmd } => self.run_shell_cmd(bufid, &cmd),
+            ShellSend { bufid, cmd } => self.run_shell_cmd(bufid, &cmd),
+            ShowHelp => self.show_help(),
+            ToggleScratch => self.layout.toggle_scratch(),
+            TsShowTree => self.show_active_ts_tree(),
+            ViewLogs => self.view_logs(),
+            Yank => self.set_clipboard(self.layout.active_buffer().dot_contents()),
+
+            DebugBufferContents => self.debug_buffer_contents(),
+            DebugEditLog => self.debug_edit_log(),
+
+            RawInput { i } => match i {
+                Input::Mouse(evt) => self.handle_mouse_event(evt),
+
+                Input::PageUp | Input::PageDown => {
+                    let arr = if i == Input::PageUp {
+                        Arrow::Up
+                    } else {
+                        Arrow::Down
+                    };
+
+                    self.handle_buffer_action(
+                        None,
+                        BAction::DotSet(TextObject::Arr(arr), self.layout.active_window_rows()),
+                        Source::Keyboard,
+                    );
+                }
+
+                Input::Arrow(a) => self.handle_buffer_action(None, BAction::RawArrow(a), source),
+                Input::Char(c) => self.handle_buffer_action(None, BAction::RawChar(c), source),
+                Input::Return => self.handle_buffer_action(None, BAction::RawReturn, source),
+                Input::Tab => self.handle_buffer_action(None, BAction::RawTab, source),
+
+                _ => (),
+            },
+        }
+    }
+
+    pub(super) fn handle_buffer_action(
+        &mut self,
+        bufid: Option<usize>,
+        a: BAction,
+        source: Source,
+    ) {
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                None => return,
+            },
+            None => self.layout.active_buffer_mut(),
+        };
+
+        if let Some(o) = b.handle_action(a, source) {
+            match o {
+                ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
+                ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
+            }
+        }
+    }
+
+    fn handle_ui_action(&mut self, uaction: UAction) {
+        use UAction::*;
+
+        match uaction {
+            BalanceActiveColumn => self.layout.balance_active_column(),
+            BalanceAll => self.layout.balance_all(),
+            BalanceColumns => self.layout.balance_columns(),
+            BalanceWindows => self.layout.balance_windows(),
+
+            DeleteColumn { force } => self.delete_active_column(force),
+            DeleteWindow { force } => self.delete_active_window(force),
+
+            DragWindow {
+                direction: Arrow::Up,
+            } => self.layout.drag_up(),
+            DragWindow {
+                direction: Arrow::Down,
+            } => self.layout.drag_down(),
+            DragWindow {
+                direction: Arrow::Left,
+            } => self.layout.drag_left(),
+            DragWindow {
+                direction: Arrow::Right,
+            } => self.layout.drag_right(),
+
             NewColumn => self.layout.new_column(),
             NewWindow => self.layout.new_window(),
             NextBuffer => {
@@ -658,17 +755,7 @@ where
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
-            OpenFile { path, new_window } => {
-                self.open_file_relative_to_effective_directory(&path, new_window)
-            }
-            OpenTransientScratch { name, txt } => self.layout.open_transient_scratch(name, txt),
-            OpenVirtualFile {
-                name,
-                txt,
-                new_window,
-            } => self.open_virtual(name, txt, new_window),
-            Paste => self.paste_from_clipboard(source),
-            Plumb { txt, new_window } => self.plumb(txt, new_window),
+
             PreviousBuffer => {
                 let id = self.layout.focus_previous_buffer();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
@@ -683,51 +770,11 @@ where
                 let id = self.active_buffer_id();
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
-            ReloadActiveBuffer => self.reload_active_buffer(),
-            ReloadBuffer { id } => self.reload_buffer(id),
-            ReloadConfig => self.reload_config(),
+
             ResizeActiveColumn { delta } => self.layout.resize_active_column(delta),
             ResizeActiveWindow { delta } => self.layout.resize_active_window(delta),
-            RunMode => self.run_mode(),
-            SamMode => self.sam_mode(),
-            SaveBuffer { force } => self.save_current_buffer(None, force),
-            SaveBufferAll { force } => self.save_all_buffers(force),
-            SaveBufferAs { path, force } => self.save_current_buffer(Some(path), force),
-            SearchInCurrentBuffer => self.search_in_current_buffer(),
-            SendKeys { ks } => self.handle_explicit_inputs(ks),
-            SelectBuffer => self.select_buffer(),
-            SetMode { m } => self.set_mode(m),
-            SetStatusMessage { message } => self.set_status_message(&message),
+
             SetViewPort(vp) => self.layout.set_viewport(vp),
-            ShellPipe { cmd } => self.pipe_dot_through_shell_cmd(&cmd),
-            ShellReplace { cmd } => self.replace_dot_with_shell_cmd(&cmd),
-            ShellRun { cmd } => self.run_shell_cmd(&cmd),
-            ShowHelp => self.show_help(),
-            ToggleScratch => self.layout.toggle_scratch(),
-            TsShowTree => self.show_active_ts_tree(),
-            ViewLogs => self.view_logs(),
-            Yank => self.set_clipboard(self.layout.active_buffer().dot_contents()),
-
-            DebugBufferContents => self.debug_buffer_contents(),
-            DebugEditLog => self.debug_edit_log(),
-
-            RawInput { i } if i == Input::PageUp || i == Input::PageDown => {
-                let arr = if i == Input::PageUp {
-                    Arrow::Up
-                } else {
-                    Arrow::Down
-                };
-
-                self.forward_action_to_active_buffer(
-                    DotSet(TextObject::Arr(arr), self.layout.active_window_rows()),
-                    Source::Keyboard,
-                );
-            }
-            RawInput {
-                i: Input::Mouse(evt),
-            } => self.handle_mouse_event(evt),
-
-            a => self.forward_action_to_active_buffer(a, source),
         }
     }
 
@@ -740,32 +787,6 @@ where
     fn jump_backward(&mut self) {
         if let Some(id) = self.layout.jump_backward() {
             _ = self.tx_fsys.send(LogEvent::Focus(id));
-        }
-    }
-
-    pub(super) fn forward_action_to_active_buffer(&mut self, a: Action, source: Source) {
-        if let Some(o) = self.layout.active_buffer_mut().handle_action(a, source) {
-            match o {
-                ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
-                ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
-            }
-        }
-    }
-
-    pub(super) fn forward_action_to_active_buffer_ignoring_scratch(
-        &mut self,
-        a: Action,
-        source: Source,
-    ) {
-        if let Some(o) = self
-            .layout
-            .active_buffer_mut_ignoring_scratch()
-            .handle_action(a, source)
-        {
-            match o {
-                ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
-                ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
-            }
         }
     }
 }
@@ -791,9 +812,11 @@ mod tests {
         ed.update_window_size(100, 80);
         ed.open_file(ed.cwd.join("test"), false);
         ed.handle_action(
-            Action::ShellRun {
+            EAction::ShellRun {
+                bufid: None,
                 cmd: "yes".to_string(),
-            },
+            }
+            .into(),
             Source::Keyboard,
         );
 
@@ -815,8 +838,9 @@ mod tests {
         // drain any pending writes from the script
         while let Ok(evt) = ed.rx_events.try_recv() {
             match evt {
-                Event::Action(Action::AppendToOutputBuffer { .. }) => (),
-                Event::Action(Action::CleanupChild { .. }) => (),
+                Event::Action(Action::Editor(
+                    EAction::AppendToOutputBuffer { .. } | EAction::CleanupChild { .. },
+                )) => (),
                 _ => panic!("expected AppendToOutputBuffer or CleanupChild but got {evt:?}"),
             }
         }
@@ -826,7 +850,7 @@ mod tests {
 
         match ed.rx_events.try_recv() {
             Err(_) => (),
-            Ok(Event::Action(Action::CleanupChild { .. })) => (),
+            Ok(Event::Action(Action::Editor(EAction::CleanupChild { .. }))) => (),
             Ok(evt) => panic!("expected no events or CleanupChild, got {evt:?}"),
         }
     }

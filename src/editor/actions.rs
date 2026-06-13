@@ -24,12 +24,6 @@ use std::{
 };
 use tracing::{debug, error, info, trace, warn};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Actions {
-    Single(Action),
-    Multi(Vec<Action>),
-}
-
 /// How the current viewport should be set in relation to dot.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ViewPort {
@@ -41,27 +35,88 @@ pub enum ViewPort {
     Top,
 }
 
-/// Supported actions for interacting with the editor state
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Actions {
+    Single(Action),
+    Multi(Vec<Action>),
+}
+
+impl Actions {
+    pub fn single(action: impl Into<Action>) -> Self {
+        Self::Single(action.into())
+    }
+
+    pub fn multi<T>(actions: Vec<T>) -> Self
+    where
+        T: Into<Action>,
+    {
+        Self::Multi(actions.into_iter().map(Into::into).collect())
+    }
+}
+
+impl<T> From<T> for Actions
+where
+    T: Into<Action>,
+{
+    fn from(value: T) -> Self {
+        Self::single(value)
+    }
+}
+
+impl<T> From<Vec<T>> for Actions
+where
+    T: Into<Action>,
+{
+    fn from(values: Vec<T>) -> Self {
+        Self::multi(values)
+    }
+}
+
 #[rustfmt::skip]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
-    Noop,
+    /// Actions handled by an individual buffer. If bufid is Some, the Buffer with that ID handles
+    /// the action. If bufid is None, the currently active Buffer within Buffers handles the action.
+    Buffer { bufid: Option<usize>, action: BAction },
 
-    AppendToOutputBuffer { bufid: usize, content: String },
-    BalanceActiveColumn,
-    BalanceAll,
-    BalanceColumns,
-    BalanceWindows,
-    ChangeDirectory { path: Option<String> },
-    CleanupChild { id: u32 },
-    ClearEphemeralMode { name: String },
-    ClearScratch,
-    CommandMode,
-    CurToLine { y:usize },
+    /// Actions handled by the main Editor struct directly. This includes some actions that end up
+    /// being tied to specific buffers when their execution requires state from the editor.
+    Editor(EAction),
+
+    /// Actions handled by the UI layout
+    Ui(UAction),
+}
+
+impl From<EAction> for Action {
+    fn from(action: EAction) -> Self {
+        Self::Editor(action)
+    }
+}
+
+impl From<UAction> for Action {
+    fn from(action: UAction) -> Self {
+        Self::Ui(action)
+    }
+}
+
+/// Actions handled by an individual Buffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BAction {
+    CurToLine { y: usize },
+
     Delete,
-    DeleteBuffer { bufid: usize, force: bool },
-    DeleteColumn { force: bool },
-    DeleteWindow { force: bool },
+    InsertChar { c: char },
+    InsertString { s: String },
+    XDotSetFromCoords { coords: Coords },
+    XInsertString { s: String },
+
+    // Instead of being passed RawInput { i: Input }, we unpack only the variants of Input that a
+    // Buffer ends up processing.
+    RawReturn,
+    RawTab,
+    RawChar(char),
+    RawArrow(Arrow),
+
     DotCollapseFirst,
     DotCollapseLast,
     DotExtendBackward(TextObject, usize),
@@ -69,23 +124,69 @@ pub enum Action {
     DotFlip,
     DotSet(TextObject, usize),
     DotSetFromCoords { coords: Coords },
-    DragWindow { direction: Arrow },
-    EditCommand { cmd: String },
-    EditorCommand { cmd: String },
-    EnsureFileIsOpen { path: String },
-    ExecuteDot,
-    ExecuteString { s: String },
-    Exit { force: bool },
     ExpandDot,
+
+    MarkClean,
+    Rename { name: String },
+
+    NewEditLogTransaction,
+    Redo,
+    Undo,
+}
+
+impl BAction {
+    pub fn for_buffer(self, bufid: usize) -> Action {
+        Action::Buffer {
+            bufid: Some(bufid),
+            action: self,
+        }
+    }
+
+    pub fn for_active(self) -> Action {
+        Action::Buffer {
+            bufid: None,
+            action: self,
+        }
+    }
+}
+
+/// Actions handled by the main Editor state.
+#[rustfmt::skip]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EAction {
+    Noop,
+
+    ClearEphemeralMode { name: String },
+    CommandMode,
+    RunMode,
+    SamMode,
+    SetMode { m: &'static str },
+
+    DebugBufferContents,
+    DebugEditLog,
     FindFile { new_window: bool },
     FindRepoFile { new_window: bool },
+    KillRunningChild { idx: Option<usize> },
+    MbSelect(MbSelector),
+    SearchInCurrentBuffer,
+    SelectBuffer,
+
+    ShowHelp,
+    TsShowTree,
+    ViewLogs,
+
+    AppendToOutputBuffer { bufid: usize, content: String },
+    ChangeDirectory { path: Option<String> },
+    CleanupChild { id: u32 },
+    DeleteBuffer { bufid: usize, force: bool },
+    EnsureFileIsOpen { path: String },
+    Exit { force: bool },
     FocusBuffer { id: usize },
-    InsertChar { c: char },
-    InsertString { s: String },
+    ReloadConfig,
+
     JumpListForward,
     JumpListBack,
-    KillRunningChild { idx: Option<usize> },
-    LoadDot { new_window: bool },
+
     LspCompletion,
     LspFormat,
     LspGotoDeclaration,
@@ -99,56 +200,67 @@ pub enum Action {
     LspShowDiagnostics,
     LspStart,
     LspStop,
-    MarkClean { bufid: usize },
-    MbSelect(MbSelector),
-    NewEditLogTransaction,
-    NewColumn,
-    NewWindow,
-    NextBuffer,
-    NextColumn,
-    NextWindowInColumn,
+
     OpenFile { path: String, new_window: bool },
-    OpenTransientScratch { name: String, txt: String },
     OpenVirtualFile { name: String, txt: String, new_window: bool },
-    Paste,
+
     Plumb { txt: String, new_window: bool },
-    PreviousBuffer,
-    PreviousColumn,
-    PreviousWindowInColumn,
     RawInput { i: Input },
-    Redo,
-    ReloadActiveBuffer,
-    ReloadBuffer { id: usize },
-    ReloadConfig,
-    RenameActiveBuffer { name: String },
-    ResizeActiveColumn { delta: i16 },
-    ResizeActiveWindow { delta: i16 },
-    RunMode,
-    SamMode,
+
     SaveBuffer { force: bool },
     SaveBufferAll { force: bool },
     SaveBufferAs { path: String, force: bool },
-    SearchInCurrentBuffer,
+    ReloadBuffer { bufid: Option<usize> },
+
     SendKeys { ks: Vec<Input> },
-    SelectBuffer,
-    SetViewPort(ViewPort),
-    SetMode { m: &'static str },
+
     SetStatusMessage { message: String },
-    ShellPipe { cmd: String },
-    ShellReplace { cmd: String },
-    ShellRun { cmd: String },
-    ShellSend { cmd: String },
-    ShowHelp,
+
+    ClearScratch,
     ToggleScratch,
-    TsShowTree,
-    Undo,
-    ViewLogs,
-    XDotSetFromCoords { coords: Coords },
-    XInsertString { s: String },
+    OpenTransientScratch { name: String, txt: String },
+
+    Paste,
     Yank,
 
-    DebugBufferContents,
-    DebugEditLog,
+    EditCommand { bufid: Option<usize>, cmd: String },
+    EditorCommand { bufid: Option<usize>, cmd: String },
+    ExecuteDot { bufid: Option<usize> },
+    ExecuteString { bufid: Option<usize>, s: String },
+    LoadDot { bufid: Option<usize>, new_window: bool },
+    ShellPipe { bufid: Option<usize>, cmd: String },
+    ShellReplace { bufid: Option<usize>, cmd: String },
+    ShellRun { bufid: Option<usize>, cmd: String },
+    ShellSend { bufid: Option<usize>, cmd: String },
+}
+
+/// Actions handled by the UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UAction {
+    BalanceActiveColumn,
+    BalanceAll,
+    BalanceColumns,
+    BalanceWindows,
+
+    DeleteColumn { force: bool },
+    DeleteWindow { force: bool },
+
+    DragWindow { direction: Arrow },
+
+    NewColumn,
+    NewWindow,
+
+    NextBuffer,
+    NextColumn,
+    NextWindowInColumn,
+    PreviousBuffer,
+    PreviousColumn,
+    PreviousWindowInColumn,
+
+    ResizeActiveColumn { delta: i16 },
+    ResizeActiveWindow { delta: i16 },
+
+    SetViewPort(ViewPort),
 }
 
 impl<S> Editor<S>
@@ -251,7 +363,7 @@ where
 
         let dir = dir.to_path_buf();
         let mb = SimpleMbSelect::new("> ", lines, move |selection| match selection {
-            MiniBufferSelection::Line { line, .. } => Some(Actions::Single(Action::OpenFile {
+            MiniBufferSelection::Line { line, .. } => Some(Actions::single(EAction::OpenFile {
                 path: dir.join(line.trim()).to_string_lossy().to_string(),
                 new_window,
             })),
@@ -318,12 +430,6 @@ where
         }
     }
 
-    pub(crate) fn mark_clean(&mut self, bufid: usize) {
-        if let Some(b) = self.layout.buffer_with_id_mut(bufid) {
-            b.dirty = false;
-        }
-    }
-
     pub(super) fn save_current_buffer(&mut self, fname: Option<String>, force: bool) {
         trace!("attempting to save current buffer");
         let p = match self.get_buffer_save_path(fname, force) {
@@ -331,7 +437,7 @@ where
             None => return,
         };
 
-        let b = self.layout.active_buffer_mut_ignoring_scratch();
+        let b = self.layout.active_buffer_ignoring_scratch_mut();
         match b.save_to_disk_at(p, force) {
             Ok(msg) => {
                 self.lsp_manager.document_changed(b);
@@ -406,7 +512,7 @@ where
             // Attempting to save without a name so we prompt for one and verify it
             (None, Bk::Unnamed) => {
                 let mb = SimpleMbSelect::new("Save as: ", Vec::new(), move |sel| {
-                    Some(Actions::Single(Action::SaveBufferAs {
+                    Some(Actions::single(EAction::SaveBufferAs {
                         path: sel.into_content()?,
                         force,
                     }))
@@ -428,8 +534,8 @@ where
                     move |sel| {
                         if let Some("y" | "Y" | "yes") = sel.into_content().as_deref() {
                             Some(Actions::Multi(vec![
-                                Action::RenameActiveBuffer { name: name.clone() },
-                                Action::SaveBuffer { force },
+                                BAction::Rename { name: name.clone() }.for_active(),
+                                EAction::SaveBuffer { force }.into(),
                             ]))
                         } else {
                             None
@@ -447,22 +553,24 @@ where
         }
 
         self.layout
-            .active_buffer_mut_ignoring_scratch()
+            .active_buffer_ignoring_scratch_mut()
             .set_filename(desired_path.clone());
 
         Some(desired_path)
     }
 
-    pub(super) fn reload_buffer(&mut self, id: usize) {
-        let msg = match self.layout.buffer_with_id_mut(id) {
-            Some(b) => {
-                let msg = b.reload_from_disk();
-                self.lsp_manager.document_changed(b);
-                msg
-            }
-            // Silently ignoring attempts to reload unknown buffers
-            None => return,
+    pub(super) fn reload_buffer(&mut self, bufid: Option<usize>) {
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                // Silently ignoring attempts to reload unknown buffers
+                None => return,
+            },
+            None => self.layout.active_buffer_ignoring_scratch_mut(),
         };
+
+        let msg = b.reload_from_disk();
+        self.lsp_manager.document_changed(b);
 
         self.set_status_message(msg);
     }
@@ -480,15 +588,6 @@ where
 
         self.set_status_message(msg);
         self.ui.state_change(StateChange::ConfigUpdated);
-    }
-
-    pub(super) fn reload_active_buffer(&mut self) {
-        let msg = self
-            .layout
-            .active_buffer_mut_ignoring_scratch()
-            .reload_from_disk();
-
-        self.set_status_message(msg);
     }
 
     pub(super) fn set_mode(&mut self, name: &str) {
@@ -523,7 +622,7 @@ where
     pub(super) fn paste_from_clipboard(&mut self, source: Source) {
         trace!("pasting from clipboard");
         match self.system.read_clipboard() {
-            Ok(s) => self.handle_action(Action::InsertString { s }, source),
+            Ok(s) => self.handle_action(BAction::InsertString { s }.for_active(), source),
             Err(e) => self.set_status_message(format!("Error reading clipboard: {e}")),
         }
     }
@@ -540,9 +639,9 @@ where
 
         let mb = SimpleMbSelect::new("> ", numbered_lines, |selection| match selection {
             MiniBufferSelection::Line { cy, .. } => Some(Actions::Multi(vec![
-                Action::CurToLine { y: cy },
-                Action::DotSet(TextObject::Line, 1),
-                Action::SetViewPort(ViewPort::Center),
+                BAction::CurToLine { y: cy }.for_active(),
+                BAction::DotSet(TextObject::Line, 1).for_active(),
+                UAction::SetViewPort(ViewPort::Center).into(),
             ])),
             _ => None,
         });
@@ -593,7 +692,7 @@ where
                     .0
                     .parse::<usize>()
                     .ok()
-                    .map(|id| Actions::Single(Action::FocusBuffer { id })),
+                    .map(|id| Actions::single(EAction::FocusBuffer { id })),
                 _ => None,
             },
         );
@@ -651,10 +750,6 @@ where
         self.push_minibuffer(mb.into_selector());
     }
 
-    pub(super) fn expand_current_dot(&mut self) {
-        self.layout.active_buffer_mut().expand_cur_dot();
-    }
-
     /// Default semantics for attempting to load the current dot:
     ///   - an event filter is in place -> pass to the event filter
     ///   - a plumbing rule matches the load -> run the plumbing rule
@@ -667,11 +762,27 @@ where
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_load_dot(&mut self, source: Source, load_in_new_window: bool) {
-        // Grabbing the ID in this way allows us to treat loads in the scratch buffer as being from
-        // the active buffer.
-        let id = self.layout.active_buffer_ignoring_scratch().id;
-        let b = self.layout.active_buffer_mut();
+    pub(super) fn default_load_dot(
+        &mut self,
+        bufid: Option<usize>,
+        load_in_new_window: bool,
+        source: Source,
+    ) {
+        let (id, b) = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => (id, b),
+                None => return,
+            },
+            None => {
+                // Grabbing the ID in this way allows us to treat loads in the scratch buffer as being from
+                // the active buffer.
+                let id = self.layout.active_buffer_ignoring_scratch().id;
+                let b = self.layout.active_buffer_mut();
+
+                (id, b)
+            }
+        };
+
         b.expand_cur_dot();
         if b.notify_load(source) {
             return; // input filter in place
@@ -800,11 +911,11 @@ where
                 let b = self.layout.active_buffer_mut();
                 b.dot = b.map_addr(&addr);
                 self.layout.clamp_scroll();
-                self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
+                self.handle_action(UAction::SetViewPort(ViewPort::Center).into(), Source::Fsys);
             }
         } else {
             b.find_forward(s);
-            self.handle_action(Action::SetViewPort(ViewPort::Center), Source::Fsys);
+            self.handle_action(UAction::SetViewPort(ViewPort::Center).into(), Source::Fsys);
         }
     }
 
@@ -817,8 +928,20 @@ where
     /// lifted almost directly from acme on plan9 and the curious user is encouraged to read the
     /// materials available at http://acme.cat-v.org/ to learn more about what is possible with
     /// such a system.
-    pub(super) fn default_execute_dot(&mut self, arg: Option<(Range, String)>, source: Source) {
-        let b = self.layout.active_buffer_mut();
+    pub(super) fn default_execute_dot(
+        &mut self,
+        bufid: Option<usize>,
+        arg: Option<(Range, String)>,
+        source: Source,
+    ) {
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                None => return,
+            },
+            None => self.layout.active_buffer_mut(),
+        };
+
         b.expand_cur_dot();
         if b.notify_execute(source, arg.clone()) {
             return; // input filter in place
@@ -834,36 +957,42 @@ where
             cmd.push_str(&arg);
         }
 
-        match self.parse_command(&cmd) {
+        match self.parse_command(self.active_buffer_id(), &cmd) {
             Some(actions) => self.handle_actions(actions, source),
-            None => self.run_shell_cmd(&cmd),
+            None => self.run_shell_cmd(bufid, &cmd),
         }
     }
 
-    /// Silently focus `bufid` (no jumplist record) and execute the given string. If executing the
-    /// string doesn't change the focused buffer we then reset back to the buffer that was active.
-    pub(super) fn execute_explicit_string(&mut self, bufid: usize, s: &str, source: Source) {
+    pub(super) fn execute_explicit_string(
+        &mut self,
+        bufid: Option<usize>,
+        s: &str,
+        source: Source,
+    ) {
         let current_id = self.active_buffer_id();
-        self.layout.focus_id_silent(bufid);
+        let id = bufid.unwrap_or(current_id);
+        self.layout.focus_id_silent(id);
 
-        match self.parse_command(s.trim()) {
+        match self.parse_command(id, s.trim()) {
             Some(actions) => self.handle_actions(actions, source),
-            None => self.run_shell_cmd(s.trim()),
+            None => self.run_shell_cmd(bufid, s.trim()),
         }
 
-        if self.active_buffer_id() == bufid {
+        if self.active_buffer_id() == id {
             self.layout.focus_id_silent(current_id);
         }
     }
 
-    pub(super) fn execute_command(&mut self, cmd: &str) {
+    pub(super) fn execute_command(&mut self, bufid: Option<usize>, cmd: &str) {
+        let bufid = bufid.unwrap_or_else(|| self.active_buffer_id());
+
         debug!(%cmd, "executing command");
-        if let Some(actions) = self.parse_command(cmd.trim_end()) {
+        if let Some(actions) = self.parse_command(bufid, cmd.trim_end()) {
             self.handle_actions(actions, Source::Fsys);
         }
     }
 
-    pub(super) fn execute_edit_command(&mut self, cmd: &str) {
+    pub(super) fn execute_edit_command(&mut self, bufid: Option<usize>, cmd: &str) {
         debug!(%cmd, "executing edit command");
         let prog = match Program::try_parse(cmd) {
             Ok(prog) => prog,
@@ -875,7 +1004,14 @@ where
         };
 
         let mut buf = Vec::new();
-        let b = self.layout.active_buffer_mut_ignoring_scratch();
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                None => return,
+            },
+            None => self.layout.active_buffer_ignoring_scratch_mut(),
+        };
+
         let fname = b.full_name().to_string();
 
         let mut runner = EditorRunner {
@@ -887,7 +1023,7 @@ where
         match prog.execute(b, &mut runner, &fname, &mut buf) {
             Ok(new_dot) => {
                 self.layout.record_jump_position();
-                self.layout.active_buffer_mut_ignoring_scratch().dot = new_dot;
+                self.layout.active_buffer_ignoring_scratch_mut().dot = new_dot;
             }
 
             Err(e) => self.set_status_message(format!("Error running edit command: {e:?}")),
@@ -910,9 +1046,12 @@ where
     fn set_ephemeral_mode(&mut self, name: &str) -> Vec<Action> {
         self.modes.insert(0, Mode::ephemeral_mode(name));
 
-        vec![Action::ClearEphemeralMode {
-            name: name.to_string(),
-        }]
+        vec![
+            EAction::ClearEphemeralMode {
+                name: name.to_string(),
+            }
+            .into(),
+        ]
     }
 
     pub(super) fn clear_ephemeral_mode(&mut self, name: &str) {
@@ -923,7 +1062,7 @@ where
         let mut actions = self.set_ephemeral_mode("COMMAND");
         let mb = SimpleMbSelect::new(":", Vec::new(), move |selection| {
             if let Some(cmd) = selection.into_content() {
-                actions.push(Action::EditorCommand { cmd });
+                actions.push(EAction::EditorCommand { bufid: None, cmd }.into());
             };
 
             Some(Actions::Multi(take(&mut actions)))
@@ -936,7 +1075,7 @@ where
         let mut actions = self.set_ephemeral_mode("RUN");
         let mb = SimpleMbSelect::new("!", Vec::new(), move |selection| {
             if let Some(cmd) = selection.into_content() {
-                actions.push(Action::ShellRun { cmd });
+                actions.push(EAction::ShellRun { bufid: None, cmd }.into());
             };
 
             Some(Actions::Multi(take(&mut actions)))
@@ -949,7 +1088,7 @@ where
         let mut actions = self.set_ephemeral_mode("EDIT");
         let mb = SimpleMbSelect::new("% ", Vec::new(), move |selection| {
             if let Some(cmd) = selection.into_content() {
-                actions.push(Action::EditCommand { cmd });
+                actions.push(EAction::EditCommand { bufid: None, cmd }.into());
             };
 
             Some(Actions::Multi(take(&mut actions)))
@@ -974,9 +1113,12 @@ where
         let mut actions = self.set_ephemeral_mode("LSP-RENAME");
         let mb = SimpleMbSelect::new("LSP Rename> ", Vec::new(), move |selection| {
             if let Some(new_name) = selection.into_content() {
-                actions.push(Action::LspRename {
-                    new_name: Some(new_name),
-                });
+                actions.push(
+                    EAction::LspRename {
+                        new_name: Some(new_name),
+                    }
+                    .into(),
+                );
             };
 
             Some(Actions::Multi(take(&mut actions)))
@@ -985,40 +1127,52 @@ where
         self.push_minibuffer(mb.into_selector());
     }
 
-    pub(super) fn pipe_dot_through_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let (s, d) = {
-            let b = self.layout.active_buffer_ignoring_scratch();
-            (b.dot_contents(), b.dir().unwrap_or(&self.cwd))
+    pub(super) fn pipe_dot_through_shell_cmd(&mut self, bufid: Option<usize>, raw_cmd_str: &str) {
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                None => return,
+            },
+            None => self.layout.active_buffer_ignoring_scratch_mut(),
         };
 
-        let id = self.active_buffer_id();
+        let (s, d, id) = (b.dot_contents(), b.dir().unwrap_or(&self.cwd), b.id);
         let res = self.system.pipe_through_command(raw_cmd_str, &s, d, id);
 
         match res {
-            Ok(s) => self.forward_action_to_active_buffer_ignoring_scratch(
-                Action::InsertString { s },
-                Source::Fsys,
-            ),
+            Ok(s) => self.handle_buffer_action(Some(id), BAction::InsertString { s }, Source::Fsys),
             Err(e) => self.set_status_message(format!("Error running external command: {e}")),
         }
     }
 
-    pub(super) fn replace_dot_with_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let b = self.layout.active_buffer_ignoring_scratch();
-        let d = b.dir().unwrap_or(&self.cwd);
-        let id = b.id;
+    pub(super) fn replace_dot_with_shell_cmd(&mut self, bufid: Option<usize>, raw_cmd_str: &str) {
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                None => return,
+            },
+            None => self.layout.active_buffer_ignoring_scratch_mut(),
+        };
+
+        let (d, id) = (b.dir().unwrap_or(&self.cwd), b.id);
         let res = self.system.run_command_blocking(raw_cmd_str, d, id);
 
         match res {
-            Ok(s) => self.handle_action(Action::InsertString { s }, Source::Fsys),
+            Ok(s) => self.handle_buffer_action(Some(id), BAction::InsertString { s }, Source::Fsys),
             Err(e) => self.set_status_message(format!("Error running external command: {e}")),
         }
     }
 
-    pub(super) fn run_shell_cmd(&mut self, raw_cmd_str: &str) {
-        let b = self.layout.active_buffer_ignoring_scratch();
-        let d = b.dir().unwrap_or(&self.cwd);
-        let id = b.id;
+    pub(super) fn run_shell_cmd(&mut self, bufid: Option<usize>, raw_cmd_str: &str) {
+        let b = match bufid {
+            Some(id) => match self.layout.buffer_with_id_mut(id) {
+                Some(b) => b,
+                None => return,
+            },
+            None => self.layout.active_buffer_ignoring_scratch_mut(),
+        };
+
+        let (d, id) = (b.dir().unwrap_or(&self.cwd), b.id);
         let res = self
             .system
             .run_command(raw_cmd_str, d, id, self.tx_events.clone());
@@ -1037,7 +1191,7 @@ where
         let known = self.system.running_children();
         let mb = SimpleMbSelect::new("Kill", known, |selection| match selection {
             MiniBufferSelection::Line { cy, .. } => {
-                Some(Actions::Single(Action::KillRunningChild { idx: Some(cy) }))
+                Some(Actions::single(EAction::KillRunningChild { idx: Some(cy) }))
             }
             _ => None,
         });
@@ -1060,13 +1214,13 @@ where
                     move |sel| {
                         let mut actions = match sel.into_content().as_deref() {
                             Some("y" | "Y" | "yes") => {
-                                vec![Action::ReloadBuffer { id }]
+                                vec![EAction::ReloadBuffer { bufid: Some(id) }.into()]
                             }
                             _ => return None,
                         };
 
                         if id != current_id {
-                            actions.push(Action::FocusBuffer { id });
+                            actions.push(EAction::FocusBuffer { id }.into());
                         }
 
                         Some(Actions::Multi(actions))
@@ -1189,7 +1343,7 @@ recv {}({})",
         ed.open_file("bar", false);
         assert_eq!(ed.active_buffer_id(), 2);
 
-        ed.execute_explicit_string(bufid, cmd, Source::Keyboard);
+        ed.execute_explicit_string(Some(bufid), cmd, Source::Keyboard);
         assert_eq!(ed.active_buffer_id(), active);
     }
 }

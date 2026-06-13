@@ -1,6 +1,6 @@
 use crate::{
     buffer::Buffers,
-    editor::{Action, Actions, MbSelect, MiniBufferSelection, ViewPort},
+    editor::{Actions, BAction, EAction, MbSelect, MiniBufferSelection, UAction, ViewPort},
     lsp::{
         LspManager, Pos, PositionEncoding,
         capabilities::Coords,
@@ -48,12 +48,15 @@ impl LspRequest for req::References {
             .collect();
         let mut actions: Vec<_> = refs
             .iter()
-            .map(|r| Action::EnsureFileIsOpen {
-                path: r.path.clone(),
+            .map(|r| {
+                EAction::EnsureFileIsOpen {
+                    path: r.path.clone(),
+                }
+                .into()
             })
             .collect();
 
-        actions.push(Action::MbSelect(References(refs).into_selector()));
+        actions.push(EAction::MbSelect(References(refs).into_selector()).into());
 
         Some(Actions::Multi(actions))
     }
@@ -113,12 +116,13 @@ impl MbSelect for References {
         match sel {
             MiniBufferSelection::Line { cy, .. } => self.0.get(cy).map(|r| {
                 Actions::Multi(vec![
-                    Action::OpenFile {
+                    EAction::OpenFile {
                         path: r.path.clone(),
                         new_window: false,
-                    },
-                    Action::DotSetFromCoords { coords: r.coords },
-                    Action::SetViewPort(ViewPort::Center),
+                    }
+                    .into(),
+                    BAction::DotSetFromCoords { coords: r.coords }.for_active(),
+                    UAction::SetViewPort(ViewPort::Center).into(),
                 ])
             }),
 

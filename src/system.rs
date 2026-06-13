@@ -1,6 +1,6 @@
 //! An abstraction around system interactions to support testing and
 //! platform specific behaviour
-use crate::{editor::Action, input::Event, util::normalize_line_endings};
+use crate::{editor::EAction, input::Event, util::normalize_line_endings};
 use std::{
     env, fmt,
     io::{self, BufRead, BufReader, Read, Write},
@@ -247,7 +247,7 @@ fn run_command(cmd: &str, cwd: &Path, bufid: usize, tx: Sender<Event>) -> io::Re
         let tx2 = tx.clone();
         spawn(move || send_lines(bufid, stderr.lines(), tx2));
         send_lines(bufid, stdout.lines(), tx.clone());
-        _ = tx.send(Event::Action(Action::CleanupChild { id }));
+        _ = tx.send(Event::action(EAction::CleanupChild { id }));
     });
 
     Ok(child)
@@ -258,7 +258,7 @@ fn send_lines(bufid: usize, it: impl Iterator<Item = io::Result<String>>, tx: Se
         match res {
             Ok(mut line) => {
                 line.push('\n');
-                _ = tx.send(Event::Action(Action::AppendToOutputBuffer {
+                _ = tx.send(Event::action(EAction::AppendToOutputBuffer {
                     bufid,
                     content: normalize_line_endings(line),
                 }));

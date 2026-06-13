@@ -190,7 +190,7 @@ impl Layout {
     }
 
     /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
-    pub(crate) fn active_buffer_mut_ignoring_scratch(&mut self) -> &mut Buffer {
+    pub(crate) fn active_buffer_ignoring_scratch_mut(&mut self) -> &mut Buffer {
         self.buffers.active_mut()
     }
 

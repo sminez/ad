@@ -1,7 +1,7 @@
 //! A minimal config file format for ad
 use crate::{
     buffer::Buffer,
-    editor::{Action, Actions},
+    editor::{Actions, EAction},
     key::{Arrow, Input},
     syntax::TK_DEFAULT,
     trie::Trie,
@@ -304,8 +304,12 @@ pub enum KeyAction {
 impl KeyAction {
     fn into_actions(self) -> Actions {
         match self {
-            Self::Execute { run } => Actions::Single(Action::ExecuteString { s: run }),
-            Self::Keys { send_keys } => Actions::Single(Action::SendKeys { ks: send_keys.0 }),
+            Self::Execute { run } => EAction::ExecuteString {
+                bufid: None,
+                s: run,
+            }
+            .into(),
+            Self::Keys { send_keys } => EAction::SendKeys { ks: send_keys.0 }.into(),
         }
     }
 }

@@ -44,6 +44,8 @@ impl LspRequest for Formatting {
                 .collect(),
         );
 
-        Some(Actions::Multi(actions))
+        Some(Actions::Multi(
+            actions.into_iter().map(|a| a.for_active()).collect(),
+        ))
     }
 }

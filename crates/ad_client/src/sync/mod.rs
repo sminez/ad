@@ -452,7 +452,11 @@ mod tests {
         EventData, EventOutcome,
         test_util::{TestEditor, mbs_cancelled, mbs_line, mbs_user},
     };
-    use ad_editor::{editor::Action, input::Event, key::Input};
+    use ad_editor::{
+        editor::{Action, BAction, EAction},
+        input::Event,
+        key::Input,
+    };
     use ad_event::Source;
     use simple_test_case::test_case;
     use std::{
@@ -648,10 +652,10 @@ mod tests {
         }
     }
 
-    #[test_case(Action::LoadDot { new_window: false }, "load"; "load")]
-    #[test_case(Action::ExecuteDot , "execute"; "execute")]
-    #[test_case(Action::InsertChar { c: 'a' } , "insert"; "insert")]
-    #[test_case(Action::Delete, "delete"; "delete")]
+    #[test_case(EAction::LoadDot { bufid: None, new_window: false }.into(), "load"; "load")]
+    #[test_case(EAction::ExecuteDot { bufid: None }.into(), "execute"; "execute")]
+    #[test_case(BAction::InsertChar { c: 'a' }.for_active(), "insert"; "insert")]
+    #[test_case(BAction::Delete.for_active(), "delete"; "delete")]
     #[test]
     fn run_event_filter_works(action: Action, expected: &str) {
         let (client, ted) = prepare(&[("foo", "foo content")]);
@@ -684,7 +688,9 @@ mod tests {
         let current_id = client.current_buffer().unwrap();
         assert_eq!(current_id, 1);
 
-        _ = ted.tx.send(Event::Action(Action::InsertChar { c: 'a' }));
+        _ = ted
+            .tx
+            .send(Event::action(BAction::InsertChar { c: 'a' }.for_active()));
 
         let body = client.for_buffer(1).read_body().unwrap();
         assert_eq!(body, "afoo content");

@@ -1,6 +1,6 @@
 //! Traits and handlers for processing LSP messages
 use crate::{
-    editor::Action,
+    editor::BAction,
     lsp::{Coords, capabilities::PositionEncoding},
 };
 use lsp_types::{Position, TextDocumentIdentifier, TextDocumentPositionParams, TextEdit, Uri};
@@ -83,16 +83,16 @@ impl EditAction {
             s,
             use_xdot,
         }: EditAction,
-    ) -> [Action; 2] {
+    ) -> [BAction; 2] {
         if use_xdot {
             [
-                Action::XDotSetFromCoords { coords },
-                Action::XInsertString { s },
+                BAction::XDotSetFromCoords { coords },
+                BAction::XInsertString { s },
             ]
         } else {
             [
-                Action::DotSetFromCoords { coords },
-                Action::InsertString { s },
+                BAction::DotSetFromCoords { coords },
+                BAction::InsertString { s },
             ]
         }
     }
@@ -117,7 +117,7 @@ impl EditAction {
 ///   text document. Overlapping text edits are not supported.
 ///
 /// Also see <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#textEditArray>
-pub(crate) fn edit_actions_as_editor_actions(mut edit_actions: Vec<EditAction>) -> Vec<Action> {
+pub(crate) fn edit_actions_as_editor_actions(mut edit_actions: Vec<EditAction>) -> Vec<BAction> {
     edit_actions.sort_by_key(|a| a.coords);
     edit_actions.reverse();
 
@@ -231,7 +231,7 @@ fn main() {}"#;
                 .collect(),
         );
 
-        for action in actions {
+        for action in actions.into_iter() {
             b.handle_action(action, Source::Fsys);
         }
 
@@ -307,7 +307,7 @@ fn main() {}"#;
                 .collect(),
         );
 
-        for action in actions {
+        for action in actions.into_iter() {
             b.handle_action(action, Source::Fsys);
         }
 

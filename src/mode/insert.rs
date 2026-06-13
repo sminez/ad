@@ -1,7 +1,7 @@
 //! vim style insert mode where most keys are directly modifying the buffer
 use crate::{
     dot::TextObject::*,
-    editor::{Action::*, Actions},
+    editor::{Actions, BAction::*, EAction::*},
     key::{Arrow::*, Input::*},
     keymap,
     mode::Mode,
@@ -11,37 +11,41 @@ use crate::{
 pub(crate) fn insert_mode() -> (Mode, Vec<(String, &'static str)>) {
     let (keymap, docs) = keymap! {
         "return to NORMAL mode";
-        [ Esc ] => [ SetMode { m: "NORMAL" }, NewEditLogTransaction ],
+        [ Esc ] => [ SetMode { m: "NORMAL" }.into(), NewEditLogTransaction.for_active() ],
         "toggle the visibility of the scratch buffer";
         [ Alt(';') ] => [ ToggleScratch ],
 
         "backspace";
-        [ Backspace ] => [ DotSet(Arr(Left), 1), Delete ],
+        [ Backspace ] => [ DotSet(Arr(Left), 1).for_active(), Delete.for_active() ],
         "delete";
-        [ Del ] => [ Delete ],
+        [ Del ] => [ Delete.for_active() ],
         "move to start of line";
-        [ Home ] => [ DotSet(LineStart, 1) ],
+        [ Home ] => [ DotSet(LineStart, 1).for_active() ],
         "move to end of line";
-        [ End ] => [ DotSet(LineEnd, 1) ],
+        [ End ] => [ DotSet(LineEnd, 1).for_active() ],
 
         // following vim here: alt-hjkl will move the cursor the same as normal mode hjkl
         // with the added effect of moving you to normal mode.
         "return to NORMAL mode and move one character left";
-        [ Alt('h') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Left), 1) ],
+        [ Alt('h') ] => [ SetMode { m: "NORMAL" }.into(), DotSet(Arr(Left), 1).for_active() ],
         "return to NORMAL mode and move one line down";
-        [ Alt('j') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Down), 1) ],
+        [ Alt('j') ] => [ SetMode { m: "NORMAL" }.into(), DotSet(Arr(Down), 1).for_active() ],
         "return to NORMAL mode and move one line up";
-        [ Alt('k') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Up), 1) ],
+        [ Alt('k') ] => [ SetMode { m: "NORMAL" }.into(), DotSet(Arr(Up), 1).for_active() ],
         "return to NORMAL mode and move one character right";
-        [ Alt('l') ] => [ SetMode { m: "NORMAL" }, DotSet(Arr(Right), 1) ],
+        [ Alt('l') ] => [ SetMode { m: "NORMAL" }.into(), DotSet(Arr(Right), 1).for_active() ],
 
         // readline style bindings
         "move to start of line";
-        [ Ctrl('a') ] => [ DotSet(LineStart, 1) ],
+        [ Ctrl('a') ] => [ DotSet(LineStart, 1).for_active() ],
         "move to end of line";
-        [ Ctrl('e') ] => [ DotSet(LineEnd, 1) ],
+        [ Ctrl('e') ] => [ DotSet(LineEnd, 1).for_active() ],
         "delete previous word";
-        [ Ctrl('w') ] => [ DotSet(Arr(Left), 1), DotExtendBackward(Word, 1), Delete ],
+        [ Ctrl('w') ] => [
+            DotSet(Arr(Left), 1).for_active(),
+            DotExtendBackward(Word, 1).for_active(),
+            Delete.for_active()
+        ],
 
         // LSP
         "LSP: request completions";
@@ -54,9 +58,9 @@ pub(crate) fn insert_mode() -> (Mode, Vec<(String, &'static str)>) {
         keymap,
         handle_expired_pending: |keys| {
             Some(if keys.len() == 1 {
-                Actions::Single(RawInput { i: keys[0] })
+                Actions::single(RawInput { i: keys[0] })
             } else {
-                Actions::Multi(keys.iter().map(|&i| RawInput { i }).collect())
+                Actions::multi(keys.iter().map(|&i| RawInput { i }).collect())
             })
         },
     };
@@ -69,12 +73,11 @@ mod tests {
     use super::*;
     use crate::{
         config::{Inputs, KeyBindings},
-        editor::Action,
         key::Input,
     };
     use simple_test_case::test_case;
 
-    #[test_case("C-a", Some(Actions::Single(Action::DotSet(LineStart, 1))); "direct override single")]
+    #[test_case("C-a", Some(Actions::single(DotSet(LineStart, 1).for_active())); "direct override single")]
     #[test]
     fn overrides_work(binding: &str, expected_default_actions: Option<Actions>) {
         let action = r#"{ send_keys = "A" }"#;
@@ -98,7 +101,7 @@ mod tests {
         let override_actions = mode.handle_keys(&mut keys);
         assert_eq!(
             override_actions,
-            Some(Actions::Single(Action::SendKeys {
+            Some(Actions::single(SendKeys {
                 ks: vec![Input::Char('A')]
             })),
             "override"

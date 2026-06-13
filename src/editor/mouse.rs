@@ -1,7 +1,7 @@
 //! Handling for acme-style mouse interactions with the editor.
 use crate::{
     dot::{Dot, Range},
-    editor::{Action, Editor},
+    editor::{BAction, Editor},
     fsys::LogEvent,
     key::{MouseButton, MouseEvent, MouseEventKind, MouseMod},
     system::System,
@@ -263,7 +263,7 @@ where
                     } else if !is_right && !*cut_handled {
                         *selection = self.layout.active_buffer().dot.as_range();
                         *cut_handled = true;
-                        self.forward_action_to_active_buffer(Action::Delete, Source::Mouse);
+                        self.handle_buffer_action(None, BAction::Delete, Source::Mouse);
                     }
                 } else if (is_right && *btn == Middle) || (!is_right && *btn == Right) {
                     self.held_click = None;
@@ -297,7 +297,7 @@ where
             // used as an argument to the command being executed.
             if is_right {
                 self.layout.active_buffer_mut().dot = Dot::from(selection);
-                self.default_load_dot(Source::Mouse, load_in_new_window);
+                self.default_load_dot(None, load_in_new_window, Source::Mouse);
             } else {
                 let dot = self.layout.active_buffer().dot;
                 self.layout.active_buffer_mut().dot = Dot::from(selection);
@@ -305,10 +305,10 @@ where
                 if dot.is_range() {
                     // Execute as if the click selection was dot then reset dot
                     let arg = dot.content(self.layout.active_buffer()).trim().to_string();
-                    self.default_execute_dot(Some((dot.as_range(), arg)), Source::Mouse);
+                    self.default_execute_dot(None, Some((dot.as_range(), arg)), Source::Mouse);
                     self.layout.active_buffer_mut().dot = dot;
                 } else {
-                    self.default_execute_dot(None, Source::Mouse);
+                    self.default_execute_dot(None, None, Source::Mouse);
                 }
             }
         } else {
@@ -320,9 +320,9 @@ where
             }
 
             if is_right {
-                self.default_load_dot(Source::Mouse, load_in_new_window);
+                self.default_load_dot(None, load_in_new_window, Source::Mouse);
             } else {
-                self.default_execute_dot(None, Source::Mouse);
+                self.default_execute_dot(None, None, Source::Mouse);
             }
         }
     }
