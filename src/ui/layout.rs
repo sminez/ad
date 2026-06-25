@@ -4,8 +4,9 @@ use crate::{
     config::Config,
     die,
     dot::{Cur, Dot},
-    editor::ViewPort,
+    editor::{ActionOutcome, UAction, ViewPort},
     fsys::InputFilter,
+    key::Arrow,
     lsp::LspManagerHandle,
     ziplist,
     ziplist::{Position, ZipList},
@@ -134,6 +135,68 @@ impl Layout {
         l
     }
 
+    pub fn handle_ui_action(&mut self, uaction: UAction) -> Option<ActionOutcome> {
+        use UAction::*;
+
+        match uaction {
+            BalanceActiveColumn => self.balance_active_column(),
+            BalanceAll => self.balance_all(),
+            BalanceColumns => self.balance_columns(),
+            BalanceWindows => self.balance_windows(),
+
+            DeleteColumn { force } => return self.close_active_column(force),
+            DeleteWindow { force } => return self.close_active_window(force),
+
+            DragWindow {
+                direction: Arrow::Up,
+            } => self.drag_up(),
+            DragWindow {
+                direction: Arrow::Down,
+            } => self.drag_down(),
+            DragWindow {
+                direction: Arrow::Left,
+            } => self.drag_left(),
+            DragWindow {
+                direction: Arrow::Right,
+            } => self.drag_right(),
+
+            NewColumn => self.new_column(),
+            NewWindow => self.new_window(),
+            NextBuffer => {
+                let id = self.focus_next_buffer();
+                return Some(ActionOutcome::NotifyFocusChange(id));
+            }
+            NextColumn => {
+                self.next_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+            NextWindowInColumn => {
+                self.next_window_in_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+
+            PreviousBuffer => {
+                let id = self.focus_previous_buffer();
+                return Some(ActionOutcome::NotifyFocusChange(id));
+            }
+            PreviousColumn => {
+                self.prev_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+            PreviousWindowInColumn => {
+                self.prev_window_in_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+
+            ResizeActiveColumn { delta } => self.resize_active_column(delta),
+            ResizeActiveWindow { delta } => self.resize_active_window(delta),
+
+            SetViewPort(vp) => self.set_viewport(vp),
+        }
+
+        None
+    }
+
     /// Check to see if any actions taken since the last time this method was called resulted
     /// in changes to the visible UI state.
     ///
@@ -182,6 +245,10 @@ impl Layout {
         self.cols
             .iter()
             .any(|(_, c)| c.wins.iter().any(|(_, w)| w.view.bufid == id))
+    }
+
+    fn active_buffer_id(&self) -> usize {
+        self.buffers.active().id
     }
 
     /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
@@ -479,16 +546,16 @@ impl Layout {
 
     /// Close the active window, if this was the last remaining window then
     /// Editor::delete_active_window will exit.
-    pub(crate) fn close_active_window(&mut self) -> bool {
+    pub(crate) fn close_active_window(&mut self, force: bool) -> Option<ActionOutcome> {
         self.changed_since_last_render = true;
 
         if self.scratch.is_focused {
             self.scratch.toggle();
-            return false;
+            return None;
         }
 
         if self.cols.len() == 1 && self.cols.focus.wins.len() == 1 {
-            return true;
+            return Some(ActionOutcome::Exit(force));
         }
 
         if self.cols.focus.wins.len() == 1 {
@@ -505,21 +572,21 @@ impl Layout {
         #[cfg(test)]
         assert_invariants!(self);
 
-        false
+        None
     }
 
     /// Close the active column, if this was the last remaining column then
     /// Editor::delete_active_column will exit.
-    pub(crate) fn close_active_column(&mut self) -> bool {
+    pub(crate) fn close_active_column(&mut self, force: bool) -> Option<ActionOutcome> {
         self.changed_since_last_render = true;
 
         if self.scratch.is_focused {
             self.scratch.toggle();
-            return false;
+            return None;
         }
 
         if self.cols.len() == 1 {
-            return true;
+            return Some(ActionOutcome::Exit(force));
         }
 
         self.cols.remove_focused_unchecked();
@@ -531,7 +598,7 @@ impl Layout {
         #[cfg(test)]
         assert_invariants!(self);
 
-        false
+        None
     }
 
     pub(crate) fn record_jump_position(&mut self) {

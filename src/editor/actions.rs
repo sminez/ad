@@ -263,6 +263,16 @@ pub enum UAction {
     SetViewPort(ViewPort),
 }
 
+// Used to inform the editor that further action needs to be taken by it after another component
+// has finished processing a given Action.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ActionOutcome {
+    Exit(bool),
+    NotifyFocusChange(usize),
+    SetClipboard(String),
+    SetStatusMessage(String),
+}
+
 impl<S> Editor<S>
 where
     S: System,
@@ -413,20 +423,6 @@ where
                 let was_last_buffer = self.layout.close_buffer(id);
                 self.running = !was_last_buffer;
             }
-        }
-    }
-
-    pub(crate) fn delete_active_window(&mut self, force: bool) {
-        let is_last_window = self.layout.close_active_window();
-        if is_last_window {
-            self.exit(force);
-        }
-    }
-
-    pub(crate) fn delete_active_column(&mut self, force: bool) {
-        let is_last_column = self.layout.close_active_column();
-        if is_last_column {
-            self.exit(force);
         }
     }
 

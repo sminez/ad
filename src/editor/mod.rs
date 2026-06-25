@@ -1,7 +1,7 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     LogBuffer,
-    buffer::{ActionOutcome, Buffer, BufferId, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferId, WELCOME_SQUIRREL},
     config::Config,
     die,
     dot::TextObject,
@@ -34,7 +34,7 @@ mod commands;
 mod minibuffer;
 mod mouse;
 
-pub use actions::{Action, BAction, EAction, UAction};
+pub use actions::{Action, ActionOutcome, BAction, EAction, UAction};
 pub use minibuffer::MiniBufferState;
 pub use mouse::Click;
 
@@ -706,75 +706,23 @@ where
             None => self.layout.active_buffer_mut(),
         };
 
-        if let Some(o) = b.handle_action(a, source) {
-            match o {
-                ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
-                ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
-            }
+        if let Some(ao) = b.handle_action(a, source) {
+            self.handle_action_outcome(ao);
         }
     }
 
     fn handle_ui_action(&mut self, uaction: UAction) {
-        use UAction::*;
+        if let Some(ao) = self.layout.handle_ui_action(uaction) {
+            self.handle_action_outcome(ao);
+        }
+    }
 
-        match uaction {
-            BalanceActiveColumn => self.layout.balance_active_column(),
-            BalanceAll => self.layout.balance_all(),
-            BalanceColumns => self.layout.balance_columns(),
-            BalanceWindows => self.layout.balance_windows(),
-
-            DeleteColumn { force } => self.delete_active_column(force),
-            DeleteWindow { force } => self.delete_active_window(force),
-
-            DragWindow {
-                direction: Arrow::Up,
-            } => self.layout.drag_up(),
-            DragWindow {
-                direction: Arrow::Down,
-            } => self.layout.drag_down(),
-            DragWindow {
-                direction: Arrow::Left,
-            } => self.layout.drag_left(),
-            DragWindow {
-                direction: Arrow::Right,
-            } => self.layout.drag_right(),
-
-            NewColumn => self.layout.new_column(),
-            NewWindow => self.layout.new_window(),
-            NextBuffer => {
-                let id = self.layout.focus_next_buffer();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
-            }
-            NextColumn => {
-                self.layout.next_column();
-                let id = self.active_buffer_id();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
-            }
-            NextWindowInColumn => {
-                self.layout.next_window_in_column();
-                let id = self.active_buffer_id();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
-            }
-
-            PreviousBuffer => {
-                let id = self.layout.focus_previous_buffer();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
-            }
-            PreviousColumn => {
-                self.layout.prev_column();
-                let id = self.active_buffer_id();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
-            }
-            PreviousWindowInColumn => {
-                self.layout.prev_window_in_column();
-                let id = self.active_buffer_id();
-                _ = self.tx_fsys.send(LogEvent::Focus(id));
-            }
-
-            ResizeActiveColumn { delta } => self.layout.resize_active_column(delta),
-            ResizeActiveWindow { delta } => self.layout.resize_active_window(delta),
-
-            SetViewPort(vp) => self.layout.set_viewport(vp),
+    fn handle_action_outcome(&mut self, ao: ActionOutcome) {
+        match ao {
+            ActionOutcome::Exit(force) => self.exit(force),
+            ActionOutcome::NotifyFocusChange(id) => _ = self.tx_fsys.send(LogEvent::Focus(id)),
+            ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
+            ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
         }
     }
 

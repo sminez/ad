@@ -3,7 +3,7 @@ use crate::{
     Config, MAX_NAME_LEN, UNNAMED_BUFFER,
     config::ftype_config_for_path_and_first_line,
     dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
-    editor::BAction,
+    editor::{ActionOutcome, BAction},
     exec::{Addr, Address},
     fsys::InputFilter,
     lsp::Coords,
@@ -54,14 +54,6 @@ pub(crate) const WELCOME_SQUIRREL: &str = r#"+----------------------------------
 pub(crate) const DEFAULT_OUTPUT_BUFFER: &str = "+output";
 const HTTPS: &str = "https://";
 const HTTP: &str = "http://";
-
-// Used to inform the editor that further action needs to be taken by it after a Buffer has
-// finished processing a given Action.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ActionOutcome {
-    SetClipboard(String),
-    SetStatusMessage(String),
-}
 
 /// Buffer kinds control how each buffer interacts with the rest of the editor functionality
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
