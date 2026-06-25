@@ -8,8 +8,8 @@ use crate::{
     fsys::InputFilter,
     key::Arrow,
     lsp::LspManagerHandle,
-    ziplist,
     ziplist::{Position, ZipList},
+    zlist,
 };
 use parking_lot::RwLock;
 use std::{
@@ -124,7 +124,7 @@ impl Layout {
             scratch,
             screen_rows,
             screen_cols,
-            cols: ziplist![Column::new(screen_rows, screen_cols, &[id])],
+            cols: zlist![Column::new(screen_rows, screen_cols, &[id])],
             views: vec![],
             changed_since_last_render: false,
         };
@@ -412,7 +412,7 @@ impl Layout {
             .all(|bufid| bufid == id);
 
         if only_closing_buffer {
-            self.cols = ziplist![Column::new(
+            self.cols = zlist![Column::new(
                 self.screen_rows,
                 self.screen_cols,
                 &[focused_id]
@@ -1936,7 +1936,7 @@ mod tests {
             scratch,
             screen_rows: 80,
             screen_cols: 100,
-            cols: ziplist![Column::new(80, 100, &[id])],
+            cols: zlist![Column::new(80, 100, &[id])],
             views: vec![],
             changed_since_last_render: false,
         };

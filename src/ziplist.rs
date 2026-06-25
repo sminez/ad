@@ -11,7 +11,7 @@ use std::{
 };
 
 #[macro_export]
-macro_rules! ziplist {
+macro_rules! zlist {
     ([$($up:expr),*], $focus:expr, [$($down:expr),*]) => { $crate::ziplist::ZipList::new([$($up),*], $focus, [$($down),*]) };
     ([$($up:expr),*], $focus:expr) => { $crate::ziplist::ZipList::new([$($up),*], $focus, []) };
     ($focus:expr, [$($down:expr),*]) => { $crate::ziplist::ZipList::new([], $focus, [$($down),*]) };
@@ -754,22 +754,22 @@ mod tests {
 
     #[test]
     fn focused() {
-        let s = ziplist!([1, 2], 3, [4, 5]);
+        let s = zlist!([1, 2], 3, [4, 5]);
 
         assert_eq!(s.focused(), &3)
     }
 
     #[test]
     fn head() {
-        let s = ziplist!([1, 2], 3, [4, 5]);
+        let s = zlist!([1, 2], 3, [4, 5]);
 
         assert_eq!(s.head(), &1)
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!(3, [2, 1, 4, 5]); "items up and down")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!(3, [2, 1]); "items up")]
-    #[test_case(ziplist!(3, [4, 5]), ziplist!(3, [4, 5]); "items down")]
-    #[test_case(ziplist!(3), ziplist!(3); "focus only")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!(3, [2, 1, 4, 5]); "items up and down")]
+    #[test_case(zlist!([1, 2], 3), zlist!(3, [2, 1]); "items up")]
+    #[test_case(zlist!(3, [4, 5]), zlist!(3, [4, 5]); "items down")]
+    #[test_case(zlist!(3), zlist!(3); "focus only")]
     #[test]
     fn swap_focus_and_head(mut s: ZipList<u8>, expected: ZipList<u8>) {
         s.swap_focus_and_head();
@@ -777,10 +777,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!(3, [4, 5, 1, 2]); "items up and down")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!(3, [1, 2]); "items up")]
-    #[test_case(ziplist!(3, [4, 5]), ziplist!(3, [4, 5]); "items down")]
-    #[test_case(ziplist!(3), ziplist!(3); "focus only")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!(3, [4, 5, 1, 2]); "items up and down")]
+    #[test_case(zlist!([1, 2], 3), zlist!(3, [1, 2]); "items up")]
+    #[test_case(zlist!(3, [4, 5]), zlist!(3, [4, 5]); "items down")]
+    #[test_case(zlist!(3), zlist!(3); "focus only")]
     #[test]
     fn rotate_focus_to_head(mut s: ZipList<u8>, expected: ZipList<u8>) {
         s.rotate_focus_to_head();
@@ -788,10 +788,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2, 3], 4, [5, 6, 7]), ziplist!(1, [2, 3, 4, 5, 6, 7]); "items up and down")]
-    #[test_case(ziplist!([1, 2, 3], 4), ziplist!(1, [2, 3, 4]); "items up")]
-    #[test_case(ziplist!(3, [4, 5, 6]), ziplist!(3, [4, 5, 6]); "items down")]
-    #[test_case(ziplist!(3), ziplist!(3); "focus only")]
+    #[test_case(zlist!([1, 2, 3], 4, [5, 6, 7]), zlist!(1, [2, 3, 4, 5, 6, 7]); "items up and down")]
+    #[test_case(zlist!([1, 2, 3], 4), zlist!(1, [2, 3, 4]); "items up")]
+    #[test_case(zlist!(3, [4, 5, 6]), zlist!(3, [4, 5, 6]); "items down")]
+    #[test_case(zlist!(3), zlist!(3); "focus only")]
     #[test]
     fn focus_head(mut s: ZipList<u8>, expected: ZipList<u8>) {
         s.focus_head();
@@ -799,10 +799,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2, 3], 4, [5, 6, 7]), ziplist!([1, 2, 3, 4, 5, 6], 7); "items up and down")]
-    #[test_case(ziplist!([1, 2, 3], 4), ziplist!([1, 2, 3], 4); "items up")]
-    #[test_case(ziplist!(3, [4, 5, 6]), ziplist!([3, 4, 5], 6); "items down")]
-    #[test_case(ziplist!(3), ziplist!(3); "focus only")]
+    #[test_case(zlist!([1, 2, 3], 4, [5, 6, 7]), zlist!([1, 2, 3, 4, 5, 6], 7); "items up and down")]
+    #[test_case(zlist!([1, 2, 3], 4), zlist!([1, 2, 3], 4); "items up")]
+    #[test_case(zlist!(3, [4, 5, 6]), zlist!([3, 4, 5], 6); "items down")]
+    #[test_case(zlist!(3), zlist!(3); "focus only")]
     #[test]
     fn focus_tail(mut s: ZipList<u8>, expected: ZipList<u8>) {
         s.focus_tail();
@@ -810,12 +810,12 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5, 6]), |&e| e == 3, ziplist!([1, 2], 3, [4, 5, 6]); "current focus")]
-    #[test_case(ziplist!([1, 2], 3, [4, 5, 6]), |&e| e > 4, ziplist!([1, 2, 3, 4], 5, [6]); "in tail")]
-    #[test_case(ziplist!([1, 2], 3, [4, 5, 6]), |&e| e < 3 && e > 1, ziplist!([1], 2, [3, 4, 5, 6]); "in head")]
-    #[test_case(ziplist!([1, 2], 3, [4, 5, 6]), |&e| e < 3, ziplist!([], 1, [2, 3, 4, 5, 6]); "in head multiple matches")]
-    #[test_case(ziplist!([1, 2], 3, [4, 5, 6]), |&e| e == 42, ziplist!([1, 2], 3, [4, 5, 6]); "not found")]
-    #[test_case(ziplist!([1, 2], 3, [4, 5, 3, 6]), |&e| e == 42, ziplist!([1, 2], 3, [4, 5, 3, 6]); "not found with current focus duplicated")]
+    #[test_case(zlist!([1, 2], 3, [4, 5, 6]), |&e| e == 3, zlist!([1, 2], 3, [4, 5, 6]); "current focus")]
+    #[test_case(zlist!([1, 2], 3, [4, 5, 6]), |&e| e > 4, zlist!([1, 2, 3, 4], 5, [6]); "in tail")]
+    #[test_case(zlist!([1, 2], 3, [4, 5, 6]), |&e| e < 3 && e > 1, zlist!([1], 2, [3, 4, 5, 6]); "in head")]
+    #[test_case(zlist!([1, 2], 3, [4, 5, 6]), |&e| e < 3, zlist!([], 1, [2, 3, 4, 5, 6]); "in head multiple matches")]
+    #[test_case(zlist!([1, 2], 3, [4, 5, 6]), |&e| e == 42, zlist!([1, 2], 3, [4, 5, 6]); "not found")]
+    #[test_case(zlist!([1, 2], 3, [4, 5, 3, 6]), |&e| e == 42, zlist!([1, 2], 3, [4, 5, 3, 6]); "not found with current focus duplicated")]
     #[test]
     fn focus_element_by(mut s: ZipList<u8>, predicate: fn(&u8) -> bool, expected: ZipList<u8>) {
         s.focus_element_by(predicate);
@@ -825,7 +825,7 @@ mod tests {
 
     #[test]
     fn iter_yields_all_elements_in_order() {
-        let s = ziplist!([1, 2], 3, [4, 5]);
+        let s = zlist!([1, 2], 3, [4, 5]);
         let elems: Vec<(bool, u8)> = s.iter().map(|(b, t)| (b, *t)).collect();
 
         assert_eq!(
@@ -836,7 +836,7 @@ mod tests {
 
     #[test]
     fn iter_mut_yields_all_elements_in_order() {
-        let mut s = ziplist!([1, 2], 3, [4, 5]);
+        let mut s = zlist!([1, 2], 3, [4, 5]);
         let elems: Vec<(bool, u8)> = s.iter_mut().map(|(b, t)| (b, *t)).collect();
 
         assert_eq!(
@@ -847,7 +847,7 @@ mod tests {
 
     #[test]
     fn into_iter_yields_all_elements_in_order() {
-        let s = ziplist!([1, 2], 3, [4, 5]);
+        let s = zlist!([1, 2], 3, [4, 5]);
         let elems: Vec<(bool, u8)> = s.into_iter().collect();
 
         assert_eq!(
@@ -858,36 +858,36 @@ mod tests {
 
     #[test]
     fn map_preserves_structure() {
-        let s = ziplist!(["a", "bunch"], "of", ["string", "refs"]);
+        let s = zlist!(["a", "bunch"], "of", ["string", "refs"]);
 
         let mapped = s.map(|x| x.len());
-        let expected = ziplist!([1, 5], 2, [6, 4]);
+        let expected = zlist!([1, 5], 2, [6, 4]);
 
         assert_eq!(mapped, expected);
     }
 
     #[test_case(|&x| x > 5, None; "returns None if no elements satisfy the predicate")]
-    #[test_case(|x| x % 2 == 1, Some(ziplist!([3], 1, [5])); "holds focus with predicate")]
-    #[test_case(|x| x % 2 == 0, Some(ziplist!([2], 4)); "moves focus to top of down when possible")]
-    #[test_case(|&x| x == 2 || x == 3, Some(ziplist!([2], 3)); "moves focus to end of up if down is empty")]
+    #[test_case(|x| x % 2 == 1, Some(zlist!([3], 1, [5])); "holds focus with predicate")]
+    #[test_case(|x| x % 2 == 0, Some(zlist!([2], 4)); "moves focus to top of down when possible")]
+    #[test_case(|&x| x == 2 || x == 3, Some(zlist!([2], 3)); "moves focus to end of up if down is empty")]
     #[test]
     fn filter(predicate: fn(&usize) -> bool, expected: Option<ZipList<usize>>) {
-        let filtered = ziplist!([2, 3], 1, [4, 5]).filter(predicate);
+        let filtered = zlist!([2, 3], 1, [4, 5]).filter(predicate);
 
         assert_eq!(filtered, expected);
     }
 
     #[test_case(|&x| x > 5, None, vec![2,3,1,4,5]; "no elements satisfy the predicate")]
-    #[test_case(|x| x % 2 == 1, Some(ziplist!([3], 1, [5])), vec![2,4]; "holds focus with predicate")]
-    #[test_case(|x| x % 2 == 0, Some(ziplist!([2], 4)), vec![3,1,5]; "moves focus to top of down when possible")]
-    #[test_case(|&x| x == 2 || x == 3, Some(ziplist!([2], 3)), vec![1,4,5]; "moves focus to end of up if down is empty")]
+    #[test_case(|x| x % 2 == 1, Some(zlist!([3], 1, [5])), vec![2,4]; "holds focus with predicate")]
+    #[test_case(|x| x % 2 == 0, Some(zlist!([2], 4)), vec![3,1,5]; "moves focus to top of down when possible")]
+    #[test_case(|&x| x == 2 || x == 3, Some(zlist!([2], 3)), vec![1,4,5]; "moves focus to end of up if down is empty")]
     #[test]
     fn extract(
         predicate: fn(&usize) -> bool,
         expected: Option<ZipList<usize>>,
         expected_extracted: Vec<usize>,
     ) {
-        let (s, extracted) = ziplist!([2, 3], 1, [4, 5]).extract(predicate);
+        let (s, extracted) = zlist!([2, 3], 1, [4, 5]).extract(predicate);
 
         assert_eq!(s, expected);
         assert_eq!(extracted, expected_extracted);
@@ -895,7 +895,7 @@ mod tests {
 
     #[test]
     fn flatten_is_correctly_ordered() {
-        let res = ziplist!([1, 2], 3, [4, 5]).flatten();
+        let res = zlist!([1, 2], 3, [4, 5]).flatten();
 
         assert_eq!(res, vec![1, 2, 3, 4, 5]);
     }
@@ -904,7 +904,7 @@ mod tests {
     fn try_from_iter_is_correctly_ordered() {
         let res = ZipList::try_from_iter(vec![1, 2, 3, 4, 5]);
 
-        assert_eq!(res, Some(ziplist!(1, [2, 3, 4, 5])));
+        assert_eq!(res, Some(zlist!(1, [2, 3, 4, 5])));
     }
 
     #[test]
@@ -916,7 +916,7 @@ mod tests {
 
     #[test]
     fn try_from_iter_after_flatten_with_empty_up_is_inverse() {
-        let s = ziplist!(1, [2, 3, 4]);
+        let s = zlist!(1, [2, 3, 4]);
         let res = ZipList::try_from_iter(s.clone().flatten());
 
         assert_eq!(res, Some(s));
@@ -924,16 +924,16 @@ mod tests {
 
     #[test]
     fn reverse_holds_focus() {
-        let mut s = ziplist!([1, 2], 3, [4, 5]);
+        let mut s = zlist!([1, 2], 3, [4, 5]);
         s.reverse();
 
-        assert_eq!(s, ziplist!([5, 4], 3, [2, 1]));
+        assert_eq!(s, zlist!([5, 4], 3, [2, 1]));
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([1], 2, [3, 4, 5]); "items up and down")]
-    #[test_case(ziplist!([], 1, [2, 3]), ziplist!([1, 2], 3); "items down only")]
-    #[test_case(ziplist!([1, 2], 3, []), ziplist!([1], 2, [3]); "items up only")]
-    #[test_case(ziplist!([], 1, []), ziplist!(1); "only focused")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!([1], 2, [3, 4, 5]); "items up and down")]
+    #[test_case(zlist!([], 1, [2, 3]), zlist!([1, 2], 3); "items down only")]
+    #[test_case(zlist!([1, 2], 3, []), zlist!([1], 2, [3]); "items up only")]
+    #[test_case(zlist!([], 1, []), zlist!(1); "only focused")]
     #[test]
     fn focus_up(mut s: ZipList<usize>, expected: ZipList<usize>) {
         s.focus_up();
@@ -941,10 +941,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([1, 2, 3], 4, [5]); "items up and down")]
-    #[test_case(ziplist!(1, [2, 3]), ziplist!([1], 2, [3]); "items down only")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!(1, [2, 3]); "items up only")]
-    #[test_case(ziplist!(1), ziplist!(1); "only focused")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!([1, 2, 3], 4, [5]); "items up and down")]
+    #[test_case(zlist!(1, [2, 3]), zlist!([1], 2, [3]); "items down only")]
+    #[test_case(zlist!([1, 2], 3), zlist!(1, [2, 3]); "items up only")]
+    #[test_case(zlist!(1), zlist!(1); "only focused")]
     #[test]
     fn focus_down(mut s: ZipList<usize>, expected: ZipList<usize>) {
         s.focus_down();
@@ -952,10 +952,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([1], 3, [2, 4, 5]); "items up and down")]
-    #[test_case(ziplist!(1, [2, 3]), ziplist!([2, 3], 1); "items down only")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!([1], 3, [2]); "items up only")]
-    #[test_case(ziplist!(1), ziplist!(1); "only focused")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!([1], 3, [2, 4, 5]); "items up and down")]
+    #[test_case(zlist!(1, [2, 3]), zlist!([2, 3], 1); "items down only")]
+    #[test_case(zlist!([1, 2], 3), zlist!([1], 3, [2]); "items up only")]
+    #[test_case(zlist!(1), zlist!(1); "only focused")]
     #[test]
     fn swap_up(mut s: ZipList<usize>, expected: ZipList<usize>) {
         s.swap_up();
@@ -965,20 +965,20 @@ mod tests {
 
     #[test]
     fn swap_up_chained() {
-        let mut s = ziplist!([1, 2], 3, [4]);
+        let mut s = zlist!([1, 2], 3, [4]);
 
         s.swap_up();
-        assert_eq!(s, ziplist!([1], 3, [2, 4]));
+        assert_eq!(s, zlist!([1], 3, [2, 4]));
         s.swap_up();
-        assert_eq!(s, ziplist!(3, [1, 2, 4]));
+        assert_eq!(s, zlist!(3, [1, 2, 4]));
         s.swap_up();
-        assert_eq!(s, ziplist!([1, 2, 4], 3));
+        assert_eq!(s, zlist!([1, 2, 4], 3));
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([1, 2, 4], 3, [5]); "items up and down")]
-    #[test_case(ziplist!(1, [2, 3]), ziplist!([2], 1, [3]); "items down only")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!(3, [1, 2]); "items up only")]
-    #[test_case(ziplist!(1), ziplist!(1); "only focused")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!([1, 2, 4], 3, [5]); "items up and down")]
+    #[test_case(zlist!(1, [2, 3]), zlist!([2], 1, [3]); "items down only")]
+    #[test_case(zlist!([1, 2], 3), zlist!(3, [1, 2]); "items up only")]
+    #[test_case(zlist!(1), zlist!(1); "only focused")]
     #[test]
     fn swap_down(mut s: ZipList<usize>, expected: ZipList<usize>) {
         s.swap_down();
@@ -986,10 +986,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([2], 3, [4, 5, 1]); "items up and down")]
-    #[test_case(ziplist!(1, [2, 3]), ziplist!([2, 3], 1); "items down only")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!([2], 3, [1]); "items up only")]
-    #[test_case(ziplist!(1), ziplist!(1); "only focused")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!([2], 3, [4, 5, 1]); "items up and down")]
+    #[test_case(zlist!(1, [2, 3]), zlist!([2, 3], 1); "items down only")]
+    #[test_case(zlist!([1, 2], 3), zlist!([2], 3, [1]); "items up only")]
+    #[test_case(zlist!(1), zlist!(1); "only focused")]
     #[test]
     fn rotate_up(mut s: ZipList<usize>, expected: ZipList<usize>) {
         s.rotate_up();
@@ -997,10 +997,10 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1, 2], 3, [4, 5]), ziplist!([5, 1, 2], 3, [4]); "items up and down")]
-    #[test_case(ziplist!(1, [2, 3]), ziplist!([3], 1, [2]); "items down only")]
-    #[test_case(ziplist!([1, 2], 3), ziplist!(3, [1, 2]); "items up only")]
-    #[test_case(ziplist!(1), ziplist!(1); "only focused")]
+    #[test_case(zlist!([1, 2], 3, [4, 5]), zlist!([5, 1, 2], 3, [4]); "items up and down")]
+    #[test_case(zlist!(1, [2, 3]), zlist!([3], 1, [2]); "items down only")]
+    #[test_case(zlist!([1, 2], 3), zlist!(3, [1, 2]); "items up only")]
+    #[test_case(zlist!(1), zlist!(1); "only focused")]
     #[test]
     fn rotate_down(mut s: ZipList<usize>, expected: ZipList<usize>) {
         s.rotate_down();
@@ -1008,23 +1008,23 @@ mod tests {
         assert_eq!(s, expected);
     }
 
-    #[test_case(Position::Focus, ziplist!([1,2], 6, [3,4,5]); "focus")]
-    #[test_case(Position::Before, ziplist!([1,2,6], 3, [4,5]); "before")]
-    #[test_case(Position::After, ziplist!([1,2], 3, [6,4,5]); "after")]
-    #[test_case(Position::Head, ziplist!([6,1,2], 3, [4,5]); "head")]
-    #[test_case(Position::Tail, ziplist!([1,2], 3, [4,5,6]); "tail")]
+    #[test_case(Position::Focus, zlist!([1,2], 6, [3,4,5]); "focus")]
+    #[test_case(Position::Before, zlist!([1,2,6], 3, [4,5]); "before")]
+    #[test_case(Position::After, zlist!([1,2], 3, [6,4,5]); "after")]
+    #[test_case(Position::Head, zlist!([6,1,2], 3, [4,5]); "head")]
+    #[test_case(Position::Tail, zlist!([1,2], 3, [4,5,6]); "tail")]
     #[test]
     fn insert_at(pos: Position, expected: ZipList<usize>) {
-        let mut s = ziplist!([1, 2], 3, [4, 5]);
+        let mut s = zlist!([1, 2], 3, [4, 5]);
         s.insert_at(pos, 6);
 
         assert_eq!(s, expected);
     }
 
-    #[test_case(ziplist!([1,2,3,4], 5, []); "up and focus")]
-    #[test_case(ziplist!([], 1, [2,3,4,5]); "focus and down")]
-    #[test_case(ziplist!([1,2], 3, [4,5]); "all")]
-    #[test_case(ziplist!([], 1, []); "focus only")]
+    #[test_case(zlist!([1,2,3,4], 5, []); "up and focus")]
+    #[test_case(zlist!([], 1, [2,3,4,5]); "focus and down")]
+    #[test_case(zlist!([1,2], 3, [4,5]); "all")]
+    #[test_case(zlist!([], 1, []); "focus only")]
     #[test]
     fn index(zl: ZipList<usize>) {
         for i in 0..zl.len() {
@@ -1032,10 +1032,10 @@ mod tests {
         }
     }
 
-    #[test_case(ziplist!([1,2,3,4], 5, []); "up and focus")]
-    #[test_case(ziplist!([], 1, [2,3,4,5]); "focus and down")]
-    #[test_case(ziplist!([1,2], 3, [4,5]); "all")]
-    #[test_case(ziplist!([], 1, []); "focus only")]
+    #[test_case(zlist!([1,2,3,4], 5, []); "up and focus")]
+    #[test_case(zlist!([], 1, [2,3,4,5]); "focus and down")]
+    #[test_case(zlist!([1,2], 3, [4,5]); "all")]
+    #[test_case(zlist!([], 1, []); "focus only")]
     #[test]
     fn index_mut(mut zl: ZipList<usize>) {
         let expected = zl.clone().map(|_| 6);
