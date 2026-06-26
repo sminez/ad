@@ -2,7 +2,7 @@ use crate::{
     buffer::Buffers,
     die,
     dot::{Cur, Dot, Range},
-    editor::{Action, Actions, MbSelect, MiniBufferSelection},
+    editor::{Actions, EAction, MbSelect, MiniBufferSelection},
     lsp::{
         LspManager, Pos, PositionEncoding, PreparedMessage, Req,
         capabilities::Coords,
@@ -58,7 +58,7 @@ impl LspRequest for req::Completion {
             .map(|item| Completion::new(item, pos.clone(), enc, lsp_id, &man.tx_req))
             .collect();
 
-        Some(Actions::Single(Action::MbSelect(
+        Some(Actions::single(EAction::MbSelect(
             Completions(completions).into_selector(),
         )))
     }
@@ -273,12 +273,13 @@ fn actions_for_resolved_completion_item(
 
     let actions = edit_actions_as_editor_actions(edit_actions);
 
-    Actions::Multi(actions)
+    Actions::Multi(actions.into_iter().map(|a| a.for_active()).collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::editor::BAction;
     use ad_event::Source;
     use simple_test_case::test_case;
     use std::sync::mpsc::channel;
@@ -295,7 +296,7 @@ mod tests {
         let mut buffers = Buffers::new_stubbed(&[1], tx, Default::default());
         buffers
             .active_mut()
-            .handle_action(Action::InsertString { s: s.to_string() }, Source::Fsys);
+            .handle_action(BAction::InsertString { s: s.to_string() }, Source::Fsys);
 
         let initial_input = completions.initial_input(&buffers);
 

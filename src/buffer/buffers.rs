@@ -3,8 +3,8 @@ use crate::{
     config::Config,
     dot::TextObject,
     lsp::LspManagerHandle,
-    ziplist,
     ziplist::{Position, ZipList},
+    zlist,
 };
 use ad_event::Source;
 use parking_lot::RwLock;
@@ -41,7 +41,7 @@ impl Buffers {
     pub fn new(lsp_handle: Arc<LspManagerHandle>, config: Arc<RwLock<Config>>) -> Self {
         Self {
             next_id: 1,
-            inner: ziplist![Buffer::new_unnamed(0, "", config.clone())],
+            inner: zlist![Buffer::new_unnamed(0, "", config.clone())],
             jump_list: JumpList::default(),
             lsp_handle,
             config,
@@ -52,7 +52,7 @@ impl Buffers {
     pub(crate) fn new_with_raw_sender(tx_req: Sender<Req>, config: Arc<RwLock<Config>>) -> Self {
         Self {
             next_id: 1,
-            inner: ziplist![Buffer::new_unnamed(0, "", config.clone())],
+            inner: zlist![Buffer::new_unnamed(0, "", config.clone())],
             jump_list: JumpList::default(),
             lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
             config,

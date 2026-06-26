@@ -5,7 +5,7 @@
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
     buffer::BufferId,
-    editor::{Action, Click, MiniBufferState},
+    editor::{Click, EAction, MiniBufferState},
     input::Event,
     key::Input,
     system::DefaultSystem,
@@ -102,7 +102,7 @@ fn editor_scenarios(path: &str, content: &str) {
         &file_paths,
     );
 
-    e.handle_event(Event::Action(Action::ChangeDirectory {
+    e.handle_event(Event::action(EAction::ChangeDirectory {
         path: Some(test_file_dir.to_string_lossy().to_string()),
     }));
 
@@ -444,22 +444,22 @@ impl UserInterface for ScriptedUi {
             // which triggers additional refreshes for when our message actually comes through to
             // the event loop
             sleep(Duration::from_millis(FSYS_SLEEP_MS));
-            Event::Action(Action::Noop)
+            Event::action(EAction::Noop)
         } else {
             match self.actions.pop() {
                 Some(TestAction::Fsys(f)) => {
                     self.spawn_fsys(f);
-                    Event::Action(Action::Noop)
+                    Event::action(EAction::Noop)
                 }
 
                 Some(TestAction::SleepMs(n)) => {
                     sleep(Duration::from_millis(n));
-                    Event::Action(Action::Noop)
+                    Event::action(EAction::Noop)
                 }
 
                 Some(TestAction::Input(input)) => Event::Input(input),
 
-                None => Event::Action(Action::Exit { force: true }),
+                None => Event::action(EAction::Exit { force: true }),
             }
         };
 

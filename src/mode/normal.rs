@@ -1,7 +1,7 @@
 //! vim style normal mode
 use crate::{
     dot::TextObject::*,
-    editor::{Action::*, Actions, ViewPort},
+    editor::{Actions, BAction::*, EAction::*, UAction::*, ViewPort},
     key::{Arrow::*, Input::*},
     keymap,
     mode::Mode,
@@ -50,122 +50,148 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
 
         // Entering INSERT mode
         "enter INSERT mode at current position";
-        [ Char('i') ] => [ SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('i') ] => [
+            SetMode { m: "INSERT" }.into(),
+            NewEditLogTransaction.for_active()
+        ],
         "enter INSERT mode at start of line";
-        [ Char('I') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('I') ] => [
+            DotSet(LineStart, 1).for_active(),
+            SetMode { m: "INSERT" }.into(),
+            NewEditLogTransaction.for_active()
+        ],
         "enter INSERT mode after current position";
-        [ Char('a') ] => [ DotSet(Arr(Right), 1), SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('a') ] => [
+            DotSet(Arr(Right), 1).for_active(),
+            SetMode { m: "INSERT" }.into(),
+            NewEditLogTransaction.for_active()
+        ],
         "enter INSERT mode at end of line";
-        [ Char('A') ] => [ DotSet(LineEnd, 1), SetMode { m: "INSERT" }, NewEditLogTransaction ],
+        [ Char('A') ] => [
+            DotSet(LineEnd, 1).for_active(),
+            SetMode { m: "INSERT" }.into(),
+            NewEditLogTransaction.for_active()
+        ],
         "enter INSERT mode on new line below";
-        [ Char('o') ] => [ DotSet(LineEnd, 1), SetMode { m: "INSERT" }, NewEditLogTransaction, InsertChar { c: '\n' } ],
+        [ Char('o') ] => [
+            DotSet(LineEnd, 1).for_active(),
+            SetMode { m: "INSERT" }.into(),
+            NewEditLogTransaction.for_active(),
+            InsertChar { c: '\n' }.for_active()
+        ],
         "enter INSERT mode on new line above";
-        [ Char('O') ] => [ DotSet(LineStart, 1), SetMode { m: "INSERT" }, NewEditLogTransaction, InsertChar { c: '\n' }, DotSet(Arr(Up), 1) ],
+        [ Char('O') ] => [
+            DotSet(LineStart, 1).for_active(),
+            SetMode { m: "INSERT" }.into(),
+            NewEditLogTransaction.for_active(),
+            InsertChar { c: '\n' }.for_active(),
+            DotSet(Arr(Up), 1).for_active()
+        ],
 
         // Setting dot
         // >> character positions
         "move one character left";
-        [ Char('h') ] => [ DotSet(Arr(Left), 1) ],
+        [ Char('h') ] => [ DotSet(Arr(Left), 1).for_active() ],
         "move one character down";
-        [ Char('j') ] => [ DotSet(Arr(Down), 1) ],
+        [ Char('j') ] => [ DotSet(Arr(Down), 1).for_active() ],
         "move one character up";
-        [ Char('k') ] => [ DotSet(Arr(Up), 1) ],
+        [ Char('k') ] => [ DotSet(Arr(Up), 1).for_active() ],
         "move one character right";
-        [ Char('l') ] => [ DotSet(Arr(Right), 1) ],
+        [ Char('l') ] => [ DotSet(Arr(Right), 1).for_active() ],
         // >> line anchors
         "move to start of line";
-        [ Ctrl('h') ] => [ DotSet(LineStart, 1) ],
+        [ Ctrl('h') ] => [ DotSet(LineStart, 1).for_active() ],
         "move to end of line";
-        [ Ctrl('l') ] => [ DotSet(LineEnd, 1) ],
+        [ Ctrl('l') ] => [ DotSet(LineEnd, 1).for_active() ],
         "move to start of line";
-        [ Home ] => [ DotSet(LineStart, 1) ],
+        [ Home ] => [ DotSet(LineStart, 1).for_active() ],
         "move to end of line";
-        [ End ] => [ DotSet(LineEnd, 1) ],
+        [ End ] => [ DotSet(LineEnd, 1).for_active() ],
         // >> objects
         "move forward word";
-        [ Char('w') ] => [ DotExtendForward(Word, 1), DotCollapseLast ],
+        [ Char('w') ] => [ DotExtendForward(Word, 1).for_active(), DotCollapseLast.for_active() ],
         "move backward word";
-        [ Char('b') ] => [ DotExtendBackward(Word, 1), DotCollapseFirst ],
+        [ Char('b') ] => [ DotExtendBackward(Word, 1).for_active(), DotCollapseFirst.for_active() ],
         "select current line";
-        [ Char('x') ] => [ DotSet(Line, 1) ],
+        [ Char('x') ] => [ DotSet(Line, 1).for_active() ],
         "select current paragraph";
-        [ Char('X') ] => [ DotSet(Paragraph, 1) ],
+        [ Char('X') ] => [ DotSet(Paragraph, 1).for_active() ],
         "select buffer";
-        [ Char('%') ] => [ DotSet(BufferStart, 1), DotExtendForward(BufferEnd, 1) ],
+        [ Char('%') ] => [ DotSet(BufferStart, 1).for_active(), DotExtendForward(BufferEnd, 1).for_active() ],
         "move to end of paragraph";
-        [ Char('{') ] => [ DotExtendBackward(Paragraph, 1), DotCollapseFirst ],
+        [ Char('{') ] => [ DotExtendBackward(Paragraph, 1).for_active(), DotCollapseFirst.for_active() ],
         "move to start of paragraph";
-        [ Char('}') ] => [ DotExtendForward(Paragraph, 1), DotCollapseLast ],
+        [ Char('}') ] => [ DotExtendForward(Paragraph, 1).for_active(), DotCollapseLast.for_active() ],
 
         "move to start of buffer";
-        [ Char('g'), Char('g') ] => [ DotSet(BufferStart, 1) ],
+        [ Char('g'), Char('g') ] => [ DotSet(BufferStart, 1).for_active() ],
         "move to end of buffer";
-        [ Char('g'), Char('e') ] => [ DotSet(BufferEnd, 1) ],
+        [ Char('g'), Char('e') ] => [ DotSet(BufferEnd, 1).for_active() ],
         "move to start of line";
-        [ Char('g'), Char('h') ] => [ DotSet(LineStart, 1) ],
+        [ Char('g'), Char('h') ] => [ DotSet(LineStart, 1).for_active() ],
         "move to end of line";
-        [ Char('g'), Char('l') ] => [ DotSet(LineEnd, 1) ],
+        [ Char('g'), Char('l') ] => [ DotSet(LineEnd, 1).for_active() ],
 
         // Delimited pairs
         "select inside of parens";
-        [ Alt('i'), Char('(') ] => [ DotSet(Delimited('(', ')'), 1) ],
+        [ Alt('i'), Char('(') ] => [ DotSet(Delimited('(', ')'), 1).for_active() ],
         "select inside of parens";
-        [ Alt('i'), Char(')') ] => [ DotSet(Delimited('(', ')'), 1) ],
+        [ Alt('i'), Char(')') ] => [ DotSet(Delimited('(', ')'), 1).for_active() ],
         "select inside of brackets";
-        [ Alt('i'), Char('[') ] => [ DotSet(Delimited('[', ']'), 1) ],
+        [ Alt('i'), Char('[') ] => [ DotSet(Delimited('[', ']'), 1).for_active() ],
         "select inside of brackets";
-        [ Alt('i'), Char(']') ] => [ DotSet(Delimited('[', ']'), 1) ],
+        [ Alt('i'), Char(']') ] => [ DotSet(Delimited('[', ']'), 1).for_active() ],
         "select inside of curlies";
-        [ Alt('i'), Char('{') ] => [ DotSet(Delimited('{', '}'), 1) ],
+        [ Alt('i'), Char('{') ] => [ DotSet(Delimited('{', '}'), 1).for_active() ],
         "select inside of curlies";
-        [ Alt('i'), Char('}') ] => [ DotSet(Delimited('{', '}'), 1) ],
+        [ Alt('i'), Char('}') ] => [ DotSet(Delimited('{', '}'), 1).for_active() ],
         "select inside of angle brackets";
-        [ Alt('i'), Char('<') ] => [ DotSet(Delimited('<', '>'), 1) ],
+        [ Alt('i'), Char('<') ] => [ DotSet(Delimited('<', '>'), 1).for_active() ],
         "select inside of angle brackets";
-        [ Alt('i'), Char('>') ] => [ DotSet(Delimited('<', '>'), 1) ],
+        [ Alt('i'), Char('>') ] => [ DotSet(Delimited('<', '>'), 1).for_active() ],
         "select inside of double quotes";
-        [ Alt('i'), Char('"') ] => [ DotSet(Delimited('"', '"'), 1) ],
+        [ Alt('i'), Char('"') ] => [ DotSet(Delimited('"', '"'), 1).for_active() ],
         "select inside of single quotes";
-        [ Alt('i'), Char('\'') ] => [ DotSet(Delimited('\'', '\''), 1) ],
+        [ Alt('i'), Char('\'') ] => [ DotSet(Delimited('\'', '\''), 1).for_active() ],
         "select inside of forward slashes";
-        [ Alt('i'), Char('/') ] => [ DotSet(Delimited('/', '/'), 1) ],
+        [ Alt('i'), Char('/') ] => [ DotSet(Delimited('/', '/'), 1).for_active() ],
 
         // Extending dot
         // >> character positions
         "extend selection one character left";
-        [ Char('H') ] => [ DotExtendBackward(Character, 1) ],
+        [ Char('H') ] => [ DotExtendBackward(Character, 1).for_active() ],
         "extend selection one line down";
-        [ Char('J') ] => [ DotExtendForward(Line, 1) ],
+        [ Char('J') ] => [ DotExtendForward(Line, 1).for_active() ],
         "extend selection one line up";
-        [ Char('K') ] => [ DotExtendBackward(Line, 1) ],
+        [ Char('K') ] => [ DotExtendBackward(Line, 1).for_active() ],
         "extend selection one character right";
-        [ Char('L') ] => [ DotExtendForward(Character, 1) ],
+        [ Char('L') ] => [ DotExtendForward(Character, 1).for_active() ],
         // >> lines
         "extend selection to start of line";
-        [ Alt('h') ] => [ DotExtendBackward(LineStart, 1) ],
+        [ Alt('h') ] => [ DotExtendBackward(LineStart, 1).for_active() ],
         "extend selection one line down";
-        [ Alt('j') ] => [ DotExtendForward(Line, 1) ],
+        [ Alt('j') ] => [ DotExtendForward(Line, 1).for_active() ],
         "extend selection one line up";
-        [ Alt('k') ] => [ DotExtendBackward(Line, 1) ],
+        [ Alt('k') ] => [ DotExtendBackward(Line, 1).for_active() ],
         "extend selection to end of line";
-        [ Alt('l') ] => [ DotExtendForward(LineEnd, 1) ],
+        [ Alt('l') ] => [ DotExtendForward(LineEnd, 1).for_active() ],
         // >> objects
         "extend selection forward one word";
-        [ Char('W') ] => [ DotExtendForward(Word, 1) ],
+        [ Char('W') ] => [ DotExtendForward(Word, 1).for_active() ],
         "extend selection backward one word";
-        [ Char('B') ] => [ DotExtendBackward(Word, 1) ],
+        [ Char('B') ] => [ DotExtendBackward(Word, 1).for_active() ],
         "extend selection to end of paragraph";
-        [ Alt('{') ] => [ DotExtendBackward(Paragraph, 1) ],
+        [ Alt('{') ] => [ DotExtendBackward(Paragraph, 1).for_active() ],
         "extend selection to start of paragraph";
-        [ Alt('}') ] => [ DotExtendForward(Paragraph, 1) ],
+        [ Alt('}') ] => [ DotExtendForward(Paragraph, 1).for_active() ],
 
         // Manipulate dot
         "flip active cursor";
-        [ Char(';') ] => [ DotFlip ],
+        [ Char(';') ] => [ DotFlip.for_active() ],
         "collapse dot to start";
-        [ Char(',') ] => [ DotCollapseFirst ],
+        [ Char(',') ] => [ DotCollapseFirst.for_active() ],
         "collapse dot to end";
-        [ Alt(',') ] => [ DotCollapseLast ],
+        [ Alt(',') ] => [ DotCollapseLast.for_active() ],
 
         // Manipulating viewport
         "set viewport to top";
@@ -195,17 +221,17 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
 
         // Editing actions
         "delete current selection and enter INSERT mode";
-        [ Char('c') ] => [ Delete, SetMode { m: "INSERT" } ],
+        [ Char('c') ] => [ Delete.for_active(), SetMode { m: "INSERT" }.into() ],
         "delete current selection";
-        [ Char('d') ] => [ Delete ],
+        [ Char('d') ] => [ Delete.for_active() ],
         "paste";
-        [ Char('p') ] => [ NewEditLogTransaction, Paste, NewEditLogTransaction ],
+        [ Char('p') ] => [ NewEditLogTransaction.for_active(), Paste.into(), NewEditLogTransaction.for_active() ],
         "yank (copy)";
         [ Char('y') ] => [ Yank ],
         "undo";
-        [ Char('u') ] => [ Undo ],
+        [ Char('u') ] => [ Undo.for_active() ],
         "redo";
-        [ Char('U') ] => [ Redo ],
+        [ Char('U') ] => [ Redo.for_active() ],
 
         "move backward in the jump list";
         [ Ctrl('o') ] => [ JumpListBack ],
@@ -217,13 +243,13 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
         [ Alt(']') ] => [ JumpListForward ],
 
         "load dot in current window";
-        [ Return ] => [ LoadDot { new_window: false } ],
+        [ Return ] => [ LoadDot { bufid: None, new_window: false } ],
         "load dot in new window";
-        [ AltReturn ] => [ LoadDot { new_window: true } ],
+        [ AltReturn ] => [ LoadDot { bufid: None, new_window: true } ],
         "execute dot";
-        [ Char('@') ] => [ ExecuteDot ],
+        [ Char('@') ] => [ ExecuteDot { bufid: None } ],
         "expand dot";
-        [ Char('*') ] => [ ExpandDot ],
+        [ Char('*') ] => [ ExpandDot.for_active() ],
 
         // LSP
         "LSP: show diagnostics";
@@ -252,7 +278,7 @@ pub(crate) fn normal_mode() -> (Mode, Vec<(String, &'static str)>) {
             }
             let i = keys[0];
             match i {
-                Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::Single(RawInput { i })),
+                Mouse(_) | Arrow(_) | PageUp | PageDown => Some(Actions::single(RawInput { i })),
                 _ => None,
             }
         },
@@ -266,13 +292,12 @@ mod tests {
     use super::*;
     use crate::{
         config::{Inputs, KeyBindings},
-        editor::Action,
         key::Input,
     };
     use simple_test_case::test_case;
 
-    #[test_case("C-k", Some(Actions::Single(Action::LspHover)); "direct override single")]
-    #[test_case("g d", Some(Actions::Single(Action::LspGotoDefinition)); "direct override sequence")]
+    #[test_case("C-k", Some(Actions::single(LspHover)); "direct override single")]
+    #[test_case("g d", Some(Actions::single(LspGotoDefinition)); "direct override sequence")]
     #[test_case("z x", None; "sharing prefix with defaults")]
     #[test]
     fn overrides_work(binding: &str, expected_default_actions: Option<Actions>) {
@@ -297,7 +322,7 @@ mod tests {
         let override_actions = mode.handle_keys(&mut keys);
         assert_eq!(
             override_actions,
-            Some(Actions::Single(Action::SendKeys {
+            Some(Actions::single(SendKeys {
                 ks: vec![Input::Char('A')]
             })),
             "override"

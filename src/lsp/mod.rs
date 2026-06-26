@@ -6,7 +6,7 @@ use crate::{
     buffer::{Buffer, Buffers},
     config::{FtypeConfig, LspConfig, ftype_config_for_path_and_first_line},
     die,
-    editor::{Action, MbSelect},
+    editor::{Action, EAction, MbSelect},
     input::Event,
     lsp::{
         capabilities::{Capabilities, PositionEncoding},
@@ -206,7 +206,7 @@ impl LspManagerHandle {
         let mut diags: Vec<Diagnostic> = guard.values().flatten().cloned().collect();
         diags.sort_unstable();
 
-        Action::MbSelect(Diagnostics(diags).into_selector())
+        EAction::MbSelect(Diagnostics(diags).into_selector()).into()
     }
 
     /// Notify an attached LSP server that a document has been opened.
@@ -511,9 +511,12 @@ impl LspManager {
     }
 
     fn send_status(&self, message: impl Into<String>) {
-        _ = self.tx_events.send(Event::Action(Action::SetStatusMessage {
-            message: message.into(),
-        }));
+        _ = self.tx_events.send(Event::Action(
+            EAction::SetStatusMessage {
+                message: message.into(),
+            }
+            .into(),
+        ));
     }
 
     #[inline]

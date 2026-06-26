@@ -30,7 +30,7 @@
 //!       body
 //!       event
 //! ```
-use crate::{editor::Action, input::Event, ui::SCRATCH_ID};
+use crate::{editor::EAction, input::Event, ui::SCRATCH_ID};
 use ninep::{
     Result,
     fs::{IoUnit, Mode, Perm, Qid, Stat, Timestamp, WStat},
@@ -203,7 +203,10 @@ impl State {
             }
         };
 
-        if let Err(e) = self.tx.send(Event::Action(Action::FocusBuffer { id })) {
+        if let Err(e) = self
+            .tx
+            .send(Event::Action(EAction::FocusBuffer { id }.into()))
+        {
             error!("unable to send event to main loop: {e}");
             return Ok(0);
         }

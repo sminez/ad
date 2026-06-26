@@ -1,5 +1,5 @@
 use crate::{
-    editor::{Action, Actions},
+    editor::{Actions, BAction, EAction},
     lsp::{
         Coords, LspManager, Pos,
         messages::{EditAction, edit_actions_as_editor_actions, request::LspRequest, txtdoc_pos},
@@ -33,14 +33,14 @@ impl LspRequest for PrepareRenameRequest {
         _: &mut LspManager,
     ) -> Option<Actions> {
         match res {
-            Some(_) => Some(Actions::Multi(vec![
-                Action::SetStatusMessage {
+            Some(_) => Some(Actions::multi(vec![
+                EAction::SetStatusMessage {
                     message: "triggering LSP rename".to_string(),
                 },
-                Action::LspRename { new_name: None },
+                EAction::LspRename { new_name: None },
             ])),
 
-            None => Some(Actions::Single(Action::SetStatusMessage {
+            None => Some(Actions::single(EAction::SetStatusMessage {
                 message: "LSP rename not possible".into(),
             })),
         }
@@ -96,29 +96,40 @@ impl LspRequest for Rename {
             let uri = text_document.uri;
             let path = uri.to_string().strip_prefix("file://").unwrap().to_owned();
 
-            actions.push(Action::OpenFile {
-                path,
-                new_window: false,
-            });
-            actions.extend(edit_actions_as_editor_actions(
-                edits
-                    .into_iter()
-                    .map(|edit| {
-                        let edit = match edit {
-                            OneOf::Left(edit) => edit,
-                            OneOf::Right(annotated_edit) => annotated_edit.text_edit,
-                        };
+            actions.push(
+                EAction::OpenFile {
+                    path,
+                    new_window: false,
+                }
+                .into(),
+            );
 
-                        EditAction::from_text_edit(edit, enc)
-                    })
-                    .collect(),
-            ));
+            actions.extend(
+                edit_actions_as_editor_actions(
+                    edits
+                        .into_iter()
+                        .map(|edit| {
+                            let edit = match edit {
+                                OneOf::Left(edit) => edit,
+                                OneOf::Right(annotated_edit) => annotated_edit.text_edit,
+                            };
+
+                            EditAction::from_text_edit(edit, enc)
+                        })
+                        .collect(),
+                )
+                .into_iter()
+                .map(|a| a.for_active()),
+            );
         }
 
-        actions.push(Action::FocusBuffer { id: buffer_id });
-        actions.push(Action::DotSetFromCoords {
-            coords: Coords::new_from_pos(pos, enc),
-        });
+        actions.push(EAction::FocusBuffer { id: buffer_id }.into());
+        actions.push(
+            BAction::DotSetFromCoords {
+                coords: Coords::new_from_pos(pos, enc),
+            }
+            .for_active(),
+        );
 
         Some(Actions::Multi(actions))
     }

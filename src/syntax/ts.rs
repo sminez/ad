@@ -534,7 +534,7 @@ mod tests {
     use crate::{
         buffer::Buffer,
         dot::{Cur, Dot},
-        editor::Action,
+        editor::BAction,
         syntax::{RangeToken, SyntaxState, SyntaxStateInner},
     };
     use ad_event::Source;
@@ -550,7 +550,7 @@ mod tests {
     #[test_case(
         |b| {
             b.dot = Dot::Cur { c: Cur { idx: 9 } };
-            b.handle_action(Action::Delete, Source::Fsys);
+            b.handle_action(BAction::Delete, Source::Fsys);
         };
         "cur delete"
     )]

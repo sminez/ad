@@ -1,5 +1,5 @@
 use crate::{
-    editor::{Action, Actions, ViewPort},
+    editor::{Actions, BAction, EAction, UAction, ViewPort},
     lsp::{
         LspManager, Pos,
         capabilities::Coords,
@@ -57,12 +57,13 @@ macro_rules! impl_goto_req {
                 };
 
                 Some(Actions::Multi(vec![
-                    Action::OpenFile {
+                    EAction::OpenFile {
                         path,
                         new_window: false,
-                    },
-                    Action::DotSetFromCoords { coords },
-                    Action::SetViewPort(ViewPort::Center),
+                    }
+                    .into(),
+                    BAction::DotSetFromCoords { coords }.for_active(),
+                    UAction::SetViewPort(ViewPort::Center).into(),
                 ]))
             }
         }

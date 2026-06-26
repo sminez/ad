@@ -3,7 +3,7 @@
 //! <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage>
 use crate::{
     buffer::Buffers,
-    editor::{Action, Actions, MbSelect, MiniBufferSelection, ViewPort},
+    editor::{Actions, BAction, EAction, MbSelect, MiniBufferSelection, UAction, ViewPort},
     input::Event,
     lsp::{
         LspManager,
@@ -81,7 +81,7 @@ impl LspServerNotification for Progress {
                 format!("{title}: {message}")
             };
 
-            Some(Actions::Single(Action::SetStatusMessage { message }))
+            Some(Actions::single(EAction::SetStatusMessage { message }))
         };
 
         match params.value {
@@ -113,7 +113,7 @@ impl LspServerNotification for Progress {
                 man.progress_tokens(lsp_id).remove(&params.token);
 
                 // Clear the status message when progress is done
-                Some(Actions::Single(Action::SetStatusMessage {
+                Some(Actions::single(EAction::SetStatusMessage {
                     message: "".to_owned(),
                 }))
             }
@@ -191,14 +191,16 @@ impl Diagnostic {
 
     pub fn as_actions(&self) -> Actions {
         Actions::Multi(vec![
-            Action::OpenFile {
+            EAction::OpenFile {
                 path: self.path.clone(),
                 new_window: false,
-            },
-            Action::DotSetFromCoords {
+            }
+            .into(),
+            BAction::DotSetFromCoords {
                 coords: self.coords,
-            },
-            Action::SetViewPort(ViewPort::Center),
+            }
+            .for_active(),
+            UAction::SetViewPort(ViewPort::Center).into(),
         ])
     }
 }

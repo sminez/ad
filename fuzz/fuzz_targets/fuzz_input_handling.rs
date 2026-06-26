@@ -2,7 +2,7 @@
 
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
-    editor::{Action, Click, MiniBufferState},
+    editor::{Click, EAction, MiniBufferState},
     input::Event,
     key::Input,
     system::System,
@@ -114,7 +114,7 @@ impl UserInterface for ScriptedUi {
     ) {
         let event = match self.actions.pop() {
             Some(TestAction::Input(input)) => Event::Input(input),
-            None => Event::Action(Action::Exit { force: true }),
+            None => Event::action(EAction::Exit { force: true }),
         };
 
         self.tx.as_ref().unwrap().send(event).unwrap();

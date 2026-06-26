@@ -1,5 +1,5 @@
 // Update times for running TreeSitter syntax highlighting
-use ad_editor::{Config, buffer::Buffer, dot::TextObject, editor::Action};
+use ad_editor::{Config, buffer::Buffer, dot::TextObject, editor::BAction};
 use ad_event::Source;
 use criterion::{Criterion, criterion_group};
 use parking_lot::RwLock;
@@ -26,8 +26,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 
     group.bench_function("append newline and update", |b| {
         b.iter(|| {
-            buf.handle_action(Action::DotSet(TextObject::BufferEnd, 1), Source::Fsys);
-            buf.handle_action(Action::InsertChar { c: '\n' }, Source::Fsys);
+            buf.handle_action(BAction::DotSet(TextObject::BufferEnd, 1), Source::Fsys);
+            buf.handle_action(BAction::InsertChar { c: '\n' }, Source::Fsys);
             buf.update_ts_state(0, 70);
         })
     });

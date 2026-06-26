@@ -106,8 +106,8 @@ macro_rules! keymap {
         }
     };
 
-    (@action $v:expr) => { $crate::editor::Actions::Single($v) };
-    (@action $($v:expr),+) => { $crate::editor::Actions::Multi(vec![$($v),+]) };
+    (@action $v:expr) => { $crate::editor::Actions::single($v) };
+    (@action $($v:expr),+) => { $crate::editor::Actions::multi(vec![$($v),+]) };
 }
 
 #[cfg(test)]

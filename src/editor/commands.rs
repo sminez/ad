@@ -1,9 +1,8 @@
 //! Command mode commands for ad
 use crate::{
     editor::{
-        Action::*,
         Actions::{self, *},
-        Editor, ViewPort,
+        BAction, EAction, Editor, UAction, ViewPort,
     },
     system::System,
 };
@@ -15,7 +14,7 @@ pub fn parse_command_fuzz(input: &str) {
 }
 
 fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Actions, String> {
-    if let Some(actions) = try_parse_single_char_command(input) {
+    if let Some(actions) = try_parse_single_char_command(input, active_buffer_id) {
         return Ok(actions);
     }
 
@@ -24,28 +23,29 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
 
     match command {
         "b" | "buffer" => match args.parse::<usize>() {
-            Ok(id) => Ok(Single(FocusBuffer { id })),
+            Ok(id) => Ok(EAction::FocusBuffer { id }.into()),
             Err(_) => Err(format!("'{args}' is not a valid buffer id")),
         },
-        "bn" | "next-buffer" => Ok(Single(NextBuffer)),
-        "bp" | "prev-buffer" => Ok(Single(PreviousBuffer)),
-        "next-column" => Ok(Single(NextColumn)),
-        "next-window" => Ok(Single(NextWindowInColumn)),
-        "prev-column" => Ok(Single(PreviousColumn)),
-        "prev-window" => Ok(Single(PreviousWindowInColumn)),
+        "bn" | "next-buffer" => Ok(UAction::NextBuffer.into()),
+        "bp" | "prev-buffer" => Ok(UAction::PreviousBuffer.into()),
+        "next-column" => Ok(UAction::NextColumn.into()),
+        "next-window" => Ok(UAction::NextWindowInColumn.into()),
+        "prev-column" => Ok(UAction::PreviousColumn.into()),
+        "prev-window" => Ok(UAction::PreviousWindowInColumn.into()),
 
-        "balance-all" => Ok(Single(BalanceAll)),
-        "balance-column" => Ok(Single(BalanceActiveColumn)),
-        "balance-columns" => Ok(Single(BalanceColumns)),
-        "balance-windows" => Ok(Single(BalanceWindows)),
+        "balance-all" => Ok(UAction::BalanceAll.into()),
+        "balance-column" => Ok(UAction::BalanceActiveColumn.into()),
+        "balance-columns" => Ok(UAction::BalanceColumns.into()),
+        "balance-windows" => Ok(UAction::BalanceWindows.into()),
 
         "cd" | "change-directory" => {
             if args.is_empty() {
-                Ok(Single(ChangeDirectory { path: None }))
+                Ok(EAction::ChangeDirectory { path: None }.into())
             } else {
-                Ok(Single(ChangeDirectory {
+                Ok(EAction::ChangeDirectory {
                     path: Some(args.to_string()),
-                }))
+                }
+                .into())
             }
         }
 
@@ -59,70 +59,84 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
                 }
             };
 
-            Ok(Single(MarkClean { bufid }))
+            Ok(BAction::MarkClean.for_buffer(bufid).into())
         }
 
-        "db" | "delete-buffer" => Ok(Single(DeleteBuffer {
+        "db" | "delete-buffer" => Ok(EAction::DeleteBuffer {
             bufid: try_parse_bufid(args, active_buffer_id)?,
             force: false,
-        })),
+        }
+        .into()),
 
-        "db!" | "delete-buffer!" => Ok(Single(DeleteBuffer {
+        "db!" | "delete-buffer!" => Ok(EAction::DeleteBuffer {
             bufid: try_parse_bufid(args, active_buffer_id)?,
             force: true,
-        })),
+        }
+        .into()),
 
-        "dc" | "delete-column" => Ok(Single(DeleteColumn { force: false })),
-        "dc!" | "delete-column!" => Ok(Single(DeleteColumn { force: true })),
-        "dw" | "delete-window" => Ok(Single(DeleteWindow { force: false })),
-        "dw!" | "delete-window!" => Ok(Single(DeleteWindow { force: true })),
+        "dc" | "delete-column" => Ok(UAction::DeleteColumn { force: false }.into()),
+        "dc!" | "delete-column!" => Ok(UAction::DeleteColumn { force: true }.into()),
+        "dw" | "delete-window" => Ok(UAction::DeleteWindow { force: false }.into()),
+        "dw!" | "delete-window!" => Ok(UAction::DeleteWindow { force: true }.into()),
 
-        "echo" => Ok(Single(SetStatusMessage {
+        "echo" => Ok(EAction::SetStatusMessage {
             message: args.to_string(),
-        })),
+        }
+        .into()),
 
-        "expand-dot" => Ok(Single(ExpandDot)),
+        "expand-dot" => Ok(BAction::ExpandDot.for_active().into()),
 
         "E" | "Edit" => {
             if args.is_empty() {
                 Err("No Edit script provided".to_string())
             } else {
-                Ok(Single(EditCommand {
+                Ok(EAction::EditCommand {
+                    bufid: Some(active_buffer_id),
                     cmd: args.to_string(),
-                }))
+                }
+                .into())
             }
         }
 
-        "execute" => Ok(Single(ExecuteDot)),
-        "help" => Ok(Single(ShowHelp)),
-        "kill" => Ok(Single(KillRunningChild { idx: None })),
-        "load" => Ok(Single(LoadDot { new_window: false })),
-        "plumb" => Ok(Single(Plumb {
+        "execute" => Ok(EAction::ExecuteDot {
+            bufid: Some(active_buffer_id),
+        }
+        .into()),
+        "help" => Ok(EAction::ShowHelp.into()),
+        "kill" => Ok(EAction::KillRunningChild { idx: None }.into()),
+        "load" => Ok(EAction::LoadDot {
+            bufid: Some(active_buffer_id),
+            new_window: false,
+        }
+        .into()),
+        "plumb" => Ok(EAction::Plumb {
             txt: args.to_string(),
             new_window: false,
-        })),
+        }
+        .into()),
 
-        "lsp-completion" => Ok(Single(LspCompletion)),
-        "lsp-find-references" => Ok(Single(LspReferences)),
-        "lsp-format" => Ok(Single(LspFormat)),
-        "lsp-goto-declaration" => Ok(Single(LspGotoDeclaration)),
-        "lsp-goto-definition" => Ok(Single(LspGotoDefinition)),
-        "lsp-goto-type-definition" => Ok(Single(LspGotoTypeDefinition)),
-        "lsp-hover" => Ok(Single(LspHover)),
-        "lsp-rename" => Ok(Single(LspRenamePrepare)),
-        "lsp-show-capabilities" => Ok(Single(LspShowCapabilities)),
-        "lsp-show-diagnostics" => Ok(Single(LspShowDiagnostics)),
-        "lsp-start" => Ok(Single(LspStart)),
-        "lsp-stop" => Ok(Single(LspStop)),
+        "lsp-completion" => Ok(EAction::LspCompletion.into()),
+        "lsp-find-references" => Ok(EAction::LspReferences.into()),
+        "lsp-format" => Ok(EAction::LspFormat.into()),
+        "lsp-goto-declaration" => Ok(EAction::LspGotoDeclaration.into()),
+        "lsp-goto-definition" => Ok(EAction::LspGotoDefinition.into()),
+        "lsp-goto-type-definition" => Ok(EAction::LspGotoTypeDefinition.into()),
+        "lsp-hover" => Ok(EAction::LspHover.into()),
+        "lsp-rename" => Ok(EAction::LspRenamePrepare.into()),
+        "lsp-show-capabilities" => Ok(EAction::LspShowCapabilities.into()),
+        "lsp-show-diagnostics" => Ok(EAction::LspShowDiagnostics.into()),
+        "lsp-start" => Ok(EAction::LspStart.into()),
+        "lsp-stop" => Ok(EAction::LspStop.into()),
 
         "o" | "open" => {
             if args.is_empty() {
                 Err("No filename provided".to_string())
             } else {
-                Ok(Single(OpenFile {
+                Ok(EAction::OpenFile {
                     path: args.to_string(),
                     new_window: false,
-                }))
+                }
+                .into())
             }
         }
 
@@ -130,10 +144,11 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
             if args.is_empty() {
                 Err("No filename provided".to_string())
             } else {
-                Ok(Single(OpenFile {
+                Ok(EAction::OpenFile {
                     path: args.to_string(),
                     new_window: true,
-                }))
+                }
+                .into())
             }
         }
 
@@ -142,11 +157,12 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
                 Err("No filename provided".to_string())
             } else {
                 let (name, txt) = args.split_once(' ').unwrap_or((args, ""));
-                Ok(Single(OpenVirtualFile {
+                Ok(EAction::OpenVirtualFile {
                     name: name.to_string(),
                     txt: txt.to_string(),
                     new_window: false,
-                }))
+                }
+                .into())
             }
         }
 
@@ -155,97 +171,104 @@ fn parse_command(input: &str, active_buffer_id: usize, cwd: &Path) -> Result<Act
                 Err("No filename provided".to_string())
             } else {
                 let (name, txt) = args.split_once(' ').unwrap_or((args, ""));
-                Ok(Single(OpenVirtualFile {
+                Ok(EAction::OpenVirtualFile {
                     name: name.to_string(),
                     txt: txt.to_string(),
                     new_window: true,
-                }))
+                }
+                .into())
             }
         }
 
-        "new-column" => Ok(Single(NewColumn)),
-        "new-window" => Ok(Single(NewWindow)),
+        "new-column" => Ok(UAction::NewColumn.into()),
+        "new-window" => Ok(UAction::NewWindow.into()),
 
-        "pwd" => Ok(Single(SetStatusMessage {
+        "pwd" => Ok(EAction::SetStatusMessage {
             message: cwd.display().to_string(),
-        })),
+        }
+        .into()),
 
-        "q" | "quit" | "Exit" => Ok(Single(Exit { force: false })),
-        "q!" | "quit!" | "Exit!" => Ok(Single(Exit { force: true })),
+        "q" | "quit" | "Exit" => Ok(EAction::Exit { force: false }.into()),
+        "q!" | "quit!" | "Exit!" => Ok(EAction::Exit { force: true }.into()),
 
-        "reload-config" => Ok(Single(ReloadConfig)),
+        "reload-config" => Ok(EAction::ReloadConfig.into()),
         "reload-buffer" | "Get" => {
             if args.is_empty() {
-                Ok(Single(ReloadActiveBuffer))
+                Ok(EAction::ReloadBuffer {
+                    bufid: Some(active_buffer_id),
+                }
+                .into())
             } else {
                 match args.parse::<usize>() {
-                    Ok(id) => Ok(Single(ReloadBuffer { id })),
+                    Ok(id) => Ok(EAction::ReloadBuffer { bufid: Some(id) }.into()),
                     Err(_) => Err(format!("'{args}' is not a valid buffer id")),
                 }
             }
         }
 
-        "rename-buffer" => Ok(Single(RenameActiveBuffer {
+        "rename-buffer" => Ok(BAction::Rename {
             name: args.to_string(),
-        })),
+        }
+        .for_buffer(active_buffer_id)
+        .into()),
 
         "resize-column" => match args.parse::<i16>() {
-            Ok(delta) => Ok(Single(ResizeActiveColumn { delta })),
+            Ok(delta) => Ok(UAction::ResizeActiveColumn { delta }.into()),
             Err(_) => Err(format!("'{args}' is not a valid delta")),
         },
         "resize-window" => match args.parse::<i16>() {
-            Ok(delta) => Ok(Single(ResizeActiveWindow { delta })),
+            Ok(delta) => Ok(UAction::ResizeActiveWindow { delta }.into()),
             Err(_) => Err(format!("'{args}' is not a valid delta")),
         },
 
-        "clear-scratch" => Ok(Single(ClearScratch)),
-        "toggle-scratch" => Ok(Single(ToggleScratch)),
+        "clear-scratch" => Ok(EAction::ClearScratch.into()),
+        "toggle-scratch" => Ok(EAction::ToggleScratch.into()),
 
-        "ts-show-tree" => Ok(Single(TsShowTree)),
-
-        "view-logs" => Ok(Single(ViewLogs)),
+        "ts-show-tree" => Ok(EAction::TsShowTree.into()),
+        "view-logs" => Ok(EAction::ViewLogs.into()),
 
         "w" | "write" => {
             if args.is_empty() {
-                Ok(Single(SaveBuffer { force: false }))
+                Ok(EAction::SaveBuffer { force: false }.into())
             } else {
-                Ok(Single(SaveBufferAs {
+                Ok(EAction::SaveBufferAs {
                     path: args.to_string(),
                     force: false,
-                }))
+                }
+                .into())
             }
         }
         "w!" | "write!" => {
             if args.is_empty() {
-                Ok(Single(SaveBuffer { force: true }))
+                Ok(EAction::SaveBuffer { force: true }.into())
             } else {
-                Ok(Single(SaveBufferAs {
+                Ok(EAction::SaveBufferAs {
                     path: args.to_string(),
                     force: true,
-                }))
+                }
+                .into())
             }
         }
 
-        "wa" | "write-all" => Ok(Single(SaveBufferAll { force: false })),
-        "wa!" | "write-all!" => Ok(Single(SaveBufferAll { force: true })),
+        "wa" | "write-all" => Ok(EAction::SaveBufferAll { force: false }.into()),
+        "wa!" | "write-all!" => Ok(EAction::SaveBufferAll { force: true }.into()),
 
         "wq" | "write-quit" => Ok(Multi(vec![
-            SaveBuffer { force: false },
-            Exit { force: false },
+            EAction::SaveBuffer { force: false }.into(),
+            EAction::Exit { force: false }.into(),
         ])),
 
         "wq!" | "write-quit!" => Ok(Multi(vec![
-            SaveBuffer { force: true },
-            Exit { force: true },
+            EAction::SaveBuffer { force: true }.into(),
+            EAction::Exit { force: true }.into(),
         ])),
 
-        "viewport-bottom" => Ok(Single(SetViewPort(ViewPort::Bottom))),
-        "viewport-top" => Ok(Single(SetViewPort(ViewPort::Top))),
-        "viewport-center" => Ok(Single(SetViewPort(ViewPort::Center))),
+        "viewport-bottom" => Ok(UAction::SetViewPort(ViewPort::Bottom).into()),
+        "viewport-top" => Ok(UAction::SetViewPort(ViewPort::Top).into()),
+        "viewport-center" => Ok(UAction::SetViewPort(ViewPort::Center).into()),
 
         "" => Err(String::new()),
         _ => Err(String::new()),
-        // _ => Err(format!("Not an editor command: {command}")),
     }
 }
 
@@ -253,8 +276,8 @@ impl<S> Editor<S>
 where
     S: System,
 {
-    pub(super) fn parse_command(&mut self, input: &str) -> Option<Actions> {
-        match parse_command(input, self.active_buffer_id(), &self.cwd) {
+    pub(super) fn parse_command(&mut self, bufid: usize, input: &str) -> Option<Actions> {
+        match parse_command(input, bufid, &self.cwd) {
             Ok(actions) => Some(actions),
             Err(msg) if msg.is_empty() => None,
             Err(msg) => {
@@ -276,20 +299,36 @@ fn try_parse_bufid(args: &str, active_buffer_id: usize) -> Result<usize, String>
     }
 }
 
-fn try_parse_single_char_command(input: &str) -> Option<Actions> {
+fn try_parse_single_char_command(input: &str, active_buffer_id: usize) -> Option<Actions> {
     match input.chars().next() {
-        Some('!') => Some(Single(ShellRun {
-            cmd: input[1..].to_string(),
-        })),
-        Some('|') => Some(Single(ShellPipe {
-            cmd: input[1..].to_string(),
-        })),
-        Some('<') => Some(Single(ShellReplace {
-            cmd: input[1..].to_string(),
-        })),
-        Some('>') => Some(Single(ShellSend {
-            cmd: input[1..].to_string(),
-        })),
+        Some('!') => Some(
+            EAction::ShellRun {
+                bufid: Some(active_buffer_id),
+                cmd: input[1..].to_string(),
+            }
+            .into(),
+        ),
+        Some('|') => Some(
+            EAction::ShellPipe {
+                bufid: Some(active_buffer_id),
+                cmd: input[1..].to_string(),
+            }
+            .into(),
+        ),
+        Some('<') => Some(
+            EAction::ShellReplace {
+                bufid: Some(active_buffer_id),
+                cmd: input[1..].to_string(),
+            }
+            .into(),
+        ),
+        Some('>') => Some(
+            EAction::ShellSend {
+                bufid: Some(active_buffer_id),
+                cmd: input[1..].to_string(),
+            }
+            .into(),
+        ),
 
         _ => None,
     }

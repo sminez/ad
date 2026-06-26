@@ -4,11 +4,12 @@ use crate::{
     config::Config,
     die,
     dot::{Cur, Dot},
-    editor::ViewPort,
+    editor::{ActionOutcome, UAction, ViewPort},
     fsys::InputFilter,
+    key::Arrow,
     lsp::LspManagerHandle,
-    ziplist,
     ziplist::{Position, ZipList},
+    zlist,
 };
 use parking_lot::RwLock;
 use std::{
@@ -123,7 +124,7 @@ impl Layout {
             scratch,
             screen_rows,
             screen_cols,
-            cols: ziplist![Column::new(screen_rows, screen_cols, &[id])],
+            cols: zlist![Column::new(screen_rows, screen_cols, &[id])],
             views: vec![],
             changed_since_last_render: false,
         };
@@ -132,6 +133,68 @@ impl Layout {
         assert_invariants!(l);
 
         l
+    }
+
+    pub fn handle_ui_action(&mut self, uaction: UAction) -> Option<ActionOutcome> {
+        use UAction::*;
+
+        match uaction {
+            BalanceActiveColumn => self.balance_active_column(),
+            BalanceAll => self.balance_all(),
+            BalanceColumns => self.balance_columns(),
+            BalanceWindows => self.balance_windows(),
+
+            DeleteColumn { force } => return self.close_active_column(force),
+            DeleteWindow { force } => return self.close_active_window(force),
+
+            DragWindow {
+                direction: Arrow::Up,
+            } => self.drag_up(),
+            DragWindow {
+                direction: Arrow::Down,
+            } => self.drag_down(),
+            DragWindow {
+                direction: Arrow::Left,
+            } => self.drag_left(),
+            DragWindow {
+                direction: Arrow::Right,
+            } => self.drag_right(),
+
+            NewColumn => self.new_column(),
+            NewWindow => self.new_window(),
+            NextBuffer => {
+                let id = self.focus_next_buffer();
+                return Some(ActionOutcome::NotifyFocusChange(id));
+            }
+            NextColumn => {
+                self.next_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+            NextWindowInColumn => {
+                self.next_window_in_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+
+            PreviousBuffer => {
+                let id = self.focus_previous_buffer();
+                return Some(ActionOutcome::NotifyFocusChange(id));
+            }
+            PreviousColumn => {
+                self.prev_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+            PreviousWindowInColumn => {
+                self.prev_window_in_column();
+                return Some(ActionOutcome::NotifyFocusChange(self.active_buffer_id()));
+            }
+
+            ResizeActiveColumn { delta } => self.resize_active_column(delta),
+            ResizeActiveWindow { delta } => self.resize_active_window(delta),
+
+            SetViewPort(vp) => self.set_viewport(vp),
+        }
+
+        None
     }
 
     /// Check to see if any actions taken since the last time this method was called resulted
@@ -184,13 +247,17 @@ impl Layout {
             .any(|(_, c)| c.wins.iter().any(|(_, w)| w.view.bufid == id))
     }
 
+    fn active_buffer_id(&self) -> usize {
+        self.buffers.active().id
+    }
+
     /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
     pub(crate) fn active_buffer_ignoring_scratch(&self) -> &Buffer {
         self.buffers.active()
     }
 
     /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
-    pub(crate) fn active_buffer_mut_ignoring_scratch(&mut self) -> &mut Buffer {
+    pub(crate) fn active_buffer_ignoring_scratch_mut(&mut self) -> &mut Buffer {
         self.buffers.active_mut()
     }
 
@@ -345,7 +412,7 @@ impl Layout {
             .all(|bufid| bufid == id);
 
         if only_closing_buffer {
-            self.cols = ziplist![Column::new(
+            self.cols = zlist![Column::new(
                 self.screen_rows,
                 self.screen_cols,
                 &[focused_id]
@@ -479,16 +546,16 @@ impl Layout {
 
     /// Close the active window, if this was the last remaining window then
     /// Editor::delete_active_window will exit.
-    pub(crate) fn close_active_window(&mut self) -> bool {
+    pub(crate) fn close_active_window(&mut self, force: bool) -> Option<ActionOutcome> {
         self.changed_since_last_render = true;
 
         if self.scratch.is_focused {
             self.scratch.toggle();
-            return false;
+            return None;
         }
 
         if self.cols.len() == 1 && self.cols.focus.wins.len() == 1 {
-            return true;
+            return Some(ActionOutcome::Exit(force));
         }
 
         if self.cols.focus.wins.len() == 1 {
@@ -505,21 +572,21 @@ impl Layout {
         #[cfg(test)]
         assert_invariants!(self);
 
-        false
+        None
     }
 
     /// Close the active column, if this was the last remaining column then
     /// Editor::delete_active_column will exit.
-    pub(crate) fn close_active_column(&mut self) -> bool {
+    pub(crate) fn close_active_column(&mut self, force: bool) -> Option<ActionOutcome> {
         self.changed_since_last_render = true;
 
         if self.scratch.is_focused {
             self.scratch.toggle();
-            return false;
+            return None;
         }
 
         if self.cols.len() == 1 {
-            return true;
+            return Some(ActionOutcome::Exit(force));
         }
 
         self.cols.remove_focused_unchecked();
@@ -531,7 +598,7 @@ impl Layout {
         #[cfg(test)]
         assert_invariants!(self);
 
-        false
+        None
     }
 
     pub(crate) fn record_jump_position(&mut self) {
@@ -1869,7 +1936,7 @@ mod tests {
             scratch,
             screen_rows: 80,
             screen_cols: 100,
-            cols: ziplist![Column::new(80, 100, &[id])],
+            cols: zlist![Column::new(80, 100, &[id])],
             views: vec![],
             changed_since_last_render: false,
         };

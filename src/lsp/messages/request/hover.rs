@@ -1,5 +1,5 @@
 use crate::{
-    editor::{Action, Actions},
+    editor::{Actions, EAction},
     lsp::{
         LSP_FILE, LspManager, Pos,
         messages::{request::LspRequest, txtdoc_pos},
@@ -44,7 +44,7 @@ impl LspRequest for HoverRequest {
             }
         };
 
-        Some(Actions::Single(Action::OpenTransientScratch {
+        Some(Actions::single(EAction::OpenTransientScratch {
             name: LSP_FILE.to_string(),
             txt,
         }))
