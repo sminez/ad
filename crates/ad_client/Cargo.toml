@@ -22,7 +22,7 @@ tokio = ["dep:tokio", "ninep/tokio"]
 
 [dependencies]
 ad_event = { version = "0.5", path = "../ad_event" }
-ninep = { version = "0.6", path = "../ninep", default-features = false }
+ninep = { version = "0.6", default-features = false }
 tokio =  { version = "1", features = ["macros", "net", "io-util", "rt", "sync", "time"], optional = true }
 
 [dev-dependencies]

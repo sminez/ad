@@ -799,16 +799,14 @@ dependencies = [
 [[package]]
 name = "ninep"
 version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da9fa3f52e63db1cdf6adae8b42a5f2e5c7cdb5afeb3ac8ef1e0322ee2e4f160"
 dependencies = [
- "assert_fs",
  "bitflags 2.11.1",
  "jiff",
- "lexopt",
  "parking_lot",
  "simple_coro",
- "simple_test_case",
  "tokio",
- "uzers",
 ]
 
 [[package]]
@@ -1524,16 +1522,6 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
-
-[[package]]
-name = "uzers"
-version = "0.12.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b8275fb1afee25b4111d2dc8b5c505dbbc4afd0b990cb96deb2d88bff8be18d"
-dependencies = [
- "libc",
- "log",
-]
 
 [[package]]
 name = "valuable"

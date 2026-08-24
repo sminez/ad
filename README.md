@@ -21,7 +21,7 @@ issues to learn about what is and is not implemented.
 ![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
 
 
-## :warning: Project Status
+## Project Status
 
 `ad` is now stable enough that you can try it out and see what you think. That said, there is
 currently very little documentation and there are likely to be a variety of bugs and crashes in
@@ -35,7 +35,7 @@ the git log for details of what has changed.
 You have been warned!
 
 
-### :technologist: Contributing
+### Contributing
 
 The project as a whole isn't particularly well suited for external contributors in its current
 state so please do [raise an issue](https://github.com/sminez/ad/issues/new/choose) to discuss
@@ -44,7 +44,7 @@ minor bug fixes and typo corrections I am unlikely to be able to do anything oth
 PRs that have been opened without prior discussion of the issue they are intending to address.
 
 
-## :eyes: Getting started
+## Getting started
 
 Packaging of the project to include the default config files and helper scripts isn't currently
 in place, so the recommended way to try out `ad` is to clone this repo and compile from source:
@@ -67,7 +67,7 @@ If you would like to watch a tour of how `ad` works there is one available [here
 > the exact content of the video tour may not accurately reflect the current state of `ad`.
 
 
-## :straight_ruler: The design of ad
+## The design of ad
 
 `ad` is aiming to be a hybrid of the pieces of various editors that I find most useful:
   - vim style modal editing
@@ -88,7 +88,7 @@ direct interaction with external tools and programs from the outside rather than
 everything **in**.
 
 
-### :building_construction: Building on top of ad
+### Building on top of ad
 
 In addition to the `data/bin` directory of this repo you might want to check out the following links for examples of
 what you can achieve with `ad`'s filesystem interface:
@@ -96,7 +96,7 @@ what you can achieve with `ad`'s filesystem interface:
 - A [Zettelkasten note taking application](https://gist.github.com/davcam/a4570acb520dce3a25a98cf2ddbb9ef2) from [@davcam](https://github.com/davcam)
 
 
-## :package: Modules
+## Modules
 Given the (arguably questionable) goal of implementing as much as possible from scratch, there is a fair
 amount of functionality included in `ad` which in turn is split out into a number of modules within the
 crate. For now, I'm not structuring things as individual crates but that may change in future.
@@ -107,10 +107,12 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
   internal state of a Buffer.
 - **dot**: manipulation of the current selection in a given buffer (including vim-like motions)
 - **exec**: minimal implementation of the core of the [sam editing language](http://doc.cat-v.org/bell_labs/sam_lang_tutorial/sam_tut.pdf)
+  - The core engine has now moved out to its own crate with source code available [here](https://github.com/sminez/structex).
+  - See [this blogpost](https://www.sminez.dev/match-it-again-sam/) for an overview of how the system works
 - **fsys**: virtual filesystem interface to the editor state in the style of [acme](http://acme.cat-v.org/)
 - **lsp**: a minimal [LSP](https://microsoft.github.io/language-server-protocol/) client
 - **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
-  - Now moved out to its own crate with source code available [here](https://github.com/sminez/ad/crates/ninep).
+  - Now moved out to its own crate with source code available [here](https://github.com/sminez/ninep).
 - **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
   the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexibility in tinkering
   with the exec command language.
@@ -119,7 +121,7 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
 - **trie**: [trie](https://en.wikipedia.org/wiki/Trie) data structure for handling sequence based keybindings
 
 
-## :question: Why?
+## Why?
 
 I've used [vim][0] for years now (more recently [neovim][1] and [kakoune][2]) and I really love the
 core editor itself. A while back I discovered [acme][3] through a fantastic [screencast][4] from
