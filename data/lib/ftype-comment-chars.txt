@@ -1,6 +1,7 @@
 bash #
 c //
 dart //
+go //
 graphql #
 just #
 make #
