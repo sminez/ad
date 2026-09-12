@@ -339,7 +339,7 @@ where
     pub fn open_file<P: AsRef<Path>>(&mut self, path: P, new_window: bool) {
         let path = path.as_ref();
         debug!(?path, "opening file");
-        let was_empty_scratch = self.layout.is_empty_squirrel();
+        let was_empty_scratch = self.layout.buffers().is_empty_squirrel();
         let current_id = self.active_buffer_id();
 
         match self.layout.open_or_focus(path, new_window) {
@@ -393,6 +393,7 @@ where
     pub(crate) fn find_repo_file(&mut self, new_window: bool) {
         let d = self
             .layout
+            .buffers()
             .active_buffer_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
@@ -414,7 +415,7 @@ where
     }
 
     pub(crate) fn delete_buffer(&mut self, id: usize, force: bool) {
-        match self.layout.buffer_with_id(id) {
+        match self.layout.buffers().with_id(id) {
             Some(b) if b.dirty && !force => self.set_status_message("No write since last change"),
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
@@ -433,7 +434,10 @@ where
             None => return,
         };
 
-        let b = self.layout.active_buffer_ignoring_scratch_mut();
+        let b = self
+            .layout
+            .buffers_mut()
+            .active_buffer_ignoring_scratch_mut();
         match b.save_to_disk_at(p, force) {
             Ok(msg) => {
                 self.lsp_manager.document_changed(b);
@@ -459,7 +463,7 @@ where
         let mut n_errors = 0;
 
         for &id in ids.iter() {
-            let b = self.layout.buffer_with_id_mut(id).unwrap();
+            let b = self.layout.buffers_mut().with_id_mut(id).unwrap();
             let p = match &b.kind {
                 BufferKind::File(p) if b.dirty => p.clone(),
                 _ => continue,
@@ -493,7 +497,10 @@ where
     fn get_buffer_save_path(&mut self, fname: Option<String>, force: bool) -> Option<PathBuf> {
         use BufferKind as Bk;
 
-        let desired_path = match (fname, &self.layout.active_buffer_ignoring_scratch().kind) {
+        let desired_path = match (
+            fname,
+            &self.layout.buffers().active_buffer_ignoring_scratch().kind,
+        ) {
             // Renaming an existing file or attempting to save a new file created in
             // the editor: both need verifying
             (Some(s), Bk::File(_) | Bk::Unnamed) => PathBuf::from(s),
@@ -549,6 +556,7 @@ where
         }
 
         self.layout
+            .buffers_mut()
             .active_buffer_ignoring_scratch_mut()
             .set_filename(desired_path.clone());
 
@@ -557,12 +565,15 @@ where
 
     pub(super) fn reload_buffer(&mut self, bufid: Option<usize>) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 // Silently ignoring attempts to reload unknown buffers
                 None => return,
             },
-            None => self.layout.active_buffer_ignoring_scratch_mut(),
+            None => self
+                .layout
+                .buffers_mut()
+                .active_buffer_ignoring_scratch_mut(),
         };
 
         let msg = b.reload_from_disk();
@@ -594,7 +605,7 @@ where
     }
 
     pub(super) fn exit(&mut self, force: bool) {
-        let dirty_buffers = self.layout.dirty_buffers();
+        let dirty_buffers = self.layout.buffers().dirty_buffers();
         if !dirty_buffers.is_empty() && !force {
             self.set_status_message("No write since last change. Use ':q!' to force exit");
             self.push_minibuffer(
@@ -626,6 +637,7 @@ where
     pub(super) fn search_in_current_buffer(&mut self) {
         let numbered_lines = self
             .layout
+            .buffers()
             .active_buffer_ignoring_scratch()
             .string_lines()
             .into_iter()
@@ -678,10 +690,8 @@ where
 
     /// Use the minibuffer to select an open buffer and focus it in the active window
     pub(super) fn select_buffer(&mut self) {
-        let mb = SimpleMbSelect::new(
-            "> ",
-            self.layout.as_buffer_list(),
-            |selection| match selection {
+        let mb = SimpleMbSelect::new("> ", self.layout.buffers().as_buffer_list(), |selection| {
+            match selection {
                 MiniBufferSelection::Line { line, .. } => line
                     .split_once(' ')
                     .expect("buffer list format contains a space")
@@ -690,8 +700,8 @@ where
                     .ok()
                     .map(|id| Actions::single(EAction::FocusBuffer { id })),
                 _ => None,
-            },
-        );
+            }
+        });
 
         self.push_minibuffer(mb.into_selector());
     }
@@ -706,6 +716,7 @@ where
         let mb = SimpleMbSelect::new(
             "<RAW BUFFER> ",
             self.layout
+                .buffers()
                 .active_buffer_ignoring_scratch()
                 .string_lines()
                 .into_iter()
@@ -724,6 +735,7 @@ where
     pub(super) fn show_active_ts_tree(&mut self) {
         match self
             .layout
+            .buffers()
             .active_buffer_ignoring_scratch()
             .pretty_print_ts_tree()
         {
@@ -739,7 +751,7 @@ where
     pub(super) fn debug_edit_log(&mut self) {
         let mb = SimpleMbSelect::new(
             "<EDIT LOG> ",
-            self.layout.active_buffer().debug_edit_log(),
+            self.layout.buffers().active_buffer().debug_edit_log(),
             |_| None,
         );
 
@@ -765,15 +777,15 @@ where
         source: Source,
     ) {
         let (id, b) = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => (id, b),
                 None => return,
             },
             None => {
                 // Grabbing the ID in this way allows us to treat loads in the scratch buffer as being from
                 // the active buffer.
-                let id = self.layout.active_buffer_ignoring_scratch().id;
-                let b = self.layout.active_buffer_mut();
+                let id = self.layout.buffers().active_buffer_ignoring_scratch().id;
+                let b = self.layout.buffers_mut().active_buffer_mut();
 
                 (id, b)
             }
@@ -793,12 +805,12 @@ where
     }
 
     pub(super) fn plumb(&mut self, txt: String, load_in_new_window: bool) {
-        let id = self.layout.active_buffer_ignoring_scratch().id;
+        let id = self.layout.buffers().active_buffer_id();
         self.load_string_in_buffer(id, txt, load_in_new_window);
     }
 
     pub(super) fn load_string_in_buffer(&mut self, id: usize, s: String, load_in_new_window: bool) {
-        let b = match self.layout.buffer_with_id_mut(id) {
+        let b = match self.layout.buffers_mut().with_id_mut(id) {
             Some(b) => b,
             None => return,
         };
@@ -858,7 +870,7 @@ where
                 if let Some(s) = attrs.get("addr") {
                     match Addr::parse(s) {
                         Ok(addr) => {
-                            let b = self.layout.active_buffer_mut();
+                            let b = self.layout.buffers_mut().active_buffer_mut();
                             b.dot = b.map_addr(&addr);
                         }
                         Err(e) => self.set_status_message(format!("malformed addr: {e:?}")),
@@ -873,7 +885,7 @@ where
             return;
         }
 
-        let b = match self.layout.buffer_with_id_mut(bufid) {
+        let b = match self.layout.buffers_mut().with_id_mut(bufid) {
             Some(b) => b,
             None => return,
         };
@@ -904,7 +916,7 @@ where
         if is_file {
             self.open_file(path, load_in_new_window);
             if let Some(addr) = maybe_addr {
-                let b = self.layout.active_buffer_mut();
+                let b = self.layout.buffers_mut().active_buffer_mut();
                 b.dot = b.map_addr(&addr);
                 self.layout.clamp_scroll();
                 self.handle_action(UAction::SetViewPort(ViewPort::Center).into(), Source::Fsys);
@@ -931,11 +943,11 @@ where
         source: Source,
     ) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_mut(),
+            None => self.layout.buffers_mut().active_buffer_mut(),
         };
 
         b.expand_cur_dot();
@@ -1001,11 +1013,14 @@ where
 
         let mut buf = Vec::new();
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_ignoring_scratch_mut(),
+            None => self
+                .layout
+                .buffers_mut()
+                .active_buffer_ignoring_scratch_mut(),
         };
 
         let fname = b.full_name().to_string();
@@ -1018,8 +1033,11 @@ where
 
         match prog.execute(b, &mut runner, &fname, &mut buf) {
             Ok(new_dot) => {
-                self.layout.record_jump_position();
-                self.layout.active_buffer_ignoring_scratch_mut().dot = new_dot;
+                self.layout.buffers_mut().record_jump_position();
+                self.layout
+                    .buffers_mut()
+                    .active_buffer_ignoring_scratch_mut()
+                    .dot = new_dot;
             }
 
             Err(e) => self.set_status_message(format!("Error running edit command: {e:?}")),
@@ -1096,12 +1114,12 @@ where
     pub(super) fn prepare_lsp_rename(&mut self) {
         self.set_status_message("preparing LSP rename...");
         self.lsp_manager
-            .prepare_rename(self.layout.active_buffer_ignoring_scratch());
+            .prepare_rename(self.layout.buffers().active_buffer_ignoring_scratch());
     }
 
     pub(super) fn lsp_rename(&mut self, new_name: Option<String>) {
         if let Some(new_name) = new_name {
-            let b = self.layout.active_buffer_ignoring_scratch();
+            let b = self.layout.buffers().active_buffer_ignoring_scratch();
             self.lsp_manager.rename(b, new_name);
             return;
         }
@@ -1125,11 +1143,14 @@ where
 
     pub(super) fn pipe_dot_through_shell_cmd(&mut self, bufid: Option<usize>, raw_cmd_str: &str) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_ignoring_scratch_mut(),
+            None => self
+                .layout
+                .buffers_mut()
+                .active_buffer_ignoring_scratch_mut(),
         };
 
         let (s, d, id) = (b.dot_contents(), b.dir().unwrap_or(&self.cwd), b.id);
@@ -1143,11 +1164,14 @@ where
 
     pub(super) fn replace_dot_with_shell_cmd(&mut self, bufid: Option<usize>, raw_cmd_str: &str) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_ignoring_scratch_mut(),
+            None => self
+                .layout
+                .buffers_mut()
+                .active_buffer_ignoring_scratch_mut(),
         };
 
         let (d, id) = (b.dir().unwrap_or(&self.cwd), b.id);
@@ -1161,11 +1185,14 @@ where
 
     pub(super) fn run_shell_cmd(&mut self, bufid: Option<usize>, raw_cmd_str: &str) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_ignoring_scratch_mut(),
+            None => self
+                .layout
+                .buffers_mut()
+                .active_buffer_ignoring_scratch_mut(),
         };
 
         let (d, id) = (b.dir().unwrap_or(&self.cwd), b.id);
@@ -1199,6 +1226,7 @@ where
         let id = self.active_buffer_id();
         let res = self
             .layout
+            .buffers()
             .active_buffer_ignoring_scratch()
             .state_changed_on_disk();
 

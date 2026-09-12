@@ -28,8 +28,10 @@ use tracing::{debug, error};
 mod buffers;
 mod edit;
 mod internal;
+mod scratch;
 
 use edit::{Edit, EditLog, Kind, Txt};
+use scratch::ScratchBuf;
 
 pub use buffers::BufferId;
 pub(crate) use buffers::Buffers;
@@ -52,6 +54,10 @@ pub(crate) const WELCOME_SQUIRREL: &str = r#"+----------------------------------
                 ('( )'
                 -'-'"#;
 pub(crate) const DEFAULT_OUTPUT_BUFFER: &str = "+output";
+/// The reserved ID for the scratch buffer.
+/// If we ever collide with this when creating a normal buffer then the user is
+/// doing something _very_ strange...
+pub(crate) const SCRATCH_ID: usize = usize::MAX;
 const HTTPS: &str = "https://";
 const HTTP: &str = "http://";
 

@@ -1,11 +1,12 @@
 //! Handling for acme-style mouse interactions with the editor.
 use crate::{
+    buffer::SCRATCH_ID,
     dot::{Dot, Range},
     editor::{BAction, Editor},
     fsys::LogEvent,
     key::{MouseButton, MouseEvent, MouseEventKind, MouseMod},
     system::System,
-    ui::{Border, SCRATCH_ID},
+    ui::Border,
 };
 use ad_event::Source;
 use std::time::Instant;
@@ -120,7 +121,7 @@ where
                 }
 
                 let click_in_active_buffer = self.layout.set_dot_from_screen_coords(x, y);
-                let b = self.layout.active_buffer_mut();
+                let b = self.layout.buffers_mut().active_buffer_mut();
                 if !click_in_active_buffer && b.id != SCRATCH_ID {
                     _ = self.tx_fsys.send(LogEvent::Focus(b.id));
                 }
@@ -161,7 +162,7 @@ where
                     }
 
                     if *btn == Left {
-                        self.layout.active_buffer_mut().dot = Dot::from(*selection);
+                        self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(*selection);
                     }
                 }
 
@@ -261,7 +262,7 @@ where
                         *paste_handled = true;
                         self.paste_from_clipboard(Source::Mouse);
                     } else if !is_right && !*cut_handled {
-                        *selection = self.layout.active_buffer().dot.as_range();
+                        *selection = self.layout.buffers().active_buffer().dot.as_range();
                         *cut_handled = true;
                         self.handle_buffer_action(None, BAction::Delete, Source::Mouse);
                     }
@@ -296,17 +297,20 @@ where
             // For Middle clicks, if there is also a range dot in the buffer then that is
             // used as an argument to the command being executed.
             if is_right {
-                self.layout.active_buffer_mut().dot = Dot::from(selection);
+                self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(selection);
                 self.default_load_dot(None, load_in_new_window, Source::Mouse);
             } else {
-                let dot = self.layout.active_buffer().dot;
-                self.layout.active_buffer_mut().dot = Dot::from(selection);
+                let dot = self.layout.buffers().active_buffer().dot;
+                self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(selection);
 
                 if dot.is_range() {
                     // Execute as if the click selection was dot then reset dot
-                    let arg = dot.content(self.layout.active_buffer()).trim().to_string();
+                    let arg = dot
+                        .content(self.layout.buffers().active_buffer())
+                        .trim()
+                        .to_string();
                     self.default_execute_dot(None, Some((dot.as_range(), arg)), Source::Mouse);
-                    self.layout.active_buffer_mut().dot = dot;
+                    self.layout.buffers_mut().active_buffer_mut().dot = dot;
                 } else {
                     self.default_execute_dot(None, None, Source::Mouse);
                 }
@@ -315,8 +319,14 @@ where
             // In the case where the click selection was a Cur rather than a Range we
             // set the buffer dot to the click location if it is outside of the current buffer
             // dot (and allow smart expand to handle generating the selection) before we Load/Execute
-            if !self.layout.active_buffer().dot.contains(&selection.start) {
-                self.layout.active_buffer_mut().dot = Dot::from(selection.start);
+            if !self
+                .layout
+                .buffers()
+                .active_buffer()
+                .dot
+                .contains(&selection.start)
+            {
+                self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(selection.start);
             }
 
             if is_right {
@@ -754,7 +764,7 @@ mod tests {
         );
         ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
         ed.open_virtual("test", "some text to test with", false);
-        ed.layout.active_buffer_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
+        ed.layout.buffers_mut().active_buffer_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
 
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();
@@ -767,7 +777,7 @@ mod tests {
         }
 
         let recvd_fsys_events: Vec<_> = rx.try_iter().collect();
-        let b = ed.layout.active_buffer();
+        let b = ed.layout.buffers().active_buffer();
 
         assert_eq!(ed.held_click, click, "click");
         assert_eq!(b.dot.content(b), dot, "dot content");

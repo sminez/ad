@@ -125,7 +125,7 @@ where
         // If we have a minibuffer open then that takes priority over an open scratch buffer
         let w_minibuffer = mb.is_some();
         let mb = mb.unwrap_or_default();
-        let active_buffer = layout.active_buffer();
+        let active_buffer = layout.buffers().active_buffer();
 
         let mb_has_lines = mb.b.map(|b| !b.is_empty()).unwrap_or_default();
         let offset = if mb_has_lines {
@@ -150,7 +150,7 @@ where
             _ => None,
         };
 
-        let (load_exec_range, scratch_load_exec_range) = if layout.scratch.is_focused {
+        let (load_exec_range, scratch_load_exec_range) = if layout.buffers().scratch_is_focused {
             (None, load_exec_range)
         } else {
             (load_exec_range, None)
@@ -167,8 +167,9 @@ where
         if w_minibuffer {
             self.frame.render_minibuffer_state(&mb, tabstop, cs);
         } else if layout.scratch.is_visible {
+            let b = layout.buffers().scratch().buffer();
             self.frame
-                .render_scratch(&layout.scratch, scratch_load_exec_range, tabstop, cs);
+                .render_scratch(&layout.scratch, b, scratch_load_exec_range, tabstop, cs);
         };
 
         if self.frame.show_msg_bar {
@@ -272,7 +273,8 @@ where
         // since the last render.
         let need_render = layout.changed_since_last_render()
             || mb_this_frame
-            || self.mb_last_frame | held_click.is_some();
+            || self.mb_last_frame
+            || held_click.is_some();
 
         if need_render {
             layout.update_visible_ts_state();
@@ -562,25 +564,19 @@ impl Frame {
     fn render_scratch(
         &mut self,
         scratch: &Scratch,
+        b: &Buffer,
         load_exec_range: Option<(bool, Range)>,
         tabstop: usize,
         cs: &ColorScheme,
     ) {
         self.mb_lines.clear();
-        let b = scratch.b.buffer();
         let (w_lnum, _) = b.sign_col_dims();
-        let rng = if scratch.is_focused {
-            load_exec_range
-        } else {
-            None
-        };
-
         let mut wr = WinRenderer {
             y: 0,
             w_lnum,
             n_cols: self.screen_cols,
             tabstop,
-            it: b.iter_tokenized_lines_from(scratch.w.view.row_off, rng),
+            it: b.iter_tokenized_lines_from(scratch.w.view.row_off, load_exec_range),
             gb: &b.txt,
             w: &scratch.w,
             cs,
@@ -634,7 +630,8 @@ impl<'a> ColRenderer<'a> {
         let (is_focus, w) = self.inner.next()?;
         let b = self
             .layout
-            .buffer_with_id(w.view.bufid)
+            .buffers()
+            .with_id(w.view.bufid)
             .expect("valid buffer id");
 
         let (w_lnum, _) = b.sign_col_dims();

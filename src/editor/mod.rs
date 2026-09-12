@@ -1,7 +1,7 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     LogBuffer,
-    buffer::{Buffer, BufferId, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferId, SCRATCH_ID, WELCOME_SQUIRREL},
     config::Config,
     die,
     dot::TextObject,
@@ -13,7 +13,7 @@ use crate::{
     mode::{Mode, modes},
     plumb::PlumbingRules,
     system::{DefaultSystem, System},
-    ui::{Layout, SCRATCH_ID, StateChange, Ui, UserInterface, style::CurShape},
+    ui::{Layout, StateChange, Ui, UserInterface, style::CurShape},
 };
 use ad_event::Source;
 use parking_lot::RwLock;
@@ -158,8 +158,9 @@ where
 
         let ui = Ui::new(mode, config.clone());
         let mut layout = Layout::new(100, 100, lsp_manager.clone(), config.clone());
-        if show_splash && layout.is_empty_squirrel() {
+        if show_splash && layout.buffers().is_empty_squirrel() {
             layout
+                .buffers_mut()
                 .active_buffer_ignoring_scratch_mut()
                 .txt
                 .insert_str(0, WELCOME_SQUIRREL);
@@ -238,24 +239,27 @@ where
     /// The id of the currently active buffer
     #[inline]
     pub fn active_buffer_id(&self) -> usize {
-        self.layout.active_buffer_ignoring_scratch().id
+        self.layout.buffers().active_buffer_id()
     }
 
     #[inline]
     pub fn active_buffer_name(&self) -> &str {
-        self.layout.active_buffer_ignoring_scratch().full_name()
+        self.layout
+            .buffers()
+            .active_buffer_ignoring_scratch()
+            .full_name()
     }
 
     pub fn buffer_list(&self) -> Vec<String> {
-        self.layout.as_buffer_list()
+        self.layout.buffers().as_buffer_list()
     }
 
     pub fn buffer_content(&self, id: BufferId) -> Option<String> {
-        self.layout.buffer_with_id(id).map(|b| b.str_contents())
+        self.layout.buffers().with_id(id).map(|b| b.str_contents())
     }
 
     pub fn buffer_dot(&self, id: BufferId) -> Option<String> {
-        self.layout.buffer_with_id(id).map(|b| b.dot_contents())
+        self.layout.buffers().with_id(id).map(|b| b.dot_contents())
     }
 
     pub fn layout_ids(&self) -> Vec<Vec<BufferId>> {
@@ -273,6 +277,7 @@ where
     #[inline]
     pub fn effective_directory(&self) -> &Path {
         self.layout
+            .buffers()
             .active_buffer_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
@@ -287,7 +292,7 @@ where
 
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
-        if self.layout.is_empty_squirrel() {
+        if self.layout.buffers().is_empty_squirrel() {
             _ = self.tx_fsys.send(LogEvent::Open(0));
             _ = self.tx_fsys.send(LogEvent::Focus(0));
         }
@@ -392,11 +397,11 @@ where
         f: fn(&Buffer) -> String,
     ) {
         if id == SCRATCH_ID {
-            _ = tx.send(Ok((f)(self.layout.scratch.b.buffer())));
+            _ = tx.send(Ok((f)(self.layout.buffers().scratch().buffer())));
             return;
         }
 
-        match self.layout.buffer_with_id(id) {
+        match self.layout.buffers().with_id(id) {
             Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
                 _ = tx.send(Err("unknown buffer".to_string()));
@@ -413,12 +418,12 @@ where
         f: F,
     ) {
         if id == SCRATCH_ID {
-            (f)(self.layout.scratch.b.buffer_mut(), s);
+            (f)(self.layout.buffers_mut().scratch_mut().buffer_mut(), s);
             _ = tx.send(Ok("handled".to_string()));
             return;
         }
 
-        match self.layout.buffer_with_id_mut(id) {
+        match self.layout.buffers_mut().with_id_mut(id) {
             Some(b) => {
                 (f)(b, s);
                 _ = tx.send(Ok("handled".to_string()))
@@ -566,13 +571,13 @@ where
                 .write_output_for_buffer(bufid, content, &self.cwd),
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
-            ClearScratch => self.layout.scratch.b.clear(),
+            ClearScratch => self.layout.clear_scratch(),
             ClearEphemeralMode { name } => self.clear_ephemeral_mode(&name),
             CommandMode => self.command_mode(),
             DeleteBuffer { bufid, force } => self.delete_buffer(bufid, force),
             EditCommand { bufid, cmd } => self.execute_edit_command(bufid, &cmd),
             EditorCommand { bufid, cmd } => self.execute_command(bufid, &cmd),
-            EnsureFileIsOpen { path } => self.layout.ensure_file_is_open(&path),
+            EnsureFileIsOpen { path } => self.layout.buffers_mut().ensure_file_is_open(&path),
             ExecuteDot { bufid } => self.default_execute_dot(bufid, None, source),
             ExecuteString { bufid, s } => self.execute_explicit_string(bufid, &s, source),
             Exit { force } => self.exit(force),
@@ -584,17 +589,16 @@ where
             KillRunningChild { idx } => self.kill_running_child(idx),
             LoadDot { bufid, new_window } => self.default_load_dot(bufid, new_window, source),
             LspShowCapabilities => {
-                if let Some((name, txt)) = self
-                    .lsp_manager
-                    .show_server_capabilities(self.layout.active_buffer_ignoring_scratch())
-                {
+                if let Some((name, txt)) = self.lsp_manager.show_server_capabilities(
+                    self.layout.buffers().active_buffer_ignoring_scratch(),
+                ) {
                     self.open_virtual(name, txt, true)
                 }
             }
             LspShowDiagnostics => {
                 let action = self
                     .lsp_manager
-                    .show_diagnostics(self.layout.active_buffer_ignoring_scratch());
+                    .show_diagnostics(self.layout.buffers().active_buffer_ignoring_scratch());
                 self.handle_action(action, Source::Fsys);
             }
             LspStart => {
@@ -604,28 +608,28 @@ where
             }
             LspStop => self
                 .lsp_manager
-                .stop_client(self.layout.active_buffer_ignoring_scratch()),
+                .stop_client(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspCompletion => self
                 .lsp_manager
-                .completion(self.layout.active_buffer_ignoring_scratch()),
+                .completion(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspFormat => self
                 .lsp_manager
-                .format(self.layout.active_buffer_ignoring_scratch()),
+                .format(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspGotoDeclaration => self
                 .lsp_manager
-                .goto_declaration(self.layout.active_buffer_ignoring_scratch()),
+                .goto_declaration(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspGotoDefinition => self
                 .lsp_manager
-                .goto_definition(self.layout.active_buffer_ignoring_scratch()),
+                .goto_definition(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspGotoTypeDefinition => self
                 .lsp_manager
-                .goto_type_definition(self.layout.active_buffer_ignoring_scratch()),
+                .goto_type_definition(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspHover => self
                 .lsp_manager
-                .hover(self.layout.active_buffer_ignoring_scratch()),
+                .hover(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspReferences => self
                 .lsp_manager
-                .find_references(self.layout.active_buffer_ignoring_scratch()),
+                .find_references(self.layout.buffers().active_buffer_ignoring_scratch()),
             LspRename { new_name } => self.lsp_rename(new_name),
             LspRenamePrepare => self.prepare_lsp_rename(),
             MbSelect(sel) => self.push_minibuffer(sel),
@@ -660,7 +664,7 @@ where
             ToggleScratch => self.layout.toggle_scratch(),
             TsShowTree => self.show_active_ts_tree(),
             ViewLogs => self.view_logs(),
-            Yank => self.set_clipboard(self.layout.active_buffer().dot_contents()),
+            Yank => self.set_clipboard(self.layout.buffers().active_buffer().dot_contents()),
 
             DebugBufferContents => self.debug_buffer_contents(),
             DebugEditLog => self.debug_edit_log(),
@@ -699,11 +703,11 @@ where
         source: Source,
     ) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.layout.buffers_mut().with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_mut(),
+            None => self.layout.buffers_mut().active_buffer_mut(),
         };
 
         if let Some(ao) = b.handle_action(a, source) {

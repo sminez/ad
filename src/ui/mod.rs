@@ -16,7 +16,7 @@ mod layout;
 pub mod style;
 mod tui;
 
-pub use layout::{Border, Layout, SCRATCH_ID};
+pub use layout::{Border, Layout};
 pub use tui::{GenericTui, Tui};
 
 /// Something that can be used as a user interface

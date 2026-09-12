@@ -134,7 +134,7 @@ impl LspManagerHandle {
     }
 
     fn start_req_for_buf(&self, bs: &Buffers) -> Option<Req> {
-        let b = bs.active();
+        let b = bs.active_buffer_ignoring_scratch();
         let (ftype, config) = self.config_for_buffer(b)?;
         let root = config.root_for_buffer(b)?.to_str()?.to_owned();
         let open_docs: Vec<_> = bs
@@ -214,7 +214,7 @@ impl LspManagerHandle {
     /// If the `editor.lsp_autostart` config value is true then attempt to start the server if one
     /// is not already running.
     pub fn document_opened(&self, bs: &Buffers) {
-        let b = bs.active();
+        let b = bs.active_buffer_ignoring_scratch();
         let ftype = match self.config_for_buffer(b) {
             Some((ftype, _)) => ftype,
             None => return,
