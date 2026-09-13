@@ -2,6 +2,7 @@ use crate::{
     buffer::{Buffer, BufferKind, Cur, ScratchBuf, WELCOME_SQUIRREL},
     config::Config,
     dot::TextObject,
+    fsys::InputFilter,
     lsp::LspManagerHandle,
     ziplist::{Position, ZipList},
     zlist,
@@ -15,6 +16,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
+use tracing::warn;
 
 #[cfg(test)]
 use crate::lsp::Req;
@@ -37,8 +39,7 @@ pub struct Buffers {
     lsp_handle: Arc<LspManagerHandle>,
     config: Arc<RwLock<Config>>,
     changed_since_last_render: bool,
-    // FIXME: pub(crate) for this is a hack while moving over the scratch buffer state
-    pub(crate) scratch_is_focused: bool,
+    scratch_is_focused: bool,
 }
 
 impl Buffers {
@@ -106,10 +107,10 @@ impl Buffers {
         // Opening a directory from an existing directory buffer replaces the existing content
         // rather than opening a new buffer in order to prevent the issue in Acme where drilling
         // down into subdirectories results in having multiple.
-        if self.active_buffer_ignoring_scratch().kind.is_dir()
+        if self.active_ignoring_scratch().kind.is_dir()
             && path.metadata().map(|m| m.is_dir()).unwrap_or_default()
         {
-            let b = self.active_buffer_ignoring_scratch_mut();
+            let b = self.active_ignoring_scratch_mut();
             b.kind = BufferKind::Directory(path);
             b.reload_from_disk();
             b.set_dot(TextObject::BufferStart, 1);
@@ -178,11 +179,13 @@ impl Buffers {
     pub fn next(&mut self) {
         self.notify_lsp_changes_if_dirty();
         self.inner.focus_down();
+        self.changed_since_last_render = true;
     }
 
     pub fn previous(&mut self) {
         self.notify_lsp_changes_if_dirty();
         self.inner.focus_up();
+        self.changed_since_last_render = true;
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Buffer> {
@@ -281,8 +284,20 @@ impl Buffers {
         had_change
     }
 
+    pub(crate) fn set_scratch_focus(&mut self, focused: bool) {
+        if focused == self.scratch_is_focused {
+            return;
+        }
+        self.scratch_is_focused = focused;
+        self.changed_since_last_render = true;
+    }
+
+    pub(crate) fn scratch_is_focused(&self) -> bool {
+        self.scratch_is_focused
+    }
+
     pub(crate) fn focus_id(&mut self, id: BufferId) -> Option<BufferId> {
-        if !self.contains_bufid(id) || self.active_buffer_ignoring_scratch().id == id {
+        if !self.contains_bufid(id) || self.active_ignoring_scratch().id == id {
             return None;
         }
         self.notify_lsp_changes_if_dirty();
@@ -328,38 +343,38 @@ impl Buffers {
             .collect()
     }
 
+    /// Returns the active buffer or the scratch buffer if it is focused
+    pub fn active(&self) -> &Buffer {
+        if self.scratch_is_focused {
+            self.scratch.buffer()
+        } else {
+            self.active_ignoring_scratch()
+        }
+    }
+
+    /// Returns the active buffer or the scratch buffer if it is focused
+    pub fn active_mut(&mut self) -> &mut Buffer {
+        if self.scratch_is_focused {
+            self.scratch.buffer_mut()
+        } else {
+            self.active_ignoring_scratch_mut()
+        }
+    }
+
     /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
     #[inline]
-    pub fn active_buffer_ignoring_scratch(&self) -> &Buffer {
+    pub fn active_ignoring_scratch(&self) -> &Buffer {
         &self.inner.focus
     }
 
     /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
     #[inline]
-    pub fn active_buffer_ignoring_scratch_mut(&mut self) -> &mut Buffer {
+    pub fn active_ignoring_scratch_mut(&mut self) -> &mut Buffer {
         &mut self.inner.focus
     }
 
-    /// Returns the active buffer or the scratch buffer if it is focused
-    pub fn active_buffer(&self) -> &Buffer {
-        if self.scratch_is_focused {
-            self.scratch.buffer()
-        } else {
-            self.active_buffer_ignoring_scratch()
-        }
-    }
-
-    /// Returns the active buffer or the scratch buffer if it is focused
-    pub fn active_buffer_mut(&mut self) -> &mut Buffer {
-        if self.scratch_is_focused {
-            self.scratch.buffer_mut()
-        } else {
-            self.active_buffer_ignoring_scratch_mut()
-        }
-    }
-
     #[inline]
-    pub fn active_buffer_id(&self) -> usize {
+    pub fn active_id(&self) -> usize {
         self.inner.focus.id
     }
 
@@ -421,6 +436,11 @@ impl Buffers {
         self.inner.len()
     }
 
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     /// Whether or not the only buffer we currently have open is the default squirrel buffer rather
     /// than a "real" buffer that has been opened by the user.
     #[inline]
@@ -455,6 +475,34 @@ impl Buffers {
                 id
             }
         }
+    }
+
+    /// Returns `true` if the filter was successfully set, false if there was already one in place.
+    pub(crate) fn try_set_input_filter(&mut self, bufid: BufferId, filter: InputFilter) -> bool {
+        let b = match self.with_id_mut(bufid) {
+            Some(b) => b,
+            None => return false,
+        };
+
+        if b.input_filter.is_some() {
+            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
+            return false;
+        }
+
+        let scratch_filter = filter.paired_tag_filter();
+        b.input_filter = Some(filter);
+        self.scratch.set_input_filter(Some(scratch_filter));
+
+        true
+    }
+
+    /// Remove the input filter for the given buffer if one exists.
+    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
+        if let Some(b) = self.with_id_mut(bufid) {
+            b.input_filter = None;
+        }
+
+        self.scratch.set_input_filter(None);
     }
 }
 

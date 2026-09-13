@@ -3,22 +3,17 @@ use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
     key::{Input, MouseButton, MouseEvent, MouseEventKind, MouseMod},
     system::DefaultSystem,
-    ui::{GenericTui, Layout, UserInterface},
+    ui::GenericTui,
 };
 use criterion::{BenchmarkGroup, Criterion, criterion_group, measurement::WallTime};
 use parking_lot::RwLock;
 use std::{
-    env::current_dir,
-    hint::black_box,
     io::{self, Write},
     sync::Arc,
 };
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("TUI render");
-
-    fixed_view(&mut group, "single window", &["src/util.rs"]);
-    fixed_view(&mut group, "two windows", &["src/util.rs", "src/term.rs"]);
 
     single_window_editor_scroll_inputs(
         &mut group,
@@ -61,41 +56,6 @@ impl Write for StdoutSink {
 
         res
     }
-}
-
-fn tui_and_layout(files: &[&str]) -> (GenericTui<StdoutSink>, Layout) {
-    // This will need to point to the TS config for rust
-    let config = Arc::new(RwLock::new(Config::try_load().unwrap()));
-    let mut tui = GenericTui::new_with_stdout_handle(
-        config.clone(),
-        StdoutSink(Vec::with_capacity(512 * 1024)),
-    );
-    tui.set_size(80, 160);
-    let mut layout = Layout::new_with_stub_lsp_handle(80, 160, config);
-
-    let repo_root = current_dir().unwrap();
-
-    for file in files {
-        layout.open_or_focus(repo_root.join(file), false).unwrap();
-    }
-
-    (tui, layout)
-}
-
-fn fixed_view(group: &mut BenchmarkGroup<'_, WallTime>, title: &str, files: &[&str]) {
-    let (mut tui, mut layout) = tui_and_layout(files);
-    group.bench_function(title, |b| {
-        b.iter(|| {
-            tui.refresh(
-                black_box("NORMAL"),
-                black_box(&mut layout),
-                black_box(0),
-                black_box(&[]),
-                black_box(None),
-                black_box(None),
-            );
-        })
-    });
 }
 
 fn single_window_editor_scroll_inputs(

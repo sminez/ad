@@ -2,7 +2,7 @@
 use crate::{
     buffer::SCRATCH_ID,
     dot::{Dot, Range},
-    editor::{BAction, Editor},
+    editor::{BAction, Editor, layout::try_active_cur_from_screen_coords},
     fsys::LogEvent,
     key::{MouseButton, MouseEvent, MouseEventKind, MouseMod},
     system::System,
@@ -112,16 +112,15 @@ where
                             self.held_click = Some(Click::ResizeColumn { last_x: x });
                         }
                         Border::Horizontal { col_idx, win_idx } => {
-                            self.layout
-                                .focus_column_and_window_for_resize(col_idx, win_idx);
+                            self.focus_column_and_window_for_resize(col_idx, win_idx);
                             self.held_click = Some(Click::ResizeWindow { last_y: y });
                         }
                     }
                     return;
                 }
 
-                let click_in_active_buffer = self.layout.set_dot_from_screen_coords(x, y);
-                let b = self.layout.buffers_mut().active_buffer_mut();
+                let click_in_active_buffer = self.set_dot_from_screen_coords(x, y);
+                let b = self.buffers.active_mut();
                 if !click_in_active_buffer && b.id != SCRATCH_ID {
                     _ = self.tx_fsys.send(LogEvent::Focus(b.id));
                 }
@@ -152,17 +151,23 @@ where
                     cut_handled,
                     paste_handled,
                 }) => {
-                    if *btn == Left && (*cut_handled || *paste_handled) {
+                    let is_left = *btn == Left;
+                    if is_left && (*cut_handled || *paste_handled) {
                         return;
                     }
 
-                    match self.layout.try_active_cur_from_screen_coords(x, y) {
+                    match try_active_cur_from_screen_coords(
+                        &mut self.layout,
+                        &mut self.buffers,
+                        x,
+                        y,
+                    ) {
                         Some(cur) => selection.set_active_cursor(cur),
                         None => return,
                     }
 
-                    if *btn == Left {
-                        self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(*selection);
+                    if is_left {
+                        self.buffers.active_mut().dot = Dot::from(*selection);
                     }
                 }
 
@@ -187,14 +192,12 @@ where
 
             (Press, _, WheelUp) => {
                 self.last_click_was_left = false;
-                self.layout
-                    .scroll_view(x, y, true, self.scroll_rows(last_click_time));
+                self.scroll_view(x, y, true, self.scroll_rows(last_click_time));
             }
 
             (Press, _, WheelDown) => {
                 self.last_click_was_left = false;
-                self.layout
-                    .scroll_view(x, y, false, self.scroll_rows(last_click_time));
+                self.scroll_view(x, y, false, self.scroll_rows(last_click_time));
             }
 
             (Release, m, b) => {
@@ -227,7 +230,9 @@ where
 
                 // Support releasing the mouse over a different window as actioning the selection
                 // as it was present in the active buffer
-                if let Some(cur) = self.layout.try_active_cur_from_screen_coords(x, y) {
+                if let Some(cur) =
+                    try_active_cur_from_screen_coords(&mut self.layout, &mut self.buffers, x, y)
+                {
                     selection.set_active_cursor(cur);
                 }
 
@@ -262,7 +267,7 @@ where
                         *paste_handled = true;
                         self.paste_from_clipboard(Source::Mouse);
                     } else if !is_right && !*cut_handled {
-                        *selection = self.layout.buffers().active_buffer().dot.as_range();
+                        *selection = self.buffers.active().dot.as_range();
                         *cut_handled = true;
                         self.handle_buffer_action(None, BAction::Delete, Source::Mouse);
                     }
@@ -278,7 +283,7 @@ where
 
             None => {
                 let btn = if is_right { Right } else { Middle };
-                let (id, cur) = self.layout.focus_cur_from_screen_coords(x, y);
+                let (id, cur) = self.focus_cur_from_screen_coords(x, y);
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
                 self.held_click = Some(Click::text(btn, Range::from_cursors(cur, cur, false)));
             }
@@ -297,20 +302,17 @@ where
             // For Middle clicks, if there is also a range dot in the buffer then that is
             // used as an argument to the command being executed.
             if is_right {
-                self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(selection);
+                self.buffers.active_mut().dot = Dot::from(selection);
                 self.default_load_dot(None, load_in_new_window, Source::Mouse);
             } else {
-                let dot = self.layout.buffers().active_buffer().dot;
-                self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(selection);
+                let dot = self.buffers.active().dot;
+                self.buffers.active_mut().dot = Dot::from(selection);
 
                 if dot.is_range() {
                     // Execute as if the click selection was dot then reset dot
-                    let arg = dot
-                        .content(self.layout.buffers().active_buffer())
-                        .trim()
-                        .to_string();
+                    let arg = dot.content(self.buffers.active()).trim().to_string();
                     self.default_execute_dot(None, Some((dot.as_range(), arg)), Source::Mouse);
-                    self.layout.buffers_mut().active_buffer_mut().dot = dot;
+                    self.buffers.active_mut().dot = dot;
                 } else {
                     self.default_execute_dot(None, None, Source::Mouse);
                 }
@@ -319,14 +321,8 @@ where
             // In the case where the click selection was a Cur rather than a Range we
             // set the buffer dot to the click location if it is outside of the current buffer
             // dot (and allow smart expand to handle generating the selection) before we Load/Execute
-            if !self
-                .layout
-                .buffers()
-                .active_buffer()
-                .dot
-                .contains(&selection.start)
-            {
-                self.layout.buffers_mut().active_buffer_mut().dot = Dot::from(selection.start);
+            if !self.buffers.active().dot.contains(&selection.start) {
+                self.buffers.active_mut().dot = Dot::from(selection.start);
             }
 
             if is_right {
@@ -764,12 +760,12 @@ mod tests {
         );
         ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
         ed.open_virtual("test", "some text to test with", false);
-        ed.layout.buffers_mut().active_buffer_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
+        ed.buffers.active_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
 
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();
         let filter = InputFilter::new(tx);
-        ed.layout
+        ed.buffers
             .try_set_input_filter(ed.active_buffer_id(), filter);
 
         for evt in evts.iter() {
@@ -777,7 +773,7 @@ mod tests {
         }
 
         let recvd_fsys_events: Vec<_> = rx.try_iter().collect();
-        let b = ed.layout.buffers().active_buffer();
+        let b = ed.buffers.active();
 
         assert_eq!(ed.held_click, click, "click");
         assert_eq!(b.dot.content(b), dot, "dot content");

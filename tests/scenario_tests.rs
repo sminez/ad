@@ -4,7 +4,7 @@
 //! See TestCase::from_archive for details of the supported file sections.
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
-    buffer::BufferId,
+    buffer::{BufferId, Buffers},
     editor::{Click, EAction, MiniBufferState},
     input::Event,
     key::Input,
@@ -433,6 +433,7 @@ impl UserInterface for ScriptedUi {
     fn refresh(
         &mut self,
         _mode_name: &str,
+        _buffers: &Buffers,
         _layout: &mut Layout,
         _n_running: usize,
         _pending_keys: &[Input],
@@ -467,6 +468,15 @@ impl UserInterface for ScriptedUi {
     }
 
     fn set_cursor_shape(&mut self, _cur_shape: CurShape) {}
+
+    fn need_ts_state_update(
+        &self,
+        _layout_changed: bool,
+        _has_held_click: bool,
+        _has_mb: bool,
+    ) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]

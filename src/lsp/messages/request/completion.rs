@@ -128,7 +128,7 @@ pub struct Completions(Vec<Completion>);
 impl MbSelect for Completions {
     /// The initial filter input we want is the "word" so far under the cursor.
     fn initial_input(&self, buffers: &Buffers) -> Option<String> {
-        let b = buffers.active_buffer_ignoring_scratch();
+        let b = buffers.active_ignoring_scratch();
         let cur = b.dot.active_cur();
 
         // find the start of the "word" we are on
@@ -295,7 +295,7 @@ mod tests {
         let completions = Completions(Vec::new());
         let mut buffers = Buffers::new_stubbed(&[1], tx, Default::default());
         buffers
-            .active_buffer_ignoring_scratch_mut()
+            .active_ignoring_scratch_mut()
             .handle_action(BAction::InsertString { s: s.to_string() }, Source::Fsys);
 
         let initial_input = completions.initial_input(&buffers);

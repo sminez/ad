@@ -33,8 +33,7 @@ mod scratch;
 use edit::{Edit, EditLog, Kind, Txt};
 use scratch::ScratchBuf;
 
-pub use buffers::BufferId;
-pub(crate) use buffers::Buffers;
+pub use buffers::{BufferId, Buffers};
 pub use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them

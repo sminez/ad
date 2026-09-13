@@ -2,6 +2,7 @@
 
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
+    buffer::Buffers,
     editor::{Click, EAction, MiniBufferState},
     input::Event,
     key::Input,
@@ -106,6 +107,7 @@ impl UserInterface for ScriptedUi {
     fn refresh(
         &mut self,
         _mode_name: &str,
+        _buffers: &Buffers,
         _layout: &mut Layout,
         _n_running: usize,
         _pending_keys: &[Input],
@@ -121,6 +123,15 @@ impl UserInterface for ScriptedUi {
     }
 
     fn set_cursor_shape(&mut self, _cur_shape: CurShape) {}
+
+    fn need_ts_state_update(
+        &self,
+        _layout_changed: bool,
+        _has_held_click: bool,
+        _has_mb: bool,
+    ) -> bool {
+        false
+    }
 }
 
 /// A System impl that can't run commands (we don't want the fuzzer to accidentally trash the host)

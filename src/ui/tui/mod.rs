@@ -1,6 +1,6 @@
 //! A terminal UI for ad
 use crate::{
-    buffer::{Buffer, Chars, GapBuffer},
+    buffer::{Buffer, Buffers, Chars, GapBuffer},
     config::{ColorScheme, Config},
     die,
     dot::Range,
@@ -105,9 +105,11 @@ where
         self.frame.screen_cols = cols;
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn render(
         &mut self,
         mode_name: &str,
+        buffers: &Buffers,
         layout: &Layout,
         n_running: usize,
         pending_keys: &[Input],
@@ -125,7 +127,7 @@ where
         // If we have a minibuffer open then that takes priority over an open scratch buffer
         let w_minibuffer = mb.is_some();
         let mb = mb.unwrap_or_default();
-        let active_buffer = layout.buffers().active_buffer();
+        let active_buffer = buffers.active();
 
         let mb_has_lines = mb.b.map(|b| !b.is_empty()).unwrap_or_default();
         let offset = if mb_has_lines {
@@ -150,14 +152,20 @@ where
             _ => None,
         };
 
-        let (load_exec_range, scratch_load_exec_range) = if layout.buffers().scratch_is_focused {
+        let (load_exec_range, scratch_load_exec_range) = if buffers.scratch_is_focused() {
             (None, load_exec_range)
         } else {
             (load_exec_range, None)
         };
 
-        self.frame
-            .render_windows(layout, load_exec_range, effective_screen_rows, tabstop, cs);
+        self.frame.render_windows(
+            buffers,
+            layout,
+            load_exec_range,
+            effective_screen_rows,
+            tabstop,
+            cs,
+        );
         self.frame
             .render_status_bar(cs, mode_name, n_running, active_buffer);
 
@@ -167,7 +175,7 @@ where
         if w_minibuffer {
             self.frame.render_minibuffer_state(&mb, tabstop, cs);
         } else if layout.scratch.is_visible {
-            let b = layout.buffers().scratch().buffer();
+            let b = buffers.scratch().buffer();
             self.frame
                 .render_scratch(&layout.scratch, b, scratch_load_exec_range, tabstop, cs);
         };
@@ -185,7 +193,7 @@ where
         let (cur_x, cur_y) = if w_minibuffer {
             (mb.cx, self.frame.screen_rows + mb.n_visible_lines + 1)
         } else {
-            layout.ui_xy()
+            layout.ui_xy(buffers)
         };
 
         self.frame.cur_x = cur_x;
@@ -252,6 +260,7 @@ where
     fn refresh(
         &mut self,
         mode_name: &str,
+        buffers: &Buffers,
         layout: &mut Layout,
         n_running: usize,
         pending_keys: &[Input],
@@ -271,14 +280,22 @@ where
         // We also need to re-render on the frame after a minibuffer is closed in order to
         // get rid of it, as none of the other buffers in the layout will be marked as changed
         // since the last render.
-        let need_render = layout.changed_since_last_render()
-            || mb_this_frame
-            || self.mb_last_frame
-            || held_click.is_some();
+        let need_render = self.need_ts_state_update(
+            layout.changed_since_last_render,
+            held_click.is_some(),
+            mb.is_some(),
+        );
 
         if need_render {
-            layout.update_visible_ts_state();
-            self.render(mode_name, layout, n_running, pending_keys, held_click, mb);
+            self.render(
+                mode_name,
+                buffers,
+                layout,
+                n_running,
+                pending_keys,
+                held_click,
+                mb,
+            );
             if let Err(e) = self.frame.write(&mut self.stdout) {
                 die!("Unable to refresh screen: {e}");
             }
@@ -311,6 +328,15 @@ where
             // but we might as well try
             die!("Unable to write to stdout: {e}");
         };
+    }
+
+    fn need_ts_state_update(
+        &self,
+        layout_changed: bool,
+        has_held_click: bool,
+        has_mb: bool,
+    ) -> bool {
+        layout_changed || has_mb || self.mb_last_frame || has_held_click
     }
 }
 
@@ -382,6 +408,7 @@ impl Frame {
 
     fn render_windows(
         &mut self,
+        buffers: &Buffers,
         layout: &Layout,
         load_exec_range: Option<(bool, Range)>,
         screen_rows: usize,
@@ -395,7 +422,7 @@ impl Frame {
             .iter()
             .map(|(is_focus, col)| {
                 let rng = if is_focus { load_exec_range } else { None };
-                ColRenderer::new(col, layout, rng, screen_rows, tabstop, cs)
+                ColRenderer::new(col, buffers, rng, screen_rows, tabstop, cs)
             })
             .collect();
 
@@ -595,7 +622,7 @@ enum PrevCol {
 struct ColRenderer<'a> {
     inner: ziplist::Iter<'a, Window>,
     current: Option<WinRenderer<'a>>,
-    layout: &'a Layout,
+    buffers: &'a Buffers,
     cs: &'a ColorScheme,
     load_exec_range: Option<(bool, Range)>,
     screen_rows: usize,
@@ -607,7 +634,7 @@ struct ColRenderer<'a> {
 impl<'a> ColRenderer<'a> {
     fn new(
         col: &'a Column,
-        layout: &'a Layout,
+        buffers: &'a Buffers,
         load_exec_range: Option<(bool, Range)>,
         screen_rows: usize,
         tabstop: usize,
@@ -616,7 +643,7 @@ impl<'a> ColRenderer<'a> {
         ColRenderer {
             inner: col.wins.iter(),
             current: None,
-            layout,
+            buffers,
             cs,
             load_exec_range,
             screen_rows,
@@ -628,11 +655,7 @@ impl<'a> ColRenderer<'a> {
 
     fn next_window(&mut self) -> Option<WinRenderer<'a>> {
         let (is_focus, w) = self.inner.next()?;
-        let b = self
-            .layout
-            .buffers()
-            .with_id(w.view.bufid)
-            .expect("valid buffer id");
+        let b = self.buffers.with_id(w.view.bufid).expect("valid buffer id");
 
         let (w_lnum, _) = b.sign_col_dims();
         let rng = if is_focus { self.load_exec_range } else { None };
