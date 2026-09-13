@@ -321,7 +321,7 @@ where
         assert_invariants!(self);
     }
 
-    // XXX: Screen position iteractions with layout state
+    // XXX: Screen position interactions with layout state
 
     pub(crate) fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
         let bufid = self
