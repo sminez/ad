@@ -73,7 +73,7 @@ where
             }
 
             _ => {
-                if let Some(ao) = self.layout.handle_ui_action(uaction, &mut self.buffers) {
+                if let Some(ao) = self.layout.handle_ui_action(uaction) {
                     self.handle_action_outcome(ao);
                 }
             }
@@ -240,13 +240,13 @@ where
     // XXX: scratch buffer methods
 
     pub(crate) fn toggle_scratch(&mut self) {
-        if self.layout.scratch.is_visible() {
+        if self.layout.scratch.is_visible {
             self.buffers.scratch_mut().clear_transient();
         }
 
         self.layout.toggle_scratch_visibility();
         self.buffers
-            .set_scratch_focus(self.layout.scratch.is_visible());
+            .set_scratch_focus(self.layout.scratch.is_visible);
     }
 
     pub(crate) fn clear_scratch(&mut self) {
@@ -323,10 +323,10 @@ where
 
     // XXX: Screen position interactions with layout state
 
-    pub(crate) fn focus_buffer_for_screen_coords(&mut self, x: usize, y: usize) -> BufferId {
+    pub(crate) fn focus_buffer_for_screen_xy(&mut self, x: usize, y: usize) -> BufferId {
         let bufid = self
             .layout
-            .focus_buffer_for_screen_coords(x, y)
+            .focus_buffer_for_screen_xy(x, y)
             .unwrap_or_else(|| self.buffers.active_id());
 
         self.buffers.set_scratch_focus(bufid == SCRATCH_ID);
@@ -339,9 +339,9 @@ where
 
     /// Focus the buffer (or tag) containing the given screen coordinates and return the current
     /// cursor position for updating held mouse state.
-    pub(crate) fn focus_cur_from_screen_coords(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
-        let bufid = self.focus_buffer_for_screen_coords(x, y);
-        let cur = self.layout.cur_from_screen_coords(x, y, &mut self.buffers);
+    pub(crate) fn focus_cur_from_screen_xy(&mut self, x: usize, y: usize) -> (BufferId, Cur) {
+        let bufid = self.focus_buffer_for_screen_xy(x, y);
+        let cur = self.layout.set_cur_from_screen_xy(x, y, &mut self.buffers);
 
         #[cfg(test)]
         assert_invariants!(self);
@@ -356,8 +356,8 @@ where
     pub(crate) fn set_dot_from_screen_coords(&mut self, x: usize, y: usize) -> bool {
         self.layout.changed_since_last_render = true;
         let current_bufid = self.buffers.active_id();
-        let bufid = self.focus_buffer_for_screen_coords(x, y);
-        let c = self.layout.cur_from_screen_coords(x, y, &mut self.buffers);
+        let bufid = self.focus_buffer_for_screen_xy(x, y);
+        let c = self.layout.set_cur_from_screen_xy(x, y, &mut self.buffers);
         self.buffers.active_mut().dot = Dot::Cur { c };
 
         #[cfg(test)]
@@ -388,7 +388,7 @@ pub(crate) fn try_active_cur_from_screen_coords(
     let id = layout.buffer_for_screen_coords(x, y).unwrap_or(active);
 
     let cur = if id == active {
-        Some(layout.cur_from_screen_coords(x, y, buffers))
+        Some(layout.set_cur_from_screen_xy(x, y, buffers))
     } else {
         None
     };

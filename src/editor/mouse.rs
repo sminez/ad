@@ -283,7 +283,7 @@ where
 
             None => {
                 let btn = if is_right { Right } else { Middle };
-                let (id, cur) = self.focus_cur_from_screen_coords(x, y);
+                let (id, cur) = self.focus_cur_from_screen_xy(x, y);
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
                 self.held_click = Some(Click::text(btn, Range::from_cursors(cur, cur, false)));
             }

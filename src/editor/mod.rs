@@ -730,19 +730,27 @@ where
                 self.buffers.set_scratch_focus(id == SCRATCH_ID);
                 _ = self.tx_fsys.send(LogEvent::Focus(id));
             }
+            ActionOutcome::SetCursor(id, cur) => {
+                self.buffers.focus_id(id);
+                self.buffers.active_mut().dot = cur.into();
+                self.buffers.set_scratch_focus(id == SCRATCH_ID);
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
             ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
             ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
         }
     }
 
     fn jump_forward(&mut self) {
-        if let Some(id) = self.layout.jump_forward(&mut self.buffers) {
+        let maybe_ids = self.buffers.jump_list_forward();
+        if let Some(id) = self.layout.jump_forward(maybe_ids) {
             _ = self.tx_fsys.send(LogEvent::Focus(id));
         }
     }
 
     fn jump_backward(&mut self) {
-        if let Some(id) = self.layout.jump_backward(&mut self.buffers) {
+        let maybe_ids = self.buffers.jump_list_backward();
+        if let Some(id) = self.layout.jump_backward(maybe_ids) {
             _ = self.tx_fsys.send(LogEvent::Focus(id));
         }
     }

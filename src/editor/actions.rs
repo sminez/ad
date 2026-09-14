@@ -2,7 +2,7 @@
 use crate::{
     buffer::{BufferId, BufferKind},
     config::Config,
-    dot::{Range, TextObject},
+    dot::{Cur, Range, TextObject},
     editor::{Editor, MbSelect, MbSelector, MiniBufferSelection, minibuffer::SimpleMbSelect},
     exec::{Addr, Address, EditorRunner, Program},
     fsys::LogEvent,
@@ -272,6 +272,7 @@ pub enum ActionOutcome {
     Exit(bool),
     FocusChange(BufferId),
     SetClipboard(String),
+    SetCursor(BufferId, Cur),
     SetStatusMessage(String),
 }
 
