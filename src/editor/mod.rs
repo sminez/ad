@@ -13,7 +13,7 @@ use crate::{
     mode::{Mode, modes},
     plumb::PlumbingRules,
     system::{DefaultSystem, System},
-    ui::{Layout, StateChange, Ui, UserInterface, style::CurShape},
+    ui::{Layout, RefreshArgs, StateChange, Ui, UserInterface, style::CurShape},
 };
 use ad_event::Source;
 use parking_lot::RwLock;
@@ -374,15 +374,15 @@ where
             self.update_visible_ts_state();
         }
 
-        self.ui.refresh(
-            &self.modes[0].name,
-            &self.buffers,
-            &mut self.layout,
-            self.system.n_running_children(),
-            &self.pending_keys,
-            self.held_click.as_ref(),
-            self.mb_stack.last_mut().map(|mb| mb.updated_render_state()),
-        );
+        self.ui.refresh(RefreshArgs {
+            mode_name: &self.modes[0].name,
+            buffers: &self.buffers,
+            layout: &mut self.layout,
+            n_running: self.system.n_running_children(),
+            pending_keys: &self.pending_keys,
+            held_click: self.held_click.as_ref(),
+            mb: self.mb_stack.last_mut().map(|mb| mb.updated_render_state()),
+        });
     }
 
     /// Update the status line to contain the given message.

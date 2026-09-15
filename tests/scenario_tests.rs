@@ -4,12 +4,12 @@
 //! See TestCase::from_archive for details of the supported file sections.
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
-    buffer::{BufferId, Buffers},
-    editor::{Click, EAction, MiniBufferState},
+    buffer::BufferId,
+    editor::EAction,
     input::Event,
     key::Input,
     system::DefaultSystem,
-    ui::{Layout, StateChange, UserInterface, style::CurShape},
+    ui::{RefreshArgs, StateChange, UserInterface, style::CurShape},
 };
 use assert_fs::TempDir;
 use ninep::sync::client::Client;
@@ -430,16 +430,7 @@ impl UserInterface for ScriptedUi {
         }
     }
 
-    fn refresh(
-        &mut self,
-        _mode_name: &str,
-        _buffers: &Buffers,
-        _layout: &mut Layout,
-        _n_running: usize,
-        _pending_keys: &[Input],
-        _held_click: Option<&Click>,
-        _mb: Option<MiniBufferState<'_>>,
-    ) {
+    fn refresh<'a>(&mut self, _args: RefreshArgs<'a>) {
         let event = if *self.pending_fsys.lock() {
             // We need to allow for the fsys thread to communicate with the main editor event loop
             // which triggers additional refreshes for when our message actually comes through to

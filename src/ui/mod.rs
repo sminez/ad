@@ -34,17 +34,7 @@ pub trait UserInterface: Send {
     fn state_change(&mut self, change: StateChange);
 
     /// Refresh the ui to display the current editor state.
-    #[expect(clippy::too_many_arguments)]
-    fn refresh(
-        &mut self,
-        mode_name: &str,
-        buffers: &Buffers,
-        layout: &mut Layout,
-        n_running: usize,
-        pending_keys: &[Input],
-        held_click: Option<&Click>,
-        mb: Option<MiniBufferState<'_>>,
-    );
+    fn refresh<'a>(&mut self, args: RefreshArgs<'a>);
 
     /// Called when the editor mode changes and a new cursor shape is required
     fn set_cursor_shape(&mut self, cur_shape: CurShape);
@@ -58,6 +48,17 @@ pub trait UserInterface: Send {
         has_held_click: bool,
         has_mb: bool,
     ) -> bool;
+}
+
+#[derive(Debug)]
+pub struct RefreshArgs<'a> {
+    pub mode_name: &'a str,
+    pub buffers: &'a Buffers,
+    pub layout: &'a mut Layout,
+    pub n_running: usize,
+    pub pending_keys: &'a [Input],
+    pub held_click: Option<&'a Click>,
+    pub mb: Option<MiniBufferState<'a>>,
 }
 
 /// Sent by the Editor to a [UserInterface] when internal state has changed in such a way that
@@ -140,36 +141,11 @@ impl UserInterface for Ui {
         }
     }
 
-    fn refresh(
-        &mut self,
-        mode_name: &str,
-        buffers: &Buffers,
-        layout: &mut Layout,
-        n_running: usize,
-        pending_keys: &[Input],
-        held_click: Option<&Click>,
-        mb: Option<MiniBufferState<'_>>,
-    ) {
+    fn refresh<'a>(&mut self, args: RefreshArgs<'a>) {
         match self {
             Self::Headless => (),
-            Self::Tui(tui) => tui.refresh(
-                mode_name,
-                buffers,
-                layout,
-                n_running,
-                pending_keys,
-                held_click,
-                mb,
-            ),
-            Self::Boxed(ui) => ui.refresh(
-                mode_name,
-                buffers,
-                layout,
-                n_running,
-                pending_keys,
-                held_click,
-                mb,
-            ),
+            Self::Tui(tui) => tui.refresh(args),
+            Self::Boxed(ui) => ui.refresh(args),
         }
     }
 

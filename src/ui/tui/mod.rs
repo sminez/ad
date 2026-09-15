@@ -9,7 +9,7 @@ use crate::{
     key::{Input, MouseButton, MouseEvent},
     syntax::{LineIter, RangeToken},
     ui::{
-        Layout, StateChange, UserInterface,
+        Layout, RefreshArgs, StateChange, UserInterface,
         layout::{Column, Scratch, Window},
         style::{CurShape, Styles},
     },
@@ -105,16 +105,17 @@ where
         self.frame.screen_cols = cols;
     }
 
-    #[expect(clippy::too_many_arguments)]
-    fn render(
+    fn render<'a>(
         &mut self,
-        mode_name: &str,
-        buffers: &Buffers,
-        layout: &Layout,
-        n_running: usize,
-        pending_keys: &[Input],
-        held_click: Option<&Click>,
-        mb: Option<MiniBufferState<'_>>,
+        RefreshArgs {
+            mode_name,
+            buffers,
+            layout,
+            n_running,
+            pending_keys,
+            held_click,
+            mb,
+        }: RefreshArgs<'a>,
     ) {
         let conf = self.config.read();
         let (cs, status_timeout, tabstop, max_mb_lines) = (
@@ -257,20 +258,11 @@ where
         }
     }
 
-    fn refresh(
-        &mut self,
-        mode_name: &str,
-        buffers: &Buffers,
-        layout: &mut Layout,
-        n_running: usize,
-        pending_keys: &[Input],
-        held_click: Option<&Click>,
-        mb: Option<MiniBufferState<'_>>,
-    ) {
-        self.frame.screen_rows = layout.screen_rows;
-        self.frame.screen_cols = layout.screen_cols;
-        self.frame.show_msg_bar = mb.is_none();
-        let mb_this_frame = mb.is_some();
+    fn refresh<'a>(&mut self, args: RefreshArgs<'a>) {
+        self.frame.screen_rows = args.layout.screen_rows;
+        self.frame.screen_cols = args.layout.screen_cols;
+        self.frame.show_msg_bar = args.mb.is_none();
+        let mb_this_frame = args.mb.is_some();
 
         if self.frame.screen_cols < MIN_COLS || self.frame.screen_rows < MIN_ROWS {
             return;
@@ -281,21 +273,13 @@ where
         // get rid of it, as none of the other buffers in the layout will be marked as changed
         // since the last render.
         let need_render = self.need_ts_state_update(
-            layout.changed_since_last_render,
-            held_click.is_some(),
-            mb.is_some(),
+            args.layout.changed_since_last_render,
+            args.held_click.is_some(),
+            args.mb.is_some(),
         );
 
         if need_render {
-            self.render(
-                mode_name,
-                buffers,
-                layout,
-                n_running,
-                pending_keys,
-                held_click,
-                mb,
-            );
+            self.render(args);
             if let Err(e) = self.frame.write(&mut self.stdout) {
                 die!("Unable to refresh screen: {e}");
             }
@@ -305,7 +289,7 @@ where
             let (cs, status_timeout) = (&conf.colorscheme, conf.status_timeout);
             self.frame.render_message_bar(
                 cs,
-                pending_keys,
+                args.pending_keys,
                 status_timeout,
                 self.status_message.clone(),
                 self.last_status,

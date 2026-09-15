@@ -2,12 +2,11 @@
 
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
-    buffer::Buffers,
-    editor::{Click, EAction, MiniBufferState},
+    editor::EAction,
     input::Event,
     key::Input,
     system::System,
-    ui::{Layout, StateChange, UserInterface, style::CurShape},
+    ui::{RefreshArgs, StateChange, UserInterface, style::CurShape},
 };
 use arbitrary::Arbitrary;
 use assert_fs::{
@@ -104,16 +103,7 @@ impl UserInterface for ScriptedUi {
 
     fn state_change(&mut self, _change: StateChange) {}
 
-    fn refresh(
-        &mut self,
-        _mode_name: &str,
-        _buffers: &Buffers,
-        _layout: &mut Layout,
-        _n_running: usize,
-        _pending_keys: &[Input],
-        _held_click: Option<&Click>,
-        _mb: Option<MiniBufferState<'_>>,
-    ) {
+    fn refresh<'a>(&mut self, _args: RefreshArgs<'a>) {
         let event = match self.actions.pop() {
             Some(TestAction::Input(input)) => Event::Input(input),
             None => Event::action(EAction::Exit { force: true }),
