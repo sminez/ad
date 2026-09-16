@@ -198,12 +198,12 @@ impl Coords {
 
         if (row_start, col_start) == (row_end, col_end) {
             // LSP insert at this position within the buffer
-            Addr::Simple(AddrBase::LineAndColumn(row_start, col_start).into())
+            Addr::simple(AddrBase::LineAndColumn(row_start, col_start))
         } else if row_start == row_end && col_end == col_start + 1 {
             // LSP delete of a single character
-            Addr::Compound(
-                AddrBase::LineAndColumn(row_start, col_start).into(),
-                AddrBase::LineAndColumn(row_start, col_start).into(),
+            Addr::compound(
+                AddrBase::LineAndColumn(row_start, col_start),
+                AddrBase::LineAndColumn(row_start, col_start),
             )
         } else {
             // From the LSP spec on Ranges:
@@ -223,9 +223,9 @@ impl Coords {
                 col_end = b.txt.line(row_end).chars().count();
             }
 
-            Addr::Compound(
-                AddrBase::LineAndColumn(row_start, col_start).into(),
-                AddrBase::LineAndColumn(row_end, col_end.saturating_sub(1)).into(),
+            Addr::compound(
+                AddrBase::LineAndColumn(row_start, col_start),
+                AddrBase::LineAndColumn(row_end, col_end.saturating_sub(1)),
             )
         }
     }

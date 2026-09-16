@@ -55,12 +55,11 @@ impl fmt::Display for ErrorKind {
 /// An Addr can be evaluated by a Buffer to produce a valid Dot for using in future editing
 /// actions. The `Explicit` variant is used to handle internal operations that need to provide a
 /// Addr (as opposed to parsed user input) where we already have a fully evaluated Dot.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Addr {
     Explicit(Dot),
-    Simple(SimpleAddr),
-    Compound(SimpleAddr, SimpleAddr),
+    Simple(Box<SimpleAddr>),
+    Compound(Box<SimpleAddr>, Box<SimpleAddr>),
 }
 
 impl Addr {
@@ -68,23 +67,31 @@ impl Addr {
         match dot {
             Dot::Cur { c } => {
                 let (y, x) = c.as_yx(b);
-                Self::Simple(AddrBase::LineAndColumn(y, x).into())
+                Self::simple(AddrBase::LineAndColumn(y, x))
             }
 
             Dot::Range { r } => {
                 let (y1, x1) = r.start.as_yx(b);
                 let (y2, x2) = r.end.as_yx(b);
 
-                Self::Compound(
-                    AddrBase::LineAndColumn(y1, x1).into(),
-                    AddrBase::LineAndColumn(y2, x2).into(),
+                Self::compound(
+                    AddrBase::LineAndColumn(y1, x1),
+                    AddrBase::LineAndColumn(y2, x2),
                 )
             }
         }
     }
 
+    pub fn simple(addr: impl Into<SimpleAddr>) -> Self {
+        Self::Simple(Box::new(addr.into()))
+    }
+
+    pub fn compound(start: impl Into<SimpleAddr>, end: impl Into<SimpleAddr>) -> Self {
+        Self::Compound(Box::new(start.into()), Box::new(end.into()))
+    }
+
     pub fn full() -> Self {
-        Addr::Compound(AddrBase::Bof.into(), AddrBase::Eof.into())
+        Addr::compound(AddrBase::Bof, AddrBase::Eof)
     }
 
     /// Attempt to parse a valid dot expression from a string
@@ -102,6 +109,12 @@ impl Addr {
 pub struct SimpleAddr {
     base: AddrBase,
     suffixes: Vec<AddrBase>, // restricted to variants that return true for is_valid_suffix
+}
+
+impl SimpleAddr {
+    pub const fn new(base: AddrBase, suffixes: Vec<AddrBase>) -> Self {
+        Self { base, suffixes }
+    }
 }
 
 /// Primitives for building out addresses.
@@ -188,7 +201,7 @@ impl<'a> Parser<'a> {
         if self.input.at_eof() || self.input.char() == ' ' {
             // If we didn't have an starting addr then this expression is invalid, otherwise
             // we just have 'start' as a simple addr
-            Ok(Addr::Simple(
+            Ok(Addr::simple(
                 start.ok_or_else(|| self.error(ErrorKind::NotAnAddress))?,
             ))
         } else if self.input.char() == ',' {
@@ -207,7 +220,7 @@ impl<'a> Parser<'a> {
                 self.parse_simple()?
             };
 
-            Ok(Addr::Compound(start, end))
+            Ok(Addr::compound(start, end))
         } else {
             Err(self.error(ErrorKind::NotAnAddress))
         }
@@ -578,8 +591,7 @@ impl Address for Buffer {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use super::{Addr::*, AddrBase::*};
+    use super::{AddrBase::*, *};
     use crate::regex::{Regex, RevRegex};
     use simple_test_case::test_case;
 
@@ -591,58 +603,50 @@ mod tests {
         RevRegex::compile(s).unwrap()
     }
 
+    fn simple(addr: impl Into<SimpleAddr>) -> Addr {
+        Addr::simple(addr)
+    }
+
+    fn compound(start: impl Into<SimpleAddr>, end: impl Into<SimpleAddr>) -> Addr {
+        Addr::compound(start, end)
+    }
+
     //  Simple
-    #[test_case(".", Simple(Current.into()); "current dot")]
-    #[test_case("-", Simple(Bol.into()); "beginning of line")]
-    #[test_case("+", Simple(Eol.into()); "end of line")]
-    #[test_case("-+", Simple(CurrentLine.into()); "current line minus plus")]
-    #[test_case("+-", Simple(CurrentLine.into()); "current line plus minus")]
-    #[test_case("0", Simple(Bof.into()); "beginning of file")]
-    #[test_case("$", Simple(Eof.into()); "end of file")]
-    #[test_case("3", Simple(Line(2).into()); "single line")]
-    #[test_case("+42", Simple(RelativeLine(42).into()); "relative line forward")]
-    #[test_case("-12", Simple(RelativeLine(-12).into()); "relative line backward")]
-    #[test_case("#3", Simple(Char(3).into()); "char")]
-    #[test_case("+#42", Simple(RelativeChar(42).into()); "relative char forward")]
-    #[test_case("-#12", Simple(RelativeChar(-12).into()); "relative char backward")]
-    #[test_case("3:9", Simple(LineAndColumn(2, 8).into()); "line and column cursor")]
-    #[test_case("/foo/", Simple(Regex(re("foo")).into()); "regex")]
-    #[test_case("+/baz/", Simple(Regex(re("baz")).into()); "regex explicit forward")]
-    #[test_case("-/bar/", Simple(RegexBack(re_rev("bar")).into()); "regex back")]
+    #[test_case(".", simple(Current); "current dot")]
+    #[test_case("-", simple(Bol); "beginning of line")]
+    #[test_case("+", simple(Eol); "end of line")]
+    #[test_case("-+", simple(CurrentLine); "current line minus plus")]
+    #[test_case("+-", simple(CurrentLine); "current line plus minus")]
+    #[test_case("0", simple(Bof); "beginning of file")]
+    #[test_case("$", simple(Eof); "end of file")]
+    #[test_case("3", simple(Line(2)); "single line")]
+    #[test_case("+42", simple(RelativeLine(42)); "relative line forward")]
+    #[test_case("-12", simple(RelativeLine(-12)); "relative line backward")]
+    #[test_case("#3", simple(Char(3)); "char")]
+    #[test_case("+#42", simple(RelativeChar(42)); "relative char forward")]
+    #[test_case("-#12", simple(RelativeChar(-12)); "relative char backward")]
+    #[test_case("3:9", simple(LineAndColumn(2, 8)); "line and column cursor")]
+    #[test_case("/foo/", simple(Regex(re("foo"))); "regex")]
+    #[test_case("+/baz/", simple(Regex(re("baz"))); "regex explicit forward")]
+    #[test_case("-/bar/", simple(RegexBack(re_rev("bar"))); "regex back")]
     // Simple with suffix
-    #[test_case(
-        "#5+",
-        Simple(SimpleAddr { base: Char(5), suffixes: vec![Eol] });
-        "char to eol"
-    )]
-    #[test_case(
-        "#5-",
-        Simple(SimpleAddr { base: Char(5), suffixes: vec![Bol] });
-        "char to bol"
-    )]
-    #[test_case(
-        "5+#3",
-        Simple(SimpleAddr { base: Line(4), suffixes: vec![RelativeChar(3)] });
-        "line plus char"
-    )]
-    #[test_case(
-        "5-#3",
-        Simple(SimpleAddr { base: Line(4), suffixes: vec![RelativeChar(-3)] });
-        "line minus char"
-    )]
+    #[test_case("#5+", simple(SimpleAddr::new(Char(5),  vec![Eol])); "char to eol")]
+    #[test_case("#5-", simple(SimpleAddr::new(Char(5), vec![Bol])); "char to bol")]
+    #[test_case("5+#3", simple(SimpleAddr::new(Line(4), vec![RelativeChar(3)])); "line plus char")]
+    #[test_case("5-#3", simple(SimpleAddr::new(Line(4), vec![RelativeChar(-3)])); "line minus char")]
     // Compound
-    #[test_case(",", Compound(Bof.into(), Eof.into()); "full")]
-    #[test_case("5,", Compound(Line(4).into(), Eof.into()); "from n")]
-    #[test_case("50,", Compound(Line(49).into(), Eof.into()); "from n multi digit")]
-    #[test_case("5,9", Compound(Line(4).into(), Line(8).into()); "from n to m")]
-    #[test_case("25,90", Compound(Line(24).into(), Line(89).into()); "from n to m multi digit")]
-    #[test_case("/foo/,/bar/", Compound(Regex(re("foo")).into(), Regex(re("bar")).into()); "regex range")]
+    #[test_case(",", compound(Bof, Eof); "full")]
+    #[test_case("5,", compound(Line(4), Eof); "from n")]
+    #[test_case("50,", compound(Line(49), Eof); "from n multi digit")]
+    #[test_case("5,9", compound(Line(4), Line(8)); "from n to m")]
+    #[test_case("25,90", compound(Line(24), Line(89)); "from n to m multi digit")]
+    #[test_case("/foo/,/bar/", compound(Regex(re("foo")), Regex(re("bar"))); "regex range")]
     // Compound with suffix
     #[test_case(
         "-/\\s/+#1,/\\s/-#1",
-        Compound(
-            SimpleAddr { base: RegexBack(re_rev("\\s")), suffixes: vec![RelativeChar(1)] },
-            SimpleAddr { base: Regex(re("\\s")), suffixes: vec![RelativeChar(-1)] },
+        compound(
+            SimpleAddr::new(RegexBack(re_rev("\\s")), vec![RelativeChar(1)]),
+            SimpleAddr::new(Regex(re("\\s")), vec![RelativeChar(-1)]),
         );
         "regex range with suffixes"
     )]
