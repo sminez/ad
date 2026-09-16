@@ -2,11 +2,11 @@
 
 use ad_editor::{
     Config, Editor, EditorMode, LogBuffer, PlumbingRules,
-    editor::{Click, EAction, MiniBufferState},
+    editor::EAction,
     input::Event,
     key::Input,
     system::System,
-    ui::{Layout, StateChange, UserInterface, style::CurShape},
+    ui::{RefreshArgs, StateChange, UserInterface, style::CurShape},
 };
 use arbitrary::Arbitrary;
 use assert_fs::{
@@ -103,15 +103,7 @@ impl UserInterface for ScriptedUi {
 
     fn state_change(&mut self, _change: StateChange) {}
 
-    fn refresh(
-        &mut self,
-        _mode_name: &str,
-        _layout: &mut Layout,
-        _n_running: usize,
-        _pending_keys: &[Input],
-        _held_click: Option<&Click>,
-        _mb: Option<MiniBufferState<'_>>,
-    ) {
+    fn refresh<'a>(&mut self, _args: RefreshArgs<'a>) {
         let event = match self.actions.pop() {
             Some(TestAction::Input(input)) => Event::Input(input),
             None => Event::action(EAction::Exit { force: true }),
@@ -121,6 +113,15 @@ impl UserInterface for ScriptedUi {
     }
 
     fn set_cursor_shape(&mut self, _cur_shape: CurShape) {}
+
+    fn need_ts_state_update(
+        &self,
+        _layout_changed: bool,
+        _has_held_click: bool,
+        _has_mb: bool,
+    ) -> bool {
+        false
+    }
 }
 
 /// A System impl that can't run commands (we don't want the fuzzer to accidentally trash the host)

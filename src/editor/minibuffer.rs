@@ -279,7 +279,7 @@ where
     /// This minibuffer will be responsible for processing input events until it returns a
     /// selection, at which point the minibuffer below it will resume processing.
     pub(crate) fn push_minibuffer(&mut self, sel: MbSelector) {
-        let mb = MiniBuffer::new(sel, self.config.clone(), self.layout.buffers());
+        let mb = MiniBuffer::new(sel, self.config.clone(), &self.buffers);
         self.mb_stack.push(mb);
     }
 

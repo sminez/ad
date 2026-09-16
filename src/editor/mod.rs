@@ -1,7 +1,7 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     LogBuffer,
-    buffer::{Buffer, BufferId, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferId, Buffers, SCRATCH_ID, WELCOME_SQUIRREL},
     config::Config,
     die,
     dot::TextObject,
@@ -13,7 +13,7 @@ use crate::{
     mode::{Mode, modes},
     plumb::PlumbingRules,
     system::{DefaultSystem, System},
-    ui::{Layout, SCRATCH_ID, StateChange, Ui, UserInterface, style::CurShape},
+    ui::{Layout, RefreshArgs, StateChange, Ui, UserInterface, style::CurShape},
 };
 use ad_event::Source;
 use parking_lot::RwLock;
@@ -26,11 +26,12 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::debug;
 
 mod actions;
 mod built_in_commands;
 mod commands;
+mod layout;
 mod minibuffer;
 mod mouse;
 
@@ -71,6 +72,7 @@ pub struct Editor<S>
 where
     S: System,
 {
+    buffers: Buffers,
     config: Arc<RwLock<Config>>,
     mb_stack: Vec<MiniBuffer>,
     system: S,
@@ -155,17 +157,19 @@ where
 
         let modes = modes(&config.keys);
         let config = Arc::new(RwLock::new(config));
+        let mut buffers = Buffers::new(lsp_manager.clone(), config.clone());
 
         let ui = Ui::new(mode, config.clone());
-        let mut layout = Layout::new(100, 100, lsp_manager.clone(), config.clone());
-        if show_splash && layout.is_empty_squirrel() {
-            layout
-                .active_buffer_ignoring_scratch_mut()
+        let layout = Layout::new(buffers.active_id(), 100, 100, config.clone());
+        if show_splash && buffers.is_empty_squirrel() {
+            buffers
+                .active_ignoring_scratch_mut()
                 .txt
                 .insert_str(0, WELCOME_SQUIRREL);
         }
 
         Self {
+            buffers,
             config,
             mb_stack: Vec::new(),
             system,
@@ -238,24 +242,24 @@ where
     /// The id of the currently active buffer
     #[inline]
     pub fn active_buffer_id(&self) -> usize {
-        self.layout.active_buffer_ignoring_scratch().id
+        self.buffers.active_id()
     }
 
     #[inline]
     pub fn active_buffer_name(&self) -> &str {
-        self.layout.active_buffer_ignoring_scratch().full_name()
+        self.buffers.active_ignoring_scratch().full_name()
     }
 
     pub fn buffer_list(&self) -> Vec<String> {
-        self.layout.as_buffer_list()
+        self.buffers.as_buffer_list()
     }
 
     pub fn buffer_content(&self, id: BufferId) -> Option<String> {
-        self.layout.buffer_with_id(id).map(|b| b.str_contents())
+        self.buffers.with_id(id).map(|b| b.str_contents())
     }
 
     pub fn buffer_dot(&self, id: BufferId) -> Option<String> {
-        self.layout.buffer_with_id(id).map(|b| b.dot_contents())
+        self.buffers.with_id(id).map(|b| b.dot_contents())
     }
 
     pub fn layout_ids(&self) -> Vec<Vec<BufferId>> {
@@ -272,22 +276,15 @@ where
     /// directory, self.cwd.
     #[inline]
     pub fn effective_directory(&self) -> &Path {
-        self.layout
-            .active_buffer_ignoring_scratch()
+        self.buffers
+            .active_ignoring_scratch()
             .dir()
             .unwrap_or(&self.cwd)
     }
 
-    /// Update the stored window size, accounting for the status and message bars
-    /// This will panic if the available screen rows are 0 or 1
-    pub(crate) fn update_window_size(&mut self, screen_rows: usize, screen_cols: usize) {
-        trace!("window size updated: rows={screen_rows} cols={screen_cols}");
-        self.layout.update_screen_size(screen_rows - 2, screen_cols);
-    }
-
     /// Ensure that opening without any files initialises the fsys state correctly
     fn ensure_correct_fsys_state(&self) {
-        if self.layout.is_empty_squirrel() {
+        if self.buffers.is_empty_squirrel() {
             _ = self.tx_fsys.send(LogEvent::Open(0));
             _ = self.tx_fsys.send(LogEvent::Focus(0));
         }
@@ -363,16 +360,29 @@ where
     }
 
     pub fn refresh_screen(&mut self) {
-        self.layout.clamp_scroll();
+        self.clamp_scroll();
 
-        self.ui.refresh(
-            &self.modes[0].name,
-            &mut self.layout,
-            self.system.n_running_children(),
-            &self.pending_keys,
-            self.held_click.as_ref(),
-            self.mb_stack.last_mut().map(|mb| mb.updated_render_state()),
-        );
+        if self.buffers.changed_since_last_render() {
+            self.layout.changed_since_last_render = true;
+        }
+
+        if self.ui.need_ts_state_update(
+            self.layout.changed_since_last_render,
+            self.held_click.is_some(),
+            !self.mb_stack.is_empty(),
+        ) {
+            self.update_visible_ts_state();
+        }
+
+        self.ui.refresh(RefreshArgs {
+            mode_name: &self.modes[0].name,
+            buffers: &self.buffers,
+            layout: &mut self.layout,
+            n_running: self.system.n_running_children(),
+            pending_keys: &self.pending_keys,
+            held_click: self.held_click.as_ref(),
+            mb: self.mb_stack.last_mut().map(|mb| mb.updated_render_state()),
+        });
     }
 
     /// Update the status line to contain the given message.
@@ -392,11 +402,11 @@ where
         f: fn(&Buffer) -> String,
     ) {
         if id == SCRATCH_ID {
-            _ = tx.send(Ok((f)(self.layout.scratch.b.buffer())));
+            _ = tx.send(Ok((f)(self.buffers.scratch().buffer())));
             return;
         }
 
-        match self.layout.buffer_with_id(id) {
+        match self.buffers.with_id(id) {
             Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
                 _ = tx.send(Err("unknown buffer".to_string()));
@@ -413,12 +423,12 @@ where
         f: F,
     ) {
         if id == SCRATCH_ID {
-            (f)(self.layout.scratch.b.buffer_mut(), s);
+            (f)(self.buffers.scratch_mut().buffer_mut(), s);
             _ = tx.send(Ok("handled".to_string()));
             return;
         }
 
-        match self.layout.buffer_with_id_mut(id) {
+        match self.buffers.with_id_mut(id) {
             Some(b) => {
                 (f)(b, s);
                 _ = tx.send(Ok("handled".to_string()))
@@ -485,12 +495,12 @@ where
             }),
 
             AppendOutput { id, s } => {
-                self.layout.write_output_for_buffer(id, s, &self.cwd);
+                self.write_output_for_buffer(id, s);
                 default_handled();
             }
 
             AddInputEventFilter { id, filter } => {
-                let resp = if self.layout.try_set_input_filter(id, filter) {
+                let resp = if self.buffers.try_set_input_filter(id, filter) {
                     Ok("handled".to_string())
                 } else {
                     Err("filter already in place".to_string())
@@ -499,7 +509,7 @@ where
             }
 
             RemoveInputEventFilter { id } => {
-                self.layout.clear_input_filter(id);
+                self.buffers.clear_input_filter(id);
                 default_handled();
             }
 
@@ -561,18 +571,16 @@ where
         match eaction {
             Noop => (),
 
-            AppendToOutputBuffer { bufid, content } => self
-                .layout
-                .write_output_for_buffer(bufid, content, &self.cwd),
+            AppendToOutputBuffer { bufid, content } => self.write_output_for_buffer(bufid, content),
             ChangeDirectory { path } => self.change_directory(path),
             CleanupChild { id } => self.system.cleanup_child(id),
-            ClearScratch => self.layout.scratch.b.clear(),
+            ClearScratch => self.clear_scratch(),
             ClearEphemeralMode { name } => self.clear_ephemeral_mode(&name),
             CommandMode => self.command_mode(),
             DeleteBuffer { bufid, force } => self.delete_buffer(bufid, force),
             EditCommand { bufid, cmd } => self.execute_edit_command(bufid, &cmd),
             EditorCommand { bufid, cmd } => self.execute_command(bufid, &cmd),
-            EnsureFileIsOpen { path } => self.layout.ensure_file_is_open(&path),
+            EnsureFileIsOpen { path } => self.buffers.ensure_file_is_open(&path),
             ExecuteDot { bufid } => self.default_execute_dot(bufid, None, source),
             ExecuteString { bufid, s } => self.execute_explicit_string(bufid, &s, source),
             Exit { force } => self.exit(force),
@@ -586,7 +594,7 @@ where
             LspShowCapabilities => {
                 if let Some((name, txt)) = self
                     .lsp_manager
-                    .show_server_capabilities(self.layout.active_buffer_ignoring_scratch())
+                    .show_server_capabilities(self.buffers.active_ignoring_scratch())
                 {
                     self.open_virtual(name, txt, true)
                 }
@@ -594,45 +602,46 @@ where
             LspShowDiagnostics => {
                 let action = self
                     .lsp_manager
-                    .show_diagnostics(self.layout.active_buffer_ignoring_scratch());
+                    .show_diagnostics(self.buffers.active_ignoring_scratch());
                 self.handle_action(action, Source::Fsys);
             }
             LspStart => {
-                if let Some(msg) = self.lsp_manager.start_client(self.layout.buffers()) {
+                if let Some(msg) = self.lsp_manager.start_client(&self.buffers) {
                     self.set_status_message(msg);
                 }
             }
             LspStop => self
                 .lsp_manager
-                .stop_client(self.layout.active_buffer_ignoring_scratch()),
+                .stop_client(self.buffers.active_ignoring_scratch()),
             LspCompletion => self
                 .lsp_manager
-                .completion(self.layout.active_buffer_ignoring_scratch()),
+                .completion(self.buffers.active_ignoring_scratch()),
             LspFormat => self
                 .lsp_manager
-                .format(self.layout.active_buffer_ignoring_scratch()),
+                .format(self.buffers.active_ignoring_scratch()),
             LspGotoDeclaration => self
                 .lsp_manager
-                .goto_declaration(self.layout.active_buffer_ignoring_scratch()),
+                .goto_declaration(self.buffers.active_ignoring_scratch()),
             LspGotoDefinition => self
                 .lsp_manager
-                .goto_definition(self.layout.active_buffer_ignoring_scratch()),
+                .goto_definition(self.buffers.active_ignoring_scratch()),
             LspGotoTypeDefinition => self
                 .lsp_manager
-                .goto_type_definition(self.layout.active_buffer_ignoring_scratch()),
+                .goto_type_definition(self.buffers.active_ignoring_scratch()),
             LspHover => self
                 .lsp_manager
-                .hover(self.layout.active_buffer_ignoring_scratch()),
+                .hover(self.buffers.active_ignoring_scratch()),
             LspReferences => self
                 .lsp_manager
-                .find_references(self.layout.active_buffer_ignoring_scratch()),
+                .find_references(self.buffers.active_ignoring_scratch()),
             LspRename { new_name } => self.lsp_rename(new_name),
             LspRenamePrepare => self.prepare_lsp_rename(),
             MbSelect(sel) => self.push_minibuffer(sel),
+            NextBuffer => self.focus_next_buffer(),
             OpenFile { path, new_window } => {
                 self.open_file_relative_to_effective_directory(&path, new_window)
             }
-            OpenTransientScratch { name, txt } => self.layout.open_transient_scratch(name, txt),
+            OpenTransientScratch { name, txt } => self.open_transient_scratch(name, txt),
             OpenVirtualFile {
                 name,
                 txt,
@@ -640,6 +649,7 @@ where
             } => self.open_virtual(name, txt, new_window),
             Paste => self.paste_from_clipboard(source),
             Plumb { txt, new_window } => self.plumb(txt, new_window),
+            PreviousBuffer => self.focus_previous_buffer(),
             ReloadBuffer { bufid } => self.reload_buffer(bufid),
             ReloadConfig => self.reload_config(),
             RunMode => self.run_mode(),
@@ -657,10 +667,10 @@ where
             ShellRun { bufid, cmd } => self.run_shell_cmd(bufid, &cmd),
             ShellSend { bufid, cmd } => self.run_shell_cmd(bufid, &cmd),
             ShowHelp => self.show_help(),
-            ToggleScratch => self.layout.toggle_scratch(),
+            ToggleScratch => self.toggle_scratch(),
             TsShowTree => self.show_active_ts_tree(),
             ViewLogs => self.view_logs(),
-            Yank => self.set_clipboard(self.layout.active_buffer().dot_contents()),
+            Yank => self.set_clipboard(self.buffers.active().dot_contents()),
 
             DebugBufferContents => self.debug_buffer_contents(),
             DebugEditLog => self.debug_edit_log(),
@@ -677,7 +687,7 @@ where
 
                     self.handle_buffer_action(
                         None,
-                        BAction::DotSet(TextObject::Arr(arr), self.layout.active_window_rows()),
+                        BAction::DotSet(TextObject::Arr(arr), self.active_window_rows()),
                         Source::Keyboard,
                     );
                 }
@@ -699,11 +709,11 @@ where
         source: Source,
     ) {
         let b = match bufid {
-            Some(id) => match self.layout.buffer_with_id_mut(id) {
+            Some(id) => match self.buffers.with_id_mut(id) {
                 Some(b) => b,
                 None => return,
             },
-            None => self.layout.active_buffer_mut(),
+            None => self.buffers.active_mut(),
         };
 
         if let Some(ao) = b.handle_action(a, source) {
@@ -711,29 +721,36 @@ where
         }
     }
 
-    fn handle_ui_action(&mut self, uaction: UAction) {
-        if let Some(ao) = self.layout.handle_ui_action(uaction) {
-            self.handle_action_outcome(ao);
-        }
-    }
-
     fn handle_action_outcome(&mut self, ao: ActionOutcome) {
         match ao {
+            ActionOutcome::ClearScratchFocus => self.buffers.set_scratch_focus(false),
             ActionOutcome::Exit(force) => self.exit(force),
-            ActionOutcome::NotifyFocusChange(id) => _ = self.tx_fsys.send(LogEvent::Focus(id)),
+            ActionOutcome::FocusChange(id) => {
+                self.buffers.focus_id(id);
+                self.buffers.set_scratch_focus(id == SCRATCH_ID);
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
+            ActionOutcome::SetCursor(id, cur) => {
+                self.buffers.focus_id(id);
+                self.buffers.active_mut().dot = cur.into();
+                self.buffers.set_scratch_focus(id == SCRATCH_ID);
+                _ = self.tx_fsys.send(LogEvent::Focus(id));
+            }
             ActionOutcome::SetStatusMessage(msg) => self.set_status_message(&msg),
             ActionOutcome::SetClipboard(s) => self.set_clipboard(s),
         }
     }
 
     fn jump_forward(&mut self) {
-        if let Some(id) = self.layout.jump_forward() {
+        let maybe_ids = self.buffers.jump_list_forward();
+        if let Some(id) = self.layout.jump_forward(maybe_ids) {
             _ = self.tx_fsys.send(LogEvent::Focus(id));
         }
     }
 
     fn jump_backward(&mut self) {
-        if let Some(id) = self.layout.jump_backward() {
+        let maybe_ids = self.buffers.jump_list_backward();
+        if let Some(id) = self.layout.jump_backward(maybe_ids) {
             _ = self.tx_fsys.send(LogEvent::Focus(id));
         }
     }
@@ -773,7 +790,7 @@ mod tests {
         ed.handle_event(evt);
 
         // Should have the test file and now the output buffer
-        assert_eq!(ed.layout.buffers().len(), 2);
+        assert_eq!(ed.buffers.len(), 2);
         assert_eq!(ed.system.running_children().len(), 1);
 
         ed.system.kill_child(0);
@@ -793,8 +810,8 @@ mod tests {
             }
         }
 
-        ed.layout.close_buffer(1);
-        assert_eq!(ed.layout.buffers().len(), 1);
+        ed.close_buffer(1);
+        assert_eq!(ed.buffers.len(), 1);
 
         match ed.rx_events.try_recv() {
             Err(_) => (),

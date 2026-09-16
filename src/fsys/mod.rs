@@ -30,7 +30,7 @@
 //!       body
 //!       event
 //! ```
-use crate::{editor::EAction, input::Event, ui::SCRATCH_ID};
+use crate::{buffer::SCRATCH_ID, editor::EAction, input::Event};
 use ninep::{
     Result,
     fs::{IoUnit, Mode, Perm, Qid, Stat, Timestamp, WStat},

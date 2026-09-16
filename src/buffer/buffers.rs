@@ -1,7 +1,8 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferKind, Cur, ScratchBuf, WELCOME_SQUIRREL},
     config::Config,
     dot::TextObject,
+    fsys::InputFilter,
     lsp::LspManagerHandle,
     ziplist::{Position, ZipList},
     zlist,
@@ -15,6 +16,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
+use tracing::warn;
 
 #[cfg(test)]
 use crate::lsp::Req;
@@ -32,9 +34,12 @@ pub type BufferId = usize;
 pub struct Buffers {
     next_id: BufferId,
     inner: ZipList<Buffer>,
+    scratch: ScratchBuf,
     jump_list: JumpList,
     lsp_handle: Arc<LspManagerHandle>,
     config: Arc<RwLock<Config>>,
+    changed_since_last_render: bool,
+    scratch_is_focused: bool,
 }
 
 impl Buffers {
@@ -42,9 +47,12 @@ impl Buffers {
         Self {
             next_id: 1,
             inner: zlist![Buffer::new_unnamed(0, "", config.clone())],
+            scratch: ScratchBuf::new(config.clone()),
             jump_list: JumpList::default(),
             lsp_handle,
             config,
+            changed_since_last_render: false,
+            scratch_is_focused: false,
         }
     }
 
@@ -53,9 +61,12 @@ impl Buffers {
         Self {
             next_id: 1,
             inner: zlist![Buffer::new_unnamed(0, "", config.clone())],
+            scratch: ScratchBuf::new(config.clone()),
             jump_list: JumpList::default(),
             lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
             config,
+            changed_since_last_render: false,
+            scratch_is_focused: false,
         }
     }
 
@@ -72,9 +83,12 @@ impl Buffers {
                     .map(|i| Buffer::new_virtual(*i, "", "", config.clone())),
             )
             .unwrap(),
+            scratch: ScratchBuf::new(config.clone()),
             jump_list: JumpList::default(),
             lsp_handle: Arc::new(LspManagerHandle::new_stubbed(tx_req)),
             config,
+            changed_since_last_render: false,
+            scratch_is_focused: false,
         }
     }
 
@@ -93,8 +107,10 @@ impl Buffers {
         // Opening a directory from an existing directory buffer replaces the existing content
         // rather than opening a new buffer in order to prevent the issue in Acme where drilling
         // down into subdirectories results in having multiple.
-        if self.active().kind.is_dir() && path.metadata().map(|m| m.is_dir()).unwrap_or_default() {
-            let b = self.active_mut();
+        if self.active_ignoring_scratch().kind.is_dir()
+            && path.metadata().map(|m| m.is_dir()).unwrap_or_default()
+        {
+            let b = self.active_ignoring_scratch_mut();
             b.kind = BufferKind::Directory(path);
             b.reload_from_disk();
             b.set_dot(TextObject::BufferStart, 1);
@@ -163,11 +179,13 @@ impl Buffers {
     pub fn next(&mut self) {
         self.notify_lsp_changes_if_dirty();
         self.inner.focus_down();
+        self.changed_since_last_render = true;
     }
 
     pub fn previous(&mut self) {
         self.notify_lsp_changes_if_dirty();
         self.inner.focus_up();
+        self.changed_since_last_render = true;
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Buffer> {
@@ -249,8 +267,37 @@ impl Buffers {
         self.inner.iter().any(|(_, b)| b.id == id)
     }
 
+    /// Check to see if any actions taken since the last time this method was called resulted
+    /// in changes to the visible UI state.
+    ///
+    /// Calling this method will reset the internal flags used for checking these state changes.
+    pub(crate) fn changed_since_last_render(&mut self) -> bool {
+        let had_change = self.changed_since_last_render
+            || self.scratch.buffer().changed_since_last_render
+            || self.iter().any(|b| b.changed_since_last_render);
+
+        self.changed_since_last_render = false;
+        self.iter_mut()
+            .for_each(|b| b.changed_since_last_render = false);
+        self.scratch.buffer_mut().changed_since_last_render = false;
+
+        had_change
+    }
+
+    pub(crate) fn set_scratch_focus(&mut self, focused: bool) {
+        if focused == self.scratch_is_focused {
+            return;
+        }
+        self.scratch_is_focused = focused;
+        self.changed_since_last_render = true;
+    }
+
+    pub(crate) fn scratch_is_focused(&self) -> bool {
+        self.scratch_is_focused
+    }
+
     pub(crate) fn focus_id(&mut self, id: BufferId) -> Option<BufferId> {
-        if !self.contains_bufid(id) || self.active().id == id {
+        if !self.contains_bufid(id) || self.active_ignoring_scratch().id == id {
             return None;
         }
         self.notify_lsp_changes_if_dirty();
@@ -296,14 +343,55 @@ impl Buffers {
             .collect()
     }
 
-    #[inline]
+    /// Returns the active buffer or the scratch buffer if it is focused
     pub fn active(&self) -> &Buffer {
+        if self.scratch_is_focused {
+            self.scratch.buffer()
+        } else {
+            self.active_ignoring_scratch()
+        }
+    }
+
+    /// Returns the active buffer or the scratch buffer if it is focused
+    pub fn active_mut(&mut self) -> &mut Buffer {
+        if self.scratch_is_focused {
+            self.scratch.buffer_mut()
+        } else {
+            self.active_ignoring_scratch_mut()
+        }
+    }
+
+    /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
+    #[inline]
+    pub fn active_ignoring_scratch(&self) -> &Buffer {
         &self.inner.focus
     }
 
+    /// Returns the active buffer, ignoring whether or not the scratch buffer is focused
     #[inline]
-    pub fn active_mut(&mut self) -> &mut Buffer {
+    pub fn active_ignoring_scratch_mut(&mut self) -> &mut Buffer {
         &mut self.inner.focus
+    }
+
+    #[inline]
+    pub fn active_id(&self) -> usize {
+        self.inner.focus.id
+    }
+
+    #[inline]
+    pub fn scratch(&self) -> &ScratchBuf {
+        &self.scratch
+    }
+
+    #[inline]
+    pub fn scratch_mut(&mut self) -> &mut ScratchBuf {
+        &mut self.scratch
+    }
+
+    pub fn set_transient_scratch(&mut self, name: impl Into<String>, content: impl Into<String>) {
+        self.scratch_is_focused = true;
+        self.scratch
+            .set_transient(name, content, self.config.clone());
     }
 
     pub fn record_jump_position(&mut self) {
@@ -348,6 +436,11 @@ impl Buffers {
         self.inner.len()
     }
 
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     /// Whether or not the only buffer we currently have open is the default squirrel buffer rather
     /// than a "real" buffer that has been opened by the user.
     #[inline]
@@ -382,6 +475,34 @@ impl Buffers {
                 id
             }
         }
+    }
+
+    /// Returns `true` if the filter was successfully set, false if there was already one in place.
+    pub(crate) fn try_set_input_filter(&mut self, bufid: BufferId, filter: InputFilter) -> bool {
+        let b = match self.with_id_mut(bufid) {
+            Some(b) => b,
+            None => return false,
+        };
+
+        if b.input_filter.is_some() {
+            warn!("attempt to set an input filter when one is already in place. id={bufid:?}");
+            return false;
+        }
+
+        let scratch_filter = filter.paired_tag_filter();
+        b.input_filter = Some(filter);
+        self.scratch.set_input_filter(Some(scratch_filter));
+
+        true
+    }
+
+    /// Remove the input filter for the given buffer if one exists.
+    pub(crate) fn clear_input_filter(&mut self, bufid: usize) {
+        if let Some(b) = self.with_id_mut(bufid) {
+            b.input_filter = None;
+        }
+
+        self.scratch.set_input_filter(None);
     }
 }
 
