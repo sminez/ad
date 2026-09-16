@@ -8,7 +8,7 @@ use std::borrow::Cow;
 /// cost of reduced performance.
 ///
 /// [0]: crate::regex::Regex
-#[allow(clippy::len_without_is_empty)]
+#[expect(clippy::len_without_is_empty)]
 pub trait Haystack {
     fn try_make_contiguous(&mut self);
     fn is_contiguous(&self) -> bool;

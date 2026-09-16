@@ -312,7 +312,7 @@ pub(crate) trait MbSelect: Send + Sync {
     fn prompt_and_options(&self, buffers: &Buffers) -> (String, Vec<String>);
     fn selected_actions(&self, sel: MiniBufferSelection) -> Option<Actions>;
 
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn initial_input(&self, buffers: &Buffers) -> Option<String> {
         None
     }

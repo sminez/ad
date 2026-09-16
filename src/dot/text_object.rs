@@ -10,7 +10,6 @@ use crate::{
 use std::cmp::min;
 
 /// A vim-like text object which can be used to manipulate the current Dot in a Buffer
-#[allow(dead_code)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum TextObject {
     Arr(Arrow),

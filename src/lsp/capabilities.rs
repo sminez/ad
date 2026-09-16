@@ -8,7 +8,6 @@ use lsp_types::{InitializeResult, Location, Position, PositionEncodingKind, Serv
 use tracing::warn;
 
 #[derive(Debug)]
-#[allow(dead_code)]
 pub(crate) struct Capabilities {
     inner: ServerCapabilities,
     pub(super) position_encoding: PositionEncoding,

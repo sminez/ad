@@ -99,7 +99,7 @@ impl Styles {
     }
 }
 
-#[allow(dead_code)]
+#[expect(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnsiStyle {
     Fg(Color),

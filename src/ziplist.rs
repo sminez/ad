@@ -1040,8 +1040,6 @@ mod tests {
     fn index_mut(mut zl: ZipList<usize>) {
         let expected = zl.clone().map(|_| 6);
 
-        // https://github.com/rust-lang/rust-clippy/issues/14685
-        #[allow(clippy::manual_slice_fill)]
         for i in 0..zl.len() {
             zl[i] = 6;
         }

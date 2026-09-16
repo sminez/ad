@@ -136,7 +136,7 @@ pub(crate) trait LspRequest:
     /// Map an error response from the server into editor [Actions] for processin in the main event
     /// loop. By default this method will error log the raw response before dropping it and taking
     /// no further action.
-    #[allow(unused_variables)]
+    #[expect(unused_variables)]
     fn handle_err(lsp_id: usize, err: ResponseError, man: &mut LspManager) -> Option<Actions> {
         error!("LSP - dropping malformed response: {err:?}");
         None

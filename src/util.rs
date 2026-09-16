@@ -1,7 +1,7 @@
 //! Utility functions
 use crate::{config::config_path, editor::built_in_commands, mode::keybindings};
 use parking_lot::{RwLock, RwLockReadGuard};
-use std::{fs, os::unix::fs::PermissionsExt, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 use tracing::warn;
 use unicode_width::UnicodeWidthChar;
 
@@ -105,39 +105,10 @@ pub(crate) fn parent_dir_containing<'a>(initial: &'a Path, target: &str) -> Opti
         .find(|&p| p.is_dir() && p.join(target).exists())
 }
 
-/// Check whether or not a given command can be found as an executable within the provided set of path directories
-#[allow(dead_code)]
-pub(crate) fn exists_on_path_as_executable(cmd: &str, cwd: &Path, path_str: &str) -> bool {
-    let cwd_candidate = cwd.join(cmd);
-    let candidates = path_str.split(':').map(|dir| Path::new(dir).join(cmd));
-
-    for candidate in std::iter::once(cwd_candidate).chain(candidates) {
-        if let Ok(meta) = fs::metadata(candidate)
-            && meta.is_file()
-            && meta.permissions().mode() & 0o111 != 0
-        {
-            return true;
-        }
-    }
-
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use simple_test_case::test_case;
-    use std::{env, path::PathBuf};
-
-    #[test_case("cat", true; "cat exists")]
-    #[test_case("dog", false; "dog does not exist")]
-    #[test]
-    fn executable_checking_works(cmd: &str, expected: bool) {
-        let path = env::var("PATH").unwrap();
-        let exists = exists_on_path_as_executable(cmd, &PathBuf::from("/tmp"), &path);
-
-        assert_eq!(exists, expected);
-    }
 
     #[test_case("example_file.md", 100, "example_file.md"; "shorter than n_cols")]
     #[test_case("example_file_能力边界探索.md", 12, "example_file"; "ascii boundary 1")]

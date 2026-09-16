@@ -89,10 +89,9 @@ pub enum StateChange {
     StatusMessage { msg: String },
 }
 
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum Ui {
     Headless,
-    Tui(Tui),
+    Tui(Box<Tui>),
     Boxed(Box<dyn UserInterface>),
 }
 
@@ -110,7 +109,7 @@ impl Ui {
     pub(crate) fn new(mode: EditorMode, config: Arc<RwLock<Config>>) -> Self {
         match mode {
             EditorMode::Headless => Self::Headless,
-            EditorMode::Terminal => Self::Tui(Tui::new(config)),
+            EditorMode::Terminal => Self::Tui(Box::new(Tui::new(config))),
             EditorMode::Boxed(ui) => Self::Boxed(ui),
         }
     }

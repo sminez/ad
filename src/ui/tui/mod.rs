@@ -897,7 +897,7 @@ fn render_chars(
     buf.push_str(RESET_STYLE);
 }
 
-#[allow(clippy::too_many_arguments)]
+#[expect(clippy::too_many_arguments)]
 fn render_line<'a>(
     gb: &'a GapBuffer,
     it: impl Iterator<Item = RangeToken<'a>>,

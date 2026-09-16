@@ -14,27 +14,16 @@ use std::{cmp::min, mem::swap, sync::Arc};
 use tracing::debug;
 use unicode_width::UnicodeWidthChar;
 
-/// Layout is a screen layout of the windows available for displaying buffer
-/// content to the user. The available screen space is split into a number of
-/// columns each containing a vertical stack of windows.
+/// A screen layout of the windows available for displaying buffer content to the user. The
+/// available screen space is split into columns each containing a vertical stack of windows.
 #[derive(Debug)]
 pub struct Layout {
-    /// Global editor config
     config: Arc<RwLock<Config>>,
-    /// An anonymous buffer that sits outside of the main buffer state and acts as though it is the
-    /// active buffer for the purposes of Load/Execute.
     pub(crate) scratch: Scratch,
-    /// Available screen width in terms of characters
     pub(crate) screen_rows: usize,
-    /// Available screen height in terms of characters
     pub(crate) screen_cols: usize,
-    /// Left to right Columns of windows
     pub(super) cols: ZipList<Column>,
-    /// Known Buffer views that are not currently active
     pub(super) views: Vec<View>,
-    /// Whether or not the on-screen state changed since the last render of the UI.
-    /// Per-buffer state changes are tracked on each [Buffer], this flag is only for
-    /// changes to the UI layout itself.
     pub(crate) changed_since_last_render: bool,
 }
 
