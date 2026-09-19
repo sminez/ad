@@ -3,6 +3,7 @@ c //
 dart //
 go //
 graphql #
+haskell --
 just #
 make #
 plumbingrules #
