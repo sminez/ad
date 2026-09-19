@@ -1,5 +1,5 @@
 //! RPC messaging between the fuse filesystem thread and the main editor thread
-use crate::{fsys::event::InputFilter, input::Event};
+use crate::{buffer::BufferId, fsys::event::InputFilter, input::Event};
 use std::sync::mpsc::{Sender, channel};
 use tracing::error;
 
@@ -34,6 +34,7 @@ impl Message {
 #[derive(Debug, Clone)]
 pub enum Req {
     ControlMessage {
+        id: Option<BufferId>,
         msg: String,
     },
     MinibufferSelect {
@@ -42,70 +43,70 @@ pub enum Req {
         tx: Sender<String>,
     },
     ReadBufferName {
-        id: usize,
+        id: BufferId,
     },
     ReadBufferDot {
-        id: usize,
+        id: BufferId,
     },
     ReadBufferXDot {
-        id: usize,
+        id: BufferId,
     },
     ReadBufferAddr {
-        id: usize,
+        id: BufferId,
     },
     ReadBufferXAddr {
-        id: usize,
+        id: BufferId,
     },
     ReadBufferBody {
-        id: usize,
+        id: BufferId,
     },
     ReadBufferFtype {
-        id: usize,
+        id: BufferId,
     },
     SetBufferName {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     SetBufferDot {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     SetBufferXDot {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     SetBufferAddr {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     SetBufferXAddr {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     ClearBufferBody {
-        id: usize,
+        id: BufferId,
     },
     AppendBufferBody {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     AppendOutput {
-        id: usize,
+        id: BufferId,
         s: String,
     },
     AddInputEventFilter {
-        id: usize,
+        id: BufferId,
         filter: InputFilter,
     },
     RemoveInputEventFilter {
-        id: usize,
+        id: BufferId,
     },
     LoadInBuffer {
-        id: usize,
+        id: BufferId,
         txt: String,
     },
     ExecuteInBuffer {
-        id: usize,
+        id: BufferId,
         txt: String,
     },
 }

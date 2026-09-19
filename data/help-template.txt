@@ -608,20 +608,21 @@ ad itself can be used as a simple 9p client to explore the filesystem (run 'ad -
 your terminal for details of each of the available commands):
 
   $ ad -9p ls ad
+  ctl                # control file for issuing commands to the current buffer
   log                # read only log of events in the editor
   minibuffer         # control file for selecting text using the minibuffer
   scratch            # control file for reading and appending to the scratch buffer
-  ctl                # control file for issuing commands to ad
   buffers            # directory of control files for open buffers
 
   $ ad -9p ls ad/buffers
-  1                  # directory of control files for buffer id=1
-  current            # the id of the current buffer
   index              # a line per open buffer in the format 'id\tpath'
+  current            # the id of the current buffer
+  1                  # directory of control files for buffer id=1
 
   $ ad -9p ls ad/buffers/1
   addr               # the row:col,row:col address of the current buffer dot
   body               # the string content of the buffer
+  ctl                # control file for issuing commands to this buffer
   dot                # the currently selected text within the buffer
   event              # control file for intercepting user input events to the buffer
   filename           # the current filename for the buffer
@@ -632,11 +633,17 @@ your terminal for details of each of the available commands):
 
 If you have the fusermount(1) and 9pfuse(4) programs installed then you can set the "auto_mount"
 property in ~/.ad/config.toml to true and mount the filesystem directly at ~/.ad/mnt when ad starts.
+
 The default scripts provided in the ad GitHub repo serve as a useful reference for the sorts of
 interactions that are possible through this interface:
 
   https://github.com/sminez/ad/tree/develop/data/bin
   https://github.com/sminez/ad/blob/develop/data/lib/ad.sh
+
+And the ad_client crate provides a convenient Rust interface for writing more complex programs
+that interact with ad:
+
+  https://crates.io/crates/ad_client
 
 ---
 

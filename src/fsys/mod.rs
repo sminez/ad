@@ -1,6 +1,5 @@
 //! An Acme style filesystem interface for ad
 //!
-//!
 //! ## Mount Point
 //! <https://www.pathname.com/fhs/pub/fhs-2.3.html#VARLIBLTEDITORGTEDITORBACKUPFILESAN>
 //!
@@ -17,18 +16,23 @@
 //! ```text
 //! $HOME/.ad/mnt/
 //!   ctl
+//!   log
 //!   minibuffer
 //!   scratch
-//!   log
 //!   buffers/
-//!     current
 //!     index
+//!     current
 //!     [n]/
-//!       filename
-//!       dot
 //!       addr
 //!       body
+//!       ctl
+//!       dot
 //!       event
+//!       filename
+//!       filetype
+//!       output
+//!       xaddr
+//!       xdot
 //! ```
 use crate::{buffer::SCRATCH_ID, editor::EAction, input::Event};
 use ninep::{
@@ -98,16 +102,17 @@ const CURRENT_BUFFER: &str = "current";
 /// of a buffer node (used to generate qid values for buffers):
 ///
 ///   1. $id            -> The buffer directory
-///   2.   filename     -> The current filename for the buffer
-///   3.   dot          -> The text currently held in dot
-///   4.   addr         -> The address value of dot
-///   5.   xdot         -> The text currently held in xdot (a virtual dot not affecting real dot)
-///   6.   xaddr        -> The address value of xdot
-///   7.   body         -> The full body of the buffer
-///   8.   event        -> Control file for intercepting input events for the buffer
+///   2.   addr         -> The address value of dot
+///   3.   body         -> The full body of the buffer
+///   4.   ctl          -> Control file for sending commands to the buffer
+///   5.   dot          -> The text currently held in dot
+///   6.   event        -> Control file for intercepting input events for the buffer
+///   7.   filename     -> The current filename for the buffer
+///   8.   filetype     -> ad's view of what filetype is configured for the buffer
 ///   9.   output       -> Write only output connected to stdout/err of commands run within the buffer
-///   10.  filetype     -> ad's view of what filetype is configured for the buffer
-const QID_OFFSET: u64 = 10;
+///   10.  xaddr        -> The address value of xdot
+///   11.  xdot         -> The text currently held in xdot (a virtual dot not affecting real dot)
+const QID_OFFSET: u64 = 11;
 
 const TOP_LEVEL_QIDS: [u64; 8] = [
     MOUNT_ROOT_QID,
@@ -511,10 +516,10 @@ impl Serve9p for AdFs {
 
         match qid {
             MOUNT_ROOT_QID => Ok(vec![
+                s.control_file_stat.clone(),
                 s.log_file_stat.clone(),
                 s.minibuffer_stat.clone(),
                 s.scratch_stat.clone(),
-                s.control_file_stat.clone(),
                 s.buffer_nodes.stat().clone(),
             ]),
             BUFFERS_QID => Ok(s.buffer_nodes.top_level_stats()),
@@ -544,7 +549,7 @@ impl Serve9p for AdFs {
                 }
                 None => {
                     s.control_file_stat.last_modified = Timestamp::now();
-                    match Message::send(Req::ControlMessage { msg: str }, &s.tx) {
+                    match Message::send(Req::ControlMessage { id: None, msg: str }, &s.tx) {
                         Ok(_) => Ok(n_bytes),
                         Err(e) => Err(format!("unable to execute control message: {e}")),
                     }
@@ -572,6 +577,7 @@ impl Serve9p for AdFs {
             let id = bnode.id;
             match Message::send(
                 Req::ControlMessage {
+                    id: None,
                     msg: format!("db {id}"),
                 },
                 &s.tx,
@@ -670,11 +676,12 @@ fn empty_file_stat(qid: u64, name: &str) -> Stat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ninep::sync::client::Error;
+    use crate::fsys::buffer::{BUFFER_FILES, EVENT};
+    use ninep::{fs::FileType, sync::client::Error};
+    use simple_test_case::test_case;
     use std::{thread::sleep, time::Duration};
 
-    #[test]
-    fn event_files_are_exclusive() {
+    pub fn test_server_with_file() -> Server<AdFs> {
         let (tx, _rx) = channel();
         let (btx, brx) = channel();
         let adfs = AdFs::new(tx, brx, false);
@@ -687,7 +694,12 @@ mod tests {
             state.buffer_nodes.update();
         }
 
-        let mut server = Server::new(adfs);
+        Server::new(adfs)
+    }
+
+    #[test]
+    fn event_files_are_exclusive() {
+        let mut server = test_server_with_file();
         let (client1, _handle1) = server.session_with_attached_client(&*UNAME, "").unwrap();
         let (client2, _handle2) = server.session_with_attached_client(&*UNAME, "").unwrap();
 
@@ -712,5 +724,50 @@ mod tests {
 
         let res = client2.iter_lines("buffers/1/event");
         assert!(res.is_ok(), "client2 read after clunk failed: {res:?}");
+    }
+
+    #[test_case(
+        "",
+        vec![
+            (FileType::FILE, CONTROL_FILE),
+            (FileType::FILE, LOG_FILE),
+            (FileType::FILE, MINIBUFFER),
+            (FileType::FILE, SCRATCH),
+            (FileType::DIRECTORY, BUFFERS_DIR)
+        ];
+        "top level"
+    )]
+    #[test_case(
+        "buffers",
+        vec![
+            (FileType::FILE, INDEX_BUFFER),
+            (FileType::FILE, CURRENT_BUFFER),
+            (FileType::DIRECTORY, "1")
+        ];
+        "buffers"
+    )]
+    #[test_case(
+        "buffers/1",
+        BUFFER_FILES.iter().map(|&(_, name)| {
+            if name == EVENT {
+                (FileType::EXCLUSIVE, name)
+            } else {
+                (FileType::FILE, name)
+            }
+        }).collect();
+        "buffer 1"
+    )]
+    #[test]
+    fn we_have_the_expected_directory_structure(path: &str, expected: Vec<(FileType, &str)>) {
+        let mut server = test_server_with_file();
+        let (client, _handle) = server.session_with_attached_client(&*UNAME, "").unwrap();
+
+        let stats = client.read_dir(path).unwrap();
+        let entries: Vec<_> = stats
+            .iter()
+            .map(|stat| (stat.qid.ty, stat.name.as_str()))
+            .collect();
+
+        assert_eq!(entries, expected);
     }
 }

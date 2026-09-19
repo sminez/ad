@@ -448,8 +448,8 @@ where
         let default_handled = || _ = tx.send(Ok("handled".to_string()));
 
         match req {
-            ControlMessage { msg } => {
-                self.execute_command(None, &msg);
+            ControlMessage { id, msg } => {
+                self.execute_command(id, &msg);
                 default_handled();
             }
 

@@ -19,26 +19,28 @@ use std::{
 };
 use tracing::{debug, error, trace};
 
-const FILENAME: &str = "filename";
-const DOT: &str = "dot";
-const ADDR: &str = "addr";
-const XDOT: &str = "xdot";
-const XADDR: &str = "xaddr";
-const BODY: &str = "body";
-const EVENT: &str = "event";
-const OUTPUT: &str = "output";
-const FILETYPE: &str = "filetype";
+pub(super) const ADDR: &str = "addr";
+pub(super) const BODY: &str = "body";
+pub(super) const CTL: &str = "ctl"; // write only
+pub(super) const DOT: &str = "dot";
+pub(super) const EVENT: &str = "event"; // exclusive
+pub(super) const FILENAME: &str = "filename";
+pub(super) const FILETYPE: &str = "filetype";
+pub(super) const OUTPUT: &str = "output"; // write only
+pub(super) const XADDR: &str = "xaddr";
+pub(super) const XDOT: &str = "xdot";
 
 pub(super) const BUFFER_FILES: [(u64, &str); QID_OFFSET as usize - 1] = [
-    (1, FILENAME),
-    (2, DOT),
-    (3, ADDR),
-    (4, XDOT),
-    (5, XADDR),
-    (6, BODY),
-    (7, EVENT),
+    (1, ADDR),
+    (2, BODY),
+    (3, CTL),
+    (4, DOT),
+    (5, EVENT),
+    (6, FILENAME),
+    (7, FILETYPE),
     (8, OUTPUT),
-    (9, FILETYPE),
+    (9, XADDR),
+    (10, XDOT),
 ];
 
 fn parent_and_fname(qid: u64) -> (u64, &'static str) {
@@ -99,9 +101,8 @@ impl BufferNodes {
     }
 
     pub(super) fn top_level_stats(&self) -> Vec<Stat> {
-        let mut stats: Vec<Stat> = self.known.values().map(|b| b.stat.clone()).collect();
-        stats.push(self.current_buff_stat.clone());
-        stats.push(self.index_stat.clone());
+        let mut stats = vec![self.index_stat.clone(), self.current_buff_stat.clone()];
+        stats.extend(self.known.values().map(|b| b.stat.clone()));
 
         stats
     }
@@ -254,14 +255,18 @@ impl BufferNodes {
 
         let n_bytes = s.len();
         let req = match fname {
-            DOT => Req::SetBufferDot { id, s },
             ADDR => Req::SetBufferAddr { id, s },
             BODY => Req::AppendBufferBody { id, s },
-            XDOT => Req::SetBufferXDot { id, s },
-            XADDR => Req::SetBufferXAddr { id, s },
-            OUTPUT => Req::AppendOutput { id, s },
+            CTL => Req::ControlMessage {
+                id: Some(id),
+                msg: s,
+            },
+            DOT => Req::SetBufferDot { id, s },
             EVENT => return send_event_to_editor(id, &s, &self.tx),
             FILENAME => Req::SetBufferName { id, s },
+            OUTPUT => Req::AppendOutput { id, s },
+            XADDR => Req::SetBufferXAddr { id, s },
+            XDOT => Req::SetBufferXDot { id, s },
             _ => return Err(E_UNKNOWN_FILE.to_string()),
         };
 
@@ -376,7 +381,7 @@ impl BufferNode {
     }
 
     fn refreshed_file_stat(&mut self, fname: &str, tx: &Sender<Event>) -> Option<Stat> {
-        if fname == OUTPUT || fname == EVENT {
+        if fname == OUTPUT || fname == EVENT || fname == CTL {
             return self.file_stats.get(fname).cloned();
         }
 
@@ -395,14 +400,16 @@ impl BufferNode {
         tx: &Sender<Event>,
     ) -> Option<String> {
         let req = match fname {
-            FILENAME => Req::ReadBufferName { id: self.id },
-            DOT => Req::ReadBufferDot { id: self.id },
             ADDR => Req::ReadBufferAddr { id: self.id },
             BODY => Req::ReadBufferBody { id: self.id },
-            XDOT => Req::ReadBufferXDot { id: self.id },
-            XADDR => Req::ReadBufferXAddr { id: self.id },
+            CTL => return None,
+            DOT => Req::ReadBufferDot { id: self.id },
+            EVENT => return None,
+            FILENAME => Req::ReadBufferName { id: self.id },
             FILETYPE => Req::ReadBufferFtype { id: self.id },
             OUTPUT => return Some(String::new()),
+            XADDR => Req::ReadBufferXAddr { id: self.id },
+            XDOT => Req::ReadBufferXDot { id: self.id },
             _ => return None, // can hit this as part of walk for unknown files
         };
 
@@ -423,14 +430,16 @@ impl BufferNode {
         tx: &Sender<Event>,
     ) -> InternalRead {
         let req = match fname {
-            FILENAME => Req::ReadBufferName { id: self.id },
-            DOT => Req::ReadBufferDot { id: self.id },
             ADDR => Req::ReadBufferAddr { id: self.id },
             BODY => Req::ReadBufferBody { id: self.id },
-            XDOT => Req::ReadBufferXDot { id: self.id },
-            XADDR => Req::ReadBufferXAddr { id: self.id },
+            CTL => return InternalRead::Immediate(Vec::new()),
+            DOT => Req::ReadBufferDot { id: self.id },
+            FILENAME => Req::ReadBufferName { id: self.id },
             FILETYPE => Req::ReadBufferFtype { id: self.id },
             OUTPUT => return InternalRead::Immediate(Vec::new()),
+            XADDR => Req::ReadBufferXAddr { id: self.id },
+            XDOT => Req::ReadBufferXDot { id: self.id },
+
             EVENT => {
                 // ignoring offset
                 return match self.pending_events() {
@@ -482,9 +491,11 @@ fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {
 
     for (offset, name) in BUFFER_FILES.into_iter() {
         let mut stat = empty_file_stat(qid + offset, name);
-        if name == EVENT {
-            stat.qid.ty = FileType::EXCLUSIVE;
-        };
+        match name {
+            EVENT => stat.qid.ty = FileType::EXCLUSIVE,
+            CTL | OUTPUT => stat.perms.remove(Perm::OWNER_READ),
+            _ => (),
+        }
 
         m.insert(name, stat);
     }
@@ -495,16 +506,43 @@ fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fsys::{UNAME, tests::test_server_with_file};
     use simple_test_case::test_case;
 
-    #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, FILENAME; "filename first buffer")]
-    #[test_case(10, 8, DOT; "dot first buffer")]
-    #[test_case(24, 18, BODY; "body second buffer")]
+    #[test_case(CURRENT_BUFFER_QID + 1 + 1, CURRENT_BUFFER_QID + 1, ADDR; "addr first buffer")]
+    #[test_case(10, 8, BODY; "body first buffer")]
+    #[test_case(25, 19, FILENAME; "filename second buffer")]
     #[test]
     fn parent_and_fname_works(qid: u64, parent: u64, fname: &str) {
         let (p, f) = parent_and_fname(qid);
 
         assert_eq!(p, parent);
         assert_eq!(f, fname);
+    }
+
+    // can read
+    #[test_case(ADDR, true; "addr")]
+    #[test_case(BODY, true; "body")]
+    #[test_case(DOT, true; "dot")]
+    #[test_case(EVENT, true; "event")]
+    #[test_case(FILENAME, true; "filename")]
+    #[test_case(FILETYPE, true; "filetype")]
+    #[test_case(XADDR, true; "xaddr")]
+    #[test_case(XDOT, true; "xdot")]
+    // can not read
+    #[test_case(CTL, false; "ctl")]
+    #[test_case(OUTPUT, false; "output")]
+    #[test]
+    fn buffer_files_have_expected_read_access(fname: &str, can_read: bool) {
+        let mut server = test_server_with_file();
+        let (client, _handle) = server.session_with_attached_client(&*UNAME, "").unwrap();
+
+        let stats = client.read_dir("buffers/1").unwrap();
+        let stat = stats
+            .iter()
+            .find(|s| s.name == fname)
+            .unwrap_or_else(|| panic!("no file named {fname} found"));
+
+        assert_eq!(stat.perms.contains(Perm::OWNER_READ), can_read, "{stat:#?}");
     }
 }

@@ -1,0 +1,15 @@
+Use the buffer level `ctl` fsys file to interact with a buffer inside of the
+editor.
+
+-- config --
+path: tests/data/config/with-fsys.toml
+-- file-hello.txt --
+-- actions --
+fsys: write buffers/1/ctl <echo hello, world!
+-- buffer-list --
+1    * hello.txt
+-- expected-windows --
+1
+-- expected-buffer-1 --
+hello, world!
+
