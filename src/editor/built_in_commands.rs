@@ -1,6 +1,22 @@
 pub fn built_in_commands() -> Vec<(Vec<&'static str>, &'static str)> {
     vec![
         (
+            vec!["!"],
+            "execute the remaining text as a shell in the directory containing the buffer",
+        ),
+        (
+            vec!["<"],
+            "as '!' but replace the current dot with the output from running the command",
+        ),
+        (
+            vec![">"],
+            "as '!' but use the current dot as stdin when running the command",
+        ),
+        (
+            vec!["|"],
+            "as '!' but pipe the current dot through the command and replace it with the output",
+        ),
+        (
             vec!["b", "buffer"],
             "switch to the buffer with the given ID ('buffer 5')",
         ),
