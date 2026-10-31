@@ -34,7 +34,7 @@ use edit::{Edit, EditLog, Kind, Txt};
 use scratch::ScratchBuf;
 
 pub use buffers::{BufferId, Buffers};
-pub use internal::{Chars, GapBuffer, IdxChars, Slice, SliceIter};
+pub use internal::{ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, RawIdx, Slice, SliceIter};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.
@@ -596,7 +596,7 @@ impl Buffer {
 
     /// The number of utf-8 characters currently held in the buffer.
     #[inline]
-    pub fn len_chars(&self) -> usize {
+    pub fn len_chars(&self) -> CharIdx {
         self.txt.len_chars()
     }
 
@@ -678,9 +678,9 @@ impl Buffer {
     /// bytes.
     pub(crate) fn iter_between_chars(
         &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
+        char_from: CharIdx,
+        char_to: CharIdx,
+    ) -> impl Iterator<Item = (CharIdx, char)> {
         self.txt
             .slice(char_from, char_to)
             .indexed_chars(char_from, false)
@@ -692,9 +692,9 @@ impl Buffer {
     /// bytes.
     pub(crate) fn rev_iter_between_chars(
         &self,
-        char_from: usize,
-        char_to: usize,
-    ) -> impl Iterator<Item = (usize, char)> {
+        char_from: CharIdx,
+        char_to: CharIdx,
+    ) -> impl Iterator<Item = (CharIdx, char)> {
         self.txt
             .slice(char_to, char_from)
             .indexed_chars(char_to, true)
@@ -771,15 +771,15 @@ impl Buffer {
     ///   - file path with addr (some/path:addr)
     ///   - file path
     ///   - url
-    fn try_expand_known(&self, current_index: usize) -> Option<Dot> {
+    fn try_expand_known(&self, current_index: CharIdx) -> Option<Dot> {
         let (mut from, mut to) = (current_index, current_index);
-        let mut colon: Option<usize> = None;
+        let mut colon: Option<CharIdx> = None;
         let n_chars = self.txt.len_chars();
 
         let is_file_char = |ch: char| ch.is_alphanumeric() || "._-+/:@".contains(ch);
         let is_addr_char = |ch: char| "+-/$.#,;?".contains(ch);
         let is_url_char = |ch: char| "?&=".contains(ch);
-        let has_url_prefix = |i: usize| {
+        let has_url_prefix = |i: CharIdx| {
             let http = i > 4 && i + 3 <= n_chars && self.txt.slice(i - 4, i + 3) == HTTP;
             let https = i > 5 && i + 3 <= n_chars && self.txt.slice(i - 5, i + 3) == HTTPS;
 
@@ -985,7 +985,7 @@ impl Buffer {
     }
 
     /// Set this Buffer's dot to an explicit cursor position, clamping to EOB.
-    pub fn set_dot_from_cursor(&mut self, idx: usize) {
+    pub fn set_dot_from_cursor(&mut self, idx: CharIdx) {
         self.dot = Cur::new(idx).into();
         self.dot.clamp_idx(self.txt.len_chars());
         self.changed_since_last_render = true;
@@ -1000,7 +1000,7 @@ impl Buffer {
     }
 
     /// Set this Buffer's dot to an explicit [Range], clamping to EOB.
-    pub fn set_dot_from_range(&mut self, from: usize, to: usize) {
+    pub fn set_dot_from_range(&mut self, from: CharIdx, to: CharIdx) {
         self.dot = Dot::from(Range::from_cursors(Cur::new(from), Cur::new(to), false))
             .collapse_null_range();
         self.dot.clamp_idx(self.txt.len_chars());

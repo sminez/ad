@@ -8,11 +8,14 @@
 //! We make use of pre-allocated buffers for the Thread lists and track the
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
-use crate::regex::{
-    Error, Haystack,
-    ast::{Assertion, parse},
-    compile::{CompiledOps, Inst, Op, Prog, compile_ast, optimise},
-    matches::{Match, MatchIter},
+use crate::{
+    buffer::ByteIdx,
+    regex::{
+        Error, Haystack,
+        ast::{Assertion, parse},
+        compile::{CompiledOps, Inst, Op, Prog, compile_ast, optimise},
+        matches::{Match, MatchIter},
+    },
 };
 use aho_corasick::AhoCorasick;
 use parking_lot::Mutex;
@@ -144,7 +147,7 @@ impl Regex {
 
     /// Determine whether or not this Regex matches the [Haystack] from the given offset without
     /// searching for the leftmost-longest match and associated submatch boundaries.
-    pub fn matches_from<H>(&self, haystack: &H, offset: usize) -> bool
+    pub fn matches_from<H>(&self, haystack: &H, offset: ByteIdx) -> bool
     where
         H: Haystack,
     {
@@ -155,7 +158,7 @@ impl Regex {
 
     /// Determine whether or not this Regex matches the [Haystack] between the given offsets
     /// without searching for the leftmost-longest match and associated submatch boundaries.
-    pub fn matches_between<H>(&self, haystack: &H, from: usize, to: usize) -> bool
+    pub fn matches_between<H>(&self, haystack: &H, from: ByteIdx, to: ByteIdx) -> bool
     where
         H: Haystack,
     {
@@ -186,7 +189,7 @@ impl Regex {
     ///
     /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
     /// in order to speed up searching whenever this is possible.
-    pub fn find_from<H>(&self, haystack: &H, offset: usize) -> Option<Match>
+    pub fn find_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Match>
     where
         H: Haystack,
     {
@@ -201,7 +204,7 @@ impl Regex {
     ///
     /// It is recommended that you call [Haystack::try_make_contiguous] before calling this method
     /// in order to speed up searching whenever this is possible.
-    pub fn find_between<H>(&self, haystack: &H, from: usize, to: usize) -> Option<Match>
+    pub fn find_between<H>(&self, haystack: &H, from: ByteIdx, to: ByteIdx) -> Option<Match>
     where
         H: Haystack,
     {
@@ -256,7 +259,7 @@ impl RevRegex {
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
     /// the provided `from` bytes offset rather than the beginning of the haystack, returning the
     /// match position along with all submatches.
-    pub fn find_rev_from<H>(&self, haystack: &H, offset: usize) -> Option<Match>
+    pub fn find_rev_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Match>
     where
         H: Haystack,
     {
@@ -301,7 +304,7 @@ impl RegexInner {
     /// match more quickly using aho-corasick.
     ///
     /// This is only valid to use when the haystack is contiguous.
-    fn fast_update_byte_offset<H>(&self, haystack: &H, mut byte_offset: usize) -> Option<usize>
+    fn fast_update_byte_offset<H>(&self, haystack: &H, mut byte_offset: ByteIdx) -> Option<ByteIdx>
     where
         H: Haystack,
     {
@@ -329,7 +332,7 @@ impl RegexInner {
     /// passing off to [Regex::run_vm].
     ///
     /// Callers need to set `self.track_submatches` prior to calling this method.
-    fn match_from_byte_offset<H>(&mut self, haystack: &H, mut offset: usize) -> Option<Match>
+    fn match_from_byte_offset<H>(&mut self, haystack: &H, mut offset: ByteIdx) -> Option<Match>
     where
         H: Haystack,
     {
@@ -345,8 +348,8 @@ impl RegexInner {
     fn match_between_byte_offsets<H>(
         &mut self,
         haystack: &H,
-        mut from: usize,
-        to: usize,
+        mut from: ByteIdx,
+        to: ByteIdx,
     ) -> Option<Match>
     where
         H: Haystack,
@@ -371,9 +374,9 @@ impl RegexInner {
     ///  - The Match returned in this case will always point to the null string at the start
     ///    of the string and should only be used for conversion to a bool in `matches_*`
     ///    methods.
-    fn run_vm<I>(&mut self, input: &mut I, mut sp: usize) -> Option<Match>
+    fn run_vm<I>(&mut self, input: &mut I, mut sp: ByteIdx) -> Option<Match>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (ByteIdx, char)>,
     {
         let mut sub_matches = [0; N_SLOTS];
         self.free_sms = (1..self.prog.len()).collect();
@@ -462,7 +465,7 @@ impl RegexInner {
     }
 
     #[inline]
-    fn step_thread(&mut self, i: usize, sp: usize, ch: char) -> Option<usize> {
+    fn step_thread(&mut self, i: usize, sp: ByteIdx, ch: char) -> Option<usize> {
         let t = &self.clist[i];
         match &self.prog[t.pc].op {
             // If comparisons and their assertions hold then queue the resulting threads
@@ -485,7 +488,7 @@ impl RegexInner {
     }
 
     #[inline]
-    fn add_thread(&mut self, t: Thread, sp: usize, ch: char, initial: bool) {
+    fn add_thread(&mut self, t: Thread, sp: ByteIdx, ch: char, initial: bool) {
         if self.prog[t.pc].generation == self.generation {
             self.sm_dec_ref(t.sm);
             return; // already on the list we are currently building
@@ -523,7 +526,15 @@ impl RegexInner {
     }
 
     #[inline]
-    fn handle_save(&mut self, t: Thread, s: usize, sp: usize, ch: char, initial: bool, rev: bool) {
+    fn handle_save(
+        &mut self,
+        t: Thread,
+        s: usize,
+        sp: ByteIdx,
+        ch: char,
+        initial: bool,
+        rev: bool,
+    ) {
         // If we are saving our initial position from a forward match then we are looking at the
         // correct character, otherwise the Save op is being processed at the character before the
         // one we need to save.
@@ -560,7 +571,7 @@ impl RegexInner {
     }
 
     #[inline]
-    fn sm_update(&mut self, i: usize, s: usize, sp: usize) -> usize {
+    fn sm_update(&mut self, i: usize, s: usize, sp: ByteIdx) -> usize {
         // We don't hard error on compiling a regex with more than out max submatches
         // but we don't track anything past the last one
         if !self.track_submatches || s >= N_SLOTS {
@@ -589,7 +600,7 @@ struct SubMatches {
     refs: usize,
     /// $0 -> $n submatches with $0 being the full match
     /// for submatch $k the start index is 2$k and the end is 2$k+1
-    inner: [usize; N_SLOTS],
+    inner: [ByteIdx; N_SLOTS],
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

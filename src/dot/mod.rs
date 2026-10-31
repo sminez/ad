@@ -7,7 +7,7 @@
 //! All indexing is 0-based when working with the contents of a specific buffer.
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
-use crate::buffer::Buffer;
+use crate::buffer::{Buffer, CharIdx};
 use std::cmp::min;
 
 mod cur;
@@ -60,7 +60,7 @@ impl Dot {
     /// Construct a new [Range] dot from two cursor indices.
     ///
     /// `to` will be used as the active cursor position.
-    pub fn from_char_indices(from: usize, to: usize) -> Self {
+    pub fn from_char_indices(from: CharIdx, to: CharIdx) -> Self {
         Self::Range {
             r: Range::from_cursors(Cur { idx: from }, Cur { idx: to }, false),
         }
@@ -70,7 +70,7 @@ impl Dot {
     /// positions.
     ///
     /// For a [Cur] dot the start and end are equal
-    pub fn as_char_indices(&self) -> (usize, usize) {
+    pub fn as_char_indices(&self) -> (CharIdx, CharIdx) {
         match *self {
             Self::Cur { c: Cur { idx } } => (idx, idx),
             Self::Range {
@@ -249,7 +249,7 @@ impl Dot {
     }
 
     /// Clamp this dot to be valid for the given Buffer
-    pub fn clamp_idx(&mut self, max_idx: usize) {
+    pub fn clamp_idx(&mut self, max_idx: CharIdx) {
         match self {
             Dot::Cur { c } => c.clamp_idx(max_idx),
             Dot::Range { r } => {

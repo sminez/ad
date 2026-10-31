@@ -1,4 +1,7 @@
-use crate::regex::{Haystack, Regex, vm::N_SLOTS};
+use crate::{
+    buffer::ByteIdx,
+    regex::{Haystack, Regex, vm::N_SLOTS},
+};
 use std::{borrow::Cow, sync::Arc};
 
 /// The match location of a Regex against a given input.
@@ -7,12 +10,12 @@ use std::{borrow::Cow, sync::Arc};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Match {
     pub(super) n_submatches: usize,
-    pub(super) sub_matches: [usize; N_SLOTS],
+    pub(super) sub_matches: [ByteIdx; N_SLOTS],
     pub(super) submatch_names: Arc<[String]>,
 }
 
 impl Match {
-    pub(crate) fn synthetic(from: usize, to: usize) -> Self {
+    pub(crate) fn synthetic(from: ByteIdx, to: ByteIdx) -> Self {
         let mut sub_matches = [0; N_SLOTS];
         sub_matches[0] = from;
         sub_matches[1] = to;
@@ -67,7 +70,7 @@ impl Match {
     }
 
     /// The start and end of this match in terms of byte offsets
-    pub fn loc(&self) -> (usize, usize) {
+    pub fn loc(&self) -> (ByteIdx, ByteIdx) {
         let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
 
         assert!(
@@ -79,12 +82,12 @@ impl Match {
         (start, end)
     }
 
-    fn sub_loc_by_name(&self, name: &str) -> Option<(usize, usize)> {
+    fn sub_loc_by_name(&self, name: &str) -> Option<(ByteIdx, ByteIdx)> {
         let n = self.submatch_names.iter().position(|s| s == name)?;
         self.sub_loc(n + 1)
     }
 
-    pub(crate) fn sub_loc(&self, n: usize) -> Option<(usize, usize)> {
+    pub(crate) fn sub_loc(&self, n: usize) -> Option<(ByteIdx, ByteIdx)> {
         if 2 * n + 1 >= N_SLOTS {
             return None;
         }
@@ -102,7 +105,7 @@ impl Match {
         Some((start, end))
     }
 
-    pub fn iter_locs(&self) -> impl Iterator<Item = Option<(usize, usize)>> {
+    pub fn iter_locs(&self) -> impl Iterator<Item = Option<(ByteIdx, ByteIdx)>> {
         let mut n = 0;
 
         std::iter::from_fn(move || {
@@ -127,7 +130,7 @@ where
 {
     pub(super) haystack: &'a H,
     pub(super) r: &'a mut Regex,
-    pub(super) from: usize,
+    pub(super) from: ByteIdx,
 }
 
 impl<'a, H> Iterator for MatchIter<'a, H>

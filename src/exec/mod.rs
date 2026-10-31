@@ -1,6 +1,6 @@
 //! Sam style language for executing structural regular expressions against ad Buffers
 use crate::{
-    buffer::{Buffer, GapBuffer},
+    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer},
     dot::{Cur, Dot},
     editor::BAction,
     parse::ParseInput,
@@ -98,10 +98,10 @@ impl From<template::RenderError> for Error {
 /// Something that can be edited by a Program
 pub trait Edit: Address + Haystack<Regex> {
     /// Insert a string at the specified index
-    fn insert(&mut self, ix: usize, s: &str);
+    fn insert(&mut self, ix: CharIdx, s: &str);
 
     /// Remove all characters from (from..to)
-    fn remove(&mut self, from: usize, to: usize);
+    fn remove(&mut self, from: CharIdx, to: CharIdx);
 
     /// Mark the start of an edit transaction
     fn begin_edit_transaction(&mut self) {}
@@ -111,22 +111,22 @@ pub trait Edit: Address + Haystack<Regex> {
 }
 
 impl Edit for GapBuffer {
-    fn insert(&mut self, idx: usize, s: &str) {
+    fn insert(&mut self, idx: CharIdx, s: &str) {
         self.insert_str(idx, s)
     }
 
-    fn remove(&mut self, from: usize, to: usize) {
+    fn remove(&mut self, from: CharIdx, to: CharIdx) {
         self.remove_range(from, to);
     }
 }
 
 impl Edit for Buffer {
-    fn insert(&mut self, idx: usize, s: &str) {
+    fn insert(&mut self, idx: CharIdx, s: &str) {
         self.dot = Dot::Cur { c: Cur { idx } };
         self.handle_action(BAction::InsertString { s: s.to_string() }, Source::Fsys);
     }
 
-    fn remove(&mut self, from: usize, to: usize) {
+    fn remove(&mut self, from: CharIdx, to: CharIdx) {
         if from == to {
             return;
         }
@@ -280,8 +280,8 @@ impl Program {
 
     fn gather_actions<'a, E, R, W>(
         &self,
-        byte_from: usize,
-        byte_to: usize,
+        byte_from: ByteIdx,
+        byte_to: ByteIdx,
         ed: &'a E,
         runner: &mut R,
         fname: &str,
@@ -394,9 +394,9 @@ impl Program {
 
 #[derive(Debug)]
 enum EditAction {
-    Insert(usize, String),
-    Remove(usize, usize),
-    Replace(usize, usize, String),
+    Insert(ByteIdx, String),
+    Remove(ByteIdx, ByteIdx),
+    Replace(ByteIdx, ByteIdx, String),
 }
 
 impl EditAction {
@@ -451,7 +451,7 @@ where
     E: Edit,
 {
     fname: &'a str,
-    byte_from: usize,
+    byte_from: ByteIdx,
     ed: &'a E,
     row_col: RefCell<Option<(String, String)>>,
 }

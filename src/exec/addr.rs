@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, GapBuffer},
+    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer},
     dot::{Cur, Dot, Range},
     parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
@@ -141,7 +141,7 @@ pub enum AddrBase {
     /// -/+n
     RelativeLine(isize),
     /// #n
-    Char(usize),
+    Char(CharIdx),
     /// -/+#n
     RelativeChar(isize),
     /// n:m
@@ -400,14 +400,14 @@ pub trait Address: Haystack + Sized {
     /// so that don't need to special case running programs against an in-editor
     /// buffer vs stdin or a file read from disk.
     fn current_dot(&self) -> Dot;
-    fn len_bytes(&self) -> usize;
-    fn len_chars(&self) -> usize;
-    fn line_to_char(&self, line_idx: usize) -> Option<usize>;
-    fn char_to_line(&self, char_idx: usize) -> Option<usize>;
-    fn char_to_line_end(&self, char_idx: usize) -> Option<usize>;
-    fn char_to_line_start(&self, char_idx: usize) -> Option<usize>;
+    fn len_bytes(&self) -> ByteIdx;
+    fn len_chars(&self) -> CharIdx;
+    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx>;
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize>;
+    fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx>;
+    fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx>;
 
-    fn max_iter(&self) -> usize {
+    fn max_iter(&self) -> CharIdx {
         self.len_chars()
     }
 
@@ -524,23 +524,23 @@ impl Address for GapBuffer {
         Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
     }
 
-    fn len_bytes(&self) -> usize {
+    fn len_bytes(&self) -> ByteIdx {
         self.len()
     }
 
-    fn len_chars(&self) -> usize {
+    fn len_chars(&self) -> CharIdx {
         self.len_chars()
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
         self.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
         self.try_char_to_line(char_idx)
     }
 
-    fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.try_char_to_line(char_idx)?;
         match self.try_line_to_char(line_idx + 1) {
             None => Some(self.len_chars() - 1),
@@ -548,7 +548,7 @@ impl Address for GapBuffer {
         }
     }
 
-    fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.try_char_to_line(char_idx)?;
         Some(self.line_to_char(line_idx))
     }
@@ -559,23 +559,23 @@ impl Address for Buffer {
         self.dot
     }
 
-    fn len_bytes(&self) -> usize {
+    fn len_bytes(&self) -> ByteIdx {
         self.txt.len()
     }
 
-    fn len_chars(&self) -> usize {
+    fn len_chars(&self) -> CharIdx {
         self.txt.len_chars()
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
         self.txt.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
         self.txt.try_char_to_line(char_idx)
     }
 
-    fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.txt.try_char_to_line(char_idx)?;
         match self.txt.try_line_to_char(line_idx + 1) {
             None => Some(self.txt.len_chars() - 1),
@@ -583,7 +583,7 @@ impl Address for Buffer {
         }
     }
 
-    fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.txt.try_char_to_line(char_idx)?;
         Some(self.txt.line_to_char(line_idx))
     }

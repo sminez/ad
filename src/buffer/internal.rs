@@ -56,14 +56,18 @@ fn count_chars(bytes: &[u8]) -> usize {
     n_chars
 }
 
-type ByteOffset = usize;
-type CharOffset = usize;
+/// A byte offset within the logical buffer state (i.e. ignoring the position of the gap).
+pub type ByteIdx = usize;
+/// A character offset within the logical buffer state.
+pub type CharIdx = usize;
+/// A byte offset within the raw buffer state (i.e. accounting for the position of the gap).
+pub type RawIdx = usize;
 
-/// A simple [HashMap] based cache of mappings from character positions to byte positions within
-/// the buffer since the last time it was modified (either by altering the logical buffer content,
-/// moving the gap or resizing the buffer).
+/// A simple [HashMap] based cache of mappings from character positions to raw byte positions
+/// within the buffer since the last time it was modified (either by altering the logical buffer
+/// content, moving the gap or resizing the buffer).
 #[derive(Debug)]
-struct CharToByteCache(UnsafeCell<HashMap<CharOffset, ByteOffset>>);
+struct CharToByteCache(UnsafeCell<HashMap<CharIdx, RawIdx>>);
 
 impl CharToByteCache {
     fn clear(&self) {
@@ -71,15 +75,15 @@ impl CharToByteCache {
         unsafe { (&mut *self.0.get()).clear() }
     }
 
-    fn get(&self, char_idx: CharOffset) -> Option<ByteOffset> {
+    fn get(&self, char_idx: CharIdx) -> Option<RawIdx> {
         // SAFETY: Only called in offset_char_to_raw_byte when used to return cached values
         unsafe { (&*self.0.get()).get(&char_idx).copied() }
     }
 
-    fn insert(&self, char_idx: CharOffset, byte_idx: ByteOffset) {
+    fn insert(&self, char_idx: CharIdx, raw_idx: RawIdx) {
         // SAFETY: Only called in offset_char_to_raw_byte when used to cache values
         unsafe {
-            (&mut *self.0.get()).insert(char_idx, byte_idx);
+            (&mut *self.0.get()).insert(char_idx, raw_idx);
         }
     }
 }
@@ -104,18 +108,18 @@ pub struct GapBuffer {
     /// the raw data being stored (both buffer content and the gap)
     data: Box<[u8]>,
     /// current size of the allocation for data
-    cap: usize,
+    cap: RawIdx,
     /// raw byte offset to the first character in the gap
-    gap_start: usize,
+    gap_start: RawIdx,
     /// raw byte offset to the last character in the gap
-    gap_end: usize,
+    gap_end: RawIdx,
     /// size in bytes for the next gap when re-allocating
     next_gap: usize,
     /// total number of characters in the buffer
     /// this is != line_endings.last() if there is no trailing newline
-    n_chars: usize,
+    n_chars: CharIdx,
     /// line ending raw byte offset -> char offset
-    line_endings: Vec<(ByteOffset, CharOffset)>,
+    line_endings: Vec<(RawIdx, CharIdx)>,
     /// Simple cache of computed char->byte mappings since the last time the buffer was modified
     char_to_byte_cache: CharToByteCache,
 }
@@ -126,7 +130,7 @@ impl Default for GapBuffer {
     }
 }
 
-fn compute_line_endings(s: &str) -> (usize, Vec<(ByteOffset, CharOffset)>) {
+fn compute_line_endings(s: &str) -> (CharIdx, Vec<(RawIdx, CharIdx)>) {
     let mut n_chars = 0;
     let mut line_endings = Vec::new();
 
@@ -270,7 +274,7 @@ impl GapBuffer {
 
     /// The current length of "active" data in the buffer (i.e. not including the gap)
     #[inline]
-    pub fn len(&self) -> usize {
+    pub fn len(&self) -> ByteIdx {
         self.cap - self.gap()
     }
 
@@ -309,7 +313,7 @@ impl GapBuffer {
     ///
     /// # Safety
     /// You must call [GapBuffer::make_contiguous] before calling this method.
-    pub unsafe fn substr_from(&self, byte_offset: usize) -> &str {
+    pub unsafe fn substr_from(&self, byte_offset: ByteIdx) -> &str {
         // SAFETY: See above
         let (start, end) = if self.gap_start == 0 {
             (self.gap_end + byte_offset, self.cap)
@@ -420,7 +424,7 @@ impl GapBuffer {
 
     /// The number of characters in the buffer
     #[inline]
-    pub fn len_chars(&self) -> usize {
+    pub fn len_chars(&self) -> CharIdx {
         self.n_chars
     }
 
@@ -429,7 +433,7 @@ impl GapBuffer {
     /// For lines with a trailing newline this is the position of the newline character,
     /// for the final line (if there is no trailing newline) this is the end of the buffer.
     #[inline]
-    pub fn line_end_byte(&self, line_idx: usize) -> usize {
+    pub fn line_end_byte(&self, line_idx: usize) -> ByteIdx {
         if line_idx < self.line_endings.len() {
             self.raw_byte_to_byte(self.line_endings[line_idx].0)
         } else {
@@ -437,7 +441,7 @@ impl GapBuffer {
         }
     }
 
-    pub fn lines_before_byte_offset(&self, byte_offset: usize) -> usize {
+    pub fn lines_before_byte_offset(&self, byte_offset: ByteIdx) -> usize {
         let raw_offset = self.byte_to_raw_byte(byte_offset);
         self.line_endings.partition_point(|(b, _)| *b < raw_offset)
     }
@@ -463,16 +467,16 @@ impl GapBuffer {
     /// # Panics
     /// This method will panic if the given character index is out of bounds
     #[inline]
-    pub fn char(&self, char_idx: usize) -> char {
-        let byte_idx = self.char_to_raw_byte(char_idx);
+    pub fn char(&self, char_idx: CharIdx) -> char {
+        let raw_idx = self.char_to_raw_byte(char_idx);
 
         // SAFETY: we know that we have valid utf8 data internally
-        unsafe { decode_char_at(byte_idx, &self.data) }
+        unsafe { decode_char_at(raw_idx, &self.data) }
     }
 
     /// The character at the specified character index.
     #[inline]
-    pub fn get_char(&self, char_idx: usize) -> Option<char> {
+    pub fn get_char(&self, char_idx: CharIdx) -> Option<char> {
         if char_idx < self.n_chars {
             Some(self.char(char_idx))
         } else {
@@ -485,16 +489,16 @@ impl GapBuffer {
     /// # Panics
     /// This method will panic if the given byte index is out of bounds
     #[inline]
-    pub fn char_at(&self, byte_idx: usize) -> char {
-        let byte_idx = self.byte_to_raw_byte(byte_idx);
+    pub fn char_at(&self, byte_idx: ByteIdx) -> char {
+        let raw_idx = self.byte_to_raw_byte(byte_idx);
 
         // SAFETY: we know that we have valid utf8 data internally
-        unsafe { decode_char_at(byte_idx, &self.data) }
+        unsafe { decode_char_at(raw_idx, &self.data) }
     }
 
     /// The character at the specified byte index.
     #[inline]
-    pub fn get_char_at(&self, byte_idx: usize) -> Option<char> {
+    pub fn get_char_at(&self, byte_idx: ByteIdx) -> Option<char> {
         if byte_idx < self.len() {
             Some(self.char_at(byte_idx))
         } else {
@@ -503,9 +507,9 @@ impl GapBuffer {
     }
 
     #[inline]
-    fn char_len(&self, byte_idx: usize) -> usize {
+    fn char_len(&self, raw_idx: RawIdx) -> usize {
         // SAFETY: we know that we have valid utf8 data internally
-        unsafe { decode_char_at(byte_idx, &self.data) }.len_utf8()
+        unsafe { decode_char_at(raw_idx, &self.data) }.len_utf8()
     }
 
     /// The requested line as a [Slice].
@@ -558,7 +562,7 @@ impl GapBuffer {
     /// # Panics
     /// This method will panic if the given line index is out of bounds
     #[inline]
-    pub fn line_len_chars(&self, line_idx: usize) -> usize {
+    pub fn line_len_chars(&self, line_idx: usize) -> CharIdx {
         if line_idx >= self.len_lines() {
             assert_line_endings!(self);
             panic!(
@@ -587,7 +591,7 @@ impl GapBuffer {
     /// Primarily intended for supplying contiguous ranges of bytes to tree-sitter when
     /// parsing. Returns a byte slice from the underlying data buffer without entering
     /// the gap.
-    pub fn maximal_slice_from_offset(&self, byte_offset: usize) -> &[u8] {
+    pub fn maximal_slice_from_offset(&self, byte_offset: ByteIdx) -> &[u8] {
         if byte_offset > self.len() {
             &[]
         } else {
@@ -601,7 +605,7 @@ impl GapBuffer {
     }
 
     /// An exclusive range of characters from the buffer
-    pub fn slice_from_byte_offsets(&self, byte_from: usize, byte_to: usize) -> Slice<'_> {
+    pub fn slice_from_byte_offsets(&self, byte_from: ByteIdx, byte_to: ByteIdx) -> Slice<'_> {
         if byte_from == byte_to {
             return Slice::NULL;
         }
@@ -613,22 +617,22 @@ impl GapBuffer {
     }
 
     /// An exclusive range of characters from the buffer
-    pub fn slice(&self, char_from: usize, char_to: usize) -> Slice<'_> {
+    pub fn slice(&self, char_from: CharIdx, char_to: CharIdx) -> Slice<'_> {
         if char_from == char_to {
             return Slice::NULL;
         }
 
-        let byte_from = self.char_to_raw_byte(char_from);
-        let byte_to = self.offset_char_to_raw_byte(char_to, byte_from, char_from);
+        let raw_from = self.char_to_raw_byte(char_from);
+        let raw_to = self.offset_char_to_raw_byte(char_to, raw_from, char_from);
 
-        Slice::from_raw_offsets(byte_from, byte_to, self)
+        Slice::from_raw_offsets(raw_from, raw_to, self)
     }
 
     pub fn as_slice(&self) -> Slice<'_> {
         self.slice(0, self.len_chars())
     }
 
-    pub fn chars_in_raw_range(&self, raw_from: usize, raw_to: usize) -> usize {
+    pub fn chars_in_raw_range(&self, raw_from: RawIdx, raw_to: RawIdx) -> usize {
         if raw_to <= self.gap_start || raw_from >= self.gap_end {
             count_chars(&self.data[raw_from..raw_to])
         } else {
@@ -641,7 +645,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given char index is out of bounds
-    pub fn char_to_line(&self, char_idx: usize) -> usize {
+    pub fn char_to_line(&self, char_idx: CharIdx) -> usize {
         match self.try_char_to_line(char_idx) {
             Some(line_idx) => line_idx,
             None => {
@@ -655,7 +659,7 @@ impl GapBuffer {
     }
 
     /// Convert a character index to the index of the line containing it
-    pub fn try_char_to_line(&self, char_idx: usize) -> Option<usize> {
+    pub fn try_char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
         match char_idx.cmp(&self.n_chars) {
             Ordering::Less => {
                 if char_idx < self.n_chars {
@@ -676,7 +680,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given char index is out of bounds
-    pub fn line_to_char(&self, line_idx: usize) -> usize {
+    pub fn line_to_char(&self, line_idx: usize) -> CharIdx {
         match self.try_line_to_char(line_idx) {
             Some(char_idx) => char_idx,
             None => {
@@ -690,7 +694,7 @@ impl GapBuffer {
     }
 
     /// Convert a line index to the character index of its first character
-    pub fn try_line_to_char(&self, line_idx: usize) -> Option<usize> {
+    pub fn try_line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
         if line_idx > self.len_lines() - 1 {
             return None;
         }
@@ -707,7 +711,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given byte index is out of bounds
-    pub fn line_to_byte(&self, line_idx: usize) -> usize {
+    pub fn line_to_byte(&self, line_idx: usize) -> ByteIdx {
         let raw = if line_idx == 0 {
             0
         } else {
@@ -721,7 +725,7 @@ impl GapBuffer {
     ///
     /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
-    pub fn insert_char(&mut self, char_idx: usize, ch: char) {
+    pub fn insert_char(&mut self, char_idx: CharIdx, ch: char) {
         let len = ch.len_utf8();
         if self.gap().saturating_sub(len) < MIN_GAP {
             self.grow_gap(len);
@@ -734,8 +738,7 @@ impl GapBuffer {
         self.gap_start += len;
         self.n_chars += 1;
 
-        let endings: &[(ByteOffset, CharOffset)] =
-            if ch == '\n' { &[(idx, char_idx)] } else { &[] };
+        let endings: &[(RawIdx, CharIdx)] = if ch == '\n' { &[(idx, char_idx)] } else { &[] };
 
         self.add_line_endings(idx, 1, endings);
         self.char_to_byte_cache.clear();
@@ -748,7 +751,7 @@ impl GapBuffer {
     ///
     /// This is O(1) if idx is at the current gap start and the gap is large enough to accommodate
     /// the new text, otherwise data will need to be copied in order to relocate the gap.
-    pub fn insert_str(&mut self, char_idx: usize, s: &str) {
+    pub fn insert_str(&mut self, char_idx: CharIdx, s: &str) {
         let len = s.len();
         let len_chars = s.chars().count();
         if self.gap().saturating_sub(len) < MIN_GAP {
@@ -777,7 +780,7 @@ impl GapBuffer {
     }
 
     /// Remove the requested character index from the visible region of the buffer
-    pub fn remove_char(&mut self, char_idx: usize) {
+    pub fn remove_char(&mut self, char_idx: CharIdx) {
         let raw_idx = self.char_to_raw_byte(char_idx);
         let idx = self.raw_byte_to_byte(raw_idx);
         let len = self.char_len(raw_idx);
@@ -802,7 +805,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if `char_from > char_to` or if the requested range is out of bounds.
-    pub fn remove_range(&mut self, char_from: usize, char_to: usize) {
+    pub fn remove_range(&mut self, char_from: CharIdx, char_to: CharIdx) {
         if char_from == char_to {
             return;
         }
@@ -831,13 +834,15 @@ impl GapBuffer {
         assert_line_endings!(self);
     }
 
+    /// Callers must have moved the gap to `raw_from` before calling this method, at which point
+    /// the logical and raw byte offsets of the newly inserted data are the same.
     fn add_line_endings(
         &mut self,
-        byte_from: usize,
+        raw_from: RawIdx,
         n_chars: usize,
-        new_endings: &[(ByteOffset, CharOffset)],
+        new_endings: &[(RawIdx, CharIdx)],
     ) {
-        let idx = self.line_endings.partition_point(|(b, _)| *b < byte_from);
+        let idx = self.line_endings.partition_point(|(b, _)| *b < raw_from);
         for (_, c) in &mut self.line_endings[idx..] {
             *c += n_chars;
         }
@@ -846,7 +851,7 @@ impl GapBuffer {
             .splice(idx..idx, new_endings.iter().copied());
     }
 
-    fn remove_line_endings(&mut self, byte_from: usize, byte_to: usize, n_chars: usize) {
+    fn remove_line_endings(&mut self, raw_from: RawIdx, raw_to: RawIdx, n_chars: usize) {
         self.line_endings
             .retain(|(b, _)| *b < self.gap_start || *b >= self.gap_end);
 
@@ -858,18 +863,18 @@ impl GapBuffer {
             || self
                 .line_endings
                 .last()
-                .map(|(b, _)| *b < byte_from)
+                .map(|(b, _)| *b < raw_from)
                 .unwrap_or(false)
         {
             return;
         }
 
-        let line_from = self.line_endings.partition_point(|(b, _)| *b < byte_from);
-        let line_to = self.line_endings.partition_point(|(b, _)| *b < byte_to);
+        let line_from = self.line_endings.partition_point(|(b, _)| *b < raw_from);
+        let line_to = self.line_endings.partition_point(|(b, _)| *b < raw_to);
 
         if line_from == line_to {
             let (b, _) = self.line_endings[line_from];
-            if b >= byte_from && b < byte_to {
+            if b >= raw_from && b < raw_to {
                 self.line_endings.remove(line_from);
             }
         } else {
@@ -919,7 +924,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given index is out of bounds
-    fn move_gap_to(&mut self, byte_idx: usize) {
+    fn move_gap_to(&mut self, byte_idx: ByteIdx) {
         // we need space to fit the current gap size
         assert!(
             byte_idx <= self.len(),
@@ -977,10 +982,10 @@ impl GapBuffer {
     /// cache and fast search on single line buffers. This is not typically in the hot path for
     /// general editor functionality so we don't mind being a little slower in order to keep the
     /// logic easier to reason about
-    pub fn byte_to_char(&self, byte_idx: usize) -> usize {
-        let mut to = usize::MAX;
+    pub fn byte_to_char(&self, byte_idx: ByteIdx) -> CharIdx {
+        let mut to: RawIdx = usize::MAX;
         let raw_byte_idx = self.byte_to_raw_byte(byte_idx);
-        let (mut raw_byte_offset, mut char_offset) = (0, 0);
+        let (mut raw_byte_offset, mut char_offset): (RawIdx, CharIdx) = (0, 0);
 
         // Determine which line the character lies in based on the byte index, skipping all
         // lines that are before the byte offset we were given.
@@ -1017,12 +1022,12 @@ impl GapBuffer {
     /// within the buffer and is treated as a String-like index but it does not
     /// account for the position of the gap.
     #[inline]
-    pub fn char_to_byte(&self, char_idx: usize) -> usize {
+    pub fn char_to_byte(&self, char_idx: CharIdx) -> ByteIdx {
         self.offset_char_to_byte(char_idx, 0, 0)
     }
 
     /// Convert a character range to a byte range
-    pub fn char_range_to_byte_range(&self, ch_from: usize, ch_to: usize) -> (usize, usize) {
+    pub fn char_range_to_byte_range(&self, ch_from: CharIdx, ch_to: CharIdx) -> (ByteIdx, ByteIdx) {
         let raw_byte_from = self.char_to_raw_byte(ch_from);
         let byte_from = self.raw_byte_to_byte(raw_byte_from);
         let byte_to = self.offset_char_to_byte(ch_to, raw_byte_from, ch_from);
@@ -1031,7 +1036,7 @@ impl GapBuffer {
     }
 
     #[inline]
-    fn raw_byte_to_byte(&self, raw: usize) -> usize {
+    fn raw_byte_to_byte(&self, raw: RawIdx) -> ByteIdx {
         if raw > self.gap_start {
             raw - self.gap()
         } else {
@@ -1040,7 +1045,7 @@ impl GapBuffer {
     }
 
     #[inline]
-    pub fn byte_to_raw_byte(&self, byte: usize) -> usize {
+    pub fn byte_to_raw_byte(&self, byte: ByteIdx) -> RawIdx {
         if byte > self.gap_start {
             byte + self.gap()
         } else {
@@ -1051,11 +1056,11 @@ impl GapBuffer {
     #[inline]
     pub(crate) fn offset_char_to_byte(
         &self,
-        char_idx: usize,
-        byte_offset: usize,
-        char_offset: usize,
-    ) -> usize {
-        let raw = self.offset_char_to_raw_byte(char_idx, byte_offset, char_offset);
+        char_idx: CharIdx,
+        raw_offset: RawIdx,
+        char_offset: CharIdx,
+    ) -> ByteIdx {
+        let raw = self.offset_char_to_raw_byte(char_idx, raw_offset, char_offset);
 
         self.raw_byte_to_byte(raw)
     }
@@ -1064,18 +1069,18 @@ impl GapBuffer {
     /// within the underlying allocation we maintain. This is an absolute index
     /// into our allocated array that accounts for the position of the gap.
     #[inline]
-    fn char_to_raw_byte(&self, char_idx: usize) -> usize {
+    fn char_to_raw_byte(&self, char_idx: CharIdx) -> RawIdx {
         self.offset_char_to_raw_byte(char_idx, 0, 0)
     }
 
-    /// Allow for skipping to a given byte index before starting the search as an optimisation when we
-    /// are searching for multiple positions in sequence (e.g. the start and end of a range).
+    /// Allow for skipping to a given raw byte index before starting the search as an optimisation
+    /// when we are searching for multiple positions in sequence (e.g. the start and end of a range).
     fn offset_char_to_raw_byte(
         &self,
-        char_idx: usize,
-        mut byte_offset: usize,
-        mut char_offset: usize,
-    ) -> usize {
+        char_idx: CharIdx,
+        mut raw_offset: RawIdx,
+        mut char_offset: CharIdx,
+    ) -> RawIdx {
         if let Some(i) = self.char_to_byte_cache.get(char_idx) {
             return i;
         }
@@ -1112,11 +1117,11 @@ impl GapBuffer {
             };
         }
 
-        let mut to = usize::MAX;
+        let mut to: RawIdx = usize::MAX;
 
         // Determine which line the character lies in based on the character index, skipping all
         // lines that are before the byte offset we were given.
-        let line_from = self.line_endings.partition_point(|(b, _)| *b < byte_offset);
+        let line_from = self.line_endings.partition_point(|(b, _)| *b < raw_offset);
         let line_endings = &self.line_endings[line_from..];
 
         match line_endings.binary_search_by_key(&char_idx, |&(_, c)| c) {
@@ -1128,7 +1133,7 @@ impl GapBuffer {
             Err(i) => {
                 if i > 0 {
                     let (b, c) = line_endings[i - 1];
-                    byte_offset = b;
+                    raw_offset = b;
                     char_offset = c;
                 }
                 if i < line_endings.len() {
@@ -1137,15 +1142,15 @@ impl GapBuffer {
             }
         }
 
-        let slice = Slice::from_raw_offsets(byte_offset, to, self);
+        let slice = Slice::from_raw_offsets(raw_offset, to, self);
         let mut chars = slice.chars();
-        let mut cur = byte_offset;
+        let mut cur: RawIdx = raw_offset;
         for _ in 0..(char_idx - char_offset) {
             chars.next();
-            cur = chars.cur + byte_offset;
+            cur = chars.cur + raw_offset;
         }
 
-        let slice_enclosed_gap = self.gap_start >= byte_offset && self.gap_end <= to;
+        let slice_enclosed_gap = self.gap_start >= raw_offset && self.gap_end <= to;
         // Cur landed inside the gap or we counted over the gap while iterating the slice above
         if cur >= self.gap_start && (cur < self.gap_end || slice_enclosed_gap) {
             cur += self.gap();
@@ -1172,7 +1177,7 @@ impl GapBuffer {
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Slice<'a> {
     /// The logical byte offset that this slice was taken from
-    from: usize,
+    from: ByteIdx,
     left: &'a [u8],
     right: &'a [u8],
 }
@@ -1203,12 +1208,12 @@ impl<'a> Slice<'a> {
     }
 
     /// The logical byte offset that this slice was taken from.
-    pub fn from(&self) -> usize {
+    pub fn from(&self) -> ByteIdx {
         self.from
     }
 
     #[inline]
-    fn from_raw_offsets(from: usize, to: usize, gb: &'a GapBuffer) -> Slice<'a> {
+    fn from_raw_offsets(from: RawIdx, to: RawIdx, gb: &'a GapBuffer) -> Slice<'a> {
         let to = min(to, gb.data.len());
         let logical_from = gb.raw_byte_to_byte(from);
 
@@ -1311,7 +1316,7 @@ impl<'a> Slice<'a> {
     }
 
     /// Iterate over the characters in this slice with their corresponding character indices
-    pub fn indexed_chars(self, from: usize, rev: bool) -> IdxChars<'a> {
+    pub fn indexed_chars(self, from: CharIdx, rev: bool) -> IdxChars<'a> {
         let (cur, idx) = if rev {
             (
                 self.left.len() + self.right.len(),
@@ -1445,12 +1450,12 @@ impl Iterator for RevChars<'_> {
 pub struct IdxChars<'a> {
     s: Slice<'a>,
     cur: usize,
-    idx: usize,
+    idx: CharIdx,
     rev: bool,
 }
 
 impl Iterator for IdxChars<'_> {
-    type Item = (usize, char);
+    type Item = (CharIdx, char);
 
     fn next(&mut self) -> Option<Self::Item> {
         if (!self.rev && self.cur >= self.s.left.len() + self.s.right.len())

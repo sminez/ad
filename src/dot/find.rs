@@ -2,7 +2,7 @@
 //!
 //! For more complex patterns, Regex should be used instead
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, CharIdx},
     dot::{Cur, Dot, Range},
 };
 
@@ -19,9 +19,9 @@ pub trait Find {
 
     /// Attempt to locate the start/end indices of the next match of this Matcher within a
     /// character stream. Single character matches should be returned with start==end.
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>;
+        I: Iterator<Item = (CharIdx, char)>;
 
     fn expand(&self, dot: Dot, b: &Buffer) -> Dot
     where
@@ -68,7 +68,7 @@ pub fn find_backward_start<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
 //         .or_else(|| rev_find_between(f, b.txt.len_chars(), b.dot.first_cur().idx, b))
 // }
 
-fn match_to_dot(m: Option<(usize, usize)>) -> Option<Dot> {
+fn match_to_dot(m: Option<(CharIdx, CharIdx)>) -> Option<Dot> {
     match m {
         Some((start, end)) if start == end => Some(Cur { idx: start }.into()),
         Some((start, end)) => Some(Dot::from_char_indices(start, end)),
@@ -76,11 +76,11 @@ fn match_to_dot(m: Option<(usize, usize)>) -> Option<Dot> {
     }
 }
 
-fn find_between<F: Find>(f: &F, from: usize, to: usize, b: &Buffer) -> Option<Dot> {
+fn find_between<F: Find>(f: &F, from: CharIdx, to: CharIdx, b: &Buffer) -> Option<Dot> {
     match_to_dot(f.try_find(b.iter_between_chars(from, to)))
 }
 
-fn rev_find_between<F: Find>(f: &F, from: usize, to: usize, b: &Buffer) -> Option<Dot> {
+fn rev_find_between<F: Find>(f: &F, from: CharIdx, to: CharIdx, b: &Buffer) -> Option<Dot> {
     match_to_dot(f.reversed().try_find(b.rev_iter_between_chars(from, to)))
 }
 
@@ -91,9 +91,9 @@ where
 {
     type Reversed = F;
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         for (i, ch) in it {
             if (self)(ch) {
@@ -113,9 +113,9 @@ where
 impl Find for char {
     type Reversed = char;
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         for (i, ch) in it {
             if ch == *self {
@@ -135,9 +135,9 @@ impl Find for char {
 impl Find for &str {
     type Reversed = String;
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         let chars: Vec<char> = self.chars().collect();
         let last = chars.len().saturating_sub(1);
@@ -174,9 +174,9 @@ impl Find for &str {
 impl Find for String {
     type Reversed = String;
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         self.as_str().try_find(it)
     }

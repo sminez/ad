@@ -5,7 +5,7 @@
 //! or overlapping regex sets but its better than nothing if all you need is some quick and simple
 //! rules for highlighting regions of a known file format.
 use crate::{
-    buffer::GapBuffer,
+    buffer::{CharIdx, GapBuffer},
     dot::Range,
     regex::{Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
@@ -79,8 +79,8 @@ impl ReState {
 struct Tokenizer<'a> {
     mr: &'a mut MultiRegex,
     gb: &'a GapBuffer,
-    pos: usize,
-    ch_to: usize,
+    pos: CharIdx,
+    ch_to: CharIdx,
 }
 
 impl Iterator for Tokenizer<'_> {
@@ -117,7 +117,7 @@ impl MultiRegex {
     // really this should live in the regex module and it should run the VMs in parallel, returning
     // the first match rather than in series like this
 
-    pub fn match_gb_from(&mut self, gb: &GapBuffer, ch_from: usize) -> Option<(usize, Match)> {
+    pub fn match_gb_from(&mut self, gb: &GapBuffer, ch_from: CharIdx) -> Option<(usize, Match)> {
         let mut leftmost: Option<(usize, Match)> = None;
 
         for (i, re) in self.re.iter_mut().enumerate() {

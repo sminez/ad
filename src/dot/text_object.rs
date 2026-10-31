@@ -1,6 +1,6 @@
 //! Vim style text objects
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, CharIdx},
     dot::{
         Cur, Dot, Range,
         find::{Find, find_backward_start, find_forward_end},
@@ -150,9 +150,9 @@ impl Find for FindDelimited {
         }
     }
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         let (target, other) = if self.rev {
             (&self.l, &self.r)
@@ -191,9 +191,9 @@ impl Find for FindParagraph {
         }
     }
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         let mut prev_was_newline = false;
         let mut pos = 0;
@@ -231,9 +231,9 @@ impl Find for FindWord {
         }
     }
 
-    fn try_find<I>(&self, it: I) -> Option<(usize, usize)>
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
-        I: Iterator<Item = (usize, char)>,
+        I: Iterator<Item = (CharIdx, char)>,
     {
         use CharKind::*;
 

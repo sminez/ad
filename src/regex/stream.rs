@@ -1,4 +1,10 @@
-use crate::{Edit, buffer::GapBuffer, dot::Dot, exec::Address, regex::Haystack};
+use crate::{
+    Edit,
+    buffer::{ByteIdx, CharIdx, GapBuffer},
+    dot::Dot,
+    exec::Address,
+    regex::Haystack,
+};
 use std::{
     borrow::Cow,
     cell::RefCell,
@@ -39,7 +45,7 @@ where
     /// tracking the historic line and byte counts so we can correctly adjust future read offsets.
     ///
     /// Data before offset will no longer be accessible.
-    pub fn clear_until(&self, offset: usize) {
+    pub fn clear_until(&self, offset: ByteIdx) {
         self.inner.borrow_mut().clear_until(offset);
     }
 
@@ -47,7 +53,7 @@ where
         self.inner.borrow().closed
     }
 
-    fn get_char_at(&self, byte_idx: usize) -> Option<char> {
+    fn get_char_at(&self, byte_idx: ByteIdx) -> Option<char> {
         let inner = self.inner.borrow();
         inner.gb.get_char_at(byte_idx - inner.cleared_bytes)
     }
@@ -67,33 +73,33 @@ where
         false
     }
 
-    fn len(&self) -> usize {
+    fn len(&self) -> ByteIdx {
         usize::MAX
     }
 
-    fn substr_from<'a>(&'a self, byte_offset: usize) -> Option<Cow<'a, str>> {
+    fn substr_from<'a>(&'a self, byte_offset: ByteIdx) -> Option<Cow<'a, str>> {
         let inner = self.inner.borrow();
         let s = Haystack::substr_from(&inner.gb, byte_offset)?.into_owned();
 
         Some(Cow::Owned(s))
     }
 
-    fn substr<'a>(&'a self, byte_from: usize, byte_to: usize) -> Cow<'a, str> {
+    fn substr<'a>(&'a self, byte_from: ByteIdx, byte_to: ByteIdx) -> Cow<'a, str> {
         let inner = self.inner.borrow();
         let s = inner.gb.substr(byte_from, byte_to).into_owned();
 
         Cow::Owned(s)
     }
 
-    fn byte_to_char(&self, byte_idx: usize) -> Option<usize> {
+    fn byte_to_char(&self, byte_idx: ByteIdx) -> Option<CharIdx> {
         Haystack::byte_to_char(&self.inner.borrow().gb, byte_idx)
     }
 
-    fn char_to_byte(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_byte(&self, char_idx: CharIdx) -> Option<ByteIdx> {
         Haystack::char_to_byte(&self.inner.borrow().gb, char_idx)
     }
 
-    fn iter_from(&self, from: usize) -> Option<impl Iterator<Item = (usize, char)>> {
+    fn iter_from(&self, from: ByteIdx) -> Option<impl Iterator<Item = (ByteIdx, char)>> {
         if self.inner.borrow().closed {
             None
         } else {
@@ -105,7 +111,7 @@ where
         }
     }
 
-    fn iter_between(&self, from: usize, to: usize) -> impl Iterator<Item = (usize, char)> {
+    fn iter_between(&self, from: ByteIdx, to: ByteIdx) -> impl Iterator<Item = (ByteIdx, char)> {
         CachingStreamIter {
             inner: self,
             from,
@@ -113,7 +119,11 @@ where
         }
     }
 
-    fn rev_iter_between(&self, _from: usize, _to: usize) -> impl Iterator<Item = (usize, char)> {
+    fn rev_iter_between(
+        &self,
+        _from: ByteIdx,
+        _to: ByteIdx,
+    ) -> impl Iterator<Item = (ByteIdx, char)> {
         std::iter::empty()
     }
 }
@@ -122,11 +132,11 @@ impl<R> Edit for CachingStream<R>
 where
     R: Read,
 {
-    fn insert(&mut self, ix: usize, s: &str) {
+    fn insert(&mut self, ix: CharIdx, s: &str) {
         self.inner.borrow_mut().gb.insert(ix, s);
     }
 
-    fn remove(&mut self, from: usize, to: usize) {
+    fn remove(&mut self, from: CharIdx, to: CharIdx) {
         self.inner.borrow_mut().gb.remove_range(from, to);
     }
 }
@@ -139,7 +149,7 @@ where
         Dot::from_char_indices(0, usize::MAX)
     }
 
-    fn len_bytes(&self) -> usize {
+    fn len_bytes(&self) -> ByteIdx {
         if self.is_closed() {
             self.inner.borrow().gb.len()
         } else {
@@ -147,7 +157,7 @@ where
         }
     }
 
-    fn len_chars(&self) -> usize {
+    fn len_chars(&self) -> CharIdx {
         if self.is_closed() {
             self.inner.borrow().gb.len_chars()
         } else {
@@ -155,7 +165,7 @@ where
         }
     }
 
-    fn max_iter(&self) -> usize {
+    fn max_iter(&self) -> CharIdx {
         if self.is_closed() {
             self.inner.borrow().gb.len_chars()
         } else {
@@ -163,7 +173,7 @@ where
         }
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<usize> {
+    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
         let cur_len = self.inner.borrow().gb.len_lines();
 
         if line_idx > cur_len {
@@ -178,11 +188,11 @@ where
         self.inner.borrow().gb.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
         self.inner.borrow().gb.try_char_to_line(char_idx)
     }
 
-    fn char_to_line_end(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let gb = &self.inner.borrow().gb;
         let line_idx = gb.try_char_to_line(char_idx)?;
         match gb.try_line_to_char(line_idx + 1) {
@@ -191,7 +201,7 @@ where
         }
     }
 
-    fn char_to_line_start(&self, char_idx: usize) -> Option<usize> {
+    fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let gb = &self.inner.borrow().gb;
         let line_idx = gb.try_char_to_line(char_idx)?;
         Some(gb.line_to_char(line_idx))
@@ -208,7 +218,7 @@ where
     gb: GapBuffer,
     closed: bool,
     cleared_lines: usize,
-    cleared_bytes: usize,
+    cleared_bytes: ByteIdx,
 }
 
 impl<R> Inner<R>
@@ -228,7 +238,7 @@ where
         };
     }
 
-    fn clear_until(&mut self, logical_offset: usize) {
+    fn clear_until(&mut self, logical_offset: ByteIdx) {
         let offset = logical_offset - self.cleared_bytes;
         let cleared_lines = self.gb.lines_before_byte_offset(offset);
         let char_to = self.gb.byte_to_char(offset);
@@ -245,8 +255,8 @@ where
     R: Read,
 {
     inner: &'a RefCell<Inner<R>>,
-    from: usize,
-    to: usize,
+    from: ByteIdx,
+    to: ByteIdx,
 }
 
 impl<'a, R> StreamSlice<'a, R>
@@ -288,15 +298,15 @@ where
     R: Read,
 {
     pub(super) inner: &'a CachingStream<R>,
-    pub(super) from: usize,
-    pub(super) to: usize,
+    pub(super) from: ByteIdx,
+    pub(super) to: ByteIdx,
 }
 
 impl<R> Iterator for CachingStreamIter<'_, R>
 where
     R: Read,
 {
-    type Item = (usize, char);
+    type Item = (ByteIdx, char);
 
     fn next(&mut self) -> Option<Self::Item> {
         // self.from == self.to - 1 is the last character so
@@ -332,11 +342,11 @@ mod impl_structex {
     where
         R: Read,
     {
-        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+        fn is_match_between(&self, re: &Regex, from: ByteIdx, to: ByteIdx) -> bool {
             re.matches_between(self, from, to)
         }
 
-        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+        fn captures_between(&self, re: &Regex, from: ByteIdx, to: ByteIdx) -> Option<RawCaptures> {
             let m = re.find_between(self, from, to)?;
 
             Some(RawCaptures::new(m.iter_locs()))
@@ -352,11 +362,11 @@ mod impl_structex {
         where
             Self: 'h;
 
-        fn char_at(&self, byte_offset: usize) -> Option<char> {
+        fn char_at(&self, byte_offset: ByteIdx) -> Option<char> {
             self.get_char_at(byte_offset)
         }
 
-        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
+        fn slice(&self, range: Range<ByteIdx>) -> Self::Slice<'_> {
             StreamSlice {
                 inner: &self.inner,
                 from: range.start,
@@ -364,7 +374,7 @@ mod impl_structex {
             }
         }
 
-        fn max_len(&self) -> usize {
+        fn max_len(&self) -> ByteIdx {
             usize::MAX
         }
     }

@@ -18,7 +18,7 @@
 //!     none, part or all of any given token should be rendered.
 use crate::{
     Config,
-    buffer::{GapBuffer, Slice},
+    buffer::{ByteIdx, CharIdx, GapBuffer, Slice},
     dot::Range,
 };
 use std::{
@@ -38,7 +38,7 @@ pub const TK_EXEC: &str = "exec";
 /// Buffer level state for parsing and highlighting visible lines.
 #[derive(Debug)]
 pub struct SyntaxState {
-    pub(crate) pending_edit: Option<(usize, usize, usize)>,
+    pub(crate) pending_edit: Option<(ByteIdx, ByteIdx, ByteIdx)>,
     pub(crate) inner: SyntaxStateInner,
 }
 
@@ -80,25 +80,25 @@ impl SyntaxState {
         }
     }
 
-    pub fn prepare_insert_char(&mut self, idx: usize, ch: char, gb: &GapBuffer) {
+    pub fn prepare_insert_char(&mut self, idx: CharIdx, ch: char, gb: &GapBuffer) {
         if let SyntaxStateInner::Ts(ts) = &self.inner {
             self.pending_edit = Some(ts.prepare_insert_char(idx, ch, gb));
         }
     }
 
-    pub fn prepare_insert_string(&mut self, idx: usize, s: &str, gb: &GapBuffer) {
+    pub fn prepare_insert_string(&mut self, idx: CharIdx, s: &str, gb: &GapBuffer) {
         if let SyntaxStateInner::Ts(ts) = &self.inner {
             self.pending_edit = Some(ts.prepare_insert_string(idx, s, gb));
         }
     }
 
-    pub fn prepare_delete_char(&mut self, idx: usize, gb: &GapBuffer) {
+    pub fn prepare_delete_char(&mut self, idx: CharIdx, gb: &GapBuffer) {
         if let SyntaxStateInner::Ts(ts) = &self.inner {
             self.pending_edit = Some(ts.prepare_delete_char(idx, gb));
         }
     }
 
-    pub fn prepare_delete_range(&mut self, from: usize, to: usize, gb: &GapBuffer) {
+    pub fn prepare_delete_range(&mut self, from: CharIdx, to: CharIdx, gb: &GapBuffer) {
         if let SyntaxStateInner::Ts(ts) = &self.inner {
             self.pending_edit = Some(ts.prepare_delete_range(from, to, gb));
         }
@@ -163,8 +163,8 @@ impl SyntaxState {
 /// Byte offsets within a Buffer
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct ByteRange {
-    pub(crate) from: usize,
-    pub(crate) to: usize,
+    pub(crate) from: ByteIdx,
+    pub(crate) to: ByteIdx,
 }
 
 impl ByteRange {
@@ -184,12 +184,12 @@ impl ByteRange {
     }
 
     #[inline]
-    fn intersects(&self, start_byte: usize, end_byte: usize) -> bool {
+    fn intersects(&self, start_byte: ByteIdx, end_byte: ByteIdx) -> bool {
         self.from <= end_byte && start_byte <= self.to
     }
 
     #[inline]
-    fn contains(&self, start_byte: usize, end_byte: usize) -> bool {
+    fn contains(&self, start_byte: ByteIdx, end_byte: ByteIdx) -> bool {
         self.from <= start_byte && self.to >= end_byte
     }
 
@@ -198,8 +198,8 @@ impl ByteRange {
     fn try_as_token<'a>(
         &self,
         ty: &'a str,
-        start_byte: usize,
-        end_byte: usize,
+        start_byte: ByteIdx,
+        end_byte: ByteIdx,
     ) -> Option<RangeToken<'a>> {
         if self.intersects(start_byte, end_byte) {
             Some(RangeToken {
@@ -240,7 +240,7 @@ impl RangeToken<'_> {
     }
 
     #[inline]
-    fn split(self, at: usize) -> (Self, Self) {
+    fn split(self, at: ByteIdx) -> (Self, Self) {
         (
             RangeToken {
                 tag: self.tag,
@@ -435,7 +435,7 @@ enum Held<'a> {
 }
 
 impl Held<'_> {
-    fn byte_from_to(&self) -> (usize, usize) {
+    fn byte_from_to(&self) -> (ByteIdx, ByteIdx) {
         match self {
             Held::One(a) => (a.r.from, a.r.to),
             Held::Two(a, b) => (a.r.from, b.r.to),
@@ -445,7 +445,7 @@ impl Held<'_> {
         }
     }
 
-    fn split(self, at: usize) -> (Self, Self) {
+    fn split(self, at: ByteIdx) -> (Self, Self) {
         use Held::*;
 
         match self {
@@ -520,9 +520,9 @@ impl Held<'_> {
 #[derive(Debug)]
 pub struct TokenIter<'a> {
     /// byte offset for the start of this line
-    start_byte: usize,
+    start_byte: ByteIdx,
     /// byte offset for the end of this line
-    end_byte: usize,
+    end_byte: ByteIdx,
     /// Capture names to be used as the token types
     names: &'a [String],
     /// The set of ranges applicable to this line
@@ -660,7 +660,7 @@ impl<'a> TokenIter<'a> {
         held
     }
 
-    fn find_end_of_selection(&mut self, mut held: Held<'a>, to: usize) -> Held<'a> {
+    fn find_end_of_selection(&mut self, mut held: Held<'a>, to: ByteIdx) -> Held<'a> {
         loop {
             let mut next = match self.next_without_selections() {
                 None => break,
@@ -719,7 +719,7 @@ impl<'a> Iterator for TokenIter<'a> {
         //   - dot overwrites original syntax highlighting
         //   - load/exec overwrite dot
         #[inline]
-        fn intersects(opt: &Option<RangeToken<'_>>, from: usize, to: usize) -> bool {
+        fn intersects(opt: &Option<RangeToken<'_>>, from: ByteIdx, to: ByteIdx) -> bool {
             opt.as_ref()
                 .map(|rt| rt.r.intersects(from, to))
                 .unwrap_or(false)

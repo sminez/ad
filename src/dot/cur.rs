@@ -1,13 +1,16 @@
-use crate::{buffer::Buffer, key::Arrow};
+use crate::{
+    buffer::{Buffer, CharIdx},
+    key::Arrow,
+};
 use std::cmp::min;
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Cur {
-    pub idx: usize,
+    pub idx: CharIdx,
 }
 
 impl Cur {
-    pub fn new(idx: usize) -> Self {
+    pub fn new(idx: CharIdx) -> Self {
         Self { idx }
     }
 
@@ -81,7 +84,7 @@ impl Cur {
         cur
     }
 
-    pub(crate) fn clamp_idx(&mut self, max_idx: usize) {
+    pub(crate) fn clamp_idx(&mut self, max_idx: CharIdx) {
         self.idx = min(self.idx, max_idx);
     }
 

@@ -3,7 +3,7 @@
 //! For a given language the user needs to provide a .so file containing the compiled
 //! tree-sitter parser and a highlights .scm file for driving the highlighting.
 use crate::{
-    buffer::{GapBuffer, SliceIter},
+    buffer::{ByteIdx, CharIdx, GapBuffer, SliceIter},
     dot::Range,
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
@@ -70,7 +70,7 @@ impl TsState {
 
     fn try_new_explicit(mut p: Parser, query: &str, gb: &GapBuffer) -> Result<Self, String> {
         let tree = p.parse_with_options(
-            &mut |byte_offset, _| gb.maximal_slice_from_offset(byte_offset),
+            &mut |byte_offset: ByteIdx, _| gb.maximal_slice_from_offset(byte_offset),
             None,
             None,
         );
@@ -94,9 +94,9 @@ impl TsState {
     /// - `new_end_byte`: byte offset where the edit ends in the MODIFIED buffer
     pub(super) fn apply_prepared_edit(
         &mut self,
-        start_byte: usize,
-        old_end_byte: usize,
-        new_end_byte: usize,
+        start_byte: ByteIdx,
+        old_end_byte: ByteIdx,
+        new_end_byte: ByteIdx,
         gb: &GapBuffer,
     ) {
         self.tree.edit(&ts::InputEdit {
@@ -110,7 +110,7 @@ impl TsState {
         });
 
         let new_tree = self.p.parse_with_options(
-            &mut |byte_offset, _| gb.maximal_slice_from_offset(byte_offset),
+            &mut |byte_offset: ByteIdx, _| gb.maximal_slice_from_offset(byte_offset),
             Some(&self.tree),
             None,
         );
@@ -126,10 +126,10 @@ impl TsState {
 
     pub(super) fn prepare_insert_char(
         &self,
-        ch_idx: usize,
+        ch_idx: CharIdx,
         ch: char,
         gb: &GapBuffer,
-    ) -> (usize, usize, usize) {
+    ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let start_byte = gb.char_to_byte(ch_idx);
 
         (start_byte, start_byte, start_byte + ch.len_utf8())
@@ -137,10 +137,10 @@ impl TsState {
 
     pub(super) fn prepare_insert_string(
         &self,
-        ch_idx: usize,
+        ch_idx: CharIdx,
         s: &str,
         gb: &GapBuffer,
-    ) -> (usize, usize, usize) {
+    ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let start_byte = gb.char_to_byte(ch_idx);
 
         (start_byte, start_byte, start_byte + s.len())
@@ -148,9 +148,9 @@ impl TsState {
 
     pub(super) fn prepare_delete_char(
         &self,
-        ch_idx: usize,
+        ch_idx: CharIdx,
         gb: &GapBuffer,
-    ) -> (usize, usize, usize) {
+    ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let (start_byte, old_end_byte) = gb.char_range_to_byte_range(ch_idx, ch_idx + 1);
 
         (start_byte, old_end_byte, start_byte)
@@ -158,10 +158,10 @@ impl TsState {
 
     pub(super) fn prepare_delete_range(
         &self,
-        ch_from: usize,
-        ch_to: usize,
+        ch_from: CharIdx,
+        ch_to: CharIdx,
         gb: &GapBuffer,
-    ) -> (usize, usize, usize) {
+    ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let (start_byte, old_end_byte) = gb.char_range_to_byte_range(ch_from, ch_to);
 
         (start_byte, old_end_byte, start_byte)
@@ -396,7 +396,7 @@ impl fmt::Debug for Tokenizer {
 }
 
 #[inline]
-fn mark_region(regions: &mut Vec<ByteRange>, from: usize, to: usize) {
+fn mark_region(regions: &mut Vec<ByteRange>, from: ByteIdx, to: ByteIdx) {
     regions.push(ByteRange { from, to });
     if regions.len() == 1 {
         return;
@@ -424,7 +424,7 @@ fn mark_region(regions: &mut Vec<ByteRange>, from: usize, to: usize) {
 /// This is not attempting to be maximally efficient in returning a set of missing regions as the
 /// goal is simply to minimise the amount of retokenization we do via tree-sitter where possible.
 #[inline]
-fn missing_region(regions: &[ByteRange], from: usize, to: usize) -> Option<(usize, usize)> {
+fn missing_region(regions: &[ByteRange], from: ByteIdx, to: ByteIdx) -> Option<(ByteIdx, ByteIdx)> {
     let mut it = regions.iter();
     while let Some(r) = it.next() {
         if to < r.from {
@@ -456,15 +456,15 @@ impl Tokenizer {
         self.tokenized_regions.clear();
     }
 
-    fn missing_region(&self, from: usize, to: usize) -> Option<(usize, usize)> {
+    fn missing_region(&self, from: ByteIdx, to: ByteIdx) -> Option<(ByteIdx, ByteIdx)> {
         missing_region(&self.tokenized_regions, from, to)
     }
 
-    fn mark_region(&mut self, from: usize, to: usize) {
+    fn mark_region(&mut self, from: ByteIdx, to: ByteIdx) {
         mark_region(&mut self.tokenized_regions, from, to);
     }
 
-    pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: usize, to: usize) {
+    pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: ByteIdx, to: ByteIdx) {
         self.cur.set_byte_range(from..to);
 
         // This is a streaming-iterator not an iterator, hence the odd while-let that follows

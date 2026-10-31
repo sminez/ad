@@ -1,6 +1,6 @@
 //! Capability based logic
 use crate::{
-    buffer::Buffer,
+    buffer::{Buffer, ByteIdx, CharIdx},
     exec::{Addr, AddrBase},
     lsp::Pos,
 };
@@ -83,7 +83,7 @@ impl PositionEncoding {
 
         match self {
             Self::Utf8 => {
-                let line_start = b.txt.line_to_byte(pos.line as usize);
+                let line_start: ByteIdx = b.txt.line_to_byte(pos.line as usize);
                 let col = b.txt.chars_in_raw_range(
                     b.txt.byte_to_raw_byte(line_start),
                     b.txt.byte_to_raw_byte(line_start + pos.character as usize),
@@ -125,8 +125,8 @@ impl PositionEncoding {
     fn lsp_position(&self, b: &Buffer, line: usize, col: usize) -> (u32, u32) {
         match self {
             Self::Utf8 => {
-                let line_start = b.txt.line_to_char(line);
-                let start_idx = b.txt.char_to_byte(line_start);
+                let line_start: CharIdx = b.txt.line_to_char(line);
+                let start_idx: ByteIdx = b.txt.char_to_byte(line_start);
                 let character = b.txt.char_to_byte(line_start + col) - start_idx;
 
                 (line as u32, character as u32)

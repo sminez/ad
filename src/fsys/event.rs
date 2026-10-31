@@ -1,5 +1,6 @@
 //! Message formats for the events file
 use crate::{
+    buffer::{ByteIdx, CharIdx},
     fsys::{
         Result,
         message::{Message, Req},
@@ -37,7 +38,7 @@ impl InputFilter {
         }
     }
 
-    pub fn notify_insert(&self, source: Source, ch_from: usize, byte_from: usize, txt: &str) {
+    pub fn notify_insert(&self, source: Source, ch_from: CharIdx, byte_from: ByteIdx, txt: &str) {
         let k = if self.is_scratch {
             Kind::InsertScratch
         } else {
@@ -47,7 +48,7 @@ impl InputFilter {
         _ = self.tx.send(evt);
     }
 
-    pub fn notify_delete(&self, source: Source, ch_from: usize, byte_from: usize, txt: &str) {
+    pub fn notify_delete(&self, source: Source, ch_from: CharIdx, byte_from: ByteIdx, txt: &str) {
         let k = if self.is_scratch {
             Kind::DeleteScratch
         } else {
@@ -57,7 +58,7 @@ impl InputFilter {
         _ = self.tx.send(evt);
     }
 
-    pub fn notify_load(&self, source: Source, ch_from: usize, byte_from: usize, txt: &str) {
+    pub fn notify_load(&self, source: Source, ch_from: CharIdx, byte_from: ByteIdx, txt: &str) {
         let k = if self.is_scratch {
             Kind::LoadScratch
         } else {
@@ -70,10 +71,10 @@ impl InputFilter {
     pub fn notify_execute(
         &self,
         source: Source,
-        ch_from: usize,
-        byte_from: usize,
+        ch_from: CharIdx,
+        byte_from: ByteIdx,
         txt: &str,
-        arg: Option<(usize, usize, String)>,
+        arg: Option<(CharIdx, ByteIdx, String)>,
     ) {
         if let Some((ch_from, byte_from, arg)) = arg {
             let evt = FsysEvent::new(source, Kind::ChordedArgument, ch_from, byte_from, &arg);
