@@ -3,7 +3,7 @@
 //! For a given language the user needs to provide a .so file containing the compiled
 //! tree-sitter parser and a highlights .scm file for driving the highlighting.
 use crate::{
-    buffer::{ByteIdx, CharIdx, GapBuffer, SliceIter},
+    buffer::{ByteIdx, CharIdx, GapBuffer, LineIdx, SliceIter},
     dot::Range,
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
@@ -167,7 +167,7 @@ impl TsState {
         (start_byte, old_end_byte, start_byte)
     }
 
-    pub fn update(&mut self, gb: &GapBuffer, from_row: usize, n_rows: usize) {
+    pub fn update(&mut self, gb: &GapBuffer, from_row: LineIdx, n_rows: usize) {
         let raw_from = gb.line_to_byte(from_row);
         let raw_to = if from_row + n_rows + 1 < gb.len_lines() {
             gb.line_to_byte(from_row + n_rows + 1)
@@ -198,7 +198,7 @@ impl TsState {
     #[inline]
     pub fn iter_tokenized_lines_from<'a>(
         &'a self,
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
@@ -497,7 +497,7 @@ impl Tokenizer {
     #[inline]
     pub fn iter_tokenized_lines_from<'a>(
         &'a self,
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,

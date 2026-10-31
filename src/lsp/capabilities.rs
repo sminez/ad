@@ -1,6 +1,6 @@
 //! Capability based logic
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx},
+    buffer::{Buffer, ByteIdx, CharIdx, LineIdx},
     exec::{Addr, AddrBase},
     lsp::Pos,
 };
@@ -74,7 +74,7 @@ pub(crate) enum PositionEncoding {
 }
 
 impl PositionEncoding {
-    pub(crate) fn parse_lsp_position(&self, b: &Buffer, pos: Position) -> (usize, usize) {
+    pub(crate) fn parse_lsp_position(&self, b: &Buffer, pos: Position) -> (LineIdx, usize) {
         let pos_line = pos.line as usize;
         if pos_line > b.len_lines() - 1 {
             warn!("LSP position out of bounds, clamping to EOF");
@@ -122,7 +122,7 @@ impl PositionEncoding {
         Pos::new(file, line, character)
     }
 
-    fn lsp_position(&self, b: &Buffer, line: usize, col: usize) -> (u32, u32) {
+    fn lsp_position(&self, b: &Buffer, line: LineIdx, col: usize) -> (u32, u32) {
         match self {
             Self::Utf8 => {
                 let line_start: CharIdx = b.txt.line_to_char(line);

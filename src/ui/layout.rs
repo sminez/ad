@@ -1,6 +1,6 @@
 //! Layout of UI windows
 use crate::{
-    buffer::{Buffer, BufferId, Buffers, SCRATCH_ID},
+    buffer::{Buffer, BufferId, Buffers, LineIdx, SCRATCH_ID},
     config::Config,
     die,
     dot::Cur,
@@ -1014,7 +1014,7 @@ impl Window {
 pub(crate) struct View {
     pub(crate) bufid: BufferId,
     pub(crate) col_off: usize,
-    pub(crate) row_off: usize,
+    pub(crate) row_off: LineIdx,
     pub(crate) rx: usize,
     pending_viewport: Option<ViewPort>,
     cur: Cur,
@@ -1042,7 +1042,7 @@ impl View {
         (x, y)
     }
 
-    pub(crate) fn rx_from_x(&self, b: &Buffer, y: usize, x: usize, tabstop: usize) -> usize {
+    pub(crate) fn rx_from_x(&self, b: &Buffer, y: LineIdx, x: usize, tabstop: usize) -> usize {
         if y >= b.len_lines() {
             return 0;
         }

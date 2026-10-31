@@ -5,7 +5,7 @@
 //! or overlapping regex sets but its better than nothing if all you need is some quick and simple
 //! rules for highlighting regions of a known file format.
 use crate::{
-    buffer::{CharIdx, GapBuffer},
+    buffer::{CharIdx, GapBuffer, LineIdx},
     dot::Range,
     regex::{Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
@@ -38,7 +38,7 @@ impl ReState {
         })
     }
 
-    pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
+    pub fn update(&mut self, gb: &GapBuffer, from: LineIdx, n_rows: usize) {
         self.ranges.clear();
 
         let pos = gb.line_to_char(from);
@@ -59,7 +59,7 @@ impl ReState {
     #[inline]
     pub fn iter_tokenized_lines_from<'a>(
         &'a self,
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,

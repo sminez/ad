@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer},
+    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer, LineIdx},
     dot::{Cur, Dot, Range},
     parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
@@ -137,7 +137,7 @@ pub enum AddrBase {
     /// $
     Eof,
     /// n
-    Line(usize),
+    Line(LineIdx),
     /// -/+n
     RelativeLine(isize),
     /// #n
@@ -145,7 +145,7 @@ pub enum AddrBase {
     /// -/+#n
     RelativeChar(isize),
     /// n:m
-    LineAndColumn(usize, usize),
+    LineAndColumn(LineIdx, usize),
     /// /re/ or +/re/
     Regex(Regex),
     /// -/re/
@@ -402,8 +402,8 @@ pub trait Address: Haystack + Sized {
     fn current_dot(&self) -> Dot;
     fn len_bytes(&self) -> ByteIdx;
     fn len_chars(&self) -> CharIdx;
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx>;
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize>;
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx>;
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx>;
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx>;
     fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx>;
 
@@ -424,7 +424,7 @@ pub trait Address: Haystack + Sized {
         dot
     }
 
-    fn full_line(&self, line_idx: usize) -> Option<Dot> {
+    fn full_line(&self, line_idx: LineIdx) -> Option<Dot> {
         let from = self.line_to_char(line_idx)?;
         let to = self.char_to_line_end(from)?.saturating_sub(1);
 
@@ -532,11 +532,11 @@ impl Address for GapBuffer {
         self.len_chars()
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
         self.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         self.try_char_to_line(char_idx)
     }
 
@@ -567,11 +567,11 @@ impl Address for Buffer {
         self.txt.len_chars()
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
         self.txt.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         self.txt.try_char_to_line(char_idx)
     }
 

@@ -1,6 +1,6 @@
 use crate::{
     Edit,
-    buffer::{ByteIdx, CharIdx, GapBuffer},
+    buffer::{ByteIdx, CharIdx, GapBuffer, LineIdx},
     dot::Dot,
     exec::Address,
     regex::Haystack,
@@ -173,7 +173,7 @@ where
         }
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
         let cur_len = self.inner.borrow().gb.len_lines();
 
         if line_idx > cur_len {
@@ -188,7 +188,7 @@ where
         self.inner.borrow().gb.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         self.inner.borrow().gb.try_char_to_line(char_idx)
     }
 
@@ -217,7 +217,7 @@ where
     buf: String,
     gb: GapBuffer,
     closed: bool,
-    cleared_lines: usize,
+    cleared_lines: LineIdx,
     cleared_bytes: ByteIdx,
 }
 

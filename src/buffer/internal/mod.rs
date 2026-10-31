@@ -27,7 +27,7 @@ mod index;
 mod slice;
 mod utf8;
 
-pub use index::{ByteIdx, CharIdx, RawIdx};
+pub use index::{ByteIdx, CharIdx, LineIdx, RawIdx};
 pub use slice::{Chars, IdxChars, RevChars, Slice, SliceIter};
 use utf8::{count_chars, decode_char_at, decode_char_ending_at};
 
@@ -386,7 +386,7 @@ impl GapBuffer {
 
     /// The number of lines within the buffer
     #[inline]
-    pub fn len_lines(&self) -> usize {
+    pub fn len_lines(&self) -> LineIdx {
         match self.line_endings.last() {
             Some(&(raw_idx, _)) => {
                 let n = self.line_endings.len();
@@ -414,7 +414,7 @@ impl GapBuffer {
     /// For lines with a trailing newline this is the position of the newline character,
     /// for the final line (if there is no trailing newline) this is the end of the buffer.
     #[inline]
-    pub fn line_end_byte(&self, line_idx: usize) -> ByteIdx {
+    pub fn line_end_byte(&self, line_idx: LineIdx) -> ByteIdx {
         if line_idx < self.line_endings.len() {
             self.raw_byte_to_byte(self.line_endings[line_idx].0)
         } else {
@@ -422,7 +422,7 @@ impl GapBuffer {
         }
     }
 
-    pub fn lines_before_byte_offset(&self, byte_offset: ByteIdx) -> usize {
+    pub fn lines_before_byte_offset(&self, byte_offset: ByteIdx) -> LineIdx {
         let raw_offset = self.byte_to_raw_byte(byte_offset);
         self.line_endings.partition_point(|(b, _)| *b < raw_offset)
     }
@@ -498,7 +498,7 @@ impl GapBuffer {
     /// # Panics
     /// This method will panic if the given line index is out of bounds
     #[inline]
-    pub fn line(&self, line_idx: usize) -> Slice<'_> {
+    pub fn line(&self, line_idx: LineIdx) -> Slice<'_> {
         if line_idx >= self.len_lines() {
             assert_line_endings!(self);
             panic!(
@@ -531,7 +531,7 @@ impl GapBuffer {
     /// Returns true if the requested line is empty or only contains a single trailing newline.
     ///
     /// See [line][Self::line] for panic details.
-    pub fn line_is_blank(&self, line_idx: usize) -> bool {
+    pub fn line_is_blank(&self, line_idx: LineIdx) -> bool {
         matches!(
             self.line(line_idx).as_strs(),
             ("", "") | ("", "\n") | ("\n", "")
@@ -543,7 +543,7 @@ impl GapBuffer {
     /// # Panics
     /// This method will panic if the given line index is out of bounds
     #[inline]
-    pub fn line_len_chars(&self, line_idx: usize) -> CharIdx {
+    pub fn line_len_chars(&self, line_idx: LineIdx) -> CharIdx {
         if line_idx >= self.len_lines() {
             assert_line_endings!(self);
             panic!(
@@ -626,7 +626,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given char index is out of bounds
-    pub fn char_to_line(&self, char_idx: CharIdx) -> usize {
+    pub fn char_to_line(&self, char_idx: CharIdx) -> LineIdx {
         match self.try_char_to_line(char_idx) {
             Some(line_idx) => line_idx,
             None => {
@@ -640,7 +640,7 @@ impl GapBuffer {
     }
 
     /// Convert a character index to the index of the line containing it
-    pub fn try_char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    pub fn try_char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         match char_idx.cmp(&self.n_chars) {
             Ordering::Less => {
                 if char_idx < self.n_chars {
@@ -661,7 +661,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given char index is out of bounds
-    pub fn line_to_char(&self, line_idx: usize) -> CharIdx {
+    pub fn line_to_char(&self, line_idx: LineIdx) -> CharIdx {
         match self.try_line_to_char(line_idx) {
             Some(char_idx) => char_idx,
             None => {
@@ -675,7 +675,7 @@ impl GapBuffer {
     }
 
     /// Convert a line index to the character index of its first character
-    pub fn try_line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
+    pub fn try_line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
         if line_idx > self.len_lines() - 1 {
             return None;
         }
@@ -692,7 +692,7 @@ impl GapBuffer {
     ///
     /// # Panics
     /// This method will panic if the given byte index is out of bounds
-    pub fn line_to_byte(&self, line_idx: usize) -> ByteIdx {
+    pub fn line_to_byte(&self, line_idx: LineIdx) -> ByteIdx {
         let raw = if line_idx == 0 {
             0
         } else {

@@ -18,7 +18,7 @@
 //!     none, part or all of any given token should be rendered.
 use crate::{
     Config,
-    buffer::{ByteIdx, CharIdx, GapBuffer, Slice},
+    buffer::{ByteIdx, CharIdx, GapBuffer, LineIdx, Slice},
     dot::Range,
 };
 use std::{
@@ -124,7 +124,7 @@ impl SyntaxState {
 
     /// Update internal state for the requested region to prepare for a call to
     /// [Self::iter_tokenized_lines_from].
-    pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
+    pub fn update(&mut self, gb: &GapBuffer, from: LineIdx, n_rows: usize) {
         match &mut self.inner {
             SyntaxStateInner::Ts(s) => s.update(gb, from, n_rows),
             SyntaxStateInner::Re(s) => s.update(gb, from, n_rows),
@@ -136,7 +136,7 @@ impl SyntaxState {
     #[inline]
     pub fn iter_tokenized_lines_from<'a>(
         &'a self,
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
@@ -286,16 +286,16 @@ pub struct LineIter<'a> {
     /// full set of syntax ranges for the input
     ranges: &'a [SyntaxRange],
     /// the next line to yield
-    line: usize,
+    line: LineIdx,
     /// total number of lines (cached from gb.len_lines())
-    n_lines: usize,
+    n_lines: LineIdx,
     dot_range: ByteRange,
     load_exec_range: Option<(bool, ByteRange)>,
 }
 
 impl<'a> LineIter<'a> {
     pub(crate) fn new(
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,

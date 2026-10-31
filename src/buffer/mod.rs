@@ -35,7 +35,7 @@ use scratch::ScratchBuf;
 
 pub use buffers::{BufferId, Buffers};
 pub use internal::{
-    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, RawIdx, RevChars, Slice, SliceIter,
+    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, LineIdx, RawIdx, RevChars, Slice, SliceIter,
 };
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
@@ -536,7 +536,7 @@ impl Buffer {
             .collect()
     }
 
-    pub fn update_ts_state(&mut self, from: usize, n_rows: usize) {
+    pub fn update_ts_state(&mut self, from: LineIdx, n_rows: usize) {
         if let Some(ts) = self.syntax_state.as_mut() {
             ts.update(&self.txt, from, n_rows);
         }
@@ -544,7 +544,7 @@ impl Buffer {
 
     pub fn iter_tokenized_lines_from(
         &self,
-        line: usize,
+        line: LineIdx,
         load_exec_range: Option<(bool, Range)>,
     ) -> LineIter<'_> {
         match self.syntax_state.as_ref() {
@@ -592,7 +592,7 @@ impl Buffer {
 
     /// The number of lines currently held in the buffer.
     #[inline]
-    pub fn len_lines(&self) -> usize {
+    pub fn len_lines(&self) -> LineIdx {
         self.txt.len_lines()
     }
 
@@ -627,11 +627,11 @@ impl Buffer {
         self.edit_log.debug_edits(self)
     }
 
-    pub(crate) fn x_from_rx(&self, y: usize) -> usize {
+    pub(crate) fn x_from_rx(&self, y: LineIdx) -> usize {
         self.x_from_provided_rx(y, self.cached_rx)
     }
 
-    pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
+    pub(crate) fn x_from_provided_rx(&self, y: LineIdx, buf_rx: usize) -> usize {
         let tabstop = self.tabstop();
         if self.is_empty() {
             return 0;
@@ -666,7 +666,7 @@ impl Buffer {
     }
 
     /// The line at the requested index returned as a Slice.
-    pub fn line(&self, y: usize) -> Option<Slice<'_>> {
+    pub fn line(&self, y: LineIdx) -> Option<Slice<'_>> {
         if y >= self.len_lines() {
             None
         } else {

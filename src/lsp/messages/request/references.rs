@@ -1,5 +1,5 @@
 use crate::{
-    buffer::Buffers,
+    buffer::{Buffers, LineIdx},
     editor::{Actions, BAction, EAction, MbSelect, MiniBufferSelection, UAction, ViewPort},
     lsp::{
         LspManager, Pos, PositionEncoding,
@@ -82,7 +82,7 @@ impl Reference {
     }
 
     fn mb_line(&self, buffers: &Buffers, width: usize) -> String {
-        let try_buffer_line = |path: &str, y: usize| -> Option<String> {
+        let try_buffer_line = |path: &str, y: LineIdx| -> Option<String> {
             let s = buffers.with_path(path)?.line(y)?.to_string();
             Some(s.trim().to_string())
         };

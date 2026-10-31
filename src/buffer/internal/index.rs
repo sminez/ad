@@ -6,3 +6,5 @@ pub type ByteIdx = usize;
 pub type CharIdx = usize;
 /// A byte offset within the raw buffer state (i.e. accounting for the position of the gap).
 pub type RawIdx = usize;
+/// A line index within the logical buffer state.
+pub type LineIdx = usize;

@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, CharIdx},
+    buffer::{Buffer, CharIdx, LineIdx},
     key::Arrow,
 };
 use std::cmp::min;
@@ -29,14 +29,14 @@ impl Cur {
         format!("{}:{}", y + 1, x + 1)
     }
 
-    pub(crate) fn as_yx(&self, b: &Buffer) -> (usize, usize) {
+    pub(crate) fn as_yx(&self, b: &Buffer) -> (LineIdx, usize) {
         let y = b.txt.char_to_line(self.idx);
         let x = self.idx - b.txt.line_to_char(y);
 
         (y, x)
     }
 
-    pub(crate) fn from_yx(y_idx: usize, x_idx: usize, b: &Buffer) -> Self {
+    pub(crate) fn from_yx(y_idx: LineIdx, x_idx: usize, b: &Buffer) -> Self {
         let line_start = b.txt.line_to_char(y_idx);
         let mut x_max = b.txt.line_len_chars(y_idx);
         if y_idx < b.len_lines() - 1 {
