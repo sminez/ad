@@ -42,8 +42,9 @@ impl ReState {
         self.ranges.clear();
 
         let pos = gb.line_to_char(from);
-        let ch_to = if from + n_rows + 1 < gb.len_lines() {
-            gb.line_to_char(from + n_rows + 1)
+        let to = from.uadd(n_rows + 1);
+        let ch_to = if to < gb.len_lines() {
+            gb.line_to_char(to)
         } else {
             gb.len_chars()
         };
@@ -180,10 +181,10 @@ plumb to edit";
         .collect();
 
         let mut state = ReState::new(&tagged_re).expect("valid regex patterns");
-        state.update(&gb, 0, 6);
+        state.update(&gb, LineIdx(0), 6);
 
         let mut toks = Vec::new();
-        for line in state.iter_tokenized_lines_from(0, &gb, Range::BOF, None) {
+        for line in state.iter_tokenized_lines_from(LineIdx(0), &gb, Range::BOF, None) {
             for tok in line {
                 let s = tok.as_slice(&gb).to_string();
                 toks.push((tok.tag.to_string(), s));

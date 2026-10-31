@@ -328,12 +328,12 @@ impl<'a> Parser<'a> {
                         } else {
                             match self.try_parse_num()? {
                                 0 => Err(self.error(ErrorKind::ZeroIndexedLineOrColumn)),
-                                col => Ok(AddrBase::LineAndColumn(line - 1, col - 1)),
+                                col => Ok(AddrBase::LineAndColumn(LineIdx(line - 1), col - 1)),
                             }
                         }
                     }
 
-                    (_, None) => Ok(AddrBase::Line(line - 1)),
+                    (_, None) => Ok(AddrBase::Line(LineIdx(line - 1))),
                     (_, Some(Dir::Fwd)) => Ok(AddrBase::RelativeLine(line as isize)),
                     (_, Some(Dir::Bck)) => Ok(AddrBase::RelativeLine(-(line as isize))),
                 }
@@ -461,7 +461,7 @@ pub trait Address: Haystack + Sized {
             Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
                 let mut line_idx = self.char_to_line(cur_dot.active_cur().idx)?;
-                line_idx = (line_idx as isize + *offset) as usize;
+                line_idx = LineIdx((line_idx.0 as isize + *offset) as usize);
                 self.full_line(line_idx)?
             }
 
@@ -542,7 +542,7 @@ impl Address for GapBuffer {
 
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.try_char_to_line(char_idx)?;
-        match self.try_line_to_char(line_idx + 1) {
+        match self.try_line_to_char(line_idx.uadd(1)) {
             None => Some(self.len_chars() - 1),
             Some(idx) => Some(idx),
         }
@@ -577,7 +577,7 @@ impl Address for Buffer {
 
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.txt.try_char_to_line(char_idx)?;
-        match self.txt.try_line_to_char(line_idx + 1) {
+        match self.txt.try_line_to_char(line_idx.uadd(1)) {
             None => Some(self.txt.len_chars() - 1),
             Some(idx) => Some(idx),
         }
@@ -619,27 +619,27 @@ mod tests {
     #[test_case("+-", simple(CurrentLine); "current line plus minus")]
     #[test_case("0", simple(Bof); "beginning of file")]
     #[test_case("$", simple(Eof); "end of file")]
-    #[test_case("3", simple(Line(2)); "single line")]
+    #[test_case("3", simple(Line(LineIdx(2))); "single line")]
     #[test_case("+42", simple(RelativeLine(42)); "relative line forward")]
     #[test_case("-12", simple(RelativeLine(-12)); "relative line backward")]
     #[test_case("#3", simple(Char(3)); "char")]
     #[test_case("+#42", simple(RelativeChar(42)); "relative char forward")]
     #[test_case("-#12", simple(RelativeChar(-12)); "relative char backward")]
-    #[test_case("3:9", simple(LineAndColumn(2, 8)); "line and column cursor")]
+    #[test_case("3:9", simple(LineAndColumn(LineIdx(2), 8)); "line and column cursor")]
     #[test_case("/foo/", simple(Regex(re("foo"))); "regex")]
     #[test_case("+/baz/", simple(Regex(re("baz"))); "regex explicit forward")]
     #[test_case("-/bar/", simple(RegexBack(re_rev("bar"))); "regex back")]
     // Simple with suffix
     #[test_case("#5+", simple(SimpleAddr::new(Char(5),  vec![Eol])); "char to eol")]
     #[test_case("#5-", simple(SimpleAddr::new(Char(5), vec![Bol])); "char to bol")]
-    #[test_case("5+#3", simple(SimpleAddr::new(Line(4), vec![RelativeChar(3)])); "line plus char")]
-    #[test_case("5-#3", simple(SimpleAddr::new(Line(4), vec![RelativeChar(-3)])); "line minus char")]
+    #[test_case("5+#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(3)])); "line plus char")]
+    #[test_case("5-#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(-3)])); "line minus char")]
     // Compound
     #[test_case(",", compound(Bof, Eof); "full")]
-    #[test_case("5,", compound(Line(4), Eof); "from n")]
-    #[test_case("50,", compound(Line(49), Eof); "from n multi digit")]
-    #[test_case("5,9", compound(Line(4), Line(8)); "from n to m")]
-    #[test_case("25,90", compound(Line(24), Line(89)); "from n to m multi digit")]
+    #[test_case("5,", compound(Line(LineIdx(4)), Eof); "from n")]
+    #[test_case("50,", compound(Line(LineIdx(49)), Eof); "from n multi digit")]
+    #[test_case("5,9", compound(Line(LineIdx(4)), Line(LineIdx(8))); "from n to m")]
+    #[test_case("25,90", compound(Line(LineIdx(24)), Line(LineIdx(89))); "from n to m multi digit")]
     #[test_case("/foo/,/bar/", compound(Regex(re("foo")), Regex(re("bar"))); "regex range")]
     // Compound with suffix
     #[test_case(

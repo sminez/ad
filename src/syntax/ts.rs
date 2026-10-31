@@ -169,8 +169,9 @@ impl TsState {
 
     pub fn update(&mut self, gb: &GapBuffer, from_row: LineIdx, n_rows: usize) {
         let raw_from = gb.line_to_byte(from_row);
-        let raw_to = if from_row + n_rows + 1 < gb.len_lines() {
-            gb.line_to_byte(from_row + n_rows + 1)
+        let row_to = from_row.uadd(n_rows + 1);
+        let raw_to = if row_to < gb.len_lines() {
+            gb.line_to_byte(row_to)
         } else {
             gb.len()
         };
@@ -575,7 +576,7 @@ mod tests {
         let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
                 .unwrap();
-        ts.update(gb, 0, gb.len());
+        ts.update(gb, LineIdx(0), gb.len());
         b.syntax_state = Some(SyntaxState::ts(ts));
 
         assert_eq!(b.str_contents(), "fn main() {}");
@@ -603,7 +604,7 @@ mod tests {
         b.syntax_state
             .as_mut()
             .unwrap()
-            .update(&b.txt, 0, usize::MAX - 1);
+            .update(&b.txt, LineIdx(0), usize::MAX - 1);
 
         let ranges = match b.syntax_state.as_ref() {
             Some(SyntaxState {
@@ -652,7 +653,7 @@ mod tests {
             gb,
         )
         .unwrap();
-        ts.update(gb, 0, gb.len());
+        ts.update(gb, LineIdx(0), gb.len());
 
         assert_eq!(
             ts.t.range_tokens(),
@@ -683,7 +684,7 @@ mod tests {
         let mut ts =
             TsState::try_new_from_language("rust", tree_sitter_rust::LANGUAGE.into(), query, gb)
                 .unwrap();
-        ts.update(gb, 0, gb.len());
+        ts.update(gb, LineIdx(0), gb.len());
 
         assert_eq!(
             ts.t.range_tokens(),

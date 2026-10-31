@@ -18,7 +18,7 @@ use std::{
 
 const SCRIPT: &str = include_str!("../../examples/scripts/fancy_impl_blocks.ad");
 const ZIPLIST: &str = include_str!("../../src/ziplist.rs");
-const GAP_BUFFER: &str = include_str!("../../src/buffer/internal.rs");
+const GAP_BUFFER: &str = include_str!("../../src/buffer/internal/mod.rs");
 
 fn criterion_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("Structural regex");

@@ -87,7 +87,7 @@ impl Reference {
             Some(s.trim().to_string())
         };
 
-        match try_buffer_line(&self.path, self.coords.line() as usize) {
+        match try_buffer_line(&self.path, LineIdx(self.coords.line() as usize)) {
             Some(line) => format!("{:<width$} | {line}", self.prefix, width = width),
             None => self.prefix.clone(),
         }

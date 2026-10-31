@@ -35,7 +35,7 @@ where
                 buf: String::with_capacity(LINE_BUF_LEN),
                 gb: GapBuffer::from(""),
                 closed: false,
-                cleared_lines: 0,
+                cleared_lines: LineIdx(0),
                 cleared_bytes: 0,
             }),
         }
@@ -177,7 +177,7 @@ where
         let cur_len = self.inner.borrow().gb.len_lines();
 
         if line_idx > cur_len {
-            for _ in cur_len..=line_idx {
+            for _ in cur_len.to(line_idx.uadd(1)) {
                 self.try_read_next_line();
                 if self.is_closed() {
                     break;
@@ -195,7 +195,7 @@ where
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let gb = &self.inner.borrow().gb;
         let line_idx = gb.try_char_to_line(char_idx)?;
-        match gb.try_line_to_char(line_idx + 1) {
+        match gb.try_line_to_char(line_idx.uadd(1)) {
             None => Some(gb.len_chars() - 1),
             Some(idx) => Some(idx),
         }

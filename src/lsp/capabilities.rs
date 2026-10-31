@@ -76,24 +76,24 @@ pub(crate) enum PositionEncoding {
 impl PositionEncoding {
     pub(crate) fn parse_lsp_position(&self, b: &Buffer, pos: Position) -> (LineIdx, usize) {
         let pos_line = pos.line as usize;
-        if pos_line > b.len_lines() - 1 {
+        if pos_line > b.len_lines().0 - 1 {
             warn!("LSP position out of bounds, clamping to EOF");
-            return (b.len_lines().saturating_sub(1), b.len_chars());
+            return (b.len_lines().saturating_sub(LineIdx(1)), b.len_chars());
         }
 
         match self {
             Self::Utf8 => {
-                let line_start: ByteIdx = b.txt.line_to_byte(pos.line as usize);
+                let line_start: ByteIdx = b.txt.line_to_byte(LineIdx(pos.line as usize));
                 let col = b.txt.chars_in_raw_range(
                     b.txt.byte_to_raw_byte(line_start),
                     b.txt.byte_to_raw_byte(line_start + pos.character as usize),
                 );
 
-                (pos.line as usize, col)
+                (LineIdx(pos.line as usize), col)
             }
 
             Self::Utf16 => {
-                let slice = b.txt.line(pos.line as usize);
+                let slice = b.txt.line(LineIdx(pos.line as usize));
                 let mut remaining = pos.character as usize;
                 let mut col = 0;
                 for ch in slice.chars() {
@@ -107,10 +107,10 @@ impl PositionEncoding {
                     col = slice.chars().count(); // clamp to EOL
                 }
 
-                (pos.line as usize, col)
+                (LineIdx(pos.line as usize), col)
             }
 
-            Self::Utf32 => (pos.line as usize, pos.character as usize),
+            Self::Utf32 => (LineIdx(pos.line as usize), pos.character as usize),
         }
     }
 
@@ -129,7 +129,7 @@ impl PositionEncoding {
                 let start_idx: ByteIdx = b.txt.char_to_byte(line_start);
                 let character = b.txt.char_to_byte(line_start + col) - start_idx;
 
-                (line as u32, character as u32)
+                (line.0 as u32, character as u32)
             }
 
             Self::Utf16 => {
@@ -139,10 +139,10 @@ impl PositionEncoding {
                     character += ch.len_utf16();
                 }
 
-                (line as u32, character as u32)
+                (line.0 as u32, character as u32)
             }
 
-            Self::Utf32 => (line as u32, col as u32),
+            Self::Utf32 => (line.0 as u32, col as u32),
         }
     }
 }
@@ -219,7 +219,7 @@ impl Coords {
             // With that in mind, we need to check for this case and filter for when the line is
             // actually a blank line otherwise removing full lines doesn't work.
             if col_end == 0 && !b.txt.line_is_blank(row_end) {
-                row_end = row_end.saturating_sub(1);
+                row_end = row_end.saturating_sub(LineIdx(1));
                 col_end = b.txt.line(row_end).chars().count();
             }
 
@@ -262,7 +262,7 @@ mod tests {
 
         let (line, col) = PositionEncoding::Utf16.parse_lsp_position(&b, pos);
 
-        assert_eq!(line, 0);
+        assert_eq!(line, LineIdx(0));
         assert_eq!(col, expected_col);
     }
 }

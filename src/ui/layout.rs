@@ -817,7 +817,7 @@ impl Layout {
                 }
 
                 let b = buffers.with_id_mut(win.view.bufid).unwrap();
-                let y_max = b.txt.len_lines() - 1;
+                let y_max = b.txt.len_lines().usub(1);
                 win.view.row_off = min(win.view.row_off, y_max);
             }
         }
@@ -917,11 +917,8 @@ impl Layout {
             .saturating_sub(1)
             .saturating_sub(x_offset)
             .saturating_sub(w_sgncol);
-        let y = min(
-            y.saturating_sub(y_offset).saturating_add(row_off),
-            b.len_lines(),
-        )
-        .saturating_sub(1);
+        let y =
+            min(row_off.uadd(y.saturating_sub(y_offset)), b.len_lines()).saturating_sub(LineIdx(1));
 
         win.view.rx = rx;
         b.cached_rx = rx;
@@ -1025,7 +1022,7 @@ impl View {
         Self {
             bufid,
             col_off: 0,
-            row_off: 0,
+            row_off: LineIdx(0),
             rx: 0,
             cur: Cur::default(),
             pending_viewport: None,
@@ -1037,7 +1034,7 @@ impl View {
         let (_, w_sgncol) = b.sign_col_dims();
         let (y, _) = b.dot.active_cur().as_yx(b);
         let x = self.rx - self.col_off + w_sgncol;
-        let y = y - self.row_off;
+        let y = (y - self.row_off).0;
 
         (x, y)
     }
@@ -1072,8 +1069,8 @@ impl View {
         if let Some(vp) = self.pending_viewport.take() {
             self.row_off = match vp {
                 ViewPort::Top => y,
-                ViewPort::Center => y.saturating_sub(rows / 2),
-                ViewPort::Bottom => y.saturating_sub(rows),
+                ViewPort::Center => y.saturating_sub(LineIdx(rows / 2)),
+                ViewPort::Bottom => y.saturating_sub(LineIdx(rows)),
             };
         }
 
@@ -1085,8 +1082,8 @@ impl View {
             self.row_off = y;
         }
 
-        if y >= self.row_off + rows {
-            self.row_off = y + 1 - rows;
+        if y >= self.row_off.uadd(rows) {
+            self.row_off = y.uadd(1).usub(rows);
         }
 
         if self.rx < self.col_off {
@@ -1243,13 +1240,13 @@ fn apply_scroll(
         view.cur
     };
     let (y, x) = cur.as_yx(b);
-    let y_max = b.txt.len_lines() - 1;
+    let y_max = b.txt.len_lines().usub(1);
     let mut need_clamp = false;
 
-    if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
-        cur = Cur::from_yx(y.saturating_sub(scroll_rows), x, b);
+    if up && view.row_off > LineIdx(0) && y == view.row_off.uadd(n_rows).usub(1) {
+        cur = Cur::from_yx(y.saturating_sub(LineIdx(scroll_rows)), x, b);
     } else if !up && y == view.row_off && view.row_off < y_max {
-        cur = Cur::from_yx(min(y + scroll_rows, y_max), x, b);
+        cur = Cur::from_yx(min(y.uadd(scroll_rows), y_max), x, b);
         need_clamp = true;
     };
 
@@ -1264,9 +1261,9 @@ fn apply_scroll(
     }
 
     view.row_off = if up {
-        view.row_off.saturating_sub(scroll_rows)
+        view.row_off.saturating_sub(LineIdx(scroll_rows))
     } else {
-        min(view.row_off + scroll_rows, y_max)
+        min(view.row_off.uadd(scroll_rows), y_max)
     };
 
     if focused {
@@ -1884,7 +1881,7 @@ mod tests {
             for (_, win) in col.wins.iter_mut() {
                 let b = bfs.with_id_mut(win.view.bufid).unwrap();
                 b.insert_xdot("line1\nline2\nline3".to_string());
-                win.view.row_off = 100;
+                win.view.row_off = LineIdx(100);
             }
         }
 
@@ -1893,9 +1890,11 @@ mod tests {
         for (_, col) in l.cols.iter() {
             for (_, win) in col.wins.iter() {
                 assert_eq!(
-                    win.view.row_off, 2,
+                    win.view.row_off,
+                    LineIdx(2),
                     "bufid {} had row_off={}",
-                    win.view.bufid, win.view.row_off
+                    win.view.bufid,
+                    win.view.row_off
                 );
             }
         }
@@ -1905,11 +1904,11 @@ mod tests {
     fn apply_scroll_for_unfocused_window_clamps_row_off() {
         let config = Arc::new(RwLock::new(Config::default()));
         let mut b = Buffer::new_unnamed(0, "line1\nline2\nline3\nline4\nline5", config);
-        let y_max = b.txt.len_lines() - 1;
-        assert_eq!(y_max, 4);
+        let y_max = b.txt.len_lines().usub(1);
+        assert_eq!(y_max, LineIdx(4));
 
         let mut win = Window::new(0, 3);
-        win.view.row_off = 3;
+        win.view.row_off = LineIdx(3);
 
         let focused = false;
         let up = false;

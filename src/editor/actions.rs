@@ -625,7 +625,7 @@ where
 
         let mb = SimpleMbSelect::new("> ", numbered_lines, |selection| match selection {
             MiniBufferSelection::Line { cy, .. } => Some(Actions::Multi(vec![
-                BAction::CurToLine { y: cy }.for_active(),
+                BAction::CurToLine { y: LineIdx(cy) }.for_active(),
                 BAction::DotSet(TextObject::Line, 1).for_active(),
                 UAction::SetViewPort(ViewPort::Center).into(),
             ])),

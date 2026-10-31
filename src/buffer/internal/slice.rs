@@ -322,7 +322,7 @@ impl Iterator for IdxChars<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::internal::raw_debug_buffer_content;
+    use crate::buffer::internal::{LineIdx, raw_debug_buffer_content};
     use simple_test_case::test_case;
 
     #[test_case(0, 0, "hello, world!\n"; "first line cur at BOF")]
@@ -337,7 +337,7 @@ mod tests {
         gb.move_gap_to(cur);
         gb.shred_gap();
 
-        assert_eq!(gb.line(line).to_string(), expected);
+        assert_eq!(gb.line(LineIdx(line)).to_string(), expected);
     }
 
     #[test]
@@ -346,10 +346,10 @@ mod tests {
         let s2 = "how are you?";
         let gb = GapBuffer::from(format!("{s1}{s2}"));
 
-        let l1_chars: String = gb.line(0).chars().collect();
+        let l1_chars: String = gb.line(LineIdx(0)).chars().collect();
         assert_eq!(l1_chars, s1);
 
-        let l2_chars: String = gb.line(1).chars().collect();
+        let l2_chars: String = gb.line(LineIdx(1)).chars().collect();
         assert_eq!(l2_chars, s2);
     }
 
@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn indexed_chars_works(s: &str, rev: bool, expected: &[(usize, char)]) {
         let mut gb = GapBuffer::from(s);
-        let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
+        let v: Vec<(usize, char)> = gb.line(LineIdx(0)).indexed_chars(0, rev).collect();
         assert_eq!(&v, expected);
 
         for i in 0..gb.len_chars() {
@@ -388,7 +388,7 @@ mod tests {
             gb.move_gap_to(idx);
             gb.shred_gap();
 
-            let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
+            let v: Vec<(usize, char)> = gb.line(LineIdx(0)).indexed_chars(0, rev).collect();
             assert_eq!(&v, expected, "idx={idx}");
         }
     }
@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn chars_works(s: &str) {
         let mut gb = GapBuffer::from(s);
-        let chars: String = gb.line(0).chars().collect();
+        let chars: String = gb.line(LineIdx(0)).chars().collect();
         assert_eq!(chars, s);
 
         for i in 0..gb.len_chars() {
@@ -406,7 +406,7 @@ mod tests {
             gb.move_gap_to(idx);
             gb.shred_gap();
 
-            let chars: String = gb.line(0).chars().collect();
+            let chars: String = gb.line(LineIdx(0)).chars().collect();
             assert_eq!(chars, s, "idx={idx}");
         }
     }

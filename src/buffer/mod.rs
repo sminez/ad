@@ -505,7 +505,10 @@ impl Buffer {
     /// Check the current [Config] to see if this buffer matches a known filetype configuration.
     pub fn configured_filetype(&self) -> Option<String> {
         let lang_configs = &self.config.read().filetypes;
-        let first_line = self.line(0).map(|l| l.to_string()).unwrap_or_default();
+        let first_line = self
+            .line(LineIdx(0))
+            .map(|l| l.to_string())
+            .unwrap_or_default();
 
         self.path()
             .and_then(|path| ftype_config_for_path_and_first_line(path, &first_line, lang_configs))
@@ -864,7 +867,7 @@ impl Buffer {
     }
 
     pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
-        let w_lnum = n_digits(self.len_lines());
+        let w_lnum = n_digits(self.len_lines().0);
         let w_sgncol = w_lnum + 2;
 
         (w_lnum, w_sgncol)
@@ -1486,7 +1489,7 @@ pub(crate) mod tests {
     #[test]
     fn simple_insert_works() {
         let b = simple_initial_buffer();
-        let c = Cur::from_yx(1, LINE_2.len(), &b);
+        let c = Cur::from_yx(LineIdx(1), LINE_2.len(), &b);
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
@@ -1546,7 +1549,7 @@ pub(crate) mod tests {
         let lines = b.string_lines();
         assert_eq!(lines.len(), 2);
 
-        let c = Cur::from_yx(1, 1, &b);
+        let c = Cur::from_yx(LineIdx(1), 1, &b);
         assert_eq!(b.dot, Dot::Cur { c });
 
         assert_eq!(lines[0], LINE_1);
@@ -1592,7 +1595,7 @@ pub(crate) mod tests {
         );
         b.handle_action(BAction::Delete, Source::Keyboard);
 
-        let c = Cur::from_yx(1, LINE_2.len() - 1, &b);
+        let c = Cur::from_yx(LineIdx(1), LINE_2.len() - 1, &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -1614,7 +1617,7 @@ pub(crate) mod tests {
         b.handle_action(BAction::DotSet(TextObject::Line, 1), Source::Keyboard);
         b.handle_action(BAction::Delete, Source::Keyboard);
 
-        let c = Cur::from_yx(1, 0, &b);
+        let c = Cur::from_yx(LineIdx(1), 0, &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });

@@ -329,7 +329,7 @@ impl<'a> Iterator for LineIter<'a> {
         let start_byte = self.gb.line_to_byte(self.line);
         let end_byte = self.gb.line_end_byte(self.line);
 
-        self.line += 1;
+        self.line = self.line.uadd(1);
 
         // Determine tokens required for the next line
         let held: Option<RangeToken<'_>>;

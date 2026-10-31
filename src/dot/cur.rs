@@ -26,7 +26,7 @@ impl Cur {
 
     pub fn as_string_addr(&self, b: &Buffer) -> String {
         let (y, x) = self.as_yx(b);
-        format!("{}:{}", y + 1, x + 1)
+        format!("{}:{}", y.uadd(1), x + 1)
     }
 
     pub(crate) fn as_yx(&self, b: &Buffer) -> (LineIdx, usize) {
@@ -39,7 +39,7 @@ impl Cur {
     pub(crate) fn from_yx(y_idx: LineIdx, x_idx: usize, b: &Buffer) -> Self {
         let line_start = b.txt.line_to_char(y_idx);
         let mut x_max = b.txt.line_len_chars(y_idx);
-        if y_idx < b.len_lines() - 1 {
+        if y_idx < b.len_lines().usub(1) {
             x_max -= 1;
         }
 
@@ -65,15 +65,15 @@ impl Cur {
         match arr {
             Arrow::Up => {
                 let (mut y, _) = self.as_yx(b);
-                if y != 0 {
-                    y -= 1;
+                if y != LineIdx(0) {
+                    y = y.usub(1);
                     cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
             }
             Arrow::Down => {
                 let (mut y, _) = self.as_yx(b);
-                if !b.is_empty() && y < b.len_lines() - 1 {
-                    y += 1;
+                if !b.is_empty() && y < b.len_lines().usub(1) {
+                    y = y.uadd(1);
                     cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
             }
@@ -102,7 +102,7 @@ impl Cur {
 
         // On the last line of the file we don't have a trailing newline
         // so we really do want the final character
-        if y < b.len_lines().saturating_sub(1) {
+        if y < b.len_lines().saturating_sub(LineIdx(1)) {
             self.idx = self.idx.saturating_sub(1);
         }
 
@@ -121,12 +121,12 @@ mod tests {
         let b = buffer_from_lines(lines);
 
         for (n, s) in lines.iter().enumerate() {
-            let c = Cur::from_yx(n, 100, &b);
+            let c = Cur::from_yx(LineIdx(n), 100, &b);
 
             // Should be focused on the newline character at the end of the line
             // In the case of the last line we should be focused on the index after
             // the end of the string so that we are appending to the buffer.
-            assert_eq!(c.as_yx(&b), (n, s.len()), "line='{s}'");
+            assert_eq!(c.as_yx(&b), (LineIdx(n), s.len()), "line='{s}'");
         }
     }
 
@@ -135,10 +135,10 @@ mod tests {
         let lines = &["a", "ab", "abc", "abcd"];
         let b = buffer_from_lines(lines);
         let c = Cur::buffer_end(&b);
-        assert_eq!(c.as_yx(&b), (3, 4));
+        assert_eq!(c.as_yx(&b), (LineIdx(3), 4));
 
         let final_c = c.arr(Arrow::Right, &b);
-        assert_eq!(final_c.as_yx(&b), (3, 4));
+        assert_eq!(final_c.as_yx(&b), (LineIdx(3), 4));
     }
 
     #[test]
@@ -148,10 +148,10 @@ mod tests {
         let mut c = Cur::buffer_end(&b);
         c.idx -= 1;
 
-        assert_eq!(c.as_yx(&b), (3, 3));
+        assert_eq!(c.as_yx(&b), (LineIdx(3), 3));
 
         let mut final_c = c.arr(Arrow::Right, &b);
         final_c.clamp_idx(b.txt.len_chars());
-        assert_eq!(final_c.as_yx(&b), (3, 4));
+        assert_eq!(final_c.as_yx(&b), (LineIdx(3), 4));
     }
 }
