@@ -34,7 +34,9 @@ use edit::{Edit, EditLog, Kind, Txt};
 use scratch::ScratchBuf;
 
 pub use buffers::{BufferId, Buffers};
-pub use internal::{ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, RawIdx, Slice, SliceIter};
+pub use internal::{
+    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, RawIdx, RevChars, Slice, SliceIter,
+};
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
 // with a blank buffer.

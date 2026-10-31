@@ -17,12 +17,19 @@
 //! - <https://coredumped.dev/2023/08/09/text-showdown-gap-buffers-vs-ropes/>
 //! - <https://code.visualstudio.com/blogs/2018/03/23/text-buffer-reimplementation>
 use std::{
-    borrow::Cow,
     cell::UnsafeCell,
     cmp::{Ordering, max, min},
     collections::HashMap,
     fmt,
 };
+
+mod index;
+mod slice;
+mod utf8;
+
+pub use index::{ByteIdx, CharIdx, RawIdx};
+pub use slice::{Chars, IdxChars, RevChars, Slice, SliceIter};
+use utf8::{count_chars, decode_char_at, decode_char_ending_at};
 
 // The internal data is `[u8]` so the values here are in terms of bytes
 
@@ -36,32 +43,6 @@ const MAX_GAP_GROW: usize = 1024 * 8;
 fn clamp_gap_size(len: usize, min_gap: usize) -> usize {
     min(max(len / 20, min_gap), MAX_GAP_GROW)
 }
-
-#[inline]
-fn count_chars(bytes: &[u8]) -> usize {
-    if bytes.is_empty() {
-        return 0;
-    }
-
-    let mut n_chars = 0;
-    let mut cur = 0;
-
-    while cur < bytes.len() {
-        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
-        let ch = unsafe { decode_char_at(cur, bytes) };
-        cur += ch.len_utf8();
-        n_chars += 1;
-    }
-
-    n_chars
-}
-
-/// A byte offset within the logical buffer state (i.e. ignoring the position of the gap).
-pub type ByteIdx = usize;
-/// A character offset within the logical buffer state.
-pub type CharIdx = usize;
-/// A byte offset within the raw buffer state (i.e. accounting for the position of the gap).
-pub type RawIdx = usize;
 
 /// A simple [HashMap] based cache of mappings from character positions to raw byte positions
 /// within the buffer since the last time it was modified (either by altering the logical buffer
@@ -1171,445 +1152,31 @@ impl GapBuffer {
     }
 }
 
-/// A view on a region of the GapBuffer.
-///
-/// Slices will become invalidated if the gap is moved from the position they were created with
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Slice<'a> {
-    /// The logical byte offset that this slice was taken from
-    from: ByteIdx,
-    left: &'a [u8],
-    right: &'a [u8],
+#[cfg(test)]
+fn debug_buffer_content(gb: &GapBuffer) -> String {
+    let mut v = gb.data.to_vec();
+    v[gb.gap_start..gb.gap_end].copy_from_slice("_".repeat(gb.gap()).as_bytes());
+    String::from_utf8(v).expect("valid utf8")
 }
 
-impl<'a> From<Slice<'a>> for Cow<'a, str> {
-    fn from(s: Slice<'a>) -> Self {
-        if s.left.is_empty() {
-            // SAFETY: we know that we have valid utf8 data internally
-            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(s.right) })
-        } else if s.right.is_empty() {
-            // SAFETY: we know that we have valid utf8 data internally
-            Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(s.left) })
-        } else {
-            Cow::Owned(s.to_string())
+#[cfg(test)]
+fn raw_debug_buffer_content(gb: &GapBuffer) -> String {
+    let mut v = gb.data.to_vec();
+    for b in v[gb.gap_start..gb.gap_end].iter_mut() {
+        if *b == b'\0' {
+            *b = b'_';
         }
     }
-}
+    v.insert(gb.gap_end, b']');
+    v.insert(gb.gap_start, b'[');
 
-impl<'a> Slice<'a> {
-    const NULL: Slice<'a> = Slice {
-        from: 0,
-        left: &[],
-        right: &[],
-    };
-
-    pub fn is_contiguous(&self) -> bool {
-        self.left.is_empty() || self.right.is_empty()
-    }
-
-    /// The logical byte offset that this slice was taken from.
-    pub fn from(&self) -> ByteIdx {
-        self.from
-    }
-
-    #[inline]
-    fn from_raw_offsets(from: RawIdx, to: RawIdx, gb: &'a GapBuffer) -> Slice<'a> {
-        let to = min(to, gb.data.len());
-        let logical_from = gb.raw_byte_to_byte(from);
-
-        if to <= gb.gap_start || from >= gb.gap_end {
-            return Slice {
-                from: logical_from,
-                left: &gb.data[from..to],
-                right: &[],
-            };
-        }
-
-        debug_assert!(from <= gb.gap_start, "line offset sits in gap");
-
-        Slice {
-            from: logical_from,
-            left: &gb.data[from..gb.gap_start],
-            right: &gb.data[gb.gap_end..to],
-        }
-    }
-
-    pub fn subslice_from_byte_offsets(&self, from: usize, to: usize) -> Slice<'_> {
-        if from == to {
-            return Slice::NULL;
-        }
-
-        let to = min(to, self.len());
-        let logical_from = self.from + from;
-
-        if to <= self.left.len() {
-            Slice {
-                from: logical_from,
-                left: &self.left[from..to],
-                right: &[],
-            }
-        } else if from >= self.left.len() {
-            Slice {
-                from: logical_from,
-                left: &[],
-                right: &self.right[from..to],
-            }
-        } else {
-            Slice {
-                from: logical_from,
-                left: &self.left[from..],
-                right: &self.right[..to],
-            }
-        }
-    }
-
-    /// The number of utf-8 characters within this slice.
-    ///
-    /// Calculating involves parsing the entire slice as utf-8.
-    pub fn len_utf8(&self) -> usize {
-        self.chars().count()
-    }
-
-    pub fn len(&self) -> usize {
-        self.left.len() + self.right.len()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.len() == 0
-    }
-
-    /// The two sides of this slice as &str references
-    pub fn as_strs(&self) -> (&str, &str) {
-        // SAFETY: we know that we have valid utf8 data internally
-        unsafe {
-            (
-                std::str::from_utf8_unchecked(self.left),
-                std::str::from_utf8_unchecked(self.right),
-            )
-        }
-    }
-
-    /// The two sides of this slice as &[u8] slices
-    pub fn as_slices(&self) -> (&[u8], &[u8]) {
-        (self.left, self.right)
-    }
-
-    /// Iterate over the contiguous &[u8] regions within this slice
-    pub fn slice_iter(self) -> SliceIter<'a> {
-        SliceIter {
-            inner: self,
-            pos: Some(false),
-        }
-    }
-
-    /// Iterate over the characters in this slice
-    pub fn chars(self) -> Chars<'a> {
-        Chars { s: self, cur: 0 }
-    }
-
-    /// Iterate over the characters in this slice in reverse
-    pub fn rev_chars(self) -> RevChars<'a> {
-        RevChars {
-            s: self,
-            cur: self.left.len() + self.right.len(),
-        }
-    }
-
-    /// Iterate over the characters in this slice with their corresponding character indices
-    pub fn indexed_chars(self, from: CharIdx, rev: bool) -> IdxChars<'a> {
-        let (cur, idx) = if rev {
-            (
-                self.left.len() + self.right.len(),
-                from + count_chars(self.left) + count_chars(self.right),
-            )
-        } else {
-            (0, from)
-        };
-
-        IdxChars {
-            s: self,
-            cur,
-            idx,
-            rev,
-        }
-    }
-
-    fn cur_and_data(&self, cur: usize) -> (usize, &[u8]) {
-        if cur < self.left.len() {
-            (cur, self.left)
-        } else {
-            (cur - self.left.len(), self.right)
-        }
-    }
-}
-
-impl fmt::Display for Slice<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v = Vec::with_capacity(self.left.len() + self.right.len());
-        v.extend_from_slice(self.left);
-        v.extend_from_slice(self.right);
-
-        match String::from_utf8(v) {
-            Ok(s) => write!(f, "{s}"),
-            Err(_) => Err(fmt::Error),
-        }
-    }
-}
-
-impl<'a> PartialEq<&'a str> for Slice<'_> {
-    fn eq(&self, other: &&'a str) -> bool {
-        let b = other.as_bytes();
-        if b.len() != self.left.len() + self.right.len() {
-            return false;
-        }
-
-        &b[..self.left.len()] == self.left && &b[self.left.len()..] == self.right
-    }
-}
-
-impl PartialEq<String> for Slice<'_> {
-    fn eq(&self, other: &String) -> bool {
-        *self == other.as_str()
-    }
-}
-
-#[derive(Debug)]
-pub struct SliceIter<'a> {
-    inner: Slice<'a>,
-    pos: Option<bool>,
-}
-
-impl<'a> Iterator for SliceIter<'a> {
-    type Item = &'a [u8];
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self.pos? {
-            false => {
-                self.pos = Some(true);
-                Some(self.inner.left)
-            }
-
-            true => {
-                self.pos = None;
-                Some(self.inner.right)
-            }
-        }
-    }
-}
-
-/// An iterator of characters from a [Slice]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Chars<'a> {
-    s: Slice<'a>,
-    cur: usize,
-}
-
-impl Iterator for Chars<'_> {
-    type Item = char;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur >= self.s.left.len() + self.s.right.len() {
-            return None;
-        }
-
-        let (cur, data) = self.s.cur_and_data(self.cur);
-        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
-        let ch = unsafe { decode_char_at(cur, data) };
-        self.cur += ch.len_utf8();
-
-        Some(ch)
-    }
-}
-
-/// An iterator of characters from a [Slice]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub struct RevChars<'a> {
-    s: Slice<'a>,
-    cur: usize,
-}
-
-impl Iterator for RevChars<'_> {
-    type Item = char;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.cur == 0 {
-            return None;
-        }
-
-        let (cur, data) = self.s.cur_and_data(self.cur - 1);
-        // SAFETY: we know we are in bounds and that we contain valid utf-8 data
-        let ch = unsafe { decode_char_ending_at(cur, data) };
-        self.cur -= ch.len_utf8();
-
-        Some(ch)
-    }
-}
-
-/// An iterator of characters and their indices from a [Slice]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
-pub struct IdxChars<'a> {
-    s: Slice<'a>,
-    cur: usize,
-    idx: CharIdx,
-    rev: bool,
-}
-
-impl Iterator for IdxChars<'_> {
-    type Item = (CharIdx, char);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if (!self.rev && self.cur >= self.s.left.len() + self.s.right.len())
-            || (self.rev && self.cur == 0)
-        {
-            return None;
-        }
-
-        if self.rev {
-            let (cur, data) = self.s.cur_and_data(self.cur - 1);
-            // SAFETY: we know we are in bounds and that we contain valid utf-8 data
-            let ch = unsafe { decode_char_ending_at(cur, data) };
-            let len = ch.len_utf8();
-            self.idx -= 1;
-            self.cur -= len;
-            Some((self.idx, ch))
-        } else {
-            let (cur, data) = self.s.cur_and_data(self.cur);
-            // SAFETY: we know we are in bounds and that we contain valid utf-8 data
-            let ch = unsafe { decode_char_at(cur, data) };
-            let len = ch.len_utf8();
-            let res = Some((self.idx, ch));
-            self.cur += len;
-            self.idx += 1;
-            res
-        }
-    }
-}
-
-// The following helper functions are adapted from nightly APIs in std::core::str
-// -> https://doc.rust-lang.org/stable/src/core/str/validations.rs.html
-
-/// Mask of the value bits of a continuation byte.
-const CONT_MASK: u8 = 0b0011_1111;
-
-/// Returns the initial codepoint accumulator for the first byte.
-/// The first byte is special, only want bottom 5 bits for width 2, 4 bits
-/// for width 3, and 3 bits for width 4.
-#[inline]
-const fn utf8_first_byte(byte: u8, width: u32) -> u32 {
-    (byte & (0x7F >> width)) as u32
-}
-
-/// Returns the value of `ch` updated with continuation byte `byte`.
-#[inline]
-const fn utf8_acc_cont_byte(ch: u32, byte: u8) -> u32 {
-    (ch << 6) | (byte & CONT_MASK) as u32
-}
-
-/// Checks whether the byte is a UTF-8 continuation byte (i.e., starts with the
-/// bits `10`).
-#[inline]
-const fn utf8_is_cont_byte(byte: u8) -> bool {
-    (byte as i8) < -64
-}
-
-/// Decode a utf-8 code point from `bytes` starting at `start`.
-/// `bytes` must contain valid utf-8 data beginning at `start`
-#[inline]
-unsafe fn decode_char_at(start: usize, bytes: &[u8]) -> char {
-    // Decode UTF-8
-    // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-    let x = bytes[start];
-    if x < 128 {
-        // SAFETY: x is in the correct range
-        return unsafe { char::from_u32_unchecked(x as u32) };
-    }
-
-    // Multibyte case follows
-    // Decode from a byte combination out of: [[[x y] z] w]
-    // NOTE: Performance is sensitive to the exact formulation here
-    let init = utf8_first_byte(x, 2);
-    // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-    let y = bytes[start + 1];
-    let mut ch = utf8_acc_cont_byte(init, y);
-
-    if x >= 0xE0 {
-        // [[x y z] w] case
-        // 5th bit in 0xE0 .. 0xEF is always clear, so `init` is still valid
-        // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-        let z = bytes[start + 2];
-        let y_z = utf8_acc_cont_byte((y & CONT_MASK) as u32, z);
-        ch = (init << 12) | y_z;
-        if x >= 0xF0 {
-            // [x y z w] case
-            // use only the lower 3 bits of `init`
-            // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-            let w = bytes[start + 3];
-            ch = ((init & 7) << 18) | utf8_acc_cont_byte(y_z, w);
-        }
-    }
-
-    // SAFETY: we know that ch is valid at this point
-    unsafe { char::from_u32_unchecked(ch) }
-}
-
-/// Decode a utf-8 code point from `bytes` ending at `end`.
-/// `bytes` must contain valid utf-8 data ending at `end`
-#[inline]
-unsafe fn decode_char_ending_at(end: usize, bytes: &[u8]) -> char {
-    // Decode UTF-8
-    let w = match bytes[end] {
-        // SAFETY: b is in range
-        b if b < 128 => return unsafe { char::from_u32_unchecked(b as u32) },
-        b => b,
-    };
-
-    // Multibyte case follows
-    // Decode from a byte combination out of: [x [y [z w]]]
-    let mut ch;
-    // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-    let z = bytes[end - 1];
-    ch = utf8_first_byte(z, 2);
-    if utf8_is_cont_byte(z) {
-        // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-        let y = bytes[end - 2];
-        ch = utf8_first_byte(y, 3);
-        if utf8_is_cont_byte(y) {
-            // SAFETY: `bytes` contains UTF-8-like string data so we have the next byte,
-            let x = bytes[end - 3];
-            ch = utf8_first_byte(x, 4);
-            ch = utf8_acc_cont_byte(ch, y);
-        }
-        ch = utf8_acc_cont_byte(ch, z);
-    }
-    ch = utf8_acc_cont_byte(ch, w);
-
-    // SAFETY: we know that ch is valid at this point
-    unsafe { char::from_u32_unchecked(ch) }
+    String::from_utf8(v).expect("valid utf8")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use simple_test_case::test_case;
-
-    fn debug_buffer_content(gb: &GapBuffer) -> String {
-        let mut v = gb.data.to_vec();
-        v[gb.gap_start..gb.gap_end].copy_from_slice("_".repeat(gb.gap()).as_bytes());
-        String::from_utf8(v).expect("valid utf8")
-    }
-
-    fn raw_debug_buffer_content(gb: &GapBuffer) -> String {
-        let mut v = gb.data.to_vec();
-        for b in v[gb.gap_start..gb.gap_end].iter_mut() {
-            if *b == b'\0' {
-                *b = b'_';
-            }
-        }
-        v.insert(gb.gap_end, b']');
-        v.insert(gb.gap_start, b'[');
-
-        String::from_utf8(v).expect("valid utf8")
-    }
 
     #[test]
     fn from_string_matches_from_str() {
@@ -1851,21 +1418,6 @@ mod tests {
                 assert_eq!(idx, ch_idx, "gap@{pos}");
             }
         }
-    }
-
-    #[test_case(0, 0, "hello, world!\n"; "first line cur at BOF")]
-    #[test_case(0, 1, "how are you?"; "second line cur at BOF")]
-    #[test_case(26, 0, "hello, world!\n"; "first line cur at EOF")]
-    #[test_case(26, 1, "how are you?"; "second line cur at EOF")]
-    #[test_case(10, 0, "hello, world!\n"; "first line cur in line")]
-    #[test_case(10, 1, "how are you?"; "second line cur in line")]
-    #[test]
-    fn slice_to_string_works(cur: usize, line: usize, expected: &str) {
-        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        gb.move_gap_to(cur);
-        gb.shred_gap();
-
-        assert_eq!(gb.line(line).to_string(), expected);
     }
 
     #[test]
@@ -2150,125 +1702,6 @@ mod tests {
         }
 
         assert_eq!(gb.to_string(), s);
-    }
-
-    #[test]
-    fn chars_work() {
-        let s1 = "hello, world!\n";
-        let s2 = "how are you?";
-        let gb = GapBuffer::from(format!("{s1}{s2}"));
-
-        let l1_chars: String = gb.line(0).chars().collect();
-        assert_eq!(l1_chars, s1);
-
-        let l2_chars: String = gb.line(1).chars().collect();
-        assert_eq!(l2_chars, s2);
-    }
-
-    #[test_case(
-        "hello, 世界!", false,
-        &[(0, 'h'), (1, 'e'), (2, 'l'), (3, 'l'), (4, 'o'),
-          (5, ','), (6, ' '), (7, '世'), (8, '界'), (9, '!')];
-        "multi-byte block forward"
-    )]
-    #[test_case(
-        "hello, 世界!", true,
-        &[(9, '!'), (8, '界'), (7, '世'), (6, ' '), (5, ','),
-          (4, 'o'), (3, 'l'), (2, 'l'), (1, 'e'), (0, 'h')];
-        "multi-byte block reversed"
-    )]
-    #[test_case(
-        "foo│foo│foo", false,
-        &[(0, 'f'), (1, 'o'), (2, 'o'), (3, '│'), (4, 'f'), (5, 'o'),
-          (6, 'o'), (7, '│'), (8, 'f'), (9, 'o'), (10, 'o')];
-        "interleaved forward"
-    )]
-    #[test_case(
-        "foo│foo│foo", true,
-        &[(10, 'o'), (9, 'o'), (8, 'f'), (7, '│'), (6, 'o'), (5, 'o'),
-          (4, 'f'), (3, '│'), (2, 'o'), (1, 'o'), (0, 'f')];
-        "interleaved reversed"
-    )]
-    #[test]
-    fn indexed_chars_works(s: &str, rev: bool, expected: &[(usize, char)]) {
-        let mut gb = GapBuffer::from(s);
-        let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
-        assert_eq!(&v, expected);
-
-        for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
-            gb.move_gap_to(idx);
-            gb.shred_gap();
-
-            let v: Vec<(usize, char)> = gb.line(0).indexed_chars(0, rev).collect();
-            assert_eq!(&v, expected, "idx={idx}");
-        }
-    }
-
-    #[test_case("foo│foo│foo"; "interleaved multibyte and ascii")]
-    #[test_case("hello, 世界!"; "blocks of multibyte and ascii")]
-    #[test]
-    fn chars_works(s: &str) {
-        let mut gb = GapBuffer::from(s);
-        let chars: String = gb.line(0).chars().collect();
-        assert_eq!(chars, s);
-
-        for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
-            gb.move_gap_to(idx);
-            gb.shred_gap();
-
-            let chars: String = gb.line(0).chars().collect();
-            assert_eq!(chars, s, "idx={idx}");
-        }
-    }
-
-    #[test]
-    fn slice_works() {
-        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        let slice = Slice::from_raw_offsets(0, gb.cap, &gb);
-        let (s1, s2) = slice.as_strs();
-        assert_eq!(s1, "");
-        assert_eq!(s2, "hello, world!\nhow are you?");
-
-        let slice = gb.slice(6, 17);
-        let (s1, s2) = slice.as_strs();
-        assert_eq!(s1, " world!\nhow");
-        assert_eq!(s2, "");
-
-        gb.move_gap_to(12);
-        gb.shred_gap();
-        println!("after move:  {:?}", raw_debug_buffer_content(&gb));
-
-        let slice = gb.slice(6, 17);
-        let (s1, s2) = slice.as_strs();
-        assert_eq!(s1, " world");
-        assert_eq!(s2, "!\nhow");
-    }
-
-    #[test]
-    fn null_slice_is_empty() {
-        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-
-        for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
-            gb.move_gap_to(idx);
-            gb.shred_gap();
-
-            let slice = gb.slice(0, 0);
-
-            assert!(slice.left.is_empty(), "{i} slice left: {:?}", slice.left);
-            assert!(slice.right.is_empty(), "{i} slice right: {:?}", slice.right);
-        }
-    }
-
-    #[test]
-    fn slice_eq_str_works() {
-        let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        gb.move_gap_to(3);
-        gb.shred_gap();
-        let slice = gb.slice(0, 5);
-        assert_eq!(slice, "hello");
     }
 
     #[test]
