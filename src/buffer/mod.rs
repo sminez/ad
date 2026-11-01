@@ -415,8 +415,8 @@ impl Buffer {
             Err(e) => return format!("Error reloading buffer: {e}"),
         };
 
-        let n_chars = raw.len();
         self.txt = GapBuffer::from(raw);
+        let n_chars = self.txt.len_chars();
         self.dot.clamp_idx(CharIdx(n_chars));
         self.xdot.clamp_idx(CharIdx(n_chars));
         self.edit_log.clear();
