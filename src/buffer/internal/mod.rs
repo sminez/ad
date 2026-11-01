@@ -28,8 +28,10 @@ mod index;
 mod slice;
 mod utf8;
 
-pub use index::{ByteIdx, CharIdx, LineIdx, RawIdx};
+pub use index::{ByteIdx, CharIdx, LineIdx};
 pub use slice::{Chars, IdxChars, RevChars, Slice, SliceIter};
+
+use index::RawIdx;
 use utf8::{count_chars, decode_char_at, decode_char_ending_at};
 
 // The internal data is `[u8]` so the values here are in terms of bytes

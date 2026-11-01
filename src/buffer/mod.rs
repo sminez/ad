@@ -35,7 +35,7 @@ use scratch::ScratchBuf;
 
 pub use buffers::{BufferId, Buffers};
 pub use internal::{
-    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, LineIdx, RawIdx, RevChars, Slice, SliceIter,
+    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, LineIdx, RevChars, Slice, SliceIter,
 };
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
