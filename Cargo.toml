@@ -64,6 +64,7 @@ ninep = { version = "0.6", default-features = false }
 parking_lot = "0.12.5"
 serde = "1.0.228"
 serde_json = "1.0.149"
+shellexpand = { version = "3.1.2", default-features = false, features = ["base-0"] }
 structex = { version = "0.6", default-features = false }
 toml = { version = "1.1.2", features = [ "preserve_order" ] }
 tracing = "0.1.44"

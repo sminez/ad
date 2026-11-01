@@ -19,7 +19,7 @@ use std::{
     env, fs,
     mem::take,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::mpsc::Sender,
 };
 use tracing::{debug, error, info, trace, warn};
@@ -812,11 +812,8 @@ where
             Some(MatchOutcome::Message(m)) => self.handle_plumbing_message(m, load_in_new_window),
 
             Some(MatchOutcome::Run(cmd)) => {
-                let mut command = Command::new("sh");
-                command
-                    .args(["-c", cmd.as_str()])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null());
+                let mut command = cmd.as_command();
+                command.stdout(Stdio::null()).stderr(Stdio::null());
                 if let Err(e) = command.spawn() {
                     self.set_status_message(format!("error spawning process: {e}"));
                 };

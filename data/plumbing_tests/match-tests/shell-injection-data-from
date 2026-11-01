@@ -1,0 +1,21 @@
+Variables substituted into shell commands must be passed as data rather than being interpreted
+as shell syntax.
+
+-- rules --
+data matches .+
+data from printf %s $0
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 32
+data: a b;echo injected 'q' $(echo x)
+
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 31
+data: a b;echo injected 'q' $(echo x)

@@ -7,6 +7,7 @@
 //!   - <http://man.cat-v.org/plan_9_3rd_ed/4/plumber>
 //!   - <http://man.cat-v.org/plan_9_3rd_ed/6/plumb>
 use crate::regex::Regex;
+use shellexpand::env_with_context_no_errors;
 use std::{
     collections::BTreeMap,
     env, fs, io,
@@ -48,7 +49,10 @@ impl FromStr for PlumbingRules {
                             Some((var, val)) => {
                                 let mut k = non_empty_string(var.trim(), line)?;
                                 k.insert(0, '$');
-                                prs.vars.insert(k, non_empty_string(val.trim(), line)?);
+                                // Variables may refer to any variables declared before them
+                                let v = non_empty_string(val.trim(), line)?;
+                                let v = expand_vars(&v, &prs.vars, |_, v| v.to_string());
+                                prs.vars.insert(k, v);
                             }
                             _ => return Err(format!("malformed line: {line:?}")),
                         }
@@ -57,9 +61,7 @@ impl FromStr for PlumbingRules {
 
                 // Apply variables and parse rule blocks
                 _ => {
-                    for (k, v) in prs.vars.iter() {
-                        block = block.replace(k, v);
-                    }
+                    block = expand_vars(&block, &prs.vars, |_, v| v.to_string());
                     prs.rules.push(Rule::from_str(&block)?);
                 }
             }
@@ -281,12 +283,7 @@ impl Pattern {
         msg: &mut PlumbingMessage,
         vars: &mut BTreeMap<String, String>,
     ) -> bool {
-        let apply_vars = |mut s: String| {
-            for (k, v) in vars.iter() {
-                s = s.replace(k, v);
-            }
-            s
-        };
+        let apply_vars = |s: String| expand_vars(&s, vars, |_, v| v.to_string());
 
         let re_match_and_update =
             |f: Field, re: &mut Regex, vars: &mut BTreeMap<String, String>| {
@@ -450,10 +447,8 @@ impl Pattern {
 
             Self::DataFrom(cmd) => {
                 debug!("running {cmd:?} to set message data");
-                let mut command = Command::new("sh");
-                command
-                    .args(["-c", apply_vars(cmd.clone()).as_str()])
-                    .stderr(Stdio::null());
+                let mut command = ShellCommand::new(cmd, vars).as_command();
+                command.stderr(Stdio::null());
                 let output = match command.output() {
                     Ok(output) => output,
                     Err(_) => return false,
@@ -511,7 +506,7 @@ pub enum MatchOutcome {
     /// A message that should be handled by ad
     Message(PlumbingMessage),
     /// A command that should be run instead of handling the message
-    Run(String),
+    Run(ShellCommand),
 }
 
 /// A parsed plumbing rule for matching against incoming messages.
@@ -608,19 +603,50 @@ impl Rule {
             match a {
                 // TODO: when other ports are supported they will need handling here!
                 Action::To(port) if port == "edit" => return Some(MatchOutcome::Message(msg)),
-                Action::Start(cmd) => {
-                    let mut s = cmd.clone();
-                    for (k, v) in vars.iter() {
-                        s = s.replace(k, v);
-                    }
-
-                    return Some(MatchOutcome::Run(s));
-                }
+                Action::Start(cmd) => return Some(MatchOutcome::Run(ShellCommand::new(cmd, vars))),
                 _ => continue,
             }
         }
 
         None
+    }
+}
+
+/// A rewritten shell command where all plumbing variable references have been rewritten to instead
+/// refer to environment variables that we provide when the command executes.
+///
+/// Handling things through environment variables this way ensures that the contents of any
+/// plumbing variable are used verbatim rather than being interpreted by the shell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellCommand {
+    script: String,
+    env: Vec<(String, String)>,
+}
+
+impl ShellCommand {
+    fn new(template: &str, vars: &BTreeMap<String, String>) -> Self {
+        let mut env = Vec::new();
+
+        // Collect all variable references from `template` and replace them with $PLUMB_var_name
+        // shell variables which we can later provide as this commands environment when it
+        // executes.
+        let script = expand_vars(template, vars, |k, v| {
+            let env_var = format!("PLUMB_{}", &k[1..]);
+            let replacement_txt = format!("\"${{{env_var}}}\"");
+            env.push((env_var, v.to_string()));
+
+            replacement_txt
+        });
+
+        Self { script, env }
+    }
+
+    pub fn as_command(&self) -> Command {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", &self.script])
+            .envs(self.env.iter().cloned());
+
+        cmd
     }
 }
 
@@ -632,10 +658,22 @@ fn non_empty_string(s: &str, line: &str) -> Result<String, String> {
     }
 }
 
+fn expand_vars(
+    s: &str,
+    vars: &BTreeMap<String, String>,
+    mut f: impl FnMut(&str, &str) -> String,
+) -> String {
+    env_with_context_no_errors(s, |name| {
+        vars.get_key_value(&format!("${name}"))
+            .map(|(k, v)| f(k, v))
+    })
+    .into_owned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use simple_test_case::dir_cases;
+    use simple_test_case::{dir_cases, test_case};
     use simple_txtar::Archive;
 
     #[test]
@@ -667,6 +705,40 @@ mod tests {
         };
 
         assert_eq!(m, expected);
+    }
+
+    #[test_case("$home", "/h"; "short name")]
+    #[test_case("$homedir", "/hd"; "longer name sharing a prefix")]
+    #[test_case("${home}dir", "/hdir"; "braces separate name from text")]
+    #[test_case("$0x", "$0x"; "names are matched greedily")]
+    #[test_case("$0.pdf", "a.pdf"; "punctuation ends a name")]
+    #[test_case("$HOME/$0", "$HOME/a"; "unknown variables are left as is")]
+    #[test_case("cost: 5$", "cost: 5$"; "trailing dollar is left as is")]
+    #[test]
+    fn expand_vars_works(s: &str, expected: &str) {
+        let vars: BTreeMap<String, String> = [("$home", "/h"), ("$homedir", "/hd"), ("$0", "a")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        assert_eq!(expand_vars(s, &vars, |_, v| v.to_string()), expected);
+    }
+
+    #[test]
+    fn plumb_start_passes_variables_via_env() {
+        let mut rules =
+            PlumbingRules::from_str("data matches .+\nplumb start xdg-open $0").unwrap();
+        let m = PlumbingMessage {
+            data: "https://x.co/?a&reboot".to_string(),
+            ..Default::default()
+        };
+
+        let expected = ShellCommand {
+            script: "xdg-open \"${PLUMB_0}\"".to_string(),
+            env: vec![("PLUMB_0".to_string(), "https://x.co/?a&reboot".to_string())],
+        };
+
+        assert_eq!(rules.plumb(m), Some(MatchOutcome::Run(expected)));
     }
 
     #[test]

@@ -1,0 +1,25 @@
+Variables defined in the rules file are matched greedily by name and may refer to variables
+declared before them.
+
+-- rules --
+home = /h
+homedir = /hd
+both = $home:$homedir
+
+data matches .+
+data set $homedir $both
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 2
+data: x
+
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 10
+data: /hd /h:/hd
