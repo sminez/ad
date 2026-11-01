@@ -1,4 +1,7 @@
-use crate::{buffer::Buffer, dot::Cur};
+use crate::{
+    buffer::{Buffer, CharIdx},
+    dot::Cur,
+};
 
 /// A [Range] is a closed interval [start, end] that includes _both_ the starting cursor and the
 /// ending cursor.
@@ -32,8 +35,8 @@ pub struct Range {
 impl Range {
     /// Beginning of file
     pub const BOF: Self = Range {
-        start: Cur { idx: 0 },
-        end: Cur { idx: 0 },
+        start: Cur { idx: CharIdx(0) },
+        end: Cur { idx: CharIdx(0) },
         start_active: false,
     };
 
@@ -124,7 +127,7 @@ mod tests {
     use simple_test_case::test_case;
 
     fn c(idx: usize) -> Cur {
-        Cur { idx }
+        Cur { idx: CharIdx(idx) }
     }
 
     fn r(start: usize, end: usize, start_active: bool) -> Range {

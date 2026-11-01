@@ -1,5 +1,5 @@
 use crate::{
-    buffer::Buffers,
+    buffer::{Buffers, CharIdx},
     die,
     dot::{Cur, Dot, Range},
     editor::{Actions, EAction, MbSelect, MiniBufferSelection},
@@ -133,11 +133,11 @@ impl MbSelect for Completions {
 
         // find the start of the "word" we are on
         let offset = b
-            .rev_iter_between_chars(cur.idx, 0)
+            .rev_iter_between_chars(cur.idx, CharIdx(0))
             .take_while(|(_, ch)| ch.is_alphanumeric() || *ch == '_')
             .count();
         let start = Cur {
-            idx: cur.idx - offset,
+            idx: cur.idx.usub(offset),
         };
         let r = Range::from_cursors(start, cur, false);
         let input = Dot::from(r).content(b);

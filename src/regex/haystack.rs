@@ -51,16 +51,16 @@ impl Haystack for &str {
     }
 
     fn byte_to_char(&self, byte_idx: ByteIdx) -> Option<CharIdx> {
-        Some(
+        Some(CharIdx(
             self.char_indices()
                 .take_while(|&(idx, _)| idx < byte_idx.0)
                 .count(),
-        )
+        ))
     }
 
     fn char_to_byte(&self, char_idx: CharIdx) -> Option<ByteIdx> {
         self.char_indices()
-            .nth(char_idx)
+            .nth(char_idx.0)
             .map(|(idx, _)| ByteIdx(idx))
     }
 
@@ -129,7 +129,7 @@ impl Haystack for GapBuffer {
     }
 
     fn char_to_byte(&self, char_idx: CharIdx) -> Option<ByteIdx> {
-        if char_idx > self.len_chars() {
+        if char_idx.0 > self.len_chars() {
             None
         } else {
             Some(self.char_to_byte(char_idx))
@@ -216,7 +216,7 @@ impl Haystack for Buffer {
     }
 
     fn char_to_byte(&self, char_idx: CharIdx) -> Option<ByteIdx> {
-        if char_idx > self.txt.len_chars() {
+        if char_idx.0 > self.txt.len_chars() {
             None
         } else {
             Some(self.txt.char_to_byte(char_idx))

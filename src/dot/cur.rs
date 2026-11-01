@@ -10,17 +10,17 @@ pub struct Cur {
 }
 
 impl Cur {
-    pub fn new(idx: CharIdx) -> Self {
+    pub const fn new(idx: CharIdx) -> Self {
         Self { idx }
     }
 
-    pub fn buffer_start() -> Self {
-        Cur { idx: 0 }
+    pub const fn buffer_start() -> Self {
+        Cur { idx: CharIdx(0) }
     }
 
-    pub fn buffer_end(b: &Buffer) -> Self {
+    pub const fn buffer_end(b: &Buffer) -> Self {
         Cur {
-            idx: b.txt.len_chars(),
+            idx: CharIdx(b.txt.len_chars()),
         }
     }
 
@@ -31,7 +31,7 @@ impl Cur {
 
     pub(crate) fn as_yx(&self, b: &Buffer) -> (LineIdx, usize) {
         let y = b.txt.char_to_line(self.idx);
-        let x = self.idx - b.txt.line_to_char(y);
+        let x = (self.idx - b.txt.line_to_char(y)).0;
 
         (y, x)
     }
@@ -44,7 +44,7 @@ impl Cur {
         }
 
         Self {
-            idx: line_start + min(x_idx, x_max),
+            idx: line_start.uadd(min(x_idx, x_max)),
         }
     }
 
@@ -55,7 +55,7 @@ impl Cur {
             cur = cur.arr(arr, b);
         }
 
-        cur.clamp_idx(b.txt.len_chars());
+        cur.clamp_idx(CharIdx(b.txt.len_chars()));
         cur
     }
 
@@ -67,18 +67,18 @@ impl Cur {
                 let (mut y, _) = self.as_yx(b);
                 if y != LineIdx(0) {
                     y = y.usub(1);
-                    cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
+                    cur.idx = b.txt.line_to_char(y).uadd(b.x_from_rx(y));
                 }
             }
             Arrow::Down => {
                 let (mut y, _) = self.as_yx(b);
                 if !b.is_empty() && y.0 < b.len_lines() - 1 {
                     y = y.uadd(1);
-                    cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
+                    cur.idx = b.txt.line_to_char(y).uadd(b.x_from_rx(y));
                 }
             }
-            Arrow::Left => cur.idx = cur.idx.saturating_sub(1),
-            Arrow::Right => cur.idx = min(cur.idx + 1, b.txt.len_chars()),
+            Arrow::Left => cur.idx = cur.idx.saturating_usub(1),
+            Arrow::Right => cur.idx = min(cur.idx.uadd(1), CharIdx(b.txt.len_chars())),
         }
 
         cur
@@ -98,12 +98,12 @@ impl Cur {
     #[must_use]
     pub(super) fn move_to_line_end(mut self, b: &Buffer) -> Self {
         let y = b.txt.char_to_line(self.idx);
-        self.idx = b.txt.line_to_char(y) + b.txt.line_len_chars(y);
+        self.idx = b.txt.line_to_char(y).uadd(b.txt.line_len_chars(y));
 
         // On the last line of the file we don't have a trailing newline
         // so we really do want the final character
         if y.0 < b.len_lines().saturating_sub(1) {
-            self.idx = self.idx.saturating_sub(1);
+            self.idx = self.idx.saturating_usub(1);
         }
 
         self
@@ -146,12 +146,12 @@ mod tests {
         let lines = &["a", "ab", "abc", "abcd"];
         let b = buffer_from_lines(lines);
         let mut c = Cur::buffer_end(&b);
-        c.idx -= 1;
+        c.idx = c.idx.usub(1);
 
         assert_eq!(c.as_yx(&b), (LineIdx(3), 3));
 
         let mut final_c = c.arr(Arrow::Right, &b);
-        final_c.clamp_idx(b.txt.len_chars());
+        final_c.clamp_idx(CharIdx(b.txt.len_chars()));
         assert_eq!(final_c.as_yx(&b), (LineIdx(3), 4));
     }
 }

@@ -1,5 +1,5 @@
 //! GapBuffer benchmarks for measuring line-ending tracking performance.
-use ad_editor::buffer::GapBuffer;
+use ad_editor::buffer::{CharIdx, GapBuffer};
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group};
 use libflate::gzip::Decoder;
 use serde::Deserialize;
@@ -55,9 +55,12 @@ impl From<(usize, usize, String)> for TestPatch {
 
 fn apply_patch(patch: &TestPatch, gb: &mut GapBuffer) {
     if patch.delete_len > 0 {
-        gb.remove_range(patch.position, patch.position + patch.delete_len);
+        gb.remove_range(
+            CharIdx(patch.position),
+            CharIdx(patch.position + patch.delete_len),
+        );
     }
-    gb.insert_str(patch.position, &patch.insert_content);
+    gb.insert_str(CharIdx(patch.position), &patch.insert_content);
 }
 
 fn single_char_insert(c: &mut Criterion) {
@@ -82,7 +85,7 @@ fn single_char_insert(c: &mut Criterion) {
                 |b, (content, pos)| {
                     b.iter_batched(
                         || GapBuffer::from(content.as_str()),
-                        |mut gb| gb.insert_char(*pos, 'a'),
+                        |mut gb| gb.insert_char(CharIdx(*pos), 'a'),
                         BatchSize::SmallInput,
                     );
                 },

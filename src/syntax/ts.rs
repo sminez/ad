@@ -151,7 +151,7 @@ impl TsState {
         ch_idx: CharIdx,
         gb: &GapBuffer,
     ) -> (ByteIdx, ByteIdx, ByteIdx) {
-        let (start_byte, old_end_byte) = gb.char_range_to_byte_range(ch_idx, ch_idx + 1);
+        let (start_byte, old_end_byte) = gb.char_range_to_byte_range(ch_idx, ch_idx.uadd(1));
 
         (start_byte, old_end_byte, start_byte)
     }
@@ -553,14 +553,14 @@ mod tests {
 
     #[test_case(
         |b| {
-            b.dot = Dot::Cur { c: Cur { idx: 9 } };
+            b.dot = Dot::Cur { c: Cur { idx: CharIdx(9) } };
             b.handle_action(BAction::Delete, Source::Fsys);
         };
         "cur delete"
     )]
     #[test_case(
         |b| {
-            b.xdot = Dot::from_char_indices(9, 9);
+            b.xdot = Dot::from_char_indices(CharIdx(9), CharIdx(9));
             b.insert_xdot(String::new());
         };
         "LSP null range empty string insert"

@@ -1,6 +1,6 @@
 //! Layout of UI windows
 use crate::{
-    buffer::{Buffer, BufferId, Buffers, LineIdx, SCRATCH_ID},
+    buffer::{Buffer, BufferId, Buffers, CharIdx, LineIdx, SCRATCH_ID},
     config::Config,
     die,
     dot::Cur,
@@ -927,7 +927,7 @@ impl Layout {
         b.cached_rx = rx;
 
         let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, rx), b);
-        cur.clamp_idx(b.len_chars());
+        cur.clamp_idx(CharIdx(b.len_chars()));
 
         cur
     }
@@ -1256,8 +1256,8 @@ fn apply_scroll(
     if focused {
         b.dot.set_active_cur(cur);
         if need_clamp {
-            b.dot.clamp_idx(b.txt.len_chars());
-            b.xdot.clamp_idx(b.txt.len_chars());
+            b.dot.clamp_idx(CharIdx(b.txt.len_chars()));
+            b.xdot.clamp_idx(CharIdx(b.txt.len_chars()));
         }
     } else {
         view.cur = cur;
@@ -1342,7 +1342,7 @@ mod tests {
     fn drag_left_works() {
         let (mut l, _) = test_layout(&[1, 1, 2], 80, 100);
         let ao = l.next_column();
-        assert_eq!(ao, ActionOutcome::SetCursor(1, Cur { idx: 0 }));
+        assert_eq!(ao, ActionOutcome::SetCursor(1, Cur { idx: CharIdx(0) }));
         l.drag_left();
 
         assert_eq!(l.cols.len(), 2);
@@ -1577,7 +1577,12 @@ mod tests {
         // sign column offset is 3
         for (idx, ch) in s.chars().enumerate() {
             assert_eq!(b.dot_contents(), ch.to_string());
-            assert_eq!(b.dot, Dot::Cur { c: Cur { idx } });
+            assert_eq!(
+                b.dot,
+                Dot::Cur {
+                    c: Cur::new(CharIdx(idx))
+                }
+            );
             assert_eq!(
                 view.ui_xy(&b),
                 (3 + offset, 0),

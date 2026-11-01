@@ -174,7 +174,7 @@ impl ByteRange {
         // For cursor ranges we don't highlight and for "real" ranges we need to
         // insert the end of the range _after_ the end index.
         if end.idx != start.idx {
-            end.idx += 1;
+            end.idx = end.idx.uadd(1);
         }
 
         Self {

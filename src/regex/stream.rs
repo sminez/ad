@@ -146,7 +146,7 @@ where
     R: Read,
 {
     fn current_dot(&self) -> Dot {
-        Dot::from_char_indices(0, usize::MAX)
+        Dot::from_char_indices(CharIdx(0), CharIdx::MAX)
     }
 
     fn len_bytes(&self) -> usize {
@@ -157,7 +157,7 @@ where
         }
     }
 
-    fn len_chars(&self) -> CharIdx {
+    fn len_chars(&self) -> usize {
         if self.is_closed() {
             self.inner.borrow().gb.len_chars()
         } else {
@@ -165,7 +165,7 @@ where
         }
     }
 
-    fn max_iter(&self) -> CharIdx {
+    fn max_iter(&self) -> usize {
         if self.is_closed() {
             self.inner.borrow().gb.len_chars()
         } else {
@@ -196,7 +196,7 @@ where
         let gb = &self.inner.borrow().gb;
         let line_idx = gb.try_char_to_line(char_idx)?;
         match gb.try_line_to_char(line_idx.uadd(1)) {
-            None => Some(gb.len_chars() - 1),
+            None => Some(CharIdx(gb.len_chars() - 1)),
             Some(idx) => Some(idx),
         }
     }
@@ -231,7 +231,7 @@ where
         match self.reader.read_line(&mut self.buf) {
             Ok(n) => {
                 let len = self.gb.len_chars();
-                self.gb.insert_str(len, &self.buf);
+                self.gb.insert_str(CharIdx(len), &self.buf);
                 self.closed = n == 0;
             }
             Err(_) => self.closed = true,
@@ -242,7 +242,7 @@ where
         let offset = logical_offset - self.cleared_bytes;
         let cleared_lines = self.gb.lines_before_byte_offset(offset);
         let char_to = self.gb.byte_to_char(offset);
-        self.gb.remove_range(0, char_to);
+        self.gb.remove_range(CharIdx(0), char_to);
 
         self.cleared_bytes = logical_offset;
         self.cleared_lines += cleared_lines;

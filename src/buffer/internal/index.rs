@@ -49,9 +49,6 @@ use std::{
     ops::{Add, AddAssign, Sub, SubAssign},
 };
 
-/// A character offset within the logical buffer state.
-pub type CharIdx = usize;
-
 macro_rules! impl_index_types {
     (
         $( $(#[$doc_str:meta])* $name:ident; )*
@@ -76,6 +73,14 @@ macro_rules! impl_index_types {
 
                 pub const fn usub(self, rhs: usize) -> Self {
                     Self(self.0 - rhs)
+                }
+
+                pub const fn saturating_usub(self, rhs: usize) -> Self {
+                    Self(self.0.saturating_sub(rhs))
+                }
+
+                pub const fn saturating_iadd(self, rhs: isize) -> Self {
+                    Self(self.0.saturating_add_signed(rhs))
                 }
 
                 pub fn to(self, end: Self) -> impl Iterator<Item = Self> {
@@ -123,6 +128,8 @@ macro_rules! impl_index_types {
 impl_index_types!(
     /// A byte offset within the logical buffer state (ignoring the position of the gap).
     ByteIdx;
+    /// A character offset within the logical buffer state.
+    CharIdx;
     /// A byte offset within the raw buffer state (accounting for the position of the gap).
     RawIdx;
     /// A line index within the logical buffer state.

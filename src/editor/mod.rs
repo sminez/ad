@@ -1,7 +1,7 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     LogBuffer,
-    buffer::{Buffer, BufferId, Buffers, SCRATCH_ID, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferId, Buffers, CharIdx, SCRATCH_ID, WELCOME_SQUIRREL},
     config::Config,
     die,
     dot::TextObject,
@@ -165,7 +165,7 @@ where
             buffers
                 .active_ignoring_scratch_mut()
                 .txt
-                .insert_str(0, WELCOME_SQUIRREL);
+                .insert_str(CharIdx(0), WELCOME_SQUIRREL);
         }
 
         Self {

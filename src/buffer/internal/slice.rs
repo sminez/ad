@@ -154,7 +154,7 @@ impl<'a> Slice<'a> {
         let (cur, idx) = if rev {
             (
                 self.left.len() + self.right.len(),
-                from + count_chars(self.left) + count_chars(self.right),
+                from.uadd(count_chars(self.left) + count_chars(self.right)),
             )
         } else {
             (0, from)
@@ -303,7 +303,7 @@ impl Iterator for IdxChars<'_> {
             // SAFETY: we know we are in bounds and that we contain valid utf-8 data
             let ch = unsafe { decode_char_ending_at(cur, data) };
             let len = ch.len_utf8();
-            self.idx -= 1;
+            self.idx = self.idx.usub(1);
             self.cur -= len;
             Some((self.idx, ch))
         } else {
@@ -313,7 +313,7 @@ impl Iterator for IdxChars<'_> {
             let len = ch.len_utf8();
             let res = Some((self.idx, ch));
             self.cur += len;
-            self.idx += 1;
+            self.idx = self.idx.uadd(1);
             res
         }
     }
@@ -380,15 +380,23 @@ mod tests {
     #[test]
     fn indexed_chars_works(s: &str, rev: bool, expected: &[(usize, char)]) {
         let mut gb = GapBuffer::from(s);
-        let v: Vec<(usize, char)> = gb.line(LineIdx(0)).indexed_chars(0, rev).collect();
+        let v: Vec<(usize, char)> = gb
+            .line(LineIdx(0))
+            .indexed_chars(CharIdx(0), rev)
+            .map(|(i, ch)| (i.0, ch))
+            .collect();
         assert_eq!(&v, expected);
 
         for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
+            let idx = gb.char_to_byte(CharIdx(i));
             gb.move_gap_to(idx);
             gb.shred_gap();
 
-            let v: Vec<(usize, char)> = gb.line(LineIdx(0)).indexed_chars(0, rev).collect();
+            let v: Vec<(usize, char)> = gb
+                .line(LineIdx(0))
+                .indexed_chars(CharIdx(0), rev)
+                .map(|(i, ch)| (i.0, ch))
+                .collect();
             assert_eq!(&v, expected, "idx={idx}");
         }
     }
@@ -402,7 +410,7 @@ mod tests {
         assert_eq!(chars, s);
 
         for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
+            let idx = gb.char_to_byte(CharIdx(i));
             gb.move_gap_to(idx);
             gb.shred_gap();
 
@@ -419,7 +427,7 @@ mod tests {
         assert_eq!(s1, "");
         assert_eq!(s2, "hello, world!\nhow are you?");
 
-        let slice = gb.slice(6, 17);
+        let slice = gb.slice(CharIdx(6), CharIdx(17));
         let (s1, s2) = slice.as_strs();
         assert_eq!(s1, " world!\nhow");
         assert_eq!(s2, "");
@@ -428,7 +436,7 @@ mod tests {
         gb.shred_gap();
         println!("after move:  {:?}", raw_debug_buffer_content(&gb));
 
-        let slice = gb.slice(6, 17);
+        let slice = gb.slice(CharIdx(6), CharIdx(17));
         let (s1, s2) = slice.as_strs();
         assert_eq!(s1, " world");
         assert_eq!(s2, "!\nhow");
@@ -439,11 +447,11 @@ mod tests {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
 
         for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
+            let idx = gb.char_to_byte(CharIdx(i));
             gb.move_gap_to(idx);
             gb.shred_gap();
 
-            let slice = gb.slice(0, 0);
+            let slice = gb.slice(CharIdx(0), CharIdx(0));
 
             assert!(slice.left.is_empty(), "{i} slice left: {:?}", slice.left);
             assert!(slice.right.is_empty(), "{i} slice right: {:?}", slice.right);
@@ -455,7 +463,7 @@ mod tests {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
         gb.move_gap_to(ByteIdx(3));
         gb.shred_gap();
-        let slice = gb.slice(0, 5);
+        let slice = gb.slice(CharIdx(0), CharIdx(5));
         assert_eq!(slice, "hello");
     }
 }

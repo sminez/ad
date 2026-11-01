@@ -4,7 +4,7 @@
 //! Conceptually this is operates as an embedded dmenu.
 use crate::{
     Config,
-    buffer::{Buffer, Buffers, GapBuffer, LineIdx, Slice},
+    buffer::{Buffer, Buffers, CharIdx, GapBuffer, LineIdx, Slice},
     dot::TextObject,
     editor::{Actions, BAction, Editor},
     input::Event,
@@ -123,7 +123,7 @@ impl MiniBuffer {
         self.update_state();
 
         MiniBufferState {
-            cx: self.input.dot.active_cur().idx + self.n_prompt_chars,
+            cx: self.input.dot.active_cur().idx.0 + self.n_prompt_chars,
             n_visible_lines: self.n_visible_lines,
             prompt: &self.prompt,
             input: self.input.txt.as_slice(),
@@ -161,7 +161,7 @@ impl MiniBuffer {
         }
 
         self.b.txt = GapBuffer::from(visible_lines.join("\n"));
-        self.b.dot.clamp_idx(self.b.txt.len_chars());
+        self.b.dot.clamp_idx(CharIdx(self.b.txt.len_chars()));
 
         let n_visible_lines = min(visible_lines.len(), self.max_height);
         let (y, _) = self.b.dot.active_cur().as_yx(&self.b);

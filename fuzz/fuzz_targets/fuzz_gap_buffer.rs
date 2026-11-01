@@ -1,6 +1,6 @@
 #![no_main]
 
-use ad_editor::buffer::GapBuffer;
+use ad_editor::buffer::{CharIdx, GapBuffer};
 use arbitrary::Arbitrary;
 use libfuzzer_sys::fuzz_target;
 use std::cmp::{max, min};
@@ -9,13 +9,17 @@ fuzz_target!(|data: FuzzData| {
     let mut gb = GapBuffer::from(data.initial_content);
     for action in data.actions.into_iter() {
         match action {
-            TestAction::InsertChar(idx, ch) if idx < gb.len_chars() => gb.insert_char(idx, ch),
-            TestAction::InsertString(idx, s) if idx < gb.len_chars() => gb.insert_str(idx, &s),
-            TestAction::RemoveChar(idx) if idx < gb.len_chars() => gb.remove_char(idx),
+            TestAction::InsertChar(idx, ch) if idx < gb.len_chars() => {
+                gb.insert_char(CharIdx(idx), ch)
+            }
+            TestAction::InsertString(idx, s) if idx < gb.len_chars() => {
+                gb.insert_str(CharIdx(idx), &s)
+            }
+            TestAction::RemoveChar(idx) if idx < gb.len_chars() => gb.remove_char(CharIdx(idx)),
             TestAction::RemoveRange(a, b) => {
                 let (from, to) = (min(a, b), max(a, b));
                 if to < gb.len_chars() {
-                    gb.remove_range(from, to);
+                    gb.remove_range(CharIdx(from), CharIdx(to));
                 }
             }
 

@@ -88,7 +88,7 @@ impl PositionEncoding {
                 let col = b.txt.byte_to_char(line_start.uadd(pos.character as usize))
                     - b.txt.line_to_char(line);
 
-                (line, col)
+                (line, col.0)
             }
 
             Self::Utf16 => {
@@ -126,7 +126,7 @@ impl PositionEncoding {
             Self::Utf8 => {
                 let line_start: CharIdx = b.txt.line_to_char(line);
                 let start_idx: ByteIdx = b.txt.char_to_byte(line_start);
-                let character = b.txt.char_to_byte(line_start + col) - start_idx;
+                let character = b.txt.char_to_byte(line_start.uadd(col)) - start_idx;
 
                 (line.0 as u32, character.0 as u32)
             }

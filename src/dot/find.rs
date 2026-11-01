@@ -41,7 +41,7 @@ pub trait Find {
 }
 
 pub fn find_forward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
-    find_between(f, cur.idx, b.txt.len_chars(), b)
+    find_between(f, cur.idx, CharIdx(b.txt.len_chars()), b)
 }
 
 pub fn find_forward_end<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
@@ -51,12 +51,12 @@ pub fn find_forward_end<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
 }
 
 pub fn find_forward_wrapping<F: Find>(f: &F, b: &Buffer) -> Option<Dot> {
-    find_between(f, b.dot.last_cur().idx, b.txt.len_chars(), b)
-        .or_else(|| find_between(f, 0, b.dot.last_cur().idx, b))
+    find_between(f, b.dot.last_cur().idx, CharIdx(b.txt.len_chars()), b)
+        .or_else(|| find_between(f, CharIdx(0), b.dot.last_cur().idx, b))
 }
 
 pub fn find_backward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
-    rev_find_between(f, cur.idx, 0, b)
+    rev_find_between(f, cur.idx, CharIdx(0), b)
 }
 
 pub fn find_backward_start<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
@@ -142,11 +142,11 @@ impl Find for &str {
         let chars: Vec<char> = self.chars().collect();
         let last = chars.len().saturating_sub(1);
         let mut cix = 0;
-        let mut start = 0;
+        let mut start = CharIdx(0);
 
         for (i, ch) in it {
             if ch != chars[cix] {
-                start = 0;
+                start = CharIdx(0);
                 cix = 0;
                 continue;
             }

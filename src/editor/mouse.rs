@@ -337,6 +337,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::buffer::CharIdx;
     use crate::{
         dot::{Cur, Range},
         editor::EditorMode,
@@ -374,8 +375,10 @@ mod tests {
 
     fn r(start: usize, end: usize, start_active: bool) -> Range {
         Range {
-            start: Cur { idx: start },
-            end: Cur { idx: end },
+            start: Cur {
+                idx: CharIdx(start),
+            },
+            end: Cur { idx: CharIdx(end) },
             start_active,
         }
     }
@@ -760,7 +763,9 @@ mod tests {
         );
         ed.update_window_size(100, 80); // Needed in order to keep clicks in bounds
         ed.open_virtual("test", "some text to test with", false);
-        ed.buffers.active_mut().dot = Dot::Cur { c: Cur { idx: 5 } };
+        ed.buffers.active_mut().dot = Dot::Cur {
+            c: Cur { idx: CharIdx(5) },
+        };
 
         // attach an input filter so we can intercept load and execute events
         let (tx, rx) = channel();

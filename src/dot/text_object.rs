@@ -165,7 +165,7 @@ impl Find for FindDelimited {
             if other.contains(ch) && target != other {
                 skips += 1;
             } else if skips == 0 && target.contains(ch) {
-                let ix = if self.rev { i + 1 } else { i - 1 };
+                let ix = if self.rev { i.uadd(1) } else { i.usub(1) };
                 return Some((ix, ix));
             } else if target.contains(ch) {
                 skips -= 1;
@@ -196,14 +196,14 @@ impl Find for FindParagraph {
         I: Iterator<Item = (CharIdx, char)>,
     {
         let mut prev_was_newline = false;
-        let mut pos = 0;
+        let mut pos = CharIdx(0);
 
         for (i, ch) in it {
             match ch {
                 '\n' if prev_was_newline => {
                     return match self {
                         Self::Fwd => Some((i, i)),
-                        Self::Bck => Some((i + 1, i + 1)),
+                        Self::Bck => Some((i.uadd(1), i.uadd(1))),
                     };
                 }
                 '\n' => prev_was_newline = true,
@@ -253,8 +253,8 @@ impl Find for FindWord {
             match (prev, kind) {
                 (Word, Punctuation) | (Punctuation, Word) | (Word | Punctuation, Whitespace) => {
                     return match self {
-                        Self::Fwd => Some((i - 1, i - 1)),
-                        Self::Bck => Some((i + 1, i + 1)),
+                        Self::Fwd => Some((i.usub(1), i.usub(1))),
+                        Self::Bck => Some((i.uadd(1), i.uadd(1))),
                     };
                 }
                 _ => prev = kind,
@@ -272,13 +272,13 @@ impl Find for FindWord {
             mut end,
             start_active,
         } = dot.as_range();
-        let max_idx = b.txt.len_chars() - 1;
+        let max_idx = CharIdx(b.txt.len_chars() - 1);
         start.idx = min(start.idx, max_idx);
         end.idx = min(end.idx, max_idx);
 
-        if start.idx > 0 {
+        if start.idx > CharIdx(0) {
             let current = CharKind::from(b.txt.char(start.idx));
-            let prev = CharKind::from(b.txt.char(start.idx - 1));
+            let prev = CharKind::from(b.txt.char(start.idx.usub(1)));
 
             match (prev, current) {
                 // We're at the start of the current word so start.idx is correct
@@ -287,7 +287,7 @@ impl Find for FindWord {
                 // We're in whitespace so advance until we hit a word or the end of the buffer
                 (_, Whitespace) if start.idx < max_idx => {
                     while matches!(CharKind::from(b.txt.char(start.idx)), Whitespace) {
-                        start.idx += 1;
+                        start.idx = start.idx.uadd(1);
                         if start.idx == max_idx {
                             end.idx = max_idx;
                             break;
@@ -302,7 +302,7 @@ impl Find for FindWord {
 
         if end.idx < max_idx {
             let current = CharKind::from(b.txt.char(end.idx));
-            let next = CharKind::from(b.txt.char(end.idx + 1));
+            let next = CharKind::from(b.txt.char(end.idx.uadd(1)));
 
             match (current, next) {
                 // We're at the end of a word so end.idx is correct
@@ -340,6 +340,7 @@ impl From<char> for CharKind {
 mod tests {
     use super::*;
     use simple_test_case::test_case;
+    use std::assert_matches;
 
     #[test_case(FindWord::Fwd, 0, "this"; "forward start of buffer")]
     #[test_case(FindWord::Fwd, 3, "this"; "forward end of first word")]
@@ -351,7 +352,9 @@ mod tests {
     #[test]
     fn expand_word(fw: FindWord, idx: usize, expected: &str) {
         let b = Buffer::new_virtual(0, "test", "this is a test", Default::default());
-        let dot = Dot::Cur { c: Cur { idx } };
+        let dot = Dot::Cur {
+            c: Cur { idx: CharIdx(idx) },
+        };
         let expanded = fw.expand(dot, &b);
         let content = expanded.content(&b);
 
@@ -361,12 +364,19 @@ mod tests {
     #[test]
     fn expand_word_for_buffer_with_trailing_spaces() {
         let b = Buffer::new_virtual(0, "test", "this is a test   ", Default::default());
-        let dot = Dot::Cur { c: Cur { idx: 14 } };
+        let dot = Dot::Cur {
+            c: Cur { idx: CharIdx(14) },
+        };
         let expanded = FindWord::Fwd.expand(dot, &b);
         let content = expanded.content(&b);
 
         // Should have advanced to the end of the buffer and selected that final space character
-        assert!(matches!(expanded, Dot::Cur { c: Cur { idx: 16 } }));
+        assert_matches!(
+            expanded,
+            Dot::Cur {
+                c: Cur { idx: CharIdx(16) }
+            }
+        );
         assert_eq!(content, " ");
     }
 
@@ -378,7 +388,9 @@ mod tests {
             "│ (EX:40727d6d-32a6-4ebc-ae4f-4d92e326a8c9) │",
             Default::default(),
         );
-        let dot = Dot::Cur { c: Cur { idx: 3 } };
+        let dot = Dot::Cur {
+            c: Cur { idx: CharIdx(3) },
+        };
         let expanded = FindDelimited::new("(", ")").expand(dot, &b);
         let content = expanded.content(&b);
 

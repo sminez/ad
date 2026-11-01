@@ -101,7 +101,7 @@ pub struct GapBuffer {
     next_gap: usize,
     /// total number of characters in the buffer
     /// this is != line_endings.last() if there is no trailing newline
-    n_chars: CharIdx,
+    n_chars: usize,
     /// line ending raw byte offset -> char offset
     line_endings: Vec<(RawIdx, CharIdx)>,
     /// Simple cache of computed char->byte mappings since the last time the buffer was modified
@@ -114,7 +114,7 @@ impl Default for GapBuffer {
     }
 }
 
-fn compute_line_endings(s: &str) -> (CharIdx, Vec<(RawIdx, CharIdx)>) {
+fn compute_line_endings(s: &str) -> (usize, Vec<(RawIdx, CharIdx)>) {
     let mut n_chars = 0;
     let mut line_endings = Vec::new();
 
@@ -123,7 +123,7 @@ fn compute_line_endings(s: &str) -> (CharIdx, Vec<(RawIdx, CharIdx)>) {
         if ch == '\n' {
             // The gap is placed at the end of the raw buffer on construction so logical and raw
             // offsets are equal here.
-            line_endings.push((RawIdx(idx), line_chars));
+            line_endings.push((RawIdx(idx), CharIdx(line_chars)));
         }
     }
 
@@ -238,7 +238,8 @@ macro_rules! assert_line_endings {
             .filter(|&(_, c)| c == '\n')
             .map(|(i, _)| i)
             .collect();
-        let tracked_line_endings: Vec<usize> = $self.line_endings.iter().map(|(_, n)| *n).collect();
+        let tracked_line_endings: Vec<usize> =
+            $self.line_endings.iter().map(|(_, n)| n.0).collect();
 
         assert_eq!(
             tracked_line_endings, true_endings,
@@ -410,14 +411,14 @@ impl GapBuffer {
 
     /// The number of lines within the buffer
     #[inline]
-    pub fn len_lines(&self) -> usize {
+    pub const fn len_lines(&self) -> usize {
         // The final line is always counted, even when it is empty following a trailing newline
         self.line_endings.len() + 1
     }
 
     /// The number of characters in the buffer
     #[inline]
-    pub fn len_chars(&self) -> CharIdx {
+    pub const fn len_chars(&self) -> usize {
         self.n_chars
     }
 
@@ -470,7 +471,7 @@ impl GapBuffer {
     /// The character at the specified character index.
     #[inline]
     pub fn get_char(&self, char_idx: CharIdx) -> Option<char> {
-        if char_idx < self.n_chars {
+        if char_idx.0 < self.n_chars {
             Some(self.char(char_idx))
         } else {
             None
@@ -560,7 +561,7 @@ impl GapBuffer {
     /// # Panics
     /// This method will panic if the given line index is out of bounds
     #[inline]
-    pub fn line_len_chars(&self, line_idx: LineIdx) -> CharIdx {
+    pub fn line_len_chars(&self, line_idx: LineIdx) -> usize {
         if line_idx.0 >= self.len_lines() {
             assert_line_endings!(self);
             panic!(
@@ -572,18 +573,18 @@ impl GapBuffer {
         let chars_to = if self.line_endings.is_empty() {
             return self.n_chars;
         } else if line_idx.0 < self.line_endings.len() {
-            self.line_endings[line_idx.0].1 + 1
+            self.line_endings[line_idx.0].1.uadd(1)
         } else {
-            self.n_chars
+            CharIdx(self.n_chars)
         };
 
         let chars_from = if line_idx == LineIdx(0) {
-            0
+            CharIdx(0)
         } else {
-            self.line_endings[line_idx.0 - 1].1 + 1
+            self.line_endings[line_idx.0 - 1].1.uadd(1)
         };
 
-        chars_to - chars_from
+        (chars_to - chars_from).0
     }
 
     /// Primarily intended for supplying contiguous ranges of bytes to tree-sitter when
@@ -627,7 +628,7 @@ impl GapBuffer {
     }
 
     pub fn as_slice(&self) -> Slice<'_> {
-        self.slice(0, self.len_chars())
+        self.slice(CharIdx(0), CharIdx(self.len_chars()))
     }
 
     /// Convert a character index to the index of the line containing it
@@ -649,9 +650,9 @@ impl GapBuffer {
 
     /// Convert a character index to the index of the line containing it
     pub fn try_char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
-        match char_idx.cmp(&self.n_chars) {
+        match char_idx.0.cmp(&self.n_chars) {
             Ordering::Less => {
-                if char_idx < self.n_chars {
+                if char_idx.0 < self.n_chars {
                     Some(LineIdx(
                         self.line_endings.partition_point(|(_, i)| *i < char_idx),
                     ))
@@ -691,10 +692,10 @@ impl GapBuffer {
         }
 
         if line_idx == LineIdx(0) {
-            Some(0)
+            Some(CharIdx(0))
         } else {
             let k = self.line_endings[line_idx.0 - 1].1;
-            Some(k + 1)
+            Some(k.uadd(1))
         }
     }
 
@@ -765,7 +766,7 @@ impl GapBuffer {
             .char_indices()
             .enumerate()
             .filter(|(_, (_, ch))| *ch == '\n')
-            .map(|(i, (offset, _))| (raw_idx.uadd(offset), char_idx + i))
+            .map(|(i, (offset, _))| (raw_idx.uadd(offset), char_idx.uadd(i)))
             .collect();
 
         self.add_line_endings(raw_idx, len_chars, &endings);
@@ -813,7 +814,7 @@ impl GapBuffer {
         let gap_start = self.move_gap_to(from);
 
         let n_bytes = to - from;
-        let n_chars = char_to - char_from;
+        let n_chars = (char_to - char_from).0;
 
         self.remove_line_endings(gap_start, self.byte_to_raw_byte(to), n_chars);
 
@@ -835,7 +836,7 @@ impl GapBuffer {
     ) {
         let idx = self.line_endings.partition_point(|(b, _)| *b < raw_from);
         for (_, c) in &mut self.line_endings[idx..] {
-            *c += n_chars;
+            *c = c.uadd(n_chars);
         }
 
         self.line_endings
@@ -873,7 +874,7 @@ impl GapBuffer {
         }
 
         for (_, c) in &mut self.line_endings[line_from..] {
-            *c -= n_chars;
+            *c = c.usub(n_chars);
         }
     }
 
@@ -980,9 +981,9 @@ impl GapBuffer {
     /// general editor functionality so we don't mind being a little slower in order to keep the
     /// logic easier to reason about
     pub fn byte_to_char(&self, byte_idx: ByteIdx) -> CharIdx {
-        let mut to = RawIdx(usize::MAX);
+        let mut to = RawIdx::MAX;
         let raw_byte_idx = self.byte_to_raw_byte(byte_idx);
-        let (mut raw_byte_offset, mut char_offset): (RawIdx, CharIdx) = (RawIdx(0), 0);
+        let (mut raw_byte_offset, mut char_offset): (RawIdx, CharIdx) = (RawIdx(0), CharIdx(0));
 
         // Determine which line the character lies in based on the byte index, skipping all
         // lines that are before the byte offset we were given.
@@ -1008,7 +1009,7 @@ impl GapBuffer {
                 break;
             }
             byte_cur = byte_cur.uadd(ch.len_utf8());
-            cur += 1;
+            cur = cur.uadd(1);
         }
 
         cur
@@ -1020,7 +1021,7 @@ impl GapBuffer {
     /// account for the position of the gap.
     #[inline]
     pub fn char_to_byte(&self, char_idx: CharIdx) -> ByteIdx {
-        self.offset_char_to_byte(char_idx, RawIdx(0), 0)
+        self.offset_char_to_byte(char_idx, RawIdx(0), CharIdx(0))
     }
 
     /// Convert a character range to a byte range
@@ -1067,7 +1068,7 @@ impl GapBuffer {
     /// into our allocated array that accounts for the position of the gap.
     #[inline]
     fn char_to_raw_byte(&self, char_idx: CharIdx) -> RawIdx {
-        self.offset_char_to_raw_byte(char_idx, RawIdx(0), 0)
+        self.offset_char_to_raw_byte(char_idx, RawIdx(0), CharIdx(0))
     }
 
     /// Allow for skipping to a given raw byte index before starting the search as an optimisation
@@ -1085,7 +1086,7 @@ impl GapBuffer {
         // Empty buffer is a special case: the only valid char indices are 0 or 1 which maps to gap_start/EOF
         if self.n_chars == 0 {
             assert!(
-                char_idx == 0 || char_idx == 1,
+                char_idx == CharIdx(0) || char_idx == CharIdx(1),
                 "char index should be 0 or 1 for an empty buffer"
             );
             return self.gap_start;
@@ -1094,7 +1095,7 @@ impl GapBuffer {
         // When looking for the last character of a buffer containing a single line we can decode
         // backwards from either the start of the gap or the end of the raw buffer depending on
         // where the gap currently lies.
-        if self.line_endings.is_empty() && char_idx == self.len_chars().saturating_sub(1) {
+        if self.line_endings.is_empty() && char_idx.0 == self.len_chars().saturating_sub(1) {
             if self.gap_end.0 == self.cap && self.gap_start > RawIdx(0) {
                 let ch_end = self.gap_start.usub(1);
                 // SAFETY: we know that we have valid utf-8 data immediately before the gap
@@ -1114,7 +1115,7 @@ impl GapBuffer {
             };
         }
 
-        let mut to = RawIdx(usize::MAX);
+        let mut to = RawIdx::MAX;
 
         // Determine which line the character lies in based on the character index, skipping all
         // lines that are before the byte offset we were given.
@@ -1142,7 +1143,7 @@ impl GapBuffer {
         let slice = Slice::from_raw_offsets(raw_offset, to, self);
         let mut chars = slice.chars();
         let mut cur: RawIdx = raw_offset;
-        for _ in 0..(char_idx - char_offset) {
+        for _ in 0..(char_idx - char_offset).0 {
             chars.next();
             cur = raw_offset.uadd(chars.cur);
         }
@@ -1213,7 +1214,7 @@ mod tests {
     #[test]
     fn insert_into_empty_string_initial_gb_works() {
         let mut gb = GapBuffer::from(String::new());
-        gb.insert_char(0, 'a');
+        gb.insert_char(CharIdx(0), 'a');
         gb.shred_gap();
 
         assert_eq!(gb.to_string(), "a");
@@ -1240,7 +1241,7 @@ mod tests {
             "line_len_chars != len_chars"
         );
 
-        gb.insert_char(5, 'X');
+        gb.insert_char(CharIdx(5), 'X');
         gb.shred_gap();
 
         println!("after insert X:   {:?}", raw_debug_buffer_content(&gb));
@@ -1251,7 +1252,7 @@ mod tests {
             "char iter len != len_chars"
         );
 
-        gb.insert_char(3, '界');
+        gb.insert_char(CharIdx(3), '界');
         gb.shred_gap();
         println!("after insert 界:  {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 2);
@@ -1261,8 +1262,8 @@ mod tests {
             "char iter len != len_chars"
         );
 
-        assert_eq!(gb.char(3), '界');
-        gb.remove_char(3);
+        assert_eq!(gb.char(CharIdx(3)), '界');
+        gb.remove_char(CharIdx(3));
         gb.shred_gap();
         println!("after remove 界:  {:?}", raw_debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s + 1);
@@ -1272,8 +1273,8 @@ mod tests {
             "char iter len != len_chars"
         );
 
-        assert_eq!(gb.char(5), 'X');
-        gb.remove_char(5);
+        assert_eq!(gb.char(CharIdx(5)), 'X');
+        gb.remove_char(CharIdx(5));
         gb.shred_gap();
         println!("after remove X:   {:?}", debug_buffer_content(&gb));
         assert_eq!(gb.len_chars(), len_s);
@@ -1303,7 +1304,7 @@ mod tests {
         let mut gb = GapBuffer::from(s);
 
         for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
+            let idx = gb.char_to_byte(CharIdx(i));
             gb.move_gap_to(idx);
             gb.shred_gap();
 
@@ -1325,7 +1326,7 @@ mod tests {
         assert_eq!(gb.len_lines(), 3);
 
         for i in 0..gb.len_chars() {
-            let idx = gb.char_to_byte(i);
+            let idx = gb.char_to_byte(CharIdx(i));
             gb.move_gap_to(idx);
             gb.shred_gap();
             assert_eq!(gb.len_lines(), 3);
@@ -1382,7 +1383,7 @@ mod tests {
         gb.move_gap_to(ByteIdx(cur));
         gb.shred_gap();
 
-        let byte_idx = gb.char_to_byte(char_idx);
+        let byte_idx = gb.char_to_byte(CharIdx(char_idx));
         assert_eq!(
             byte_idx,
             ByteIdx(expected),
@@ -1399,10 +1400,10 @@ mod tests {
     #[test]
     fn char_to_byte_works_with_leading_multibyte_char(s: &str) {
         let mut gb = GapBuffer::new();
-        gb.insert_str(0, s);
+        gb.insert_str(CharIdx(0), s);
         gb.shred_gap();
 
-        let byte_idx = gb.char_to_byte(0);
+        let byte_idx = gb.char_to_byte(CharIdx(0));
         assert_eq!(byte_idx, ByteIdx(0), "{:?}", debug_buffer_content(&gb));
     }
 
@@ -1418,11 +1419,11 @@ mod tests {
         expected: usize,
     ) {
         let mut gb = GapBuffer::new();
-        gb.insert_str(0, s);
+        gb.insert_str(CharIdx(0), s);
         gb.shred_gap();
         let last_char = s.chars().count() - 1;
 
-        let byte_idx = gb.char_to_byte(last_char);
+        let byte_idx = gb.char_to_byte(CharIdx(last_char));
         assert_eq!(
             byte_idx,
             ByteIdx(expected),
@@ -1448,7 +1449,7 @@ mod tests {
         gb.move_gap_to(ByteIdx(cur));
         gb.shred_gap();
 
-        let byte_idx = gb.char_to_raw_byte(char_idx);
+        let byte_idx = gb.char_to_raw_byte(CharIdx(char_idx));
         assert_eq!(
             byte_idx,
             RawIdx(expected),
@@ -1470,12 +1471,12 @@ mod tests {
         let mut gb = GapBuffer::from(s);
 
         for pos in 0..gb.len_chars() - 1 {
-            gb.move_gap_to(gb.char_to_byte(pos));
+            gb.move_gap_to(gb.char_to_byte(CharIdx(pos)));
             gb.shred_gap();
 
             for (ch_idx, (byte_idx, _ch)) in s.char_indices().enumerate() {
                 let idx = gb.byte_to_char(ByteIdx(byte_idx));
-                assert_eq!(idx, ch_idx, "gap@{pos}");
+                assert_eq!(idx, CharIdx(ch_idx), "gap");
             }
         }
     }
@@ -1488,11 +1489,11 @@ mod tests {
 
         let gb = GapBuffer::from(format!("{l1}{l2}{l3}"));
 
-        assert_eq!(gb.line_to_char(LineIdx(0)), 0);
-        assert_eq!(gb.line_to_char(LineIdx(1)), l1.chars().count());
+        assert_eq!(gb.line_to_char(LineIdx(0)), CharIdx(0));
+        assert_eq!(gb.line_to_char(LineIdx(1)), CharIdx(l1.chars().count()));
         assert_eq!(
             gb.line_to_char(LineIdx(2)),
-            l1.chars().count() + l2.chars().count()
+            CharIdx(l1.chars().count() + l2.chars().count())
         );
     }
 
@@ -1513,7 +1514,7 @@ mod tests {
 
         let gb = GapBuffer::from(format!("{l1}{l2}{l3}"));
 
-        assert_eq!(gb.char_to_line(char_idx), LineIdx(line_idx));
+        assert_eq!(gb.char_to_line(CharIdx(char_idx)), LineIdx(line_idx));
     }
 
     #[test_case(&[(0, 'h')], "hello world"; "insert front")]
@@ -1528,7 +1529,7 @@ mod tests {
         let mut gb = GapBuffer::from("ello world");
 
         for &(idx, ch) in inserts {
-            gb.insert_char(idx, ch);
+            gb.insert_char(CharIdx(idx), ch);
             gb.shred_gap();
         }
 
@@ -1538,19 +1539,19 @@ mod tests {
     #[test]
     fn insert_char_with_moving_cur() {
         let mut gb = GapBuffer::from("hello ");
-        gb.insert_char(6, 'w');
+        gb.insert_char(CharIdx(6), 'w');
         gb.shred_gap();
-        gb.insert_char(7, 'o');
+        gb.insert_char(CharIdx(7), 'o');
         gb.shred_gap();
-        gb.insert_char(8, 'r');
+        gb.insert_char(CharIdx(8), 'r');
         gb.shred_gap();
-        gb.insert_char(9, 'l');
+        gb.insert_char(CharIdx(9), 'l');
         gb.shred_gap();
-        gb.insert_char(10, 'd');
+        gb.insert_char(CharIdx(10), 'd');
         gb.shred_gap();
-        gb.insert_char(11, '!');
+        gb.insert_char(CharIdx(11), '!');
         gb.shred_gap();
-        gb.insert_char(5, ',');
+        gb.insert_char(CharIdx(5), ',');
         gb.shred_gap();
 
         assert_eq!(
@@ -1568,7 +1569,7 @@ mod tests {
         assert_eq!(gb.len_lines(), 2);
 
         println!("initial: {:?}", raw_debug_buffer_content(&gb));
-        gb.insert_char(6, '\n');
+        gb.insert_char(CharIdx(6), '\n');
         gb.shred_gap();
         println!("insert:  {:?}", raw_debug_buffer_content(&gb));
 
@@ -1597,7 +1598,7 @@ mod tests {
     fn insert_str(inserts: &[(usize, &str)], expected: &str) {
         let mut gb = GapBuffer::from("oworl");
         for &(idx, s) in inserts {
-            gb.insert_str(idx, s);
+            gb.insert_str(CharIdx(idx), s);
             gb.shred_gap();
         }
 
@@ -1611,7 +1612,7 @@ mod tests {
         assert_eq!(gb.len_lines(), 2);
 
         let s2 = " sailor\nisn't this fun?\nwhat a wonderful\n";
-        gb.insert_str(6, s2);
+        gb.insert_str(CharIdx(6), s2);
         gb.shred_gap();
 
         for idx in 0..=gb.len_chars() {
@@ -1648,7 +1649,7 @@ mod tests {
         let mut gb = GapBuffer::from("hello, world!");
         gb.move_gap_to(ByteIdx(6)); // space before world
         gb.shred_gap();
-        gb.remove_char(idx);
+        gb.remove_char(CharIdx(idx));
         gb.shred_gap();
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
@@ -1660,7 +1661,7 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 2);
 
-        gb.remove_char(13);
+        gb.remove_char(CharIdx(13));
         gb.shred_gap();
 
         assert_eq!(gb.len_lines(), 1);
@@ -1680,7 +1681,7 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         gb.move_gap_to(ByteIdx(6)); // space before world
         gb.shred_gap();
-        gb.remove_range(from, to);
+        gb.remove_range(CharIdx(from), CharIdx(to));
         gb.shred_gap();
 
         assert_eq!(gb.to_string(), expected, "{:?}", debug_buffer_content(&gb))
@@ -1691,17 +1692,17 @@ mod tests {
         let s = "foo│foo│foo";
         let mut gb = GapBuffer::from(s);
 
-        gb.remove_range(0, 3);
+        gb.remove_range(CharIdx(0), CharIdx(3));
         gb.shred_gap();
         assert_eq!(gb.to_string(), "│foo│foo");
         assert_eq!(gb.len_chars(), 8);
 
-        gb.remove_range(1, 4);
+        gb.remove_range(CharIdx(1), CharIdx(4));
         gb.shred_gap();
         assert_eq!(gb.to_string(), "││foo");
         assert_eq!(gb.len_chars(), 5);
 
-        gb.remove_range(2, 5);
+        gb.remove_range(CharIdx(2), CharIdx(5));
         gb.shred_gap();
         assert_eq!(gb.to_string(), "││");
         assert_eq!(gb.len_chars(), 2);
@@ -1711,7 +1712,7 @@ mod tests {
     fn remove_range_for_last_line_works() {
         let s = "hello, world!\nthis is the last line";
         let mut gb = GapBuffer::from(s);
-        gb.remove_range(14, s.len());
+        gb.remove_range(CharIdx(14), CharIdx(s.len()));
         gb.shred_gap();
         assert_eq!(gb.to_string(), "hello, world!\n");
         assert_eq!(gb.len_lines(), 2);
@@ -1726,7 +1727,7 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 2);
 
-        gb.remove_range(from, to);
+        gb.remove_range(CharIdx(from), CharIdx(to));
         gb.shred_gap();
 
         assert_eq!(gb.len_lines(), 1);
@@ -1740,9 +1741,9 @@ mod tests {
     fn insert_remove_char_is_idempotent(ch: char) {
         let s = "hello, world!";
         let mut gb = GapBuffer::from(s);
-        gb.insert_char(6, ch);
+        gb.insert_char(CharIdx(6), ch);
         gb.shred_gap();
-        gb.remove_char(6);
+        gb.remove_char(CharIdx(6));
         gb.shred_gap();
 
         assert_eq!(gb.to_string(), s, "{:?}", debug_buffer_content(&gb))
@@ -1761,7 +1762,7 @@ mod tests {
             println!("{:?}", gb.line(n).to_string());
         }
 
-        gb.insert_str(6, edit);
+        gb.insert_str(CharIdx(6), edit);
         gb.shred_gap();
         assert_eq!(gb.len_lines(), expected_lines);
         println!("insert:  {:?}", raw_debug_buffer_content(&gb));
@@ -1769,7 +1770,7 @@ mod tests {
             println!("{:?}", gb.line(n).to_string());
         }
 
-        gb.remove_range(6, 6 + edit.len());
+        gb.remove_range(CharIdx(6), CharIdx(6 + edit.len()));
         gb.shred_gap();
         println!("remove:  {:?}", raw_debug_buffer_content(&gb));
         for n in LineIdx(0).to(LineIdx(gb.len_lines())) {
@@ -1793,7 +1794,7 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 1);
 
-        gb.insert_str(at, insert);
+        gb.insert_str(CharIdx(at), insert);
         gb.shred_gap();
 
         assert_eq!(gb.len_lines(), expected_lines);
@@ -1815,7 +1816,7 @@ mod tests {
         let mut gb = GapBuffer::from(s);
         assert_eq!(gb.len_lines(), 3);
 
-        gb.remove_range(from, to);
+        gb.remove_range(CharIdx(from), CharIdx(to));
         gb.shred_gap();
 
         assert_eq!(gb.to_string(), expected);
@@ -1824,13 +1825,13 @@ mod tests {
 
     fn _insert_chars(gb: &mut GapBuffer, s: &str) {
         for (idx, ch) in s.chars().enumerate() {
-            gb.insert_char(idx + 4, ch);
+            gb.insert_char(CharIdx(idx + 4), ch);
             gb.shred_gap();
         }
     }
 
     fn _insert_str(gb: &mut GapBuffer, s: &str) {
-        gb.insert_str(4, s);
+        gb.insert_str(CharIdx(4), s);
         gb.shred_gap();
     }
 
@@ -1838,7 +1839,7 @@ mod tests {
     #[test_case(_insert_str; "whole string")]
     #[test]
     fn insert_with_multibyte_chars_preserves_line_endings(insert: fn(&mut GapBuffer, &str)) {
-        let slice_str = |gb: &GapBuffer| gb.slice(0, gb.len_chars()).to_string();
+        let slice_str = |gb: &GapBuffer| gb.slice(CharIdx(0), CharIdx(gb.len_chars())).to_string();
 
         let mut gb = GapBuffer::from("foo\nbar\nbaz\n");
         let s = "世\n界 🦊\n ";
@@ -1847,8 +1848,8 @@ mod tests {
 
         assert_eq!(slice_str(&gb), "foo\n世\n界 🦊\n bar\nbaz\n");
 
-        assert_eq!(gb.char(8), '🦊');
-        gb.remove_char(8);
+        assert_eq!(gb.char(CharIdx(8)), '🦊');
+        gb.remove_char(CharIdx(8));
         gb.shred_gap();
 
         assert_eq!(slice_str(&gb), "foo\n世\n界 \n bar\nbaz\n");
@@ -1860,7 +1861,7 @@ mod tests {
         let gb = GapBuffer::from(s);
 
         for (idx, ch) in s.chars().enumerate() {
-            assert_eq!(gb.char(idx), ch);
+            assert_eq!(gb.char(CharIdx(idx)), ch);
         }
     }
 
@@ -1870,14 +1871,14 @@ mod tests {
             GapBuffer::from("// does it need to be a doc comment? that is a long enough line to");
         gb.move_gap_to(ByteIdx(0));
         gb.shred_gap();
-        assert_eq!(gb.char_to_raw_byte(65), RawIdx(129));
+        assert_eq!(gb.char_to_raw_byte(CharIdx(65)), RawIdx(129));
         gb.move_gap_to(ByteIdx(10));
         gb.shred_gap();
-        assert_eq!(gb.char_to_raw_byte(65), RawIdx(129));
+        assert_eq!(gb.char_to_raw_byte(CharIdx(65)), RawIdx(129));
         gb.move_gap_to(ByteIdx(66));
         gb.shred_gap();
-        assert_eq!(gb.char_to_raw_byte(65), RawIdx(65));
-        gb.insert_char(66, '\n');
+        assert_eq!(gb.char_to_raw_byte(CharIdx(65)), RawIdx(65));
+        gb.insert_char(CharIdx(66), '\n');
         gb.shred_gap();
         assert_eq!(
             gb.to_string(),
@@ -1946,12 +1947,12 @@ mod tests {
     fn substr_from_matches_expected_after_appending_to_end() {
         let mut gb = GapBuffer::from("hello");
 
-        gb.insert_char(5, ' ');
-        gb.insert_char(6, 'w');
-        gb.insert_char(7, 'o');
-        gb.insert_char(8, 'r');
-        gb.insert_char(9, 'l');
-        gb.insert_char(10, 'd');
+        gb.insert_char(CharIdx(5), ' ');
+        gb.insert_char(CharIdx(6), 'w');
+        gb.insert_char(CharIdx(7), 'o');
+        gb.insert_char(CharIdx(8), 'r');
+        gb.insert_char(CharIdx(9), 'l');
+        gb.insert_char(CharIdx(10), 'd');
 
         assert!(gb.is_contiguous());
         assert_eq!(gb.gap_end.0, gb.cap);

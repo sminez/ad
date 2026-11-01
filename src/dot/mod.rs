@@ -88,7 +88,7 @@ impl Dot {
     pub fn n_chars(&self) -> usize {
         let (from, to) = self.as_char_indices();
 
-        to - from + 1
+        (to - from).0 + 1
     }
 
     /// Whether or not this dot is a [Cur].
@@ -120,15 +120,10 @@ impl Dot {
     /// is within bounds for the given buffer.
     pub fn with_offset_saturating(mut self, offset: isize) -> Self {
         match &mut self {
-            Dot::Cur { c } if offset >= 0 => c.idx += offset as usize,
-            Dot::Cur { c } => c.idx = c.idx.saturating_sub(-offset as usize),
-            Dot::Range { r } if offset >= 0 => {
-                r.start.idx += offset as usize;
-                r.end.idx += offset as usize;
-            }
+            Dot::Cur { c } => c.idx = c.idx.saturating_iadd(offset),
             Dot::Range { r } => {
-                r.start.idx = r.start.idx.saturating_sub(-offset as usize);
-                r.end.idx = r.end.idx.saturating_sub(-offset as usize);
+                r.start.idx = r.start.idx.saturating_iadd(offset);
+                r.end.idx = r.end.idx.saturating_iadd(offset);
             }
         }
 
@@ -153,7 +148,9 @@ impl Dot {
         }
 
         let (from, to) = self.as_char_indices();
-        b.txt.slice(from, min(to + 1, len_chars)).to_string()
+        b.txt
+            .slice(from, min(to.uadd(1), CharIdx(len_chars)))
+            .to_string()
     }
 
     /// The active cursor position for this [Dot] which will be manipulated by movement operations
@@ -291,7 +288,9 @@ The third paragraph is even shorter.";
                 .sum()
         };
 
-        Cur { idx: y + x }
+        Cur {
+            idx: CharIdx(y + x),
+        }
     }
 
     fn c(y: usize, x: usize) -> Dot {
