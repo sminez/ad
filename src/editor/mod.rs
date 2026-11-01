@@ -1,7 +1,7 @@
 //! The main control flow and functionality of the `ad` editor.
 use crate::{
     LogBuffer,
-    buffer::{Buffer, BufferId, Buffers, SCRATCH_ID, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferId, Buffers, CharIdx, SCRATCH_ID, WELCOME_SQUIRREL},
     config::Config,
     die,
     dot::TextObject,
@@ -165,7 +165,7 @@ where
             buffers
                 .active_ignoring_scratch_mut()
                 .txt
-                .insert_str(0, WELCOME_SQUIRREL);
+                .insert_str(CharIdx(0), WELCOME_SQUIRREL);
         }
 
         Self {
@@ -798,7 +798,7 @@ mod tests {
 
         // hack: avoid race between the child thread pushing lines to the output buffer and the
         // attempt to drain the event queue below
-        sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(500));
 
         // drain any pending writes from the script
         while let Ok(evt) = ed.rx_events.try_recv() {

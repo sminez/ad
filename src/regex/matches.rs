@@ -1,5 +1,5 @@
 use crate::{
-    buffer::ByteIdx,
+    buffer::{ByteIdx, ByteOffset},
     regex::{Haystack, Regex, vm::N_SLOTS},
 };
 use std::{borrow::Cow, sync::Arc};
@@ -16,7 +16,7 @@ pub struct Match {
 
 impl Match {
     pub(crate) fn synthetic(from: ByteIdx, to: ByteIdx) -> Self {
-        let mut sub_matches = [0; N_SLOTS];
+        let mut sub_matches = [ByteIdx(0); N_SLOTS];
         sub_matches[0] = from;
         sub_matches[1] = to;
 
@@ -92,7 +92,7 @@ impl Match {
             return None;
         }
         let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
-        if n > 0 && start == 0 && end == 0 {
+        if n > 0 && start == ByteIdx(0) && end == ByteIdx(0) {
             return None;
         }
 
@@ -119,6 +119,13 @@ impl Match {
             }
         })
     }
+
+    /// The same as [Match::iter_locs] but returning the raw usize offsets for use with APIs that
+    /// do not make use of [ByteIdx].
+    pub fn iter_raw_locs(&self) -> impl Iterator<Item = Option<(usize, usize)>> {
+        self.iter_locs()
+            .map(|loc| loc.map(|(from, to)| (from.0, to.0)))
+    }
 }
 
 /// An iterator over sequential, non overlapping matches of a Regex
@@ -143,14 +150,14 @@ where
         let m = self.r.find_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
         if from == self.from {
-            self.from += self
+            let ch = self
                 .haystack
                 .substr_from(from)
                 .unwrap()
                 .chars()
                 .next()
-                .unwrap()
-                .len_utf8();
+                .unwrap();
+            self.from += ByteOffset::from(ch);
         } else {
             self.from = from;
         }

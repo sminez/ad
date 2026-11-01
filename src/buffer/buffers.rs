@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, BufferKind, Cur, ScratchBuf, WELCOME_SQUIRREL},
+    buffer::{Buffer, BufferKind, CharIdx, Cur, ScratchBuf, WELCOME_SQUIRREL},
     config::Config,
     dot::TextObject,
     fsys::InputFilter,
@@ -226,8 +226,8 @@ impl Buffers {
             self.focus_id(id);
             self.inner.focus.txt = content.into();
             let n = self.inner.focus.txt.len_chars();
-            self.inner.focus.dot.clamp_idx(n);
-            self.inner.focus.xdot.clamp_idx(n);
+            self.inner.focus.dot.clamp_idx(CharIdx(n));
+            self.inner.focus.xdot.clamp_idx(CharIdx(n));
 
             return id;
         }
@@ -407,7 +407,7 @@ impl Buffers {
         if new_id == bufid {
             // Clamp the cursor to the buffer's valid range before setting it
             // in case the buffer was edited since this position was recorded
-            cur.clamp_idx(self.inner.focus.txt.len_chars());
+            cur.clamp_idx(CharIdx(self.inner.focus.txt.len_chars()));
             self.inner.focus.dot = cur.into();
         }
 
@@ -583,21 +583,20 @@ mod tests {
         let initial_content = "This is a test buffer with enough content to demonstrate the bug.";
         buffers.inner.focus.txt = initial_content.into();
 
-        buffers.inner.focus.set_dot_from_cursor(60);
-        assert_eq!(buffers.inner.focus.dot.active_cur().idx, 60);
+        buffers.inner.focus.set_dot_from_cursor(CharIdx(60));
+        assert_eq!(buffers.inner.focus.dot.active_cur().idx, CharIdx(60));
 
         buffers.record_jump_position();
 
         assert_eq!(buffers.inner.focus.txt.len_chars(), 65);
         let new_len = 30;
-        buffers
-            .inner
-            .focus
-            .txt
-            .remove_range(new_len, buffers.inner.focus.txt.len_chars());
+        buffers.inner.focus.txt.remove_range(
+            CharIdx(new_len),
+            CharIdx(buffers.inner.focus.txt.len_chars()),
+        );
         assert_eq!(buffers.inner.focus.txt.len_chars(), new_len);
 
-        buffers.inner.focus.set_dot_from_cursor(0);
+        buffers.inner.focus.set_dot_from_cursor(CharIdx(0));
         let result = buffers.jump_list_backward();
 
         assert!(result.is_some());
@@ -606,7 +605,7 @@ mod tests {
         let (_y, _x) = cur.as_yx(&buffers.inner.focus);
 
         assert!(
-            cur.idx <= buffers.inner.focus.txt.len_chars(),
+            cur.idx.0 <= buffers.inner.focus.txt.len_chars(),
             "cursor index {} exceeds buffer length {}",
             cur.idx,
             buffers.inner.focus.txt.len_chars()

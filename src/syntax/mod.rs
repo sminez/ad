@@ -18,7 +18,7 @@
 //!     none, part or all of any given token should be rendered.
 use crate::{
     Config,
-    buffer::{ByteIdx, CharIdx, GapBuffer, Slice},
+    buffer::{ByteIdx, CharIdx, GapBuffer, LineIdx, Slice},
     dot::Range,
 };
 use std::{
@@ -124,7 +124,7 @@ impl SyntaxState {
 
     /// Update internal state for the requested region to prepare for a call to
     /// [Self::iter_tokenized_lines_from].
-    pub fn update(&mut self, gb: &GapBuffer, from: usize, n_rows: usize) {
+    pub fn update(&mut self, gb: &GapBuffer, from: LineIdx, n_rows: usize) {
         match &mut self.inner {
             SyntaxStateInner::Ts(s) => s.update(gb, from, n_rows),
             SyntaxStateInner::Re(s) => s.update(gb, from, n_rows),
@@ -136,7 +136,7 @@ impl SyntaxState {
     #[inline]
     pub fn iter_tokenized_lines_from<'a>(
         &'a self,
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
@@ -174,7 +174,7 @@ impl ByteRange {
         // For cursor ranges we don't highlight and for "real" ranges we need to
         // insert the end of the range _after_ the end index.
         if end.idx != start.idx {
-            end.idx += 1;
+            end.idx = end.idx.uadd(1);
         }
 
         Self {
@@ -286,7 +286,7 @@ pub struct LineIter<'a> {
     /// full set of syntax ranges for the input
     ranges: &'a [SyntaxRange],
     /// the next line to yield
-    line: usize,
+    line: LineIdx,
     /// total number of lines (cached from gb.len_lines())
     n_lines: usize,
     dot_range: ByteRange,
@@ -295,7 +295,7 @@ pub struct LineIter<'a> {
 
 impl<'a> LineIter<'a> {
     pub(crate) fn new(
-        line: usize,
+        line: LineIdx,
         gb: &'a GapBuffer,
         dot_range: Range,
         load_exec_range: Option<(bool, Range)>,
@@ -322,14 +322,14 @@ impl<'a> Iterator for LineIter<'a> {
     type Item = TokenIter<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.line == self.n_lines {
+        if self.line.0 == self.n_lines {
             return None;
         }
 
         let start_byte = self.gb.line_to_byte(self.line);
         let end_byte = self.gb.line_end_byte(self.line);
 
-        self.line += 1;
+        self.line = self.line.uadd(1);
 
         // Determine tokens required for the next line
         let held: Option<RangeToken<'_>>;
@@ -757,35 +757,50 @@ mod tests {
     fn sr(from: usize, to: usize) -> SyntaxRange {
         SyntaxRange {
             cap_idx: Some(0),
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_def(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: TK_DEFAULT,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_dot(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: TK_DOT,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_exe(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: TK_EXEC,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_str(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: "string",
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
@@ -946,8 +961,8 @@ mod tests {
         expected: Held<'static>,
     ) {
         let mut it = TokenIter {
-            start_byte: 0,
-            end_byte: 42,
+            start_byte: ByteIdx(0),
+            end_byte: ByteIdx(42),
             names: &["string".to_string()],
             ranges: ranges.iter().peekable(),
             held,

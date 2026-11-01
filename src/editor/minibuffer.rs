@@ -4,7 +4,7 @@
 //! Conceptually this is operates as an embedded dmenu.
 use crate::{
     Config,
-    buffer::{Buffer, Buffers, GapBuffer, Slice},
+    buffer::{Buffer, Buffers, CharIdx, GapBuffer, LineIdx, Slice},
     dot::TextObject,
     editor::{Actions, BAction, Editor},
     input::Event,
@@ -26,12 +26,12 @@ const MINIBUFFER_ID: usize = usize::MAX - 1;
 pub struct MiniBufferState<'a> {
     pub(crate) cx: usize,
     pub(crate) n_visible_lines: usize,
-    pub(crate) selected_line_idx: usize,
+    pub(crate) selected_line_idx: LineIdx,
     pub(crate) prompt: &'a str,
     pub(crate) input: Slice<'a>,
     pub(crate) b: Option<&'a Buffer>,
-    pub(crate) top: usize,
-    pub(crate) bottom: usize,
+    pub(crate) top: LineIdx,
+    pub(crate) bottom: LineIdx,
 }
 
 pub(crate) enum MiniBufferSelection {
@@ -65,11 +65,11 @@ pub(crate) struct MiniBuffer {
     line_indices: Vec<usize>,
     b: Buffer,
     max_height: usize,
-    y: usize,
-    selected_line_idx: usize,
+    y: LineIdx,
+    selected_line_idx: LineIdx,
     n_visible_lines: usize,
-    top: usize,
-    bottom: usize,
+    top: LineIdx,
+    bottom: LineIdx,
     show_buffer_content: bool,
 }
 
@@ -100,11 +100,11 @@ impl MiniBuffer {
             line_indices,
             b: Buffer::new_minibuffer(config),
             max_height,
-            y: 0,
-            selected_line_idx: 0,
+            y: LineIdx(0),
+            selected_line_idx: LineIdx(0),
             n_visible_lines: 0,
-            top: 0,
-            bottom: 0,
+            top: LineIdx(0),
+            bottom: LineIdx(0),
             show_buffer_content: true,
         }
     }
@@ -123,7 +123,7 @@ impl MiniBuffer {
         self.update_state();
 
         MiniBufferState {
-            cx: self.input.dot.active_cur().idx + self.n_prompt_chars,
+            cx: self.input.dot.active_cur().idx.0 + self.n_prompt_chars,
             n_visible_lines: self.n_visible_lines,
             prompt: &self.prompt,
             input: self.input.txt.as_slice(),
@@ -161,18 +161,18 @@ impl MiniBuffer {
         }
 
         self.b.txt = GapBuffer::from(visible_lines.join("\n"));
-        self.b.dot.clamp_idx(self.b.txt.len_chars());
+        self.b.dot.clamp_idx(CharIdx(self.b.txt.len_chars()));
 
         let n_visible_lines = min(visible_lines.len(), self.max_height);
         let (y, _) = self.b.dot.active_cur().as_yx(&self.b);
 
         let (selected_line_idx, top, bottom, show_buffer_content) = if n_visible_lines == 0 {
-            (0, 0, 0, false)
-        } else if y >= n_visible_lines {
-            let lower = y.saturating_sub(n_visible_lines) + 1;
+            (LineIdx(0), LineIdx(0), LineIdx(0), false)
+        } else if y >= LineIdx(n_visible_lines) {
+            let lower = y.saturating_sub(LineIdx(n_visible_lines)).uadd(1);
             (y, lower, y, true)
         } else {
-            (y, 0, n_visible_lines - 1, true)
+            (y, LineIdx(0), LineIdx(n_visible_lines - 1), true)
         };
 
         self.show_buffer_content = show_buffer_content;
@@ -225,7 +225,7 @@ impl MiniBuffer {
                         input: self.input.txt.to_string(),
                     },
                     Some(l) => MiniBufferSelection::Line {
-                        cy: self.line_indices[self.y],
+                        cy: self.line_indices[self.y.0],
                         line: l.to_string(),
                     },
                     None => MiniBufferSelection::UserInput {
@@ -249,14 +249,14 @@ impl MiniBuffer {
                 );
             }
             Input::Alt('k') | Input::Arrow(Arrow::Up) => {
-                if self.selected_line_idx == 0 {
+                if self.selected_line_idx == LineIdx(0) {
                     self.b.set_dot(TextObject::BufferEnd, 1);
                 } else {
                     self.b.set_dot(TextObject::Arr(Arrow::Up), 1);
                 }
             }
             Input::Alt('j') | Input::Arrow(Arrow::Down) => {
-                if self.selected_line_idx == self.b.len_lines() - 1 {
+                if self.selected_line_idx.0 == self.b.len_lines() - 1 {
                     self.b.set_dot(TextObject::BufferStart, 1);
                 } else {
                     self.b.set_dot(TextObject::Arr(Arrow::Down), 1);

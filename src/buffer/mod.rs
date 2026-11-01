@@ -35,7 +35,8 @@ use scratch::ScratchBuf;
 
 pub use buffers::{BufferId, Buffers};
 pub use internal::{
-    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, RawIdx, RevChars, Slice, SliceIter,
+    ByteIdx, ByteOffset, CharIdx, CharOffset, Chars, GapBuffer, IdxChars, LineIdx, LineOffset,
+    RevChars, Slice, SliceIter,
 };
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
@@ -416,8 +417,8 @@ impl Buffer {
 
         let n_chars = raw.len();
         self.txt = GapBuffer::from(raw);
-        self.dot.clamp_idx(n_chars);
-        self.xdot.clamp_idx(n_chars);
+        self.dot.clamp_idx(CharIdx(n_chars));
+        self.xdot.clamp_idx(CharIdx(n_chars));
         self.edit_log.clear();
         self.dirty = false;
         self.changed_since_last_render = true;
@@ -505,7 +506,10 @@ impl Buffer {
     /// Check the current [Config] to see if this buffer matches a known filetype configuration.
     pub fn configured_filetype(&self) -> Option<String> {
         let lang_configs = &self.config.read().filetypes;
-        let first_line = self.line(0).map(|l| l.to_string()).unwrap_or_default();
+        let first_line = self
+            .line(LineIdx(0))
+            .map(|l| l.to_string())
+            .unwrap_or_default();
 
         self.path()
             .and_then(|path| ftype_config_for_path_and_first_line(path, &first_line, lang_configs))
@@ -536,7 +540,7 @@ impl Buffer {
             .collect()
     }
 
-    pub fn update_ts_state(&mut self, from: usize, n_rows: usize) {
+    pub fn update_ts_state(&mut self, from: LineIdx, n_rows: usize) {
         if let Some(ts) = self.syntax_state.as_mut() {
             ts.update(&self.txt, from, n_rows);
         }
@@ -544,7 +548,7 @@ impl Buffer {
 
     pub fn iter_tokenized_lines_from(
         &self,
-        line: usize,
+        line: LineIdx,
         load_exec_range: Option<(bool, Range)>,
     ) -> LineIter<'_> {
         match self.syntax_state.as_ref() {
@@ -598,7 +602,7 @@ impl Buffer {
 
     /// The number of utf-8 characters currently held in the buffer.
     #[inline]
-    pub fn len_chars(&self) -> CharIdx {
+    pub fn len_chars(&self) -> usize {
         self.txt.len_chars()
     }
 
@@ -620,21 +624,21 @@ impl Buffer {
             Source::Fsys,
         );
         self.handle_action(BAction::Delete, Source::Fsys);
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
     }
 
     pub(crate) fn debug_edit_log(&self) -> Vec<String> {
         self.edit_log.debug_edits(self)
     }
 
-    pub(crate) fn x_from_rx(&self, y: usize) -> usize {
+    pub(crate) fn x_from_rx(&self, y: LineIdx) -> CharOffset {
         self.x_from_provided_rx(y, self.cached_rx)
     }
 
-    pub(crate) fn x_from_provided_rx(&self, y: usize, buf_rx: usize) -> usize {
+    pub(crate) fn x_from_provided_rx(&self, y: LineIdx, buf_rx: usize) -> CharOffset {
         let tabstop = self.tabstop();
         if self.is_empty() {
-            return 0;
+            return CharOffset(0);
         }
 
         let mut rx = 0;
@@ -662,12 +666,12 @@ impl Buffer {
             cx += 1;
         }
 
-        cx
+        CharOffset(cx)
     }
 
     /// The line at the requested index returned as a Slice.
-    pub fn line(&self, y: usize) -> Option<Slice<'_>> {
-        if y >= self.len_lines() {
+    pub fn line(&self, y: LineIdx) -> Option<Slice<'_>> {
+        if y.0 >= self.len_lines() {
             None
         } else {
             Some(self.txt.line(y))
@@ -710,12 +714,12 @@ impl Buffer {
             Dot::Range { .. } => return,
         };
 
-        let prev = if current_index == 0 {
+        let prev = if current_index == CharIdx(0) {
             None
         } else {
-            self.txt.get_char(current_index - 1)
+            self.txt.get_char(current_index.usub(1))
         };
-        let next = self.txt.get_char(current_index + 1);
+        let next = self.txt.get_char(current_index.uadd(1));
 
         let (l, r) = match (prev, next) {
             (Some('\n'), _) | (_, Some('\n')) => ('\n', '\n'),
@@ -751,14 +755,14 @@ impl Buffer {
 
         // Expand until we hit non-alphanumeric characters on each sides
         let (mut from, mut to) = (current_index, current_index);
-        for (i, ch) in self.iter_between_chars(current_index, self.txt.len_chars()) {
+        for (i, ch) in self.iter_between_chars(current_index, CharIdx(self.txt.len_chars())) {
             if !(ch == '_' || ch == '-' || ch.is_alphanumeric()) {
                 break;
             }
             to = i;
         }
 
-        for (i, ch) in self.rev_iter_between_chars(current_index, 0) {
+        for (i, ch) in self.rev_iter_between_chars(current_index, CharIdx(0)) {
             if !(ch == '_' || ch == '-' || ch.is_alphanumeric()) {
                 break;
             }
@@ -782,15 +786,17 @@ impl Buffer {
         let is_addr_char = |ch: char| "+-/$.#,;?".contains(ch);
         let is_url_char = |ch: char| "?&=".contains(ch);
         let has_url_prefix = |i: CharIdx| {
-            let http = i > 4 && i + 3 <= n_chars && self.txt.slice(i - 4, i + 3) == HTTP;
-            let https = i > 5 && i + 3 <= n_chars && self.txt.slice(i - 5, i + 3) == HTTPS;
+            let http =
+                i.0 > 4 && i.0 + 3 <= n_chars && self.txt.slice(i.usub(4), i.uadd(3)) == HTTP;
+            let https =
+                i.0 > 5 && i.0 + 3 <= n_chars && self.txt.slice(i.usub(5), i.uadd(3)) == HTTPS;
 
             http || https
         };
 
         // Start by expanding to cover things that are candidates for being file names (optionally
         // with a following address) or URLs
-        for (i, ch) in self.iter_between_chars(current_index, self.txt.len_chars()) {
+        for (i, ch) in self.iter_between_chars(current_index, CharIdx(self.txt.len_chars())) {
             if !is_file_char(ch) {
                 break;
             }
@@ -801,7 +807,7 @@ impl Buffer {
             to = i;
         }
 
-        for (i, ch) in self.rev_iter_between_chars(current_index, 0) {
+        for (i, ch) in self.rev_iter_between_chars(current_index, CharIdx(0)) {
             if !(is_file_char(ch) || is_url_char(ch) || is_addr_char(ch)) {
                 break;
             }
@@ -814,29 +820,29 @@ impl Buffer {
         // Now grab the address if we had a trailing colon
         if let Some(ix) = colon {
             to = ix;
-            for (_, ch) in self.iter_between_chars(ix + 1, self.txt.len_chars()) {
+            for (_, ch) in self.iter_between_chars(ix.uadd(1), CharIdx(self.txt.len_chars())) {
                 if ch.is_whitespace() || "()[]{}<>;".contains(ch) {
                     break;
                 }
-                to += 1;
+                to = to.uadd(1);
             }
         }
 
-        let dot_content = self.txt.slice(from, to + 1).to_string();
+        let dot_content = self.txt.slice(from, to.uadd(1)).to_string();
 
         // If dot looks like a URL then expand until whitespace and strip trailing punctuation
         if dot_content.starts_with(HTTP) || dot_content.starts_with(HTTPS) {
-            if to < self.txt.len_chars() {
-                for (_, ch) in self.iter_between_chars(to + 1, self.txt.len_chars()) {
+            if to.0 < self.txt.len_chars() {
+                for (_, ch) in self.iter_between_chars(to.uadd(1), CharIdx(self.txt.len_chars())) {
                     if ch.is_whitespace() || "()[]{}<>;".contains(ch) {
                         break;
                     }
-                    to += 1;
+                    to = to.uadd(1);
                 }
             }
 
             if dot_content.ends_with('.') {
-                to -= 1;
+                to = to.usub(1);
             }
 
             return Some(Dot::from_char_indices(from, to));
@@ -875,8 +881,8 @@ impl Buffer {
         self.set_dot(TextObject::BufferEnd, 1);
         self.handle_action(BAction::InsertString { s }, source);
         self.dot = dot;
-        self.dot.clamp_idx(self.txt.len_chars());
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
@@ -891,22 +897,22 @@ impl Buffer {
             BAction::Delete => {
                 let (c, deleted) = self.delete_dot(self.dot, Some(source));
                 self.dot = Dot::Cur { c };
-                self.dot.clamp_idx(self.txt.len_chars());
-                self.xdot.clamp_idx(self.txt.len_chars());
+                self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+                self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
                 return deleted.map(ActionOutcome::SetClipboard);
             }
             BAction::InsertChar { c } => {
                 let (c, _) = self.insert_char(self.dot, c, Some(source));
                 self.dot = Dot::Cur { c };
-                self.dot.clamp_idx(self.txt.len_chars());
-                self.xdot.clamp_idx(self.txt.len_chars());
+                self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+                self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
                 return None;
             }
             BAction::InsertString { s } => {
                 let (c, _) = self.insert_string(self.dot, s, Some(source));
                 self.dot = Dot::Cur { c };
-                self.dot.clamp_idx(self.txt.len_chars());
-                self.xdot.clamp_idx(self.txt.len_chars());
+                self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+                self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
                 return None;
             }
 
@@ -916,7 +922,7 @@ impl Buffer {
 
             BAction::CurToLine { y } => {
                 self.dot = Dot::Cur {
-                    c: Cur::from_yx(y, 0, self),
+                    c: Cur::from_yx(y, CharOffset(0), self),
                 };
             }
 
@@ -981,15 +987,15 @@ impl Buffer {
         for _ in 0..n {
             t.set_dot(self);
         }
-        self.dot.clamp_idx(self.txt.len_chars());
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
     /// Set this Buffer's dot to an explicit cursor position, clamping to EOB.
     pub fn set_dot_from_cursor(&mut self, idx: CharIdx) {
         self.dot = Cur::new(idx).into();
-        self.dot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
@@ -1005,22 +1011,22 @@ impl Buffer {
     pub fn set_dot_from_range(&mut self, from: CharIdx, to: CharIdx) {
         self.dot = Dot::from(Range::from_cursors(Cur::new(from), Cur::new(to), false))
             .collapse_null_range();
-        self.dot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
     fn set_dot_from_coords(&mut self, coords: Coords) {
         let addr: Addr = coords.as_addr(self);
         self.dot = self.map_addr(&addr);
-        self.dot.clamp_idx(self.txt.len_chars());
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
     fn set_xdot_from_coords(&mut self, coords: Coords) {
         let addr: Addr = coords.as_addr(self);
         self.xdot = self.map_addr(&addr);
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
     }
 
     /// Set this Buffer's xdot from an [Addr] expression.
@@ -1035,8 +1041,8 @@ impl Buffer {
         for _ in 0..n {
             t.extend_dot_forward(self);
         }
-        self.dot.clamp_idx(self.txt.len_chars());
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
@@ -1045,8 +1051,8 @@ impl Buffer {
         for _ in 0..n {
             t.extend_dot_backward(self);
         }
-        self.dot.clamp_idx(self.txt.len_chars());
-        self.xdot.clamp_idx(self.txt.len_chars());
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
+        self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
     }
 
@@ -1112,7 +1118,7 @@ impl Buffer {
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }, None).0,
             (Kind::Delete, Txt::String(s)) => {
                 let start_idx = cur.idx;
-                let end_idx = (start_idx + s.chars().count()).saturating_sub(1);
+                let end_idx = (start_idx + CharOffset::from(s.as_str())).saturating_usub(1);
                 let end = Cur { idx: end_idx };
                 self.delete_dot(
                     Dot::Range {
@@ -1172,7 +1178,7 @@ impl Buffer {
             && r.start.idx != r.end.idx
             && let Some(s) = self.syntax_state.as_mut()
         {
-            s.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+            s.prepare_delete_range(r.start.idx, r.end.idx.uadd(1), &self.txt);
             have_prepared_edit = true;
         }
 
@@ -1210,7 +1216,7 @@ impl Buffer {
         self.mark_dirty();
         self.changed_since_last_render = true;
 
-        (Cur { idx: idx + 1 }, deleted)
+        (Cur { idx: idx.uadd(1) }, deleted)
     }
 
     fn insert_string(
@@ -1220,16 +1226,16 @@ impl Buffer {
         source: Option<Source>,
     ) -> (Cur, Option<String>) {
         let s = normalize_line_endings(s);
-        let len = s.chars().count();
+        let len = CharOffset::from(s.as_str());
         let mut have_prepared_edit = false;
 
         if let Dot::Range { r } = &dot
             && let Some(ts) = self.syntax_state.as_mut()
         {
             if r.start.idx != r.end.idx {
-                ts.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+                ts.prepare_delete_range(r.start.idx, r.end.idx.uadd(1), &self.txt);
                 have_prepared_edit = true;
-            } else if r.start.idx < self.txt.len_chars() {
+            } else if r.start.idx.0 < self.txt.len_chars() {
                 // r.start.idx == r.end.idx, so delete_range below still removes the char at r.start.idx
                 ts.prepare_delete_char(r.start.idx, &self.txt);
                 have_prepared_edit = true;
@@ -1289,12 +1295,12 @@ impl Buffer {
 
         if let Some(ts) = self.syntax_state.as_mut() {
             match &dot {
-                Dot::Cur { c } if c.idx < self.txt.len_chars() => {
+                Dot::Cur { c } if c.idx.0 < self.txt.len_chars() => {
                     ts.prepare_delete_char(c.idx, &self.txt);
                     have_prepared_edit = true;
                 }
                 Dot::Range { r } if r.start.idx != r.end.idx => {
-                    ts.prepare_delete_range(r.start.idx, r.end.idx + 1, &self.txt);
+                    ts.prepare_delete_range(r.start.idx, r.end.idx.uadd(1), &self.txt);
                     have_prepared_edit = true;
                 }
                 _ => (),
@@ -1321,7 +1327,7 @@ impl Buffer {
             None
         };
 
-        if idx < self.txt.len_chars() {
+        if idx.0 < self.txt.len_chars() {
             let ch = self.txt.char(idx);
             self.txt.remove_char(idx);
 
@@ -1338,7 +1344,10 @@ impl Buffer {
     }
 
     fn delete_range(&mut self, r: Range, source: Option<Source>) -> (Cur, Option<String>) {
-        let (from, to) = (r.start.idx, min(r.end.idx + 1, self.txt.len_chars()));
+        let (from, to) = (
+            r.start.idx,
+            min(r.end.idx.uadd(1), CharIdx(self.txt.len_chars())),
+        );
         let byte_from = if self.input_filter.is_some() {
             Some(self.txt.char_to_byte(from))
         } else {
@@ -1385,7 +1394,7 @@ impl Buffer {
     /// We determine the final cursor we collapse to based on the start of xdot
     /// and the offset coming from the text being inserted.
     pub(crate) fn insert_xdot(&mut self, s: String) {
-        let mut offset = s.chars().count() as isize;
+        let mut offset = CharOffset::from(s.as_str());
 
         if self.dot.as_range().intersects_range(&self.xdot.as_range()) {
             if self.xdot.first_cur() > self.dot.first_cur()
@@ -1394,7 +1403,7 @@ impl Buffer {
                 // The final case shown above: we need to back up a character in
                 // order to land on the last character of the existing dot rather
                 // than the first character of the inserted text.
-                offset = -1;
+                offset = CharOffset(-1);
             }
 
             self.dot = self.xdot.collapse_to_first_cur();
@@ -1402,17 +1411,17 @@ impl Buffer {
             // Nothing to update for dot.
             // DOT   |---|
             // XDOT         |----|
-            offset = 0;
+            offset = CharOffset(0);
         } else {
             // In this case, the change in buffer length needs to account for
             // the text being removed as well as what is being inserted.
             // DOT          |---|
             // XDOT  |----|
-            offset -= self.xdot.n_chars() as isize;
+            offset -= CharOffset(self.xdot.n_chars() as isize);
             if self.xdot.is_cur() {
                 // Cursors insert directly into the buffer without removing the character
                 // they are on.
-                offset += 1;
+                offset += CharOffset(1);
             }
         };
 
@@ -1420,7 +1429,7 @@ impl Buffer {
         self.dot = self.xdot;
         self.handle_action(BAction::InsertString { s }, Source::Fsys);
         (self.xdot, self.dot) = (self.dot, dot_after_edit);
-        self.dot.clamp_idx(self.txt.len_chars()); // xdot clamped as part of handling the insert
+        self.dot.clamp_idx(CharIdx(self.txt.len_chars())); // xdot clamped as part of handling the insert
     }
 }
 
@@ -1450,7 +1459,7 @@ pub(crate) mod tests {
     const LINE_2: &str = "involving multiple lines";
 
     fn c(idx: usize) -> Cur {
-        Cur { idx }
+        Cur { idx: CharIdx(idx) }
     }
 
     fn r(from: usize, to: usize, from_active: bool) -> Range {
@@ -1486,7 +1495,7 @@ pub(crate) mod tests {
     #[test]
     fn simple_insert_works() {
         let b = simple_initial_buffer();
-        let c = Cur::from_yx(1, LINE_2.len(), &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset::from(LINE_2), &b);
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
@@ -1546,7 +1555,7 @@ pub(crate) mod tests {
         let lines = b.string_lines();
         assert_eq!(lines.len(), 2);
 
-        let c = Cur::from_yx(1, 1, &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset(1), &b);
         assert_eq!(b.dot, Dot::Cur { c });
 
         assert_eq!(lines[0], LINE_1);
@@ -1566,7 +1575,7 @@ pub(crate) mod tests {
         let mut b = Buffer::new_unnamed(0, "", Default::default());
         b.handle_action(BAction::RawArrow(Arrow::Right), Source::Fsys);
 
-        let c = Cur { idx: 0 };
+        let c = Cur { idx: CharIdx(0) };
         assert_eq!(b.dot, Dot::Cur { c });
     }
 
@@ -1574,7 +1583,7 @@ pub(crate) mod tests {
     fn delete_in_empty_buffer_is_fine() {
         let mut b = Buffer::new_unnamed(0, "", Default::default());
         b.handle_action(BAction::Delete, Source::Keyboard);
-        let c = Cur { idx: 0 };
+        let c = Cur { idx: CharIdx(0) };
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -1592,7 +1601,7 @@ pub(crate) mod tests {
         );
         b.handle_action(BAction::Delete, Source::Keyboard);
 
-        let c = Cur::from_yx(1, LINE_2.len() - 1, &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset::from(LINE_2) - CharOffset(1), &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -1614,7 +1623,7 @@ pub(crate) mod tests {
         b.handle_action(BAction::DotSet(TextObject::Line, 1), Source::Keyboard);
         b.handle_action(BAction::Delete, Source::Keyboard);
 
-        let c = Cur::from_yx(1, 0, &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset(0), &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -1633,11 +1642,13 @@ pub(crate) mod tests {
     #[test]
     fn delete_range_when_start_equals_end_works() {
         let mut b = Buffer::new_unnamed(0, "foo", Default::default());
-        let (cur, deleted) =
-            b.delete_range(Range::from_cursors(Cur::new(0), Cur::new(0), false), None);
+        let (cur, deleted) = b.delete_range(
+            Range::from_cursors(Cur::new(CharIdx(0)), Cur::new(CharIdx(0)), false),
+            None,
+        );
 
         assert_eq!(b.str_contents(), "oo");
-        assert_eq!(cur, Cur::new(0));
+        assert_eq!(cur, Cur::new(CharIdx(0)));
         assert_eq!(deleted, None);
     }
 
@@ -1765,7 +1776,7 @@ pub(crate) mod tests {
 
             // Check with the initial cursor position being at any offset within the target
             for i in 0..s.len() {
-                let dot = b.try_expand_known(9 + i);
+                let dot = b.try_expand_known(CharIdx(9 + i));
                 let maybe_content = dot.map(|d| d.content(&b));
                 assert_eq!(
                     maybe_content.as_deref(),
@@ -1821,7 +1832,12 @@ pub(crate) mod tests {
         );
 
         assert_eq!(b.txt.to_string(), "bar");
-        assert_eq!(b.dot, Dot::Cur { c: Cur { idx: 3 } });
+        assert_eq!(
+            b.dot,
+            Dot::Cur {
+                c: Cur { idx: CharIdx(3) }
+            }
+        );
     }
 
     #[test]
@@ -1838,7 +1854,12 @@ pub(crate) mod tests {
         b.handle_action(BAction::InsertChar { c: 'a' }, Source::Fsys);
 
         assert_eq!(b.txt.to_string(), "a");
-        assert_eq!(b.dot, Dot::Cur { c: Cur { idx: 1 } });
+        assert_eq!(
+            b.dot,
+            Dot::Cur {
+                c: Cur::new(CharIdx(1))
+            }
+        );
     }
 
     #[test]

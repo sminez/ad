@@ -132,7 +132,7 @@ where
 
         let mb_has_lines = mb.b.map(|b| !b.is_empty()).unwrap_or_default();
         let offset = if mb_has_lines {
-            mb.bottom - mb.top + 1
+            (mb.bottom - mb.top).uadd(1).0
         } else if !w_minibuffer && layout.scratch.is_visible {
             max_mb_lines
         } else {
@@ -518,7 +518,7 @@ impl Frame {
         self.mb_lines.clear();
 
         if let Some(b) = mb.b {
-            for i in mb.top..=mb.bottom {
+            for i in mb.top.to(mb.bottom.uadd(1)) {
                 let slice = b.line(i).unwrap();
                 let bg = if i == mb.selected_line_idx {
                     cs.minibuffer_hl
@@ -726,7 +726,7 @@ impl<'a> WinRenderer<'a> {
             return false;
         }
 
-        let file_row = self.y + self.w.view.row_off;
+        let file_row = self.w.view.row_off.uadd(self.y);
         self.y += 1;
 
         if let Some(pc) = prev_col {
@@ -766,7 +766,7 @@ impl<'a> WinRenderer<'a> {
                     "{}{} {:>width$}{V_STR}",
                     AnsiStyle::Fg(self.cs.signcol_fg),
                     AnsiStyle::Bg(self.cs.bg),
-                    file_row + 1,
+                    file_row.uadd(1),
                     width = self.w_lnum
                 );
 
@@ -1122,7 +1122,10 @@ fn try_read_input(stdin: &mut impl Read) -> Option<RawInput> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::{ByteRange, TK_DEFAULT};
+    use crate::{
+        buffer::{ByteIdx, LineIdx},
+        syntax::{ByteRange, TK_DEFAULT},
+    };
     use simple_test_case::test_case;
     use std::{char::REPLACEMENT_CHARACTER, io};
 
@@ -1145,7 +1148,10 @@ mod tests {
     fn rt(tag: &'static str, from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
@@ -1231,12 +1237,12 @@ mod tests {
         let mb = MiniBufferState {
             cx: 0,
             n_visible_lines: 10,
-            selected_line_idx: 0,
+            selected_line_idx: LineIdx(0),
             prompt: "> ",
             input: Default::default(),
             b: Some(&b),
-            top: 0,
-            bottom: 0,
+            top: LineIdx(0),
+            bottom: LineIdx(0),
         };
 
         let mut frame = Frame::new();

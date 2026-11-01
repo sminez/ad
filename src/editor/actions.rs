@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferId, BufferKind},
+    buffer::{BufferId, BufferKind, LineIdx},
     config::Config,
     dot::{Cur, Range, TextObject},
     editor::{Editor, MbSelect, MbSelector, MiniBufferSelection, minibuffer::SimpleMbSelect},
@@ -102,7 +102,7 @@ impl From<UAction> for Action {
 /// Actions handled by an individual Buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BAction {
-    CurToLine { y: usize },
+    CurToLine { y: LineIdx },
 
     Delete,
     InsertChar { c: char },
@@ -625,7 +625,7 @@ where
 
         let mb = SimpleMbSelect::new("> ", numbered_lines, |selection| match selection {
             MiniBufferSelection::Line { cy, .. } => Some(Actions::Multi(vec![
-                BAction::CurToLine { y: cy }.for_active(),
+                BAction::CurToLine { y: LineIdx(cy) }.for_active(),
                 BAction::DotSet(TextObject::Line, 1).for_active(),
                 UAction::SetViewPort(ViewPort::Center).into(),
             ])),

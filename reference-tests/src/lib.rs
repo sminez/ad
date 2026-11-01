@@ -1,6 +1,10 @@
 //! Reference editing tests for the ad Buffer implementation using
 //! <https://github.com/josephg/editing-traces>
-use ad_editor::{Source, buffer::Buffer, editor::BAction};
+use ad_editor::{
+    Source,
+    buffer::{Buffer, CharIdx},
+    editor::BAction,
+};
 use libflate::gzip::Decoder;
 use serde::Deserialize;
 use std::{
@@ -69,11 +73,14 @@ impl TestPatch {
     // https://github.com/josephg/editing-traces/blob/master/sequential_traces/README.md#data-format
     pub fn apply(self, b: &mut Buffer) {
         if self.delete_len > 0 {
-            b.set_dot_from_range(self.position, self.position + self.delete_len - 1);
+            b.set_dot_from_range(
+                CharIdx(self.position),
+                CharIdx(self.position + self.delete_len - 1),
+            );
             b.handle_action(BAction::Delete, Source::Fsys);
         }
 
-        b.set_dot_from_cursor(self.position);
+        b.set_dot_from_cursor(CharIdx(self.position));
         b.handle_action(
             BAction::InsertString {
                 s: self.insert_content,

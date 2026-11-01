@@ -1,4 +1,4 @@
-use crate::buffer::{Buffer, Cur};
+use crate::buffer::{Buffer, CharOffset, Cur};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -95,11 +95,11 @@ impl Edit {
             None
         } else {
             match &self.txt {
-                Txt::Char(_) if e.cur.idx == self.cur.idx + 1 => {
+                Txt::Char(_) if e.cur.idx == self.cur.idx.uadd(1) => {
                     self.txt.append(e.txt);
                     None
                 }
-                Txt::String(s) if e.cur.idx == self.cur.idx + s.len() => {
+                Txt::String(s) if e.cur.idx == self.cur.idx + CharOffset::from(s.as_str()) => {
                     self.txt.append(e.txt);
                     None
                 }
@@ -114,12 +114,12 @@ impl Edit {
             None
         } else {
             match &e.txt {
-                Txt::Char(_) if e.cur.idx + 1 == self.cur.idx => {
+                Txt::Char(_) if e.cur.idx.uadd(1) == self.cur.idx => {
                     self.txt.prepend(e.txt);
                     self.cur = e.cur;
                     None
                 }
-                Txt::String(s) if e.cur.idx + s.len() == self.cur.idx => {
+                Txt::String(s) if e.cur.idx + CharOffset::from(s.as_str()) == self.cur.idx => {
                     self.txt.prepend(e.txt);
                     self.cur = e.cur;
                     None
@@ -262,12 +262,13 @@ impl EditLog {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::buffer::CharIdx;
     use simple_test_case::test_case;
 
     pub(crate) fn in_c(idx: usize, c: char) -> Edit {
         Edit {
             kind: Kind::Insert,
-            cur: Cur { idx },
+            cur: Cur { idx: CharIdx(idx) },
             txt: Txt::Char(c),
         }
     }
@@ -275,7 +276,7 @@ pub(crate) mod tests {
     pub(crate) fn in_s(idx: usize, s: &str) -> Edit {
         Edit {
             kind: Kind::Insert,
-            cur: Cur { idx },
+            cur: Cur { idx: CharIdx(idx) },
             txt: Txt::String(s.to_string()),
         }
     }
@@ -283,7 +284,7 @@ pub(crate) mod tests {
     pub(crate) fn del_c(idx: usize, c: char) -> Edit {
         Edit {
             kind: Kind::Delete,
-            cur: Cur { idx },
+            cur: Cur { idx: CharIdx(idx) },
             txt: Txt::Char(c),
         }
     }
@@ -291,7 +292,7 @@ pub(crate) mod tests {
     pub(crate) fn del_s(idx: usize, s: &str) -> Edit {
         Edit {
             kind: Kind::Delete,
-            cur: Cur { idx },
+            cur: Cur { idx: CharIdx(idx) },
             txt: Txt::String(s.to_string()),
         }
     }
@@ -335,6 +336,16 @@ pub(crate) mod tests {
         vec![in_s(0, "abc"), in_c(0, 'd')],
         &[in_s(0, "dabc")];
         "string then char at same cursor"
+    )]
+    #[test_case(
+        vec![in_s(0, "éé"), in_c(2, 'x')],
+        &[in_s(0, "ééx")];
+        "multi-byte string then adjacent char"
+    )]
+    #[test_case(
+        vec![in_s(0, "é"), in_c(2, 'x')],
+        &[in_s(0, "é"), in_c(2, 'x')];
+        "multi-byte string then non-adjacent char"
     )]
     #[test]
     fn inserts_work(edits: Vec<Edit>, expected: &[Edit]) {
@@ -385,6 +396,16 @@ pub(crate) mod tests {
         vec![del_s(0, "abc"), del_c(0, 'd')],
         &[del_s(0, "abcd")];
         "string then char at same cursor"
+    )]
+    #[test_case(
+        vec![del_c(2, 'x'), del_s(0, "éé")],
+        &[del_s(0, "ééx")];
+        "char then adjacent multi-byte string"
+    )]
+    #[test_case(
+        vec![del_c(4, 'x'), del_s(0, "éé")],
+        &[del_c(4, 'x'), del_s(0, "éé")];
+        "char then non-adjacent multi-byte string"
     )]
     #[test]
     fn delete_work(edits: Vec<Edit>, expected: &[Edit]) {

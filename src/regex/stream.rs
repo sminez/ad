@@ -1,6 +1,6 @@
 use crate::{
     Edit,
-    buffer::{ByteIdx, CharIdx, GapBuffer},
+    buffer::{ByteIdx, ByteOffset, CharIdx, GapBuffer, LineIdx},
     dot::Dot,
     exec::Address,
     regex::Haystack,
@@ -35,8 +35,8 @@ where
                 buf: String::with_capacity(LINE_BUF_LEN),
                 gb: GapBuffer::from(""),
                 closed: false,
-                cleared_lines: 0,
-                cleared_bytes: 0,
+                cleared_lines: LineIdx(0),
+                cleared_bytes: ByteIdx(0),
             }),
         }
     }
@@ -73,7 +73,7 @@ where
         false
     }
 
-    fn len(&self) -> ByteIdx {
+    fn len(&self) -> usize {
         usize::MAX
     }
 
@@ -106,7 +106,7 @@ where
             Some(CachingStreamIter {
                 inner: self,
                 from,
-                to: usize::MAX,
+                to: ByteIdx::MAX,
             })
         }
     }
@@ -146,10 +146,10 @@ where
     R: Read,
 {
     fn current_dot(&self) -> Dot {
-        Dot::from_char_indices(0, usize::MAX)
+        Dot::from_char_indices(CharIdx(0), CharIdx::MAX)
     }
 
-    fn len_bytes(&self) -> ByteIdx {
+    fn len_bytes(&self) -> usize {
         if self.is_closed() {
             self.inner.borrow().gb.len()
         } else {
@@ -157,7 +157,7 @@ where
         }
     }
 
-    fn len_chars(&self) -> CharIdx {
+    fn len_chars(&self) -> usize {
         if self.is_closed() {
             self.inner.borrow().gb.len_chars()
         } else {
@@ -165,7 +165,7 @@ where
         }
     }
 
-    fn max_iter(&self) -> CharIdx {
+    fn max_iter(&self) -> usize {
         if self.is_closed() {
             self.inner.borrow().gb.len_chars()
         } else {
@@ -173,11 +173,11 @@ where
         }
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
-        let cur_len = self.inner.borrow().gb.len_lines();
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
+        let cur_len = LineIdx(self.inner.borrow().gb.len_lines());
 
         if line_idx > cur_len {
-            for _ in cur_len..=line_idx {
+            for _ in cur_len.to(line_idx.uadd(1)) {
                 self.try_read_next_line();
                 if self.is_closed() {
                     break;
@@ -188,15 +188,15 @@ where
         self.inner.borrow().gb.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         self.inner.borrow().gb.try_char_to_line(char_idx)
     }
 
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let gb = &self.inner.borrow().gb;
         let line_idx = gb.try_char_to_line(char_idx)?;
-        match gb.try_line_to_char(line_idx + 1) {
-            None => Some(gb.len_chars() - 1),
+        match gb.try_line_to_char(line_idx.uadd(1)) {
+            None => Some(CharIdx(gb.len_chars() - 1)),
             Some(idx) => Some(idx),
         }
     }
@@ -217,7 +217,7 @@ where
     buf: String,
     gb: GapBuffer,
     closed: bool,
-    cleared_lines: usize,
+    cleared_lines: LineIdx,
     cleared_bytes: ByteIdx,
 }
 
@@ -231,7 +231,7 @@ where
         match self.reader.read_line(&mut self.buf) {
             Ok(n) => {
                 let len = self.gb.len_chars();
-                self.gb.insert_str(len, &self.buf);
+                self.gb.insert_str(CharIdx(len), &self.buf);
                 self.closed = n == 0;
             }
             Err(_) => self.closed = true,
@@ -242,7 +242,7 @@ where
         let offset = logical_offset - self.cleared_bytes;
         let cleared_lines = self.gb.lines_before_byte_offset(offset);
         let char_to = self.gb.byte_to_char(offset);
-        self.gb.remove_range(0, char_to);
+        self.gb.remove_range(CharIdx(0), char_to);
 
         self.cleared_bytes = logical_offset;
         self.cleared_lines += cleared_lines;
@@ -264,7 +264,7 @@ where
     R: Read,
 {
     pub fn len(&self) -> usize {
-        self.to - self.from
+        (self.to - self.from).0
     }
 
     pub fn is_empty(&self) -> bool {
@@ -278,8 +278,8 @@ where
 {
     fn from(s: StreamSlice<'a, R>) -> Self {
         let inner = s.inner.borrow();
-        let to = if s.to == usize::MAX {
-            inner.gb.len()
+        let to = if s.to == ByteIdx::MAX {
+            ByteIdx(inner.gb.len())
         } else {
             s.to - inner.cleared_bytes
         };
@@ -319,7 +319,7 @@ where
             match self.inner.get_char_at(self.from) {
                 Some(ch) => {
                     let res = (self.from, ch);
-                    self.from += ch.len_utf8();
+                    self.from += ByteOffset::from(ch);
                     return Some(res);
                 }
                 None if self.inner.is_closed() => return None,
@@ -342,14 +342,14 @@ mod impl_structex {
     where
         R: Read,
     {
-        fn is_match_between(&self, re: &Regex, from: ByteIdx, to: ByteIdx) -> bool {
-            re.matches_between(self, from, to)
+        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+            re.matches_between(self, ByteIdx(from), ByteIdx(to))
         }
 
-        fn captures_between(&self, re: &Regex, from: ByteIdx, to: ByteIdx) -> Option<RawCaptures> {
-            let m = re.find_between(self, from, to)?;
+        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+            let m = re.find_between(self, ByteIdx(from), ByteIdx(to))?;
 
-            Some(RawCaptures::new(m.iter_locs()))
+            Some(RawCaptures::new(m.iter_raw_locs()))
         }
     }
 
@@ -362,19 +362,19 @@ mod impl_structex {
         where
             Self: 'h;
 
-        fn char_at(&self, byte_offset: ByteIdx) -> Option<char> {
-            self.get_char_at(byte_offset)
+        fn char_at(&self, byte_offset: usize) -> Option<char> {
+            self.get_char_at(ByteIdx(byte_offset))
         }
 
-        fn slice(&self, range: Range<ByteIdx>) -> Self::Slice<'_> {
+        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
             StreamSlice {
                 inner: &self.inner,
-                from: range.start,
-                to: range.end,
+                from: ByteIdx(range.start),
+                to: ByteIdx(range.end),
             }
         }
 
-        fn max_len(&self) -> ByteIdx {
+        fn max_len(&self) -> usize {
             usize::MAX
         }
     }
@@ -405,8 +405,8 @@ mod impl_structex {
             W: std::io::Write,
         {
             let inner = self.inner.borrow();
-            let to = if self.to == usize::MAX {
-                inner.gb.len()
+            let to = if self.to == ByteIdx::MAX {
+                ByteIdx(inner.gb.len())
             } else {
                 self.to - inner.cleared_bytes
             };

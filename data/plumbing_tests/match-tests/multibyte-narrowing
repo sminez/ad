@@ -1,0 +1,23 @@
+The cursor position is a character offset into the message data, so leading multi-byte characters
+must not shift which match the cursor lands in. (Character 15 is in "two.pdf" while byte 15 is in
+"one.pdf".)
+
+-- rules --
+data narrows [a-zA-Z0-9_\-./@]+
+data matches ^[a-zA-Z0-9_\-./@]+\.pdf$
+plumb to edit
+
+-- initial --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+cur: 15
+ndata: 27
+data: ééééé one.pdf two.pdf
+
+-- processed --
+src: bash
+dst: ad
+wdir: /home/foo/bar
+ndata: 7
+data: two.pdf

@@ -9,7 +9,7 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use crate::{
-    buffer::ByteIdx,
+    buffer::{ByteIdx, ByteOffset},
     regex::{
         Error, Haystack,
         ast::{Assertion, parse},
@@ -142,7 +142,7 @@ impl Regex {
     {
         let mut inner = self.inner.lock();
         inner.track_submatches = false;
-        inner.match_from_byte_offset(haystack, 0).is_some()
+        inner.match_from_byte_offset(haystack, ByteIdx(0)).is_some()
     }
 
     /// Determine whether or not this Regex matches the [Haystack] from the given offset without
@@ -180,7 +180,7 @@ impl Regex {
     {
         let mut inner = self.inner.lock();
         inner.track_submatches = true;
-        inner.match_from_byte_offset(haystack, 0)
+        inner.match_from_byte_offset(haystack, ByteIdx(0))
     }
 
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
@@ -224,7 +224,7 @@ impl Regex {
         MatchIter {
             haystack,
             r: self,
-            from: 0,
+            from: ByteIdx(0),
         }
     }
 }
@@ -265,7 +265,7 @@ impl RevRegex {
     {
         let mut inner = self.0.inner.lock();
         inner.track_submatches = true;
-        inner.run_vm(&mut haystack.rev_iter_between(0, offset), offset)
+        inner.run_vm(&mut haystack.rev_iter_between(ByteIdx(0), offset), offset)
     }
 }
 
@@ -322,7 +322,7 @@ impl RegexInner {
         if let Some(m) = ac.find(haystack.substr_from(byte_offset)?.as_ref()) {
             // m.start is based on the substr not the full haystack so we need to add the original
             // offset to get the correct value.
-            byte_offset += m.start();
+            byte_offset += ByteOffset(m.start() as isize);
         }
 
         Some(byte_offset)
@@ -378,11 +378,11 @@ impl RegexInner {
     where
         I: Iterator<Item = (ByteIdx, char)>,
     {
-        let mut sub_matches = [0; N_SLOTS];
+        let mut sub_matches = [ByteIdx(0); N_SLOTS];
         self.free_sms = (1..self.prog.len()).collect();
         self.sms[0] = SubMatches {
             refs: 1,
-            inner: [0; N_SLOTS],
+            inner: [ByteIdx(0); N_SLOTS],
         };
 
         // We bump the generation to ensure we don't collide with anything from
@@ -412,7 +412,7 @@ impl RegexInner {
             for i in 0..n {
                 if let Some(sm) = self.step_thread(i, sp, ch) {
                     if !self.track_submatches {
-                        return Some(Match::synthetic(0, 0));
+                        return Some(Match::synthetic(ByteIdx(0), ByteIdx(0)));
                     }
 
                     matched = true;
@@ -538,7 +538,11 @@ impl RegexInner {
         // If we are saving our initial position from a forward match then we are looking at the
         // correct character, otherwise the Save op is being processed at the character before the
         // one we need to save.
-        let inc_bytes = if !initial && !rev { ch.len_utf8() } else { 0 };
+        let inc_bytes = if !initial && !rev {
+            ByteOffset::from(ch)
+        } else {
+            ByteOffset(0)
+        };
 
         if (!rev && s.is_multiple_of(2)) || (rev && !s.is_multiple_of(2)) {
             let sm = self.sm_update(t.sm, s, sp + inc_bytes);
@@ -740,7 +744,9 @@ mod tests {
     fn find_rev_works(re: &str, s: &str, expected: Option<&str>) {
         let r = RevRegex::compile(re).unwrap();
         let b = Buffer::new_unnamed(0, s, Default::default());
-        let m = r.find_rev_from(&b, s.len()).map(|m| m.match_text(&b));
+        let m = r
+            .find_rev_from(&b, ByteIdx(s.len()))
+            .map(|m| m.match_text(&b));
 
         assert_eq!(m.as_deref(), expected);
     }
@@ -820,10 +826,10 @@ mod tests {
         // Just to convince me that the offsets here are exactly as I am expecting
         assert_eq!(s.chars().skip(7).collect::<String>(), "\na multiline\nfile");
 
-        let m1 = r.find_from(&s, 7).unwrap();
+        let m1 = r.find_from(&s, ByteIdx(7)).unwrap();
         assert_eq!(m1.match_text(&s), "");
 
-        let m2 = r.find_from(&s, 8).unwrap();
+        let m2 = r.find_from(&s, ByteIdx(8)).unwrap();
         assert_eq!(m2.match_text(&s), "a multiline");
     }
 

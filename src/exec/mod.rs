@@ -1,6 +1,6 @@
 //! Sam style language for executing structural regular expressions against ad Buffers
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer},
+    buffer::{Buffer, ByteIdx, CharIdx, CharOffset, GapBuffer},
     dot::{Cur, Dot},
     editor::BAction,
     parse::ParseInput,
@@ -130,7 +130,7 @@ impl Edit for Buffer {
         if from == to {
             return;
         }
-        self.dot = Dot::from_char_indices(from, to.saturating_sub(1)).collapse_null_range();
+        self.dot = Dot::from_char_indices(from, to.saturating_usub(1)).collapse_null_range();
         self.handle_action(BAction::Delete, Source::Fsys);
     }
 
@@ -238,8 +238,8 @@ impl Program {
         let (char_from, char_to) = dot.as_char_indices();
         let byte_from = ed.char_to_byte(char_from).unwrap();
         let byte_to = ed
-            .char_to_byte(char_to.saturating_add(1))
-            .unwrap_or_else(|| ed.len_bytes());
+            .char_to_byte(char_to.uadd(1))
+            .unwrap_or_else(|| ByteIdx(ed.len_bytes()));
 
         let mut edit_actions = self.gather_actions(byte_from, byte_to, ed, runner, fname, out)?;
 
@@ -249,7 +249,7 @@ impl Program {
         // this selection based on how they manipulate the buffer so we need to special case this
         // final action in order to not double-count the delta it would generate.
         let last_action = edit_actions.pop();
-        let mut delta = 0;
+        let mut delta = CharOffset(0);
         if let Some(action) = last_action {
             dot = action.as_dot(ed);
             action.apply(ed);
@@ -272,10 +272,13 @@ impl Program {
         // Apply the cumulative delta from all edit actions to the final dot position to account
         // for changes made to the buffer state.
         let (from, to) = dot.as_char_indices();
-        let from = (from as isize + delta) as usize;
-        let to = (to as isize + delta) as usize;
+        let from = from.saturating_add(delta);
+        let to = to.saturating_add(delta);
 
-        Ok(Dot::from_char_indices(min(from, ix_max), min(to, ix_max)))
+        Ok(Dot::from_char_indices(
+            min(from, CharIdx(ix_max)),
+            min(to, CharIdx(ix_max)),
+        ))
     }
 
     fn gather_actions<'a, E, R, W>(
@@ -297,15 +300,15 @@ impl Program {
         let mut edit_actions = Vec::new();
         let mut ctx = Ctx {
             fname,
-            byte_from: 0,
+            byte_from: ByteIdx(0),
             ed,
             row_col: RefCell::new(None),
         };
 
-        for caps in se.iter_tagged_captures_between(byte_from, byte_to, ed) {
+        for caps in se.iter_tagged_captures_between(byte_from.0, byte_to.0, ed) {
             let action = caps.action.as_ref().unwrap();
             let id = action.id();
-            ctx.byte_from = caps.from();
+            ctx.byte_from = ByteIdx(caps.from());
             ctx.row_col.borrow_mut().take();
 
             match action.tag() {
@@ -336,13 +339,15 @@ impl Program {
                 // Edit actions
 
                 // Delete matched text
-                'd' => edit_actions.push(EditAction::Remove(caps.from(), caps.to())),
+                'd' => {
+                    edit_actions.push(EditAction::Remove(ByteIdx(caps.from()), ByteIdx(caps.to())))
+                }
 
                 // Change matched text to rendered template
                 'c' => {
                     edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
+                        ByteIdx(caps.from()),
+                        ByteIdx(caps.to()),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
@@ -350,7 +355,7 @@ impl Program {
                 // Insert rendered template before match
                 'i' => {
                     edit_actions.push(EditAction::Insert(
-                        caps.from(),
+                        ByteIdx(caps.from()),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
@@ -358,7 +363,7 @@ impl Program {
                 // Append rendered template after match
                 'a' => {
                     edit_actions.push(EditAction::Insert(
-                        caps.to(),
+                        ByteIdx(caps.to()),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
@@ -367,8 +372,8 @@ impl Program {
                 '<' => {
                     let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
                     edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
+                        ByteIdx(caps.from()),
+                        ByteIdx(caps.to()),
                         runner.run_shell_command(&cmd, None)?,
                     ));
                 }
@@ -378,8 +383,8 @@ impl Program {
                     let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
                     let slice = caps.as_slice();
                     edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
+                        ByteIdx(caps.from()),
+                        ByteIdx(caps.to()),
                         runner.run_shell_command(&cmd, Some(slice.into().as_ref()))?,
                     ));
                 }
@@ -407,9 +412,9 @@ impl EditAction {
         match self {
             Self::Insert(from, s) | Self::Replace(from, _, s) => {
                 let from = ed.byte_to_char(*from).unwrap();
-                let n_chars = s.chars().count();
+                let n_chars = CharOffset::from(s.as_str());
 
-                Dot::from_char_indices(from, from + n_chars - 1)
+                Dot::from_char_indices(from, from + n_chars - CharOffset(1))
             }
 
             Self::Remove(from, _) => {
@@ -419,7 +424,7 @@ impl EditAction {
         }
     }
 
-    fn apply<E>(self, ed: &mut E) -> isize
+    fn apply<E>(self, ed: &mut E) -> CharOffset
     where
         E: Edit,
     {
@@ -427,20 +432,20 @@ impl EditAction {
             Self::Insert(from, s) => {
                 let from = ed.byte_to_char(from).unwrap();
                 ed.insert(from, &s);
-                s.chars().count() as isize
+                CharOffset::from(s.as_str())
             }
 
             Self::Remove(from, to) => {
                 let from = ed.byte_to_char(from).unwrap();
                 let to = ed.byte_to_char(to).unwrap();
                 ed.remove(from, to);
-                -((to - from) as isize)
+                -to.offset_from(from)
             }
 
             Self::Replace(from, to, s) => {
-                Self::Remove(from, to).apply(ed);
-                let n_chars = Self::Insert(from, s).apply(ed);
-                n_chars - (to - from) as isize
+                let removed = Self::Remove(from, to).apply(ed);
+                let inserted = Self::Insert(from, s).apply(ed);
+                inserted + removed
             }
         }
     }
@@ -587,7 +592,7 @@ mod tests {
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
         let mut b = Buffer::new_unnamed(0, "foo│foo│foo", Default::default());
-        b.dot = Cur::new(idx).into();
+        b.dot = Cur::new(CharIdx(idx)).into();
         prog.execute(&mut b, &mut runner, "test", &mut vec![])
             .unwrap();
 
@@ -626,7 +631,7 @@ mod tests {
 
         let initial_content = "this is a FOO line\nand another";
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
-        b.dot = Dot::from_char_indices(9, 12);
+        b.dot = Dot::from_char_indices(CharIdx(9), CharIdx(12));
         assert_eq!(b.dot_contents(), " FOO");
 
         prog.execute(&mut b, &mut runner, "test", &mut vec![])
@@ -660,7 +665,25 @@ mod tests {
 
         assert_eq!(&b.str_contents(), expected_content);
         assert_eq!(&dot.content(&b), expected_dot_content);
-        assert_eq!(dot.as_char_indices(), expected_dot);
+        assert_eq!(
+            dot.as_char_indices(),
+            (CharIdx(expected_dot.0), CharIdx(expected_dot.1))
+        );
+    }
+
+    #[test]
+    fn returned_dot_is_correct_when_replacing_multibyte_chars() {
+        let prog = Program::try_parse(", x/é/ c/E/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, "éa éa", Default::default());
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), "Ea Ea");
+        assert_eq!(&dot.content(&b), "E");
+        assert_eq!(dot.as_char_indices(), (CharIdx(3), CharIdx(3)));
     }
 
     #[test_case(", d"; "delete buffer")]
@@ -1084,14 +1107,18 @@ mod tests {
         let prog = Program::try_parse(program).unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
-        b.dot = Cur::new(initial_dot_idx).into();
+        b.dot = Cur::new(CharIdx(initial_dot_idx)).into();
 
         let dot = prog
             .execute(&mut b, &mut runner, "test", &mut vec![])
             .unwrap();
 
         assert_eq!(&b.str_contents(), expected_content, "buffer content");
-        assert_eq!(dot.as_char_indices(), expected_dot, "returned dot");
+        assert_eq!(
+            dot.as_char_indices(),
+            (CharIdx(expected_dot.0), CharIdx(expected_dot.1)),
+            "returned dot"
+        );
     }
 
     #[test_case("0,/foo/ d", "start\nfoo bar", " bar"; "bof to regex")]
@@ -1216,7 +1243,11 @@ mod tests {
             expected_content,
             "buffer should not change"
         );
-        assert_eq!(dot.as_char_indices(), expected_dot, "dot should be set");
+        assert_eq!(
+            dot.as_char_indices(),
+            (CharIdx(expected_dot.0), CharIdx(expected_dot.1)),
+            "dot should be set"
+        );
     }
 
     #[test_case(", x/./ c/X/", "hello", "XXXXX"; "ascii single char")]
@@ -1265,7 +1296,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(&b.str_contents(), "REPLACEMENT REPLACEMENT REPLACEMENT");
-        assert!(dot.as_char_indices().1 > 5);
+        assert!(dot.as_char_indices().1 > CharIdx(5));
     }
 
     #[test]
@@ -1279,7 +1310,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(&b.str_contents(), "x x x");
-        assert_eq!(dot.as_char_indices(), (4, 4));
+        assert_eq!(dot.as_char_indices(), (CharIdx(4), CharIdx(4)));
     }
 
     #[test_case(", x/foo/ x/o/ c/X/", "foo bar", "fXX bar"; "nested x")]

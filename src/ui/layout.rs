@@ -1,6 +1,6 @@
 //! Layout of UI windows
 use crate::{
-    buffer::{Buffer, BufferId, Buffers, SCRATCH_ID},
+    buffer::{Buffer, BufferId, Buffers, CharIdx, CharOffset, LineIdx, SCRATCH_ID},
     config::Config,
     die,
     dot::Cur,
@@ -817,7 +817,7 @@ impl Layout {
                 }
 
                 let b = buffers.with_id_mut(win.view.bufid).unwrap();
-                let y_max = b.txt.len_lines() - 1;
+                let y_max = LineIdx(b.txt.len_lines() - 1);
                 win.view.row_off = min(win.view.row_off, y_max);
             }
         }
@@ -918,16 +918,16 @@ impl Layout {
             .saturating_sub(x_offset)
             .saturating_sub(w_sgncol);
         let y = min(
-            y.saturating_sub(y_offset).saturating_add(row_off),
-            b.len_lines(),
+            row_off.uadd(y.saturating_sub(y_offset)),
+            LineIdx(b.len_lines()),
         )
-        .saturating_sub(1);
+        .saturating_sub(LineIdx(1));
 
         win.view.rx = rx;
         b.cached_rx = rx;
 
         let mut cur = Cur::from_yx(y, b.x_from_provided_rx(y, rx), b);
-        cur.clamp_idx(b.len_chars());
+        cur.clamp_idx(CharIdx(b.len_chars()));
 
         cur
     }
@@ -1014,7 +1014,7 @@ impl Window {
 pub(crate) struct View {
     pub(crate) bufid: BufferId,
     pub(crate) col_off: usize,
-    pub(crate) row_off: usize,
+    pub(crate) row_off: LineIdx,
     pub(crate) rx: usize,
     pending_viewport: Option<ViewPort>,
     cur: Cur,
@@ -1025,7 +1025,7 @@ impl View {
         Self {
             bufid,
             col_off: 0,
-            row_off: 0,
+            row_off: LineIdx(0),
             rx: 0,
             cur: Cur::default(),
             pending_viewport: None,
@@ -1037,18 +1037,18 @@ impl View {
         let (_, w_sgncol) = b.sign_col_dims();
         let (y, _) = b.dot.active_cur().as_yx(b);
         let x = self.rx - self.col_off + w_sgncol;
-        let y = y - self.row_off;
+        let y = (y - self.row_off).0;
 
         (x, y)
     }
 
-    pub(crate) fn rx_from_x(&self, b: &Buffer, y: usize, x: usize, tabstop: usize) -> usize {
-        if y >= b.len_lines() {
+    pub(crate) fn rx_from_x(&self, b: &Buffer, y: LineIdx, x: CharOffset, tabstop: usize) -> usize {
+        if y.0 >= b.len_lines() {
             return 0;
         }
 
         let mut rx = 0;
-        for c in b.txt.line(y).chars().take(x) {
+        for c in b.txt.line(y).chars().take(x.0 as usize) {
             if c == '\t' {
                 rx += (tabstop - 1) - (rx % tabstop);
             }
@@ -1072,8 +1072,8 @@ impl View {
         if let Some(vp) = self.pending_viewport.take() {
             self.row_off = match vp {
                 ViewPort::Top => y,
-                ViewPort::Center => y.saturating_sub(rows / 2),
-                ViewPort::Bottom => y.saturating_sub(rows),
+                ViewPort::Center => y.saturating_sub(LineIdx(rows / 2)),
+                ViewPort::Bottom => y.saturating_sub(LineIdx(rows)),
             };
         }
 
@@ -1085,8 +1085,8 @@ impl View {
             self.row_off = y;
         }
 
-        if y >= self.row_off + rows {
-            self.row_off = y + 1 - rows;
+        if y >= self.row_off.uadd(rows) {
+            self.row_off = y.uadd(1).usub(rows);
         }
 
         if self.rx < self.col_off {
@@ -1243,30 +1243,30 @@ fn apply_scroll(
         view.cur
     };
     let (y, x) = cur.as_yx(b);
-    let y_max = b.txt.len_lines() - 1;
+    let y_max = LineIdx(b.txt.len_lines() - 1);
     let mut need_clamp = false;
 
-    if up && view.row_off > 0 && y == view.row_off + n_rows - 1 {
-        cur = Cur::from_yx(y.saturating_sub(scroll_rows), x, b);
+    if up && view.row_off > LineIdx(0) && y == view.row_off.uadd(n_rows).usub(1) {
+        cur = Cur::from_yx(y.saturating_sub(LineIdx(scroll_rows)), x, b);
     } else if !up && y == view.row_off && view.row_off < y_max {
-        cur = Cur::from_yx(min(y + scroll_rows, y_max), x, b);
+        cur = Cur::from_yx(min(y.uadd(scroll_rows), y_max), x, b);
         need_clamp = true;
     };
 
     if focused {
         b.dot.set_active_cur(cur);
         if need_clamp {
-            b.dot.clamp_idx(b.txt.len_chars());
-            b.xdot.clamp_idx(b.txt.len_chars());
+            b.dot.clamp_idx(CharIdx(b.txt.len_chars()));
+            b.xdot.clamp_idx(CharIdx(b.txt.len_chars()));
         }
     } else {
         view.cur = cur;
     }
 
     view.row_off = if up {
-        view.row_off.saturating_sub(scroll_rows)
+        view.row_off.saturating_sub(LineIdx(scroll_rows))
     } else {
-        min(view.row_off + scroll_rows, y_max)
+        min(view.row_off.uadd(scroll_rows), y_max)
     };
 
     if focused {
@@ -1342,7 +1342,7 @@ mod tests {
     fn drag_left_works() {
         let (mut l, _) = test_layout(&[1, 1, 2], 80, 100);
         let ao = l.next_column();
-        assert_eq!(ao, ActionOutcome::SetCursor(1, Cur { idx: 0 }));
+        assert_eq!(ao, ActionOutcome::SetCursor(1, Cur { idx: CharIdx(0) }));
         l.drag_left();
 
         assert_eq!(l.cols.len(), 2);
@@ -1577,7 +1577,12 @@ mod tests {
         // sign column offset is 3
         for (idx, ch) in s.chars().enumerate() {
             assert_eq!(b.dot_contents(), ch.to_string());
-            assert_eq!(b.dot, Dot::Cur { c: Cur { idx } });
+            assert_eq!(
+                b.dot,
+                Dot::Cur {
+                    c: Cur::new(CharIdx(idx))
+                }
+            );
             assert_eq!(
                 view.ui_xy(&b),
                 (3 + offset, 0),
@@ -1884,7 +1889,7 @@ mod tests {
             for (_, win) in col.wins.iter_mut() {
                 let b = bfs.with_id_mut(win.view.bufid).unwrap();
                 b.insert_xdot("line1\nline2\nline3".to_string());
-                win.view.row_off = 100;
+                win.view.row_off = LineIdx(100);
             }
         }
 
@@ -1893,9 +1898,11 @@ mod tests {
         for (_, col) in l.cols.iter() {
             for (_, win) in col.wins.iter() {
                 assert_eq!(
-                    win.view.row_off, 2,
+                    win.view.row_off,
+                    LineIdx(2),
                     "bufid {} had row_off={}",
-                    win.view.bufid, win.view.row_off
+                    win.view.bufid,
+                    win.view.row_off
                 );
             }
         }
@@ -1905,11 +1912,11 @@ mod tests {
     fn apply_scroll_for_unfocused_window_clamps_row_off() {
         let config = Arc::new(RwLock::new(Config::default()));
         let mut b = Buffer::new_unnamed(0, "line1\nline2\nline3\nline4\nline5", config);
-        let y_max = b.txt.len_lines() - 1;
-        assert_eq!(y_max, 4);
+        let y_max = LineIdx(b.txt.len_lines() - 1);
+        assert_eq!(y_max, LineIdx(4));
 
         let mut win = Window::new(0, 3);
-        win.view.row_off = 3;
+        win.view.row_off = LineIdx(3);
 
         let focused = false;
         let up = false;

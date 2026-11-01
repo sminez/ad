@@ -1,6 +1,6 @@
 //! Capability based logic
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx},
+    buffer::{Buffer, ByteIdx, ByteOffset, CharIdx, CharOffset, LineIdx},
     exec::{Addr, AddrBase},
     lsp::Pos,
 };
@@ -74,26 +74,30 @@ pub(crate) enum PositionEncoding {
 }
 
 impl PositionEncoding {
-    pub(crate) fn parse_lsp_position(&self, b: &Buffer, pos: Position) -> (usize, usize) {
+    pub(crate) fn parse_lsp_position(&self, b: &Buffer, pos: Position) -> (LineIdx, CharOffset) {
         let pos_line = pos.line as usize;
         if pos_line > b.len_lines() - 1 {
             warn!("LSP position out of bounds, clamping to EOF");
-            return (b.len_lines().saturating_sub(1), b.len_chars());
+            return (
+                LineIdx(b.len_lines().saturating_sub(1)),
+                CharOffset(b.len_chars() as isize),
+            );
         }
 
         match self {
             Self::Utf8 => {
-                let line_start: ByteIdx = b.txt.line_to_byte(pos.line as usize);
-                let col = b.txt.chars_in_raw_range(
-                    b.txt.byte_to_raw_byte(line_start),
-                    b.txt.byte_to_raw_byte(line_start + pos.character as usize),
-                );
+                let line = LineIdx(pos.line as usize);
+                let line_start: ByteIdx = b.txt.line_to_byte(line);
+                let col = b
+                    .txt
+                    .byte_to_char(line_start + ByteOffset(pos.character as isize))
+                    .offset_from(b.txt.line_to_char(line));
 
-                (pos.line as usize, col)
+                (line, col)
             }
 
             Self::Utf16 => {
-                let slice = b.txt.line(pos.line as usize);
+                let slice = b.txt.line(LineIdx(pos.line as usize));
                 let mut remaining = pos.character as usize;
                 let mut col = 0;
                 for ch in slice.chars() {
@@ -107,10 +111,13 @@ impl PositionEncoding {
                     col = slice.chars().count(); // clamp to EOL
                 }
 
-                (pos.line as usize, col)
+                (LineIdx(pos.line as usize), CharOffset(col as isize))
             }
 
-            Self::Utf32 => (pos.line as usize, pos.character as usize),
+            Self::Utf32 => (
+                LineIdx(pos.line as usize),
+                CharOffset(pos.character as isize),
+            ),
         }
     }
 
@@ -122,27 +129,27 @@ impl PositionEncoding {
         Pos::new(file, line, character)
     }
 
-    fn lsp_position(&self, b: &Buffer, line: usize, col: usize) -> (u32, u32) {
+    fn lsp_position(&self, b: &Buffer, line: LineIdx, col: CharOffset) -> (u32, u32) {
         match self {
             Self::Utf8 => {
                 let line_start: CharIdx = b.txt.line_to_char(line);
                 let start_idx: ByteIdx = b.txt.char_to_byte(line_start);
                 let character = b.txt.char_to_byte(line_start + col) - start_idx;
 
-                (line as u32, character as u32)
+                (line.0 as u32, character.0 as u32)
             }
 
             Self::Utf16 => {
                 let slice = b.txt.line(line);
                 let mut character = 0;
-                for ch in slice.chars().take(col) {
+                for ch in slice.chars().take(col.0 as usize) {
                     character += ch.len_utf16();
                 }
 
-                (line as u32, character as u32)
+                (line.0 as u32, character as u32)
             }
 
-            Self::Utf32 => (line as u32, col as u32),
+            Self::Utf32 => (line.0 as u32, col.0 as u32),
         }
     }
 }
@@ -199,7 +206,7 @@ impl Coords {
         if (row_start, col_start) == (row_end, col_end) {
             // LSP insert at this position within the buffer
             Addr::simple(AddrBase::LineAndColumn(row_start, col_start))
-        } else if row_start == row_end && col_end == col_start + 1 {
+        } else if row_start == row_end && col_end == col_start + CharOffset(1) {
             // LSP delete of a single character
             Addr::compound(
                 AddrBase::LineAndColumn(row_start, col_start),
@@ -218,14 +225,14 @@ impl Coords {
             // character of a given line then...
             // With that in mind, we need to check for this case and filter for when the line is
             // actually a blank line otherwise removing full lines doesn't work.
-            if col_end == 0 && !b.txt.line_is_blank(row_end) {
-                row_end = row_end.saturating_sub(1);
-                col_end = b.txt.line(row_end).chars().count();
+            if col_end == CharOffset(0) && !b.txt.line_is_blank(row_end) {
+                row_end = row_end.saturating_sub(LineIdx(1));
+                col_end = CharOffset(b.txt.line(row_end).chars().count() as isize);
             }
 
             Addr::compound(
                 AddrBase::LineAndColumn(row_start, col_start),
-                AddrBase::LineAndColumn(row_end, col_end.saturating_sub(1)),
+                AddrBase::LineAndColumn(row_end, (col_end - CharOffset(1)).max(CharOffset(0))),
             )
         }
     }
@@ -262,7 +269,7 @@ mod tests {
 
         let (line, col) = PositionEncoding::Utf16.parse_lsp_position(&b, pos);
 
-        assert_eq!(line, 0);
-        assert_eq!(col, expected_col);
+        assert_eq!(line, LineIdx(0));
+        assert_eq!(col, CharOffset(expected_col as isize));
     }
 }

@@ -3,7 +3,7 @@
 //! See the LSP spec for details of semantics:
 //!   <https://microsoft.github.io/language-server-protocol/specification>
 use crate::{
-    buffer::{Buffer, Buffers},
+    buffer::{Buffer, Buffers, LineIdx},
     config::{FtypeConfig, LspConfig, ftype_config_for_path_and_first_line},
     die,
     editor::{Action, EAction, MbSelect},
@@ -129,7 +129,10 @@ impl LspManagerHandle {
     }
 
     fn config_for_buffer(&self, b: &Buffer) -> Option<(&String, &LspConfig)> {
-        let first_line = b.line(0).map(|l| l.to_string()).unwrap_or_default();
+        let first_line = b
+            .line(LineIdx(0))
+            .map(|l| l.to_string())
+            .unwrap_or_default();
 
         self.config_for_path_and_first_line(b.path()?, &first_line)
     }

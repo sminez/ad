@@ -7,7 +7,7 @@
 //! All indexing is 0-based when working with the contents of a specific buffer.
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
-use crate::buffer::{Buffer, CharIdx};
+use crate::buffer::{Buffer, CharIdx, CharOffset};
 use std::cmp::min;
 
 mod cur;
@@ -88,7 +88,7 @@ impl Dot {
     pub fn n_chars(&self) -> usize {
         let (from, to) = self.as_char_indices();
 
-        to - from + 1
+        (to - from).0 + 1
     }
 
     /// Whether or not this dot is a [Cur].
@@ -118,17 +118,12 @@ impl Dot {
     ///
     /// [Dot::clamp_idx] will still need to be called in order to ensure that the result
     /// is within bounds for the given buffer.
-    pub fn with_offset_saturating(mut self, offset: isize) -> Self {
+    pub fn with_offset_saturating(mut self, offset: CharOffset) -> Self {
         match &mut self {
-            Dot::Cur { c } if offset >= 0 => c.idx += offset as usize,
-            Dot::Cur { c } => c.idx = c.idx.saturating_sub(-offset as usize),
-            Dot::Range { r } if offset >= 0 => {
-                r.start.idx += offset as usize;
-                r.end.idx += offset as usize;
-            }
+            Dot::Cur { c } => c.idx = c.idx.saturating_add(offset),
             Dot::Range { r } => {
-                r.start.idx = r.start.idx.saturating_sub(-offset as usize);
-                r.end.idx = r.end.idx.saturating_sub(-offset as usize);
+                r.start.idx = r.start.idx.saturating_add(offset);
+                r.end.idx = r.end.idx.saturating_add(offset);
             }
         }
 
@@ -153,7 +148,9 @@ impl Dot {
         }
 
         let (from, to) = self.as_char_indices();
-        b.txt.slice(from, min(to + 1, len_chars)).to_string()
+        b.txt
+            .slice(from, min(to.uadd(1), CharIdx(len_chars)))
+            .to_string()
     }
 
     /// The active cursor position for this [Dot] which will be manipulated by movement operations
@@ -291,7 +288,9 @@ The third paragraph is even shorter.";
                 .sum()
         };
 
-        Cur { idx: y + x }
+        Cur {
+            idx: CharIdx(y + x),
+        }
     }
 
     fn c(y: usize, x: usize) -> Dot {

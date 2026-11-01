@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer},
+    buffer::{Buffer, CharIdx, CharOffset, GapBuffer, LineIdx, LineOffset},
     dot::{Cur, Dot, Range},
     parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
@@ -137,15 +137,15 @@ pub enum AddrBase {
     /// $
     Eof,
     /// n
-    Line(usize),
+    Line(LineIdx),
     /// -/+n
-    RelativeLine(isize),
+    RelativeLine(LineOffset),
     /// #n
     Char(CharIdx),
     /// -/+#n
-    RelativeChar(isize),
+    RelativeChar(CharOffset),
     /// n:m
-    LineAndColumn(usize, usize),
+    LineAndColumn(LineIdx, CharOffset),
     /// /re/ or +/re/
     Regex(Regex),
     /// -/re/
@@ -304,9 +304,9 @@ impl<'a> Parser<'a> {
 
                 let ix = self.try_parse_num()?;
                 match dir {
-                    None => Ok(AddrBase::Char(ix)),
-                    Some(Dir::Fwd) => Ok(AddrBase::RelativeChar(ix as isize)),
-                    Some(Dir::Bck) => Ok(AddrBase::RelativeChar(-(ix as isize))),
+                    None => Ok(AddrBase::Char(CharIdx(ix))),
+                    Some(Dir::Fwd) => Ok(AddrBase::RelativeChar(CharOffset(self.try_isize(ix)?))),
+                    Some(Dir::Bck) => Ok(AddrBase::RelativeChar(CharOffset(-self.try_isize(ix)?))),
                 }
             }
 
@@ -328,14 +328,21 @@ impl<'a> Parser<'a> {
                         } else {
                             match self.try_parse_num()? {
                                 0 => Err(self.error(ErrorKind::ZeroIndexedLineOrColumn)),
-                                col => Ok(AddrBase::LineAndColumn(line - 1, col - 1)),
+                                col => Ok(AddrBase::LineAndColumn(
+                                    LineIdx(line - 1),
+                                    CharOffset(self.try_isize(col - 1)?),
+                                )),
                             }
                         }
                     }
 
-                    (_, None) => Ok(AddrBase::Line(line - 1)),
-                    (_, Some(Dir::Fwd)) => Ok(AddrBase::RelativeLine(line as isize)),
-                    (_, Some(Dir::Bck)) => Ok(AddrBase::RelativeLine(-(line as isize))),
+                    (_, None) => Ok(AddrBase::Line(LineIdx(line - 1))),
+                    (_, Some(Dir::Fwd)) => {
+                        Ok(AddrBase::RelativeLine(LineOffset(self.try_isize(line)?)))
+                    }
+                    (_, Some(Dir::Bck)) => {
+                        Ok(AddrBase::RelativeLine(LineOffset(-self.try_isize(line)?)))
+                    }
                 }
             }
 
@@ -362,6 +369,10 @@ impl<'a> Parser<'a> {
         }
 
         s.parse().map_err(|_| self.error(ErrorKind::NotAnAddress))
+    }
+
+    fn try_isize(&self, n: usize) -> Result<isize, Error> {
+        isize::try_from(n).map_err(|_| self.error(ErrorKind::NotAnAddress))
     }
 
     fn parse_delimited_regex(&self, dir: Dir) -> Result<AddrBase, Error> {
@@ -400,14 +411,14 @@ pub trait Address: Haystack + Sized {
     /// so that don't need to special case running programs against an in-editor
     /// buffer vs stdin or a file read from disk.
     fn current_dot(&self) -> Dot;
-    fn len_bytes(&self) -> ByteIdx;
-    fn len_chars(&self) -> CharIdx;
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx>;
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize>;
+    fn len_bytes(&self) -> usize;
+    fn len_chars(&self) -> usize;
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx>;
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx>;
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx>;
     fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx>;
 
-    fn max_iter(&self) -> CharIdx {
+    fn max_iter(&self) -> usize {
         self.len_chars()
     }
 
@@ -419,14 +430,14 @@ pub trait Address: Haystack + Sized {
         };
 
         let mut dot = maybe_dot.unwrap_or_default();
-        dot.clamp_idx(self.max_iter());
+        dot.clamp_idx(CharIdx(self.max_iter()));
 
         dot
     }
 
-    fn full_line(&self, line_idx: usize) -> Option<Dot> {
+    fn full_line(&self, line_idx: LineIdx) -> Option<Dot> {
         let from = self.line_to_char(line_idx)?;
-        let to = self.char_to_line_end(from)?.saturating_sub(1);
+        let to = self.char_to_line_end(from)?.saturating_usub(1);
 
         Some(Dot::from_char_indices(from, to))
     }
@@ -436,8 +447,8 @@ pub trait Address: Haystack + Sized {
 
         let dot = match addr_base {
             Current => cur_dot,
-            Bof => Cur { idx: 0 }.into(),
-            Eof => Cur::new(self.max_iter()).into(),
+            Bof => Cur { idx: CharIdx(0) }.into(),
+            Eof => Cur::new(CharIdx(self.max_iter())).into(),
 
             Bol => {
                 let Range { start, end, .. } = cur_dot.as_range();
@@ -461,14 +472,14 @@ pub trait Address: Haystack + Sized {
             Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
                 let mut line_idx = self.char_to_line(cur_dot.active_cur().idx)?;
-                line_idx = (line_idx as isize + *offset) as usize;
+                line_idx = line_idx.saturating_add(*offset);
                 self.full_line(line_idx)?
             }
 
             Char(idx) => Cur { idx: *idx }.into(),
             RelativeChar(offset) => {
                 let mut c = cur_dot.active_cur();
-                c.idx = (c.idx as isize + *offset) as usize;
+                c.idx = c.idx.saturating_add(*offset);
                 c.into()
             }
 
@@ -478,23 +489,23 @@ pub trait Address: Haystack + Sized {
             }
 
             Regex(re) => {
-                let from = cur_dot.last_cur().idx;
+                let from = self.char_to_byte(cur_dot.last_cur().idx)?;
                 let m = re.find_from(self, from)?;
                 let (byte_from, byte_to) = m.loc();
                 let from = self.byte_to_char(byte_from).unwrap();
                 let to = self.byte_to_char(byte_to).unwrap();
 
-                Dot::from_char_indices(from, to.saturating_sub(1))
+                Dot::from_char_indices(from, to.saturating_usub(1))
             }
 
             RegexBack(re) => {
-                let from = cur_dot.first_cur().idx;
+                let from = self.char_to_byte(cur_dot.first_cur().idx)?;
                 let m = re.find_rev_from(self, from)?;
                 let (byte_from, byte_to) = m.loc();
                 let from = self.byte_to_char(byte_from).unwrap();
                 let to = self.byte_to_char(byte_to).unwrap();
 
-                Dot::from_char_indices(from, to.saturating_sub(1))
+                Dot::from_char_indices(from, to.saturating_usub(1))
             }
         };
 
@@ -521,29 +532,29 @@ pub trait Address: Haystack + Sized {
 
 impl Address for GapBuffer {
     fn current_dot(&self) -> Dot {
-        Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
+        Dot::from_char_indices(CharIdx(0), CharIdx(self.len_chars().saturating_sub(1)))
     }
 
-    fn len_bytes(&self) -> ByteIdx {
+    fn len_bytes(&self) -> usize {
         self.len()
     }
 
-    fn len_chars(&self) -> CharIdx {
+    fn len_chars(&self) -> usize {
         self.len_chars()
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
         self.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         self.try_char_to_line(char_idx)
     }
 
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.try_char_to_line(char_idx)?;
-        match self.try_line_to_char(line_idx + 1) {
-            None => Some(self.len_chars() - 1),
+        match self.try_line_to_char(line_idx.uadd(1)) {
+            None => Some(CharIdx(self.len_chars() - 1)),
             Some(idx) => Some(idx),
         }
     }
@@ -559,26 +570,26 @@ impl Address for Buffer {
         self.dot
     }
 
-    fn len_bytes(&self) -> ByteIdx {
+    fn len_bytes(&self) -> usize {
         self.txt.len()
     }
 
-    fn len_chars(&self) -> CharIdx {
+    fn len_chars(&self) -> usize {
         self.txt.len_chars()
     }
 
-    fn line_to_char(&self, line_idx: usize) -> Option<CharIdx> {
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
         self.txt.try_line_to_char(line_idx)
     }
 
-    fn char_to_line(&self, char_idx: CharIdx) -> Option<usize> {
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
         self.txt.try_char_to_line(char_idx)
     }
 
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
         let line_idx = self.txt.try_char_to_line(char_idx)?;
-        match self.txt.try_line_to_char(line_idx + 1) {
-            None => Some(self.txt.len_chars() - 1),
+        match self.txt.try_line_to_char(line_idx.uadd(1)) {
+            None => Some(CharIdx(self.txt.len_chars() - 1)),
             Some(idx) => Some(idx),
         }
     }
@@ -619,34 +630,34 @@ mod tests {
     #[test_case("+-", simple(CurrentLine); "current line plus minus")]
     #[test_case("0", simple(Bof); "beginning of file")]
     #[test_case("$", simple(Eof); "end of file")]
-    #[test_case("3", simple(Line(2)); "single line")]
-    #[test_case("+42", simple(RelativeLine(42)); "relative line forward")]
-    #[test_case("-12", simple(RelativeLine(-12)); "relative line backward")]
-    #[test_case("#3", simple(Char(3)); "char")]
-    #[test_case("+#42", simple(RelativeChar(42)); "relative char forward")]
-    #[test_case("-#12", simple(RelativeChar(-12)); "relative char backward")]
-    #[test_case("3:9", simple(LineAndColumn(2, 8)); "line and column cursor")]
+    #[test_case("3", simple(Line(LineIdx(2))); "single line")]
+    #[test_case("+42", simple(RelativeLine(LineOffset(42))); "relative line forward")]
+    #[test_case("-12", simple(RelativeLine(LineOffset(-12))); "relative line backward")]
+    #[test_case("#3", simple(Char(CharIdx(3))); "char")]
+    #[test_case("+#42", simple(RelativeChar(CharOffset(42))); "relative char forward")]
+    #[test_case("-#12", simple(RelativeChar(CharOffset(-12))); "relative char backward")]
+    #[test_case("3:9", simple(LineAndColumn(LineIdx(2), CharOffset(8))); "line and column cursor")]
     #[test_case("/foo/", simple(Regex(re("foo"))); "regex")]
     #[test_case("+/baz/", simple(Regex(re("baz"))); "regex explicit forward")]
     #[test_case("-/bar/", simple(RegexBack(re_rev("bar"))); "regex back")]
     // Simple with suffix
-    #[test_case("#5+", simple(SimpleAddr::new(Char(5),  vec![Eol])); "char to eol")]
-    #[test_case("#5-", simple(SimpleAddr::new(Char(5), vec![Bol])); "char to bol")]
-    #[test_case("5+#3", simple(SimpleAddr::new(Line(4), vec![RelativeChar(3)])); "line plus char")]
-    #[test_case("5-#3", simple(SimpleAddr::new(Line(4), vec![RelativeChar(-3)])); "line minus char")]
+    #[test_case("#5+", simple(SimpleAddr::new(Char(CharIdx(5)),  vec![Eol])); "char to eol")]
+    #[test_case("#5-", simple(SimpleAddr::new(Char(CharIdx(5)), vec![Bol])); "char to bol")]
+    #[test_case("5+#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(CharOffset(3))])); "line plus char")]
+    #[test_case("5-#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(CharOffset(-3))])); "line minus char")]
     // Compound
     #[test_case(",", compound(Bof, Eof); "full")]
-    #[test_case("5,", compound(Line(4), Eof); "from n")]
-    #[test_case("50,", compound(Line(49), Eof); "from n multi digit")]
-    #[test_case("5,9", compound(Line(4), Line(8)); "from n to m")]
-    #[test_case("25,90", compound(Line(24), Line(89)); "from n to m multi digit")]
+    #[test_case("5,", compound(Line(LineIdx(4)), Eof); "from n")]
+    #[test_case("50,", compound(Line(LineIdx(49)), Eof); "from n multi digit")]
+    #[test_case("5,9", compound(Line(LineIdx(4)), Line(LineIdx(8))); "from n to m")]
+    #[test_case("25,90", compound(Line(LineIdx(24)), Line(LineIdx(89))); "from n to m multi digit")]
     #[test_case("/foo/,/bar/", compound(Regex(re("foo")), Regex(re("bar"))); "regex range")]
     // Compound with suffix
     #[test_case(
         "-/\\s/+#1,/\\s/-#1",
         compound(
-            SimpleAddr::new(RegexBack(re_rev("\\s")), vec![RelativeChar(1)]),
-            SimpleAddr::new(Regex(re("\\s")), vec![RelativeChar(-1)]),
+            SimpleAddr::new(RegexBack(re_rev("\\s")), vec![RelativeChar(CharOffset(1))]),
+            SimpleAddr::new(Regex(re("\\s")), vec![RelativeChar(CharOffset(-1))]),
         );
         "regex range with suffixes"
     )]
@@ -657,15 +668,17 @@ mod tests {
     }
 
     #[test_case("0", Dot::default(), "t"; "bof")]
-    #[test_case("2", Dot::from_char_indices(15, 26), "and another\n"; "line 2")]
-    #[test_case("2:1", Cur { idx: 15 }.into(), "a"; "line 2 col 1")]
-    #[test_case("2:2", Cur { idx: 16 }.into(), "n"; "line 2 col 2")]
-    #[test_case("-1", Dot::from_char_indices(0, 14), "this is a line\n"; "line 1 relative to 2")]
-    #[test_case("/something/", Dot::from_char_indices(33, 41), "something"; "regex forward")]
-    #[test_case("-/line/", Dot::from_char_indices(10, 13), "line"; "regex back")]
-    #[test_case("-/his/", Dot::from_char_indices(1, 3), "his"; "regex back 2")]
-    #[test_case("-/a/,/a/", Dot::from_char_indices(15, 19), "and a"; "regex range")]
-    #[test_case("-/\\s/+#1,/\\s/-#1", Dot::from_char_indices(15, 17), "and"; "regex range boundaries")]
+    #[test_case("2", Dot::from_char_indices(CharIdx(15), CharIdx(26)), "and another\n"; "line 2")]
+    #[test_case("2:1", Cur { idx: CharIdx(15) }.into(), "a"; "line 2 col 1")]
+    #[test_case("2:2", Cur { idx: CharIdx(16) }.into(), "n"; "line 2 col 2")]
+    #[test_case("-1", Dot::from_char_indices(CharIdx(0), CharIdx(14)), "this is a line\n"; "line 1 relative to 2")]
+    #[test_case("-5", Dot::from_char_indices(CharIdx(0), CharIdx(14)), "this is a line\n"; "relative line before bof clamps")]
+    #[test_case("-#20", Cur { idx: CharIdx(0) }.into(), "t"; "relative char before bof clamps")]
+    #[test_case("/something/", Dot::from_char_indices(CharIdx(33), CharIdx(41)), "something"; "regex forward")]
+    #[test_case("-/line/", Dot::from_char_indices(CharIdx(10), CharIdx(13)), "line"; "regex back")]
+    #[test_case("-/his/", Dot::from_char_indices(CharIdx(1), CharIdx(3)), "his"; "regex back 2")]
+    #[test_case("-/a/,/a/", Dot::from_char_indices(CharIdx(15), CharIdx(19)), "and a"; "regex range")]
+    #[test_case("-/\\s/+#1,/\\s/-#1", Dot::from_char_indices(CharIdx(15), CharIdx(17)), "and"; "regex range boundaries")]
     #[test]
     fn map_addr_works(s: &str, expected: Dot, expected_contents: &str) {
         let mut b = Buffer::new_unnamed(
@@ -673,7 +686,7 @@ mod tests {
             "this is a line\nand another\n- [ ] something to do\n",
             Default::default(),
         );
-        b.dot = Cur::new(16).into();
+        b.dot = Cur::new(CharIdx(16)).into();
 
         let addr = Addr::parse(s).expect("valid addr");
         b.dot = b.map_addr(&addr);
@@ -690,6 +703,10 @@ mod tests {
     #[test_case("99999999999999999999,100"; "range start overflow")]
     #[test_case("1,99999999999999999999"; "range end overflow")]
     #[test_case("99999999999999999999:5"; "line in line col overflow")]
+    #[test_case("+#10000000000000000000"; "relative char forward isize overflow")]
+    #[test_case("-#10000000000000000000"; "relative char back isize overflow")]
+    #[test_case("+10000000000000000000"; "relative line forward isize overflow")]
+    #[test_case("-10000000000000000000"; "relative line back isize overflow")]
     #[test]
     fn giant_address_integers_error(s: &str) {
         let res = Addr::parse(s);
