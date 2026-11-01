@@ -19,7 +19,7 @@
 //! 2. [ByteIdx] - A byte offset within the logical contents of the GapBuffer. This is used
 //!    primarily by the regex and treesitter APIs where a GapBuffer is being treated as a byte
 //!    slice. The standard pitfalls of indexing into a utf-8 encoded string all apply (i.e. care
-//!    must be taked when multi-byte characters are present) and it is _not_ guaranteed that an
+//!    must be taken when multi-byte characters are present) and it is _not_ guaranteed that an
 //!    arbitrary index of this type lies on a character boundary. However, this type _does_
 //!    guarantee that indexing in this way always returns bytes from the logical contents of the
 //!    buffer and not the gap region.
@@ -37,7 +37,7 @@
 //!
 //! All four index types behave the same way and implement a set of shared helper methods / traits
 //! to make them look as much like a bare `usize` as possible while still forcing the user to be
-//! explicit about how they are indexing into a GapBuffer. Indicies can be freely added and
+//! explicit about how they are indexing into a GapBuffer. Indices can be freely added and
 //! subtracted from one another but offsetting by a `usize` requires calling the `uadd` and `usub`
 //! methods in order make it easy to audit for logic errors around mixing indices.
 //!

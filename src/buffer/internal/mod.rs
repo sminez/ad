@@ -1351,7 +1351,7 @@ mod tests {
 
     // Regression test for char_at returning data from within the gap region.
     //
-    // char_at needs to special case byte_idx == gap_start as the logical byte being targetted
+    // char_at needs to special case byte_idx == gap_start as the logical byte being targeted
     // there is actually gap_end rather than the first byte of the gap itself.
     #[test]
     fn char_at_gap_returns_correct_value() {
