@@ -482,16 +482,13 @@ impl Frame {
     ) {
         self.msg_bar.clear();
         self.msg_bar.push_str(&CursorAction::ClearRight.to_string());
-        msg.truncate(self.screen_cols.saturating_sub(10));
+        let n_cols = truncate_to_cols(&mut msg, self.screen_cols.saturating_sub(10));
 
         let pending = render_pending(pending_keys);
         let delta = (Instant::now() - last_status).as_secs();
 
         if !msg.is_empty() && delta < status_timeout {
-            let width = self
-                .screen_cols
-                .saturating_sub(msg.len())
-                .saturating_sub(10);
+            let width = self.screen_cols.saturating_sub(n_cols).saturating_sub(10);
             _ = write!(
                 &mut self.msg_bar,
                 "{}{}{msg}{pending:>width$}          ",
@@ -787,6 +784,21 @@ impl<'a> WinRenderer<'a> {
     }
 }
 
+fn truncate_to_cols(s: &mut String, cols: usize) -> usize {
+    let mut n_cols = 0;
+
+    for (i, ch) in s.char_indices() {
+        let w = ch.width().unwrap_or(0);
+        if n_cols + w > cols {
+            s.truncate(i);
+            return n_cols;
+        }
+        n_cols += w;
+    }
+
+    n_cols
+}
+
 fn render_pending(keys: &[Input]) -> String {
     let mut s = String::new();
     for k in keys {
@@ -814,6 +826,8 @@ fn render_pending(keys: &[Input]) -> String {
     }
 
     if s.len() > 10 {
+        // We're OK to use split_off here as we've just built this string above and only make use
+        // of ascii single byte characters.
         s = s.split_off(s.len() - 10);
     }
 
