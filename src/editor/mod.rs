@@ -798,7 +798,7 @@ mod tests {
 
         // hack: avoid race between the child thread pushing lines to the output buffer and the
         // attempt to drain the event queue below
-        sleep(Duration::from_millis(100));
+        sleep(Duration::from_millis(500));
 
         // drain any pending writes from the script
         while let Ok(evt) = ed.rx_events.try_recv() {
