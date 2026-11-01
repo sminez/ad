@@ -88,7 +88,7 @@ impl<'a> From<&'a FsysEvent> for EventData<'a> {
 impl<'a> EventData<'a> {
     /// Attempt to read the full text of this event from the underlying buffer
     pub fn try_full_text(&self, client: &sync::BufferClient) -> Result<String> {
-        if self.txt.len() < ad_event::MAX_CHARS {
+        if !self.truncated {
             return Ok(self.txt.to_string());
         }
 
@@ -106,7 +106,7 @@ impl<'a> EventData<'a> {
     #[cfg(feature = "tokio")]
     /// Attempt to read the full text of this event from the underlying buffer
     pub async fn try_full_text_async(&self, client: &tokio::BufferClient) -> Result<String> {
-        if self.txt.len() < ad_event::MAX_CHARS {
+        if !self.truncated {
             return Ok(self.txt.to_string());
         }
 
@@ -169,7 +169,7 @@ impl FromStr for LogEvent {
 
         let (str_id, action) = s.split_once(' ').ok_or(io::Error::new(
             io::ErrorKind::InvalidData,
-            "malformed log line: {s:?}",
+            format!("malformed log line: {s:?}"),
         ))?;
 
         let id = parse_bufid(str_id)?;
@@ -181,7 +181,7 @@ impl FromStr for LogEvent {
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    "unknown log action {action:?}",
+                    format!("unknown log action {action:?}"),
                 )
                 .into());
             }
