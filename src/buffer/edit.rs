@@ -1,4 +1,4 @@
-use crate::buffer::{Buffer, Cur};
+use crate::buffer::{Buffer, CharOffset, Cur};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -99,7 +99,7 @@ impl Edit {
                     self.txt.append(e.txt);
                     None
                 }
-                Txt::String(s) if e.cur.idx == self.cur.idx.uadd(s.chars().count()) => {
+                Txt::String(s) if e.cur.idx == self.cur.idx + CharOffset::from(s.as_str()) => {
                     self.txt.append(e.txt);
                     None
                 }
@@ -119,7 +119,7 @@ impl Edit {
                     self.cur = e.cur;
                     None
                 }
-                Txt::String(s) if e.cur.idx.uadd(s.chars().count()) == self.cur.idx => {
+                Txt::String(s) if e.cur.idx + CharOffset::from(s.as_str()) == self.cur.idx => {
                     self.txt.prepend(e.txt);
                     self.cur = e.cur;
                     None

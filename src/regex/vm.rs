@@ -9,7 +9,7 @@
 //! index we are up to per-iteration as this results in roughly a 100x speed
 //! up from not having to allocate and free inside of the main loop.
 use crate::{
-    buffer::ByteIdx,
+    buffer::{ByteIdx, ByteOffset},
     regex::{
         Error, Haystack,
         ast::{Assertion, parse},
@@ -322,7 +322,7 @@ impl RegexInner {
         if let Some(m) = ac.find(haystack.substr_from(byte_offset)?.as_ref()) {
             // m.start is based on the substr not the full haystack so we need to add the original
             // offset to get the correct value.
-            byte_offset = byte_offset.uadd(m.start());
+            byte_offset += ByteOffset(m.start() as isize);
         }
 
         Some(byte_offset)
@@ -538,10 +538,14 @@ impl RegexInner {
         // If we are saving our initial position from a forward match then we are looking at the
         // correct character, otherwise the Save op is being processed at the character before the
         // one we need to save.
-        let inc_bytes = if !initial && !rev { ch.len_utf8() } else { 0 };
+        let inc_bytes = if !initial && !rev {
+            ByteOffset::from(ch)
+        } else {
+            ByteOffset(0)
+        };
 
         if (!rev && s.is_multiple_of(2)) || (rev && !s.is_multiple_of(2)) {
-            let sm = self.sm_update(t.sm, s, sp.uadd(inc_bytes));
+            let sm = self.sm_update(t.sm, s, sp + inc_bytes);
             let th = match t.assertion {
                 Some(a) => assert_thread(t.pc + 1, sm, a),
                 None => thread(t.pc + 1, sm),
@@ -551,7 +555,7 @@ impl RegexInner {
             match t.assertion {
                 Some(a) if !a.holds_for(self.prev, ch, self.next) => self.sm_dec_ref(t.sm),
                 _ => {
-                    let sm = self.sm_update(t.sm, s, sp.uadd(inc_bytes));
+                    let sm = self.sm_update(t.sm, s, sp + inc_bytes);
                     self.add_thread(thread(t.pc + 1, sm), sp, ch, initial);
                 }
             }

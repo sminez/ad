@@ -1,6 +1,6 @@
 //! Layout of UI windows
 use crate::{
-    buffer::{Buffer, BufferId, Buffers, CharIdx, LineIdx, SCRATCH_ID},
+    buffer::{Buffer, BufferId, Buffers, CharIdx, CharOffset, LineIdx, SCRATCH_ID},
     config::Config,
     die,
     dot::Cur,
@@ -1042,13 +1042,13 @@ impl View {
         (x, y)
     }
 
-    pub(crate) fn rx_from_x(&self, b: &Buffer, y: LineIdx, x: usize, tabstop: usize) -> usize {
+    pub(crate) fn rx_from_x(&self, b: &Buffer, y: LineIdx, x: CharOffset, tabstop: usize) -> usize {
         if y.0 >= b.len_lines() {
             return 0;
         }
 
         let mut rx = 0;
-        for c in b.txt.line(y).chars().take(x) {
+        for c in b.txt.line(y).chars().take(x.0 as usize) {
             if c == '\t' {
                 rx += (tabstop - 1) - (rx % tabstop);
             }

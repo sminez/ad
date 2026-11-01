@@ -3,7 +3,7 @@
 //! For a given language the user needs to provide a .so file containing the compiled
 //! tree-sitter parser and a highlights .scm file for driving the highlighting.
 use crate::{
-    buffer::{ByteIdx, CharIdx, GapBuffer, LineIdx, SliceIter},
+    buffer::{ByteIdx, ByteOffset, CharIdx, GapBuffer, LineIdx, SliceIter},
     dot::Range,
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
@@ -132,7 +132,7 @@ impl TsState {
     ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let start_byte = gb.char_to_byte(ch_idx);
 
-        (start_byte, start_byte, start_byte.uadd(ch.len_utf8()))
+        (start_byte, start_byte, start_byte + ByteOffset::from(ch))
     }
 
     pub(super) fn prepare_insert_string(
@@ -143,7 +143,7 @@ impl TsState {
     ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let start_byte = gb.char_to_byte(ch_idx);
 
-        (start_byte, start_byte, start_byte.uadd(s.len()))
+        (start_byte, start_byte, start_byte + ByteOffset::from(s))
     }
 
     pub(super) fn prepare_delete_char(

@@ -46,7 +46,7 @@
 //! than ad-hoc manual conversion or external helper functions.
 use std::{
     fmt,
-    ops::{Add, AddAssign, Sub, SubAssign},
+    ops::{Add, AddAssign, Neg, Sub, SubAssign},
 };
 
 macro_rules! impl_index_types {
@@ -58,8 +58,8 @@ macro_rules! impl_index_types {
             #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
             pub struct $name(pub usize);
 
-            #[allow(dead_code)]
             impl $name {
+                #[allow(dead_code)]
                 /// The largest value that can be represented by this index type.
                 pub const MAX: Self = Self(usize::MAX);
 
@@ -75,14 +75,12 @@ macro_rules! impl_index_types {
                     Self(self.0 - rhs)
                 }
 
+                #[allow(dead_code)]
                 pub const fn saturating_usub(self, rhs: usize) -> Self {
                     Self(self.0.saturating_sub(rhs))
                 }
 
-                pub const fn saturating_iadd(self, rhs: isize) -> Self {
-                    Self(self.0.saturating_add_signed(rhs))
-                }
-
+                #[allow(dead_code)]
                 pub fn to(self, end: Self) -> impl Iterator<Item = Self> {
                     (self.0..end.0).map(Self)
                 }
@@ -135,3 +133,139 @@ impl_index_types!(
     /// A line index within the logical buffer state.
     LineIdx;
 );
+
+macro_rules! impl_offset_types {
+    (
+        $( $(#[$doc_str:meta])* $name:ident => $idx:ident; )*
+    ) => {
+        $(
+            $(#[$doc_str])*
+            #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            pub struct $name(pub isize);
+
+            impl $idx {
+                pub const fn offset_from(self, origin: Self) -> $name {
+                    $name(self.0 as isize - origin.0 as isize)
+                }
+
+                pub const fn saturating_add(self, rhs: $name) -> Self {
+                    Self(self.0.saturating_add_signed(rhs.0))
+                }
+            }
+
+            impl From<$idx> for $name {
+                fn from(idx: $idx) -> Self {
+                    Self(idx.0 as isize)
+                }
+            }
+
+            impl fmt::Display for $name {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    self.0.fmt(f)
+                }
+            }
+
+            impl Add for $name {
+                type Output = Self;
+
+                fn add(self, rhs: Self) -> Self {
+                    Self(self.0 + rhs.0)
+                }
+            }
+
+            impl Sub for $name {
+                type Output = Self;
+
+                fn sub(self, rhs: Self) -> Self {
+                    Self(self.0 - rhs.0)
+                }
+            }
+
+            impl Neg for $name {
+                type Output = Self;
+
+                fn neg(self) -> Self {
+                    Self(-self.0)
+                }
+            }
+
+            impl AddAssign for $name {
+                fn add_assign(&mut self, rhs: Self) {
+                    self.0 += rhs.0;
+                }
+            }
+
+            impl SubAssign for $name {
+                fn sub_assign(&mut self, rhs: Self) {
+                    self.0 -= rhs.0;
+                }
+            }
+
+            impl Add<$name> for $idx {
+                type Output = Self;
+
+                fn add(self, rhs: $name) -> Self {
+                    match self.0.checked_add_signed(rhs.0) {
+                        Some(idx) => Self(idx),
+                        None => panic!("index overflow: {} + {}", self.0, rhs.0),
+                    }
+                }
+            }
+
+            impl Sub<$name> for $idx {
+                type Output = Self;
+
+                fn sub(self, rhs: $name) -> Self {
+                    self + -rhs
+                }
+            }
+
+            impl AddAssign<$name> for $idx {
+                fn add_assign(&mut self, rhs: $name) {
+                    *self = *self + rhs;
+                }
+            }
+
+            impl SubAssign<$name> for $idx {
+                fn sub_assign(&mut self, rhs: $name) {
+                    *self = *self - rhs;
+                }
+            }
+        )*
+    };
+}
+
+impl_offset_types!(
+    /// A signed offset between two [ByteIdx] values.
+    ByteOffset => ByteIdx;
+    /// A signed offset between two [CharIdx] values.
+    CharOffset => CharIdx;
+    /// A signed offset between two [LineIdx] values.
+    LineOffset => LineIdx;
+);
+
+impl From<&str> for ByteOffset {
+    fn from(s: &str) -> Self {
+        // Casting a length to isize is lossless as Rust guarantees that allocations are never
+        // larger than isize::MAX bytes.
+        Self(s.len() as isize)
+    }
+}
+
+impl From<char> for ByteOffset {
+    fn from(ch: char) -> Self {
+        Self(ch.len_utf8() as isize)
+    }
+}
+
+impl From<&str> for CharOffset {
+    fn from(s: &str) -> Self {
+        Self(s.chars().count() as isize)
+    }
+}
+
+impl From<char> for CharOffset {
+    fn from(_: char) -> Self {
+        Self(1)
+    }
+}

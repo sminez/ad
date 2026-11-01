@@ -1,5 +1,5 @@
 use crate::{
-    buffer::{Buffer, CharIdx, LineIdx},
+    buffer::{Buffer, CharIdx, CharOffset, LineIdx},
     key::Arrow,
 };
 use std::cmp::min;
@@ -26,17 +26,17 @@ impl Cur {
 
     pub fn as_string_addr(&self, b: &Buffer) -> String {
         let (y, x) = self.as_yx(b);
-        format!("{}:{}", y.uadd(1), x + 1)
+        format!("{}:{}", y.uadd(1), x + CharOffset(1))
     }
 
-    pub(crate) fn as_yx(&self, b: &Buffer) -> (LineIdx, usize) {
+    pub(crate) fn as_yx(&self, b: &Buffer) -> (LineIdx, CharOffset) {
         let y = b.txt.char_to_line(self.idx);
-        let x = (self.idx - b.txt.line_to_char(y)).0;
+        let x = self.idx.offset_from(b.txt.line_to_char(y));
 
         (y, x)
     }
 
-    pub(crate) fn from_yx(y_idx: LineIdx, x_idx: usize, b: &Buffer) -> Self {
+    pub(crate) fn from_yx(y_idx: LineIdx, x_idx: CharOffset, b: &Buffer) -> Self {
         let line_start = b.txt.line_to_char(y_idx);
         let mut x_max = b.txt.line_len_chars(y_idx);
         if y_idx.0 < b.len_lines() - 1 {
@@ -44,7 +44,7 @@ impl Cur {
         }
 
         Self {
-            idx: line_start.uadd(min(x_idx, x_max)),
+            idx: line_start + min(x_idx, CharOffset(x_max as isize)),
         }
     }
 
@@ -67,14 +67,14 @@ impl Cur {
                 let (mut y, _) = self.as_yx(b);
                 if y != LineIdx(0) {
                     y = y.usub(1);
-                    cur.idx = b.txt.line_to_char(y).uadd(b.x_from_rx(y));
+                    cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
             }
             Arrow::Down => {
                 let (mut y, _) = self.as_yx(b);
                 if !b.is_empty() && y.0 < b.len_lines() - 1 {
                     y = y.uadd(1);
-                    cur.idx = b.txt.line_to_char(y).uadd(b.x_from_rx(y));
+                    cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
             }
             Arrow::Left => cur.idx = cur.idx.saturating_usub(1),
@@ -121,12 +121,16 @@ mod tests {
         let b = buffer_from_lines(lines);
 
         for (n, s) in lines.iter().enumerate() {
-            let c = Cur::from_yx(LineIdx(n), 100, &b);
+            let c = Cur::from_yx(LineIdx(n), CharOffset(100), &b);
 
             // Should be focused on the newline character at the end of the line
             // In the case of the last line we should be focused on the index after
             // the end of the string so that we are appending to the buffer.
-            assert_eq!(c.as_yx(&b), (LineIdx(n), s.len()), "line='{s}'");
+            assert_eq!(
+                c.as_yx(&b),
+                (LineIdx(n), CharOffset::from(*s)),
+                "line='{s}'"
+            );
         }
     }
 
@@ -135,10 +139,10 @@ mod tests {
         let lines = &["a", "ab", "abc", "abcd"];
         let b = buffer_from_lines(lines);
         let c = Cur::buffer_end(&b);
-        assert_eq!(c.as_yx(&b), (LineIdx(3), 4));
+        assert_eq!(c.as_yx(&b), (LineIdx(3), CharOffset(4)));
 
         let final_c = c.arr(Arrow::Right, &b);
-        assert_eq!(final_c.as_yx(&b), (LineIdx(3), 4));
+        assert_eq!(final_c.as_yx(&b), (LineIdx(3), CharOffset(4)));
     }
 
     #[test]
@@ -148,10 +152,10 @@ mod tests {
         let mut c = Cur::buffer_end(&b);
         c.idx = c.idx.usub(1);
 
-        assert_eq!(c.as_yx(&b), (LineIdx(3), 3));
+        assert_eq!(c.as_yx(&b), (LineIdx(3), CharOffset(3)));
 
         let mut final_c = c.arr(Arrow::Right, &b);
         final_c.clamp_idx(CharIdx(b.txt.len_chars()));
-        assert_eq!(final_c.as_yx(&b), (LineIdx(3), 4));
+        assert_eq!(final_c.as_yx(&b), (LineIdx(3), CharOffset(4)));
     }
 }

@@ -1,5 +1,5 @@
 use crate::{
-    buffer::ByteIdx,
+    buffer::{ByteIdx, ByteOffset},
     regex::{Haystack, Regex, vm::N_SLOTS},
 };
 use std::{borrow::Cow, sync::Arc};
@@ -150,15 +150,14 @@ where
         let m = self.r.find_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
         if from == self.from {
-            self.from = self.from.uadd(
-                self.haystack
-                    .substr_from(from)
-                    .unwrap()
-                    .chars()
-                    .next()
-                    .unwrap()
-                    .len_utf8(),
-            );
+            let ch = self
+                .haystack
+                .substr_from(from)
+                .unwrap()
+                .chars()
+                .next()
+                .unwrap();
+            self.from += ByteOffset::from(ch);
         } else {
             self.from = from;
         }

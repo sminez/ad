@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, CharIdx, GapBuffer, LineIdx},
+    buffer::{Buffer, CharIdx, CharOffset, GapBuffer, LineIdx, LineOffset},
     dot::{Cur, Dot, Range},
     parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
@@ -139,13 +139,13 @@ pub enum AddrBase {
     /// n
     Line(LineIdx),
     /// -/+n
-    RelativeLine(isize),
+    RelativeLine(LineOffset),
     /// #n
     Char(CharIdx),
     /// -/+#n
-    RelativeChar(isize),
+    RelativeChar(CharOffset),
     /// n:m
-    LineAndColumn(LineIdx, usize),
+    LineAndColumn(LineIdx, CharOffset),
     /// /re/ or +/re/
     Regex(Regex),
     /// -/re/
@@ -305,8 +305,8 @@ impl<'a> Parser<'a> {
                 let ix = self.try_parse_num()?;
                 match dir {
                     None => Ok(AddrBase::Char(CharIdx(ix))),
-                    Some(Dir::Fwd) => Ok(AddrBase::RelativeChar(ix as isize)),
-                    Some(Dir::Bck) => Ok(AddrBase::RelativeChar(-(ix as isize))),
+                    Some(Dir::Fwd) => Ok(AddrBase::RelativeChar(CharOffset(self.try_isize(ix)?))),
+                    Some(Dir::Bck) => Ok(AddrBase::RelativeChar(CharOffset(-self.try_isize(ix)?))),
                 }
             }
 
@@ -328,14 +328,21 @@ impl<'a> Parser<'a> {
                         } else {
                             match self.try_parse_num()? {
                                 0 => Err(self.error(ErrorKind::ZeroIndexedLineOrColumn)),
-                                col => Ok(AddrBase::LineAndColumn(LineIdx(line - 1), col - 1)),
+                                col => Ok(AddrBase::LineAndColumn(
+                                    LineIdx(line - 1),
+                                    CharOffset(self.try_isize(col - 1)?),
+                                )),
                             }
                         }
                     }
 
                     (_, None) => Ok(AddrBase::Line(LineIdx(line - 1))),
-                    (_, Some(Dir::Fwd)) => Ok(AddrBase::RelativeLine(line as isize)),
-                    (_, Some(Dir::Bck)) => Ok(AddrBase::RelativeLine(-(line as isize))),
+                    (_, Some(Dir::Fwd)) => {
+                        Ok(AddrBase::RelativeLine(LineOffset(self.try_isize(line)?)))
+                    }
+                    (_, Some(Dir::Bck)) => {
+                        Ok(AddrBase::RelativeLine(LineOffset(-self.try_isize(line)?)))
+                    }
                 }
             }
 
@@ -362,6 +369,10 @@ impl<'a> Parser<'a> {
         }
 
         s.parse().map_err(|_| self.error(ErrorKind::NotAnAddress))
+    }
+
+    fn try_isize(&self, n: usize) -> Result<isize, Error> {
+        isize::try_from(n).map_err(|_| self.error(ErrorKind::NotAnAddress))
     }
 
     fn parse_delimited_regex(&self, dir: Dir) -> Result<AddrBase, Error> {
@@ -461,23 +472,20 @@ pub trait Address: Haystack + Sized {
             Line(line_idx) => self.full_line(*line_idx)?,
             RelativeLine(offset) => {
                 let mut line_idx = self.char_to_line(cur_dot.active_cur().idx)?;
-                line_idx = line_idx.saturating_iadd(*offset);
+                line_idx = line_idx.saturating_add(*offset);
                 self.full_line(line_idx)?
             }
 
             Char(idx) => Cur { idx: *idx }.into(),
             RelativeChar(offset) => {
                 let mut c = cur_dot.active_cur();
-                c.idx = c.idx.saturating_iadd(*offset);
+                c.idx = c.idx.saturating_add(*offset);
                 c.into()
             }
 
             LineAndColumn(line, col) => {
                 let idx = self.line_to_char(*line)?;
-                Cur {
-                    idx: idx.uadd(*col),
-                }
-                .into()
+                Cur { idx: idx + *col }.into()
             }
 
             Regex(re) => {
@@ -623,20 +631,20 @@ mod tests {
     #[test_case("0", simple(Bof); "beginning of file")]
     #[test_case("$", simple(Eof); "end of file")]
     #[test_case("3", simple(Line(LineIdx(2))); "single line")]
-    #[test_case("+42", simple(RelativeLine(42)); "relative line forward")]
-    #[test_case("-12", simple(RelativeLine(-12)); "relative line backward")]
+    #[test_case("+42", simple(RelativeLine(LineOffset(42))); "relative line forward")]
+    #[test_case("-12", simple(RelativeLine(LineOffset(-12))); "relative line backward")]
     #[test_case("#3", simple(Char(CharIdx(3))); "char")]
-    #[test_case("+#42", simple(RelativeChar(42)); "relative char forward")]
-    #[test_case("-#12", simple(RelativeChar(-12)); "relative char backward")]
-    #[test_case("3:9", simple(LineAndColumn(LineIdx(2), 8)); "line and column cursor")]
+    #[test_case("+#42", simple(RelativeChar(CharOffset(42))); "relative char forward")]
+    #[test_case("-#12", simple(RelativeChar(CharOffset(-12))); "relative char backward")]
+    #[test_case("3:9", simple(LineAndColumn(LineIdx(2), CharOffset(8))); "line and column cursor")]
     #[test_case("/foo/", simple(Regex(re("foo"))); "regex")]
     #[test_case("+/baz/", simple(Regex(re("baz"))); "regex explicit forward")]
     #[test_case("-/bar/", simple(RegexBack(re_rev("bar"))); "regex back")]
     // Simple with suffix
     #[test_case("#5+", simple(SimpleAddr::new(Char(CharIdx(5)),  vec![Eol])); "char to eol")]
     #[test_case("#5-", simple(SimpleAddr::new(Char(CharIdx(5)), vec![Bol])); "char to bol")]
-    #[test_case("5+#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(3)])); "line plus char")]
-    #[test_case("5-#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(-3)])); "line minus char")]
+    #[test_case("5+#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(CharOffset(3))])); "line plus char")]
+    #[test_case("5-#3", simple(SimpleAddr::new(Line(LineIdx(4)), vec![RelativeChar(CharOffset(-3))])); "line minus char")]
     // Compound
     #[test_case(",", compound(Bof, Eof); "full")]
     #[test_case("5,", compound(Line(LineIdx(4)), Eof); "from n")]
@@ -648,8 +656,8 @@ mod tests {
     #[test_case(
         "-/\\s/+#1,/\\s/-#1",
         compound(
-            SimpleAddr::new(RegexBack(re_rev("\\s")), vec![RelativeChar(1)]),
-            SimpleAddr::new(Regex(re("\\s")), vec![RelativeChar(-1)]),
+            SimpleAddr::new(RegexBack(re_rev("\\s")), vec![RelativeChar(CharOffset(1))]),
+            SimpleAddr::new(Regex(re("\\s")), vec![RelativeChar(CharOffset(-1))]),
         );
         "regex range with suffixes"
     )]
@@ -695,6 +703,10 @@ mod tests {
     #[test_case("99999999999999999999,100"; "range start overflow")]
     #[test_case("1,99999999999999999999"; "range end overflow")]
     #[test_case("99999999999999999999:5"; "line in line col overflow")]
+    #[test_case("+#10000000000000000000"; "relative char forward isize overflow")]
+    #[test_case("-#10000000000000000000"; "relative char back isize overflow")]
+    #[test_case("+10000000000000000000"; "relative line forward isize overflow")]
+    #[test_case("-10000000000000000000"; "relative line back isize overflow")]
     #[test]
     fn giant_address_integers_error(s: &str) {
         let res = Addr::parse(s);

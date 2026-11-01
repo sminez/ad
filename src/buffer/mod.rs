@@ -35,7 +35,8 @@ use scratch::ScratchBuf;
 
 pub use buffers::{BufferId, Buffers};
 pub use internal::{
-    ByteIdx, CharIdx, Chars, GapBuffer, IdxChars, LineIdx, RevChars, Slice, SliceIter,
+    ByteIdx, ByteOffset, CharIdx, CharOffset, Chars, GapBuffer, IdxChars, LineIdx, LineOffset,
+    RevChars, Slice, SliceIter,
 };
 
 // Welcome splash message for new users to help them get started (rather than just presenting them
@@ -630,14 +631,14 @@ impl Buffer {
         self.edit_log.debug_edits(self)
     }
 
-    pub(crate) fn x_from_rx(&self, y: LineIdx) -> usize {
+    pub(crate) fn x_from_rx(&self, y: LineIdx) -> CharOffset {
         self.x_from_provided_rx(y, self.cached_rx)
     }
 
-    pub(crate) fn x_from_provided_rx(&self, y: LineIdx, buf_rx: usize) -> usize {
+    pub(crate) fn x_from_provided_rx(&self, y: LineIdx, buf_rx: usize) -> CharOffset {
         let tabstop = self.tabstop();
         if self.is_empty() {
-            return 0;
+            return CharOffset(0);
         }
 
         let mut rx = 0;
@@ -665,7 +666,7 @@ impl Buffer {
             cx += 1;
         }
 
-        cx
+        CharOffset(cx)
     }
 
     /// The line at the requested index returned as a Slice.
@@ -921,7 +922,7 @@ impl Buffer {
 
             BAction::CurToLine { y } => {
                 self.dot = Dot::Cur {
-                    c: Cur::from_yx(y, 0, self),
+                    c: Cur::from_yx(y, CharOffset(0), self),
                 };
             }
 
@@ -1117,7 +1118,7 @@ impl Buffer {
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }, None).0,
             (Kind::Delete, Txt::String(s)) => {
                 let start_idx = cur.idx;
-                let end_idx = start_idx.uadd(s.chars().count()).saturating_usub(1);
+                let end_idx = (start_idx + CharOffset::from(s.as_str())).saturating_usub(1);
                 let end = Cur { idx: end_idx };
                 self.delete_dot(
                     Dot::Range {
@@ -1225,7 +1226,7 @@ impl Buffer {
         source: Option<Source>,
     ) -> (Cur, Option<String>) {
         let s = normalize_line_endings(s);
-        let len = s.chars().count();
+        let len = CharOffset::from(s.as_str());
         let mut have_prepared_edit = false;
 
         if let Dot::Range { r } = &dot
@@ -1276,7 +1277,7 @@ impl Buffer {
             }
 
             self.edit_log.insert_string(cur, s);
-            cur.idx = cur.idx.uadd(len);
+            cur.idx += len;
         }
 
         if have_prepared_edit && let Some(ts) = self.syntax_state.as_mut() {
@@ -1393,7 +1394,7 @@ impl Buffer {
     /// We determine the final cursor we collapse to based on the start of xdot
     /// and the offset coming from the text being inserted.
     pub(crate) fn insert_xdot(&mut self, s: String) {
-        let mut offset = s.chars().count() as isize;
+        let mut offset = CharOffset::from(s.as_str());
 
         if self.dot.as_range().intersects_range(&self.xdot.as_range()) {
             if self.xdot.first_cur() > self.dot.first_cur()
@@ -1402,7 +1403,7 @@ impl Buffer {
                 // The final case shown above: we need to back up a character in
                 // order to land on the last character of the existing dot rather
                 // than the first character of the inserted text.
-                offset = -1;
+                offset = CharOffset(-1);
             }
 
             self.dot = self.xdot.collapse_to_first_cur();
@@ -1410,17 +1411,17 @@ impl Buffer {
             // Nothing to update for dot.
             // DOT   |---|
             // XDOT         |----|
-            offset = 0;
+            offset = CharOffset(0);
         } else {
             // In this case, the change in buffer length needs to account for
             // the text being removed as well as what is being inserted.
             // DOT          |---|
             // XDOT  |----|
-            offset -= self.xdot.n_chars() as isize;
+            offset -= CharOffset(self.xdot.n_chars() as isize);
             if self.xdot.is_cur() {
                 // Cursors insert directly into the buffer without removing the character
                 // they are on.
-                offset += 1;
+                offset += CharOffset(1);
             }
         };
 
@@ -1494,7 +1495,7 @@ pub(crate) mod tests {
     #[test]
     fn simple_insert_works() {
         let b = simple_initial_buffer();
-        let c = Cur::from_yx(LineIdx(1), LINE_2.len(), &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset::from(LINE_2), &b);
         let lines = b.string_lines();
 
         assert_eq!(lines.len(), 2);
@@ -1554,7 +1555,7 @@ pub(crate) mod tests {
         let lines = b.string_lines();
         assert_eq!(lines.len(), 2);
 
-        let c = Cur::from_yx(LineIdx(1), 1, &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset(1), &b);
         assert_eq!(b.dot, Dot::Cur { c });
 
         assert_eq!(lines[0], LINE_1);
@@ -1600,7 +1601,7 @@ pub(crate) mod tests {
         );
         b.handle_action(BAction::Delete, Source::Keyboard);
 
-        let c = Cur::from_yx(LineIdx(1), LINE_2.len() - 1, &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset::from(LINE_2) - CharOffset(1), &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });
@@ -1622,7 +1623,7 @@ pub(crate) mod tests {
         b.handle_action(BAction::DotSet(TextObject::Line, 1), Source::Keyboard);
         b.handle_action(BAction::Delete, Source::Keyboard);
 
-        let c = Cur::from_yx(LineIdx(1), 0, &b);
+        let c = Cur::from_yx(LineIdx(1), CharOffset(0), &b);
         let lines = b.string_lines();
 
         assert_eq!(b.dot, Dot::Cur { c });

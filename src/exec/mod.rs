@@ -1,6 +1,6 @@
 //! Sam style language for executing structural regular expressions against ad Buffers
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer},
+    buffer::{Buffer, ByteIdx, CharIdx, CharOffset, GapBuffer},
     dot::{Cur, Dot},
     editor::BAction,
     parse::ParseInput,
@@ -249,7 +249,7 @@ impl Program {
         // this selection based on how they manipulate the buffer so we need to special case this
         // final action in order to not double-count the delta it would generate.
         let last_action = edit_actions.pop();
-        let mut delta = 0;
+        let mut delta = CharOffset(0);
         if let Some(action) = last_action {
             dot = action.as_dot(ed);
             action.apply(ed);
@@ -272,8 +272,8 @@ impl Program {
         // Apply the cumulative delta from all edit actions to the final dot position to account
         // for changes made to the buffer state.
         let (from, to) = dot.as_char_indices();
-        let from = from.saturating_iadd(delta);
-        let to = to.saturating_iadd(delta);
+        let from = from.saturating_add(delta);
+        let to = to.saturating_add(delta);
 
         Ok(Dot::from_char_indices(
             min(from, CharIdx(ix_max)),
@@ -412,9 +412,9 @@ impl EditAction {
         match self {
             Self::Insert(from, s) | Self::Replace(from, _, s) => {
                 let from = ed.byte_to_char(*from).unwrap();
-                let n_chars = s.chars().count();
+                let n_chars = CharOffset::from(s.as_str());
 
-                Dot::from_char_indices(from, from.uadd(n_chars).usub(1))
+                Dot::from_char_indices(from, from + n_chars - CharOffset(1))
             }
 
             Self::Remove(from, _) => {
@@ -424,7 +424,7 @@ impl EditAction {
         }
     }
 
-    fn apply<E>(self, ed: &mut E) -> isize
+    fn apply<E>(self, ed: &mut E) -> CharOffset
     where
         E: Edit,
     {
@@ -432,14 +432,14 @@ impl EditAction {
             Self::Insert(from, s) => {
                 let from = ed.byte_to_char(from).unwrap();
                 ed.insert(from, &s);
-                s.chars().count() as isize
+                CharOffset::from(s.as_str())
             }
 
             Self::Remove(from, to) => {
                 let from = ed.byte_to_char(from).unwrap();
                 let to = ed.byte_to_char(to).unwrap();
                 ed.remove(from, to);
-                -((to - from).0 as isize)
+                -to.offset_from(from)
             }
 
             Self::Replace(from, to, s) => {

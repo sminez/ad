@@ -28,7 +28,7 @@ mod index;
 mod slice;
 mod utf8;
 
-pub use index::{ByteIdx, CharIdx, LineIdx};
+pub use index::{ByteIdx, ByteOffset, CharIdx, CharOffset, LineIdx, LineOffset};
 pub use slice::{Chars, IdxChars, RevChars, Slice, SliceIter};
 
 use index::RawIdx;

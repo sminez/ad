@@ -1,6 +1,6 @@
 use crate::{
     Edit,
-    buffer::{ByteIdx, CharIdx, GapBuffer, LineIdx},
+    buffer::{ByteIdx, ByteOffset, CharIdx, GapBuffer, LineIdx},
     dot::Dot,
     exec::Address,
     regex::Haystack,
@@ -319,7 +319,7 @@ where
             match self.inner.get_char_at(self.from) {
                 Some(ch) => {
                     let res = (self.from, ch);
-                    self.from = self.from.uadd(ch.len_utf8());
+                    self.from += ByteOffset::from(ch);
                     return Some(res);
                 }
                 None if self.inner.is_closed() => return None,

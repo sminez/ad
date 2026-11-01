@@ -1,5 +1,5 @@
 //! A haystack is something that can be searched over by a Regex
-use crate::buffer::{Buffer, ByteIdx, CharIdx, GapBuffer};
+use crate::buffer::{Buffer, ByteIdx, ByteOffset, CharIdx, GapBuffer};
 use std::borrow::Cow;
 
 /// Something that can be searched over by a [Regex][0].
@@ -71,7 +71,7 @@ impl Haystack for &str {
             Some(
                 self[from.0..]
                     .char_indices()
-                    .map(move |(i, ch)| (from.uadd(i), ch)),
+                    .map(move |(i, ch)| (from + ByteOffset(i as isize), ch)),
             )
         }
     }
@@ -79,7 +79,7 @@ impl Haystack for &str {
     fn iter_between(&self, from: ByteIdx, to: ByteIdx) -> impl Iterator<Item = (ByteIdx, char)> {
         self[from.0..to.0]
             .char_indices()
-            .map(move |(i, ch)| (from.uadd(i), ch))
+            .map(move |(i, ch)| (from + ByteOffset(i as isize), ch))
     }
 
     fn rev_iter_between(
@@ -89,7 +89,7 @@ impl Haystack for &str {
     ) -> impl Iterator<Item = (ByteIdx, char)> {
         self[from.0..to.0]
             .char_indices()
-            .map(move |(i, ch)| (from.uadd(i), ch))
+            .map(move |(i, ch)| (from + ByteOffset(i as isize), ch))
             .rev()
     }
 }
@@ -146,7 +146,7 @@ impl Haystack for GapBuffer {
                     .chars()
                     .map(move |ch| {
                         let item = (acc, ch);
-                        acc = acc.uadd(ch.len_utf8());
+                        acc += ByteOffset::from(ch);
                         item
                     }),
             )
@@ -160,7 +160,7 @@ impl Haystack for GapBuffer {
             .chars()
             .map(move |ch| {
                 let item = (acc, ch);
-                acc = acc.uadd(ch.len_utf8());
+                acc += ByteOffset::from(ch);
                 item
             })
     }
@@ -175,7 +175,7 @@ impl Haystack for GapBuffer {
         self.slice_from_byte_offsets(from, to)
             .rev_chars()
             .map(move |ch| {
-                acc = acc.usub(ch.len_utf8());
+                acc -= ByteOffset::from(ch);
                 (acc, ch)
             })
     }
@@ -234,7 +234,7 @@ impl Haystack for Buffer {
                     .chars()
                     .map(move |ch| {
                         let item = (acc, ch);
-                        acc = acc.uadd(ch.len_utf8());
+                        acc += ByteOffset::from(ch);
                         item
                     }),
             )
@@ -249,7 +249,7 @@ impl Haystack for Buffer {
             .chars()
             .map(move |ch| {
                 let item = (acc, ch);
-                acc = acc.uadd(ch.len_utf8());
+                acc += ByteOffset::from(ch);
                 item
             })
     }
@@ -265,7 +265,7 @@ impl Haystack for Buffer {
             .slice_from_byte_offsets(from, to)
             .rev_chars()
             .map(move |ch| {
-                acc = acc.usub(ch.len_utf8());
+                acc -= ByteOffset::from(ch);
                 (acc, ch)
             })
     }

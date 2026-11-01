@@ -7,7 +7,7 @@
 //! All indexing is 0-based when working with the contents of a specific buffer.
 //! Converting to 1-based indices for the terminal is exclusively handled in the
 //! rendering logic.
-use crate::buffer::{Buffer, CharIdx};
+use crate::buffer::{Buffer, CharIdx, CharOffset};
 use std::cmp::min;
 
 mod cur;
@@ -118,12 +118,12 @@ impl Dot {
     ///
     /// [Dot::clamp_idx] will still need to be called in order to ensure that the result
     /// is within bounds for the given buffer.
-    pub fn with_offset_saturating(mut self, offset: isize) -> Self {
+    pub fn with_offset_saturating(mut self, offset: CharOffset) -> Self {
         match &mut self {
-            Dot::Cur { c } => c.idx = c.idx.saturating_iadd(offset),
+            Dot::Cur { c } => c.idx = c.idx.saturating_add(offset),
             Dot::Range { r } => {
-                r.start.idx = r.start.idx.saturating_iadd(offset);
-                r.end.idx = r.end.idx.saturating_iadd(offset);
+                r.start.idx = r.start.idx.saturating_add(offset);
+                r.end.idx = r.end.idx.saturating_add(offset);
             }
         }
 
