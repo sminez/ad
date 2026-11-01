@@ -230,10 +230,7 @@ impl Buffers {
 
         if let Some(id) = existing_id {
             self.focus_id(id);
-            self.inner.focus.txt = content.into();
-            let n = self.inner.focus.txt.len_chars();
-            self.inner.focus.dot.clamp_idx(CharIdx(n));
-            self.inner.focus.xdot.clamp_idx(CharIdx(n));
+            self.inner.focus.replace_content(content);
 
             return id;
         }

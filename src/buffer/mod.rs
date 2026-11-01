@@ -415,25 +415,30 @@ impl Buffer {
             Err(e) => return format!("Error reloading buffer: {e}"),
         };
 
-        self.txt = GapBuffer::from(raw);
-        let n_chars = self.txt.len_chars();
-        self.dot.clamp_idx(CharIdx(n_chars));
-        self.xdot.clamp_idx(CharIdx(n_chars));
-        self.edit_log.clear();
-        self.dirty = false;
-        self.changed_since_last_render = true;
-        self.last_save = SystemTime::now();
-
-        let n_lines = self.txt.len_lines();
-        let n_bytes = self.txt.len();
-        debug!(%n_bytes, "reloaded buffer content");
-
         let display_path = match path.canonicalize() {
             Ok(cp) => cp.display().to_string(),
             Err(_) => path.display().to_string(),
         };
 
+        self.replace_content(raw);
+
+        let n_lines = self.txt.len_lines();
+        let n_bytes = self.txt.len();
+        debug!(%n_bytes, "reloaded buffer content");
+
         format!("\"{display_path}\" {n_lines}L {n_bytes}B loaded")
+    }
+
+    pub(super) fn replace_content(&mut self, txt: String) {
+        self.txt = txt.into();
+        let n = self.txt.len_chars();
+        self.dot.clamp_idx(CharIdx(n));
+        self.xdot.clamp_idx(CharIdx(n));
+        self.edit_log.clear();
+        self.try_set_ts_state();
+        self.dirty = false;
+        self.changed_since_last_render = true;
+        self.last_save = SystemTime::now();
     }
 
     pub(super) fn new_minibuffer(config: Arc<RwLock<Config>>) -> Self {
