@@ -128,8 +128,7 @@ impl Buffers {
         }
 
         // Otherwise we load the file and add it to the buffer list.
-        let id = self.next_id;
-        self.next_id += 1;
+        let id = self.next_id();
         let mut b = Buffer::new_from_canonical_file_path(id, path, self.config.clone())?;
 
         // Remove an empty unnamed buffer if the user has now opened a file and we have not
@@ -156,8 +155,7 @@ impl Buffers {
             return;
         }
 
-        let id = self.next_id;
-        self.next_id += 1;
+        let id = self.next_id();
 
         if let Ok(b) = Buffer::new_from_canonical_file_path(id, p, self.config.clone()) {
             self.lsp_handle.document_opened(self);
@@ -174,6 +172,13 @@ impl Buffers {
         if self.inner.focus.dirty {
             self.lsp_handle.document_changed(&self.inner.focus);
         }
+    }
+
+    fn next_id(&mut self) -> usize {
+        let id = self.next_id;
+        self.next_id += 1;
+
+        id
     }
 
     pub fn next(&mut self) {
@@ -199,7 +204,8 @@ impl Buffers {
     pub fn close_buffer(&mut self, id: BufferId) {
         let removed = self.inner.remove_where_with_default(
             |b| b.id == id,
-            || Buffer::new_unnamed(self.next_id, "", self.config.clone()),
+            // we use a dummy Buffer here as removing the last buffer will close the editor
+            || Buffer::new_unnamed(0, "", self.config.clone()),
         );
         self.jump_list.clear_for_buffer(id);
 
@@ -232,11 +238,10 @@ impl Buffers {
             return id;
         }
 
-        let id = self.next_id;
+        let id = self.next_id();
         let buf = Buffer::new_virtual(id, name, content, self.config.clone());
         self.record_jump_position();
         self.push_buffer(buf);
-        self.next_id += 1;
 
         id
     }
@@ -466,8 +471,7 @@ impl Buffers {
             }
 
             None => {
-                let id = self.next_id;
-                self.next_id += 1;
+                let id = self.next_id();
                 let b = Buffer::new_output(id, key, s, self.config.clone());
                 self.record_jump_position();
                 self.inner.insert(b);
