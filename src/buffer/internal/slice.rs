@@ -48,13 +48,13 @@ impl<'a> Slice<'a> {
 
     #[inline]
     pub(super) fn from_raw_offsets(from: RawIdx, to: RawIdx, gb: &'a GapBuffer) -> Slice<'a> {
-        let to = min(to, gb.data.len());
+        let to = min(to, RawIdx(gb.data.len()));
         let logical_from = gb.raw_byte_to_byte(from);
 
         if to <= gb.gap_start || from >= gb.gap_end {
             return Slice {
                 from: logical_from,
-                left: &gb.data[from..to],
+                left: gb.raw_slice(from..to),
                 right: &[],
             };
         }
@@ -63,8 +63,8 @@ impl<'a> Slice<'a> {
 
         Slice {
             from: logical_from,
-            left: &gb.data[from..gb.gap_start],
-            right: &gb.data[gb.gap_end..to],
+            left: gb.raw_slice(from..gb.gap_start),
+            right: gb.raw_slice(gb.gap_end..to),
         }
     }
 
@@ -414,7 +414,7 @@ mod tests {
     #[test]
     fn slice_works() {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        let slice = Slice::from_raw_offsets(0, gb.cap, &gb);
+        let slice = Slice::from_raw_offsets(RawIdx(0), RawIdx(gb.cap), &gb);
         let (s1, s2) = slice.as_strs();
         assert_eq!(s1, "");
         assert_eq!(s2, "hello, world!\nhow are you?");
