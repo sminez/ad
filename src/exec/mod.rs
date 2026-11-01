@@ -35,6 +35,8 @@ use addr::ErrorKind;
 /// Errors that can be returned by the exec engine
 #[derive(Debug)]
 pub enum Error {
+    /// Changes not in sequence: two edit actions target overlapping regions of the buffer
+    ChangesNotInSequence,
     /// Format error
     Format,
     /// Invalid regex
@@ -393,6 +395,15 @@ impl Program {
             }
         }
 
+        // Actions are yielded in match order (with branches yielding in the order they appear in
+        // the branch) so we need to sort by the region of the buffer being edited before we can
+        // apply the actions.
+        // If any actions would overlap we reject the program as invalid (same semantics as Sam).
+        edit_actions.sort_by_key(|a| (a.from(), a.to()));
+        if edit_actions.windows(2).any(|w| w[0].to() > w[1].from()) {
+            return Err(Error::ChangesNotInSequence);
+        }
+
         Ok(edit_actions)
     }
 }
@@ -405,6 +416,19 @@ enum EditAction {
 }
 
 impl EditAction {
+    fn from(&self) -> ByteIdx {
+        match self {
+            Self::Insert(from, _) | Self::Remove(from, _) | Self::Replace(from, _, _) => *from,
+        }
+    }
+
+    fn to(&self) -> ByteIdx {
+        match self {
+            Self::Insert(from, _) => *from,
+            Self::Remove(_, to) | Self::Replace(_, to, _) => *to,
+        }
+    }
+
     fn as_dot<E>(&self, ed: &mut E) -> Dot
     where
         E: Edit,
@@ -586,6 +610,8 @@ mod tests {
     #[test_case(0, ", y/foo/ d", "foofoofoo"; "y delete")]
     #[test_case(0, ", y/│/ d", "││"; "y delete 2")]
     #[test_case(0, ", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
+    #[test_case(0, ", x/foo/ { a/X/; i/Y/; }", "YfooX│YfooX│YfooX"; "x append then insert")]
+    #[test_case(0, ", x/foo/ { d; i/Y/; }", "Y│Y│Y"; "x delete then insert")]
     #[test]
     fn execute_produces_the_correct_string(idx: usize, s: &str, expected: &str) {
         let prog = Program::try_parse(s).unwrap();
@@ -597,6 +623,38 @@ mod tests {
             .unwrap();
 
         assert_eq!(&b.txt.to_string(), expected, "buffer");
+    }
+
+    #[test]
+    fn dot_is_set_by_the_final_action_in_buffer_order() {
+        let prog = Program::try_parse(", x/foo/ { a/X/; i/Y/; }").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+
+        let mut b = Buffer::new_unnamed(0, "foo│foo│foo", Default::default());
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.txt.to_string(), "YfooX│YfooX│YfooX");
+        assert_eq!(dot.as_char_indices(), (CharIdx(16), CharIdx(16)));
+    }
+
+    #[test_case(", x/foo/ { d; d; }"; "same range twice")]
+    #[test_case(", x/foo/ { c/X/; x/o/ d; }"; "nested within changed range")]
+    #[test]
+    fn overlapping_changes_are_rejected(s: &str) {
+        let prog = Program::try_parse(s).unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+
+        let mut b = Buffer::new_unnamed(0, "foo│foo│foo", Default::default());
+        let res = prog.execute(&mut b, &mut runner, "test", &mut vec![]);
+
+        assert!(matches!(res, Err(Error::ChangesNotInSequence)), "{res:?}");
+        assert_eq!(
+            &b.txt.to_string(),
+            "foo│foo│foo",
+            "buffer should be unchanged"
+        );
     }
 
     #[test]
