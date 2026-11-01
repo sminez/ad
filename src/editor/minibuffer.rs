@@ -256,7 +256,7 @@ impl MiniBuffer {
                 }
             }
             Input::Alt('j') | Input::Arrow(Arrow::Down) => {
-                if self.selected_line_idx == self.b.len_lines().usub(1) {
+                if self.selected_line_idx.0 == self.b.len_lines() - 1 {
                     self.b.set_dot(TextObject::BufferStart, 1);
                 } else {
                     self.b.set_dot(TextObject::Arr(Arrow::Down), 1);

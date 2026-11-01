@@ -595,7 +595,7 @@ impl Buffer {
 
     /// The number of lines currently held in the buffer.
     #[inline]
-    pub fn len_lines(&self) -> LineIdx {
+    pub fn len_lines(&self) -> usize {
         self.txt.len_lines()
     }
 
@@ -670,7 +670,7 @@ impl Buffer {
 
     /// The line at the requested index returned as a Slice.
     pub fn line(&self, y: LineIdx) -> Option<Slice<'_>> {
-        if y >= self.len_lines() {
+        if y.0 >= self.len_lines() {
             None
         } else {
             Some(self.txt.line(y))
@@ -867,7 +867,7 @@ impl Buffer {
     }
 
     pub(crate) fn sign_col_dims(&self) -> (usize, usize) {
-        let w_lnum = n_digits(self.len_lines().0);
+        let w_lnum = n_digits(self.len_lines());
         let w_sgncol = w_lnum + 2;
 
         (w_lnum, w_sgncol)

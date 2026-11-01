@@ -39,7 +39,7 @@ impl Cur {
     pub(crate) fn from_yx(y_idx: LineIdx, x_idx: usize, b: &Buffer) -> Self {
         let line_start = b.txt.line_to_char(y_idx);
         let mut x_max = b.txt.line_len_chars(y_idx);
-        if y_idx < b.len_lines().usub(1) {
+        if y_idx.0 < b.len_lines() - 1 {
             x_max -= 1;
         }
 
@@ -72,7 +72,7 @@ impl Cur {
             }
             Arrow::Down => {
                 let (mut y, _) = self.as_yx(b);
-                if !b.is_empty() && y < b.len_lines().usub(1) {
+                if !b.is_empty() && y.0 < b.len_lines() - 1 {
                     y = y.uadd(1);
                     cur.idx = b.txt.line_to_char(y) + b.x_from_rx(y);
                 }
@@ -102,7 +102,7 @@ impl Cur {
 
         // On the last line of the file we don't have a trailing newline
         // so we really do want the final character
-        if y < b.len_lines().saturating_sub(LineIdx(1)) {
+        if y.0 < b.len_lines().saturating_sub(1) {
             self.idx = self.idx.saturating_sub(1);
         }
 

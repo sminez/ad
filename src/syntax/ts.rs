@@ -24,8 +24,8 @@ pub const SUPPORTED_PREDICATES: [&str; 0] = [];
 impl From<ts::Range> for ByteRange {
     fn from(r: ts::Range) -> Self {
         Self {
-            from: r.start_byte,
-            to: r.end_byte,
+            from: ByteIdx(r.start_byte),
+            to: ByteIdx(r.end_byte),
         }
     }
 }
@@ -70,7 +70,7 @@ impl TsState {
 
     fn try_new_explicit(mut p: Parser, query: &str, gb: &GapBuffer) -> Result<Self, String> {
         let tree = p.parse_with_options(
-            &mut |byte_offset: ByteIdx, _| gb.maximal_slice_from_offset(byte_offset),
+            &mut |byte_offset: usize, _| gb.maximal_slice_from_offset(ByteIdx(byte_offset)),
             None,
             None,
         );
@@ -100,9 +100,9 @@ impl TsState {
         gb: &GapBuffer,
     ) {
         self.tree.edit(&ts::InputEdit {
-            start_byte,
-            old_end_byte,
-            new_end_byte,
+            start_byte: start_byte.0,
+            old_end_byte: old_end_byte.0,
+            new_end_byte: new_end_byte.0,
             // See https://github.com/tree-sitter/tree-sitter/discussions/1793 for why this OK
             start_position: ts::Point::new(0, 0),
             old_end_position: ts::Point::new(0, 0),
@@ -110,7 +110,7 @@ impl TsState {
         });
 
         let new_tree = self.p.parse_with_options(
-            &mut |byte_offset: ByteIdx, _| gb.maximal_slice_from_offset(byte_offset),
+            &mut |byte_offset: usize, _| gb.maximal_slice_from_offset(ByteIdx(byte_offset)),
             Some(&self.tree),
             None,
         );
@@ -132,7 +132,7 @@ impl TsState {
     ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let start_byte = gb.char_to_byte(ch_idx);
 
-        (start_byte, start_byte, start_byte + ch.len_utf8())
+        (start_byte, start_byte, start_byte.uadd(ch.len_utf8()))
     }
 
     pub(super) fn prepare_insert_string(
@@ -143,7 +143,7 @@ impl TsState {
     ) -> (ByteIdx, ByteIdx, ByteIdx) {
         let start_byte = gb.char_to_byte(ch_idx);
 
-        (start_byte, start_byte, start_byte + s.len())
+        (start_byte, start_byte, start_byte.uadd(s.len()))
     }
 
     pub(super) fn prepare_delete_char(
@@ -170,10 +170,10 @@ impl TsState {
     pub fn update(&mut self, gb: &GapBuffer, from_row: LineIdx, n_rows: usize) {
         let raw_from = gb.line_to_byte(from_row);
         let row_to = from_row.uadd(n_rows + 1);
-        let raw_to = if row_to < gb.len_lines() {
+        let raw_to = if row_to.0 < gb.len_lines() {
             gb.line_to_byte(row_to)
         } else {
-            gb.len()
+            ByteIdx(gb.len())
         };
 
         if let Some((a, b)) = self.t.missing_region(raw_from, raw_to) {
@@ -182,12 +182,12 @@ impl TsState {
             // requested one if we have missing tokens in that direction.
             const PADDING: usize = 512;
             let byte_from = if b < raw_to {
-                a.saturating_sub(PADDING)
+                a.saturating_sub(ByteIdx(PADDING))
             } else {
                 a
             };
             let byte_to = if a > raw_from {
-                min(b + PADDING, gb.len())
+                min(b.uadd(PADDING), ByteIdx(gb.len()))
             } else {
                 b
             };
@@ -255,7 +255,7 @@ impl<'a> ts::TextProvider<&'a [u8]> for &'a GapBuffer {
             ..
         } = node.range();
 
-        self.slice_from_byte_offsets(start_byte, end_byte)
+        self.slice_from_byte_offsets(ByteIdx(start_byte), ByteIdx(end_byte))
             .slice_iter()
     }
 }
@@ -466,7 +466,7 @@ impl Tokenizer {
     }
 
     pub fn update(&mut self, root: ts::Node<'_>, gb: &GapBuffer, from: ByteIdx, to: ByteIdx) {
-        self.cur.set_byte_range(from..to);
+        self.cur.set_byte_range(from.0..to.0);
 
         // This is a streaming-iterator not an iterator, hence the odd while-let that follows
         let mut it = self.cur.captures(&self.q, root, gb);
@@ -544,7 +544,10 @@ mod tests {
     fn rt(tag: &str, from: usize, to: usize) -> RangeToken<'_> {
         RangeToken {
             tag,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
@@ -702,7 +705,10 @@ mod tests {
     }
 
     fn br(from: usize, to: usize) -> ByteRange {
-        ByteRange { from, to }
+        ByteRange {
+            from: ByteIdx(from),
+            to: ByteIdx(to),
+        }
     }
 
     #[test_case(vec![], 0, 5, vec![br(0, 5)]; "no initial regions")]
@@ -720,7 +726,7 @@ mod tests {
         to: usize,
         expected: Vec<ByteRange>,
     ) {
-        mark_region(&mut regions, from, to);
+        mark_region(&mut regions, ByteIdx(from), ByteIdx(to));
         assert_eq!(regions, expected);
     }
 
@@ -741,7 +747,7 @@ mod tests {
         to: usize,
         expected: Option<(usize, usize)>,
     ) {
-        let res = missing_region(&regions, from, to);
-        assert_eq!(res, expected);
+        let res = missing_region(&regions, ByteIdx(from), ByteIdx(to));
+        assert_eq!(res.map(|(a, b)| (a.0, b.0)), expected);
     }
 }

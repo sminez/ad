@@ -36,7 +36,7 @@ where
                 gb: GapBuffer::from(""),
                 closed: false,
                 cleared_lines: LineIdx(0),
-                cleared_bytes: 0,
+                cleared_bytes: ByteIdx(0),
             }),
         }
     }
@@ -73,7 +73,7 @@ where
         false
     }
 
-    fn len(&self) -> ByteIdx {
+    fn len(&self) -> usize {
         usize::MAX
     }
 
@@ -106,7 +106,7 @@ where
             Some(CachingStreamIter {
                 inner: self,
                 from,
-                to: usize::MAX,
+                to: ByteIdx::MAX,
             })
         }
     }
@@ -149,7 +149,7 @@ where
         Dot::from_char_indices(0, usize::MAX)
     }
 
-    fn len_bytes(&self) -> ByteIdx {
+    fn len_bytes(&self) -> usize {
         if self.is_closed() {
             self.inner.borrow().gb.len()
         } else {
@@ -174,7 +174,7 @@ where
     }
 
     fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
-        let cur_len = self.inner.borrow().gb.len_lines();
+        let cur_len = LineIdx(self.inner.borrow().gb.len_lines());
 
         if line_idx > cur_len {
             for _ in cur_len.to(line_idx.uadd(1)) {
@@ -264,7 +264,7 @@ where
     R: Read,
 {
     pub fn len(&self) -> usize {
-        self.to - self.from
+        (self.to - self.from).0
     }
 
     pub fn is_empty(&self) -> bool {
@@ -278,8 +278,8 @@ where
 {
     fn from(s: StreamSlice<'a, R>) -> Self {
         let inner = s.inner.borrow();
-        let to = if s.to == usize::MAX {
-            inner.gb.len()
+        let to = if s.to == ByteIdx::MAX {
+            ByteIdx(inner.gb.len())
         } else {
             s.to - inner.cleared_bytes
         };
@@ -319,7 +319,7 @@ where
             match self.inner.get_char_at(self.from) {
                 Some(ch) => {
                     let res = (self.from, ch);
-                    self.from += ch.len_utf8();
+                    self.from = self.from.uadd(ch.len_utf8());
                     return Some(res);
                 }
                 None if self.inner.is_closed() => return None,
@@ -342,14 +342,14 @@ mod impl_structex {
     where
         R: Read,
     {
-        fn is_match_between(&self, re: &Regex, from: ByteIdx, to: ByteIdx) -> bool {
-            re.matches_between(self, from, to)
+        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
+            re.matches_between(self, ByteIdx(from), ByteIdx(to))
         }
 
-        fn captures_between(&self, re: &Regex, from: ByteIdx, to: ByteIdx) -> Option<RawCaptures> {
-            let m = re.find_between(self, from, to)?;
+        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
+            let m = re.find_between(self, ByteIdx(from), ByteIdx(to))?;
 
-            Some(RawCaptures::new(m.iter_locs()))
+            Some(RawCaptures::new(m.iter_raw_locs()))
         }
     }
 
@@ -362,19 +362,19 @@ mod impl_structex {
         where
             Self: 'h;
 
-        fn char_at(&self, byte_offset: ByteIdx) -> Option<char> {
-            self.get_char_at(byte_offset)
+        fn char_at(&self, byte_offset: usize) -> Option<char> {
+            self.get_char_at(ByteIdx(byte_offset))
         }
 
-        fn slice(&self, range: Range<ByteIdx>) -> Self::Slice<'_> {
+        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
             StreamSlice {
                 inner: &self.inner,
-                from: range.start,
-                to: range.end,
+                from: ByteIdx(range.start),
+                to: ByteIdx(range.end),
             }
         }
 
-        fn max_len(&self) -> ByteIdx {
+        fn max_len(&self) -> usize {
             usize::MAX
         }
     }
@@ -405,8 +405,8 @@ mod impl_structex {
             W: std::io::Write,
         {
             let inner = self.inner.borrow();
-            let to = if self.to == usize::MAX {
-                inner.gb.len()
+            let to = if self.to == ByteIdx::MAX {
+                ByteIdx(inner.gb.len())
             } else {
                 self.to - inner.cleared_bytes
             };

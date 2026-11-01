@@ -44,7 +44,7 @@ impl InputFilter {
         } else {
             Kind::InsertBody
         };
-        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from.0, txt);
         _ = self.tx.send(evt);
     }
 
@@ -54,7 +54,7 @@ impl InputFilter {
         } else {
             Kind::DeleteBody
         };
-        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from.0, txt);
         _ = self.tx.send(evt);
     }
 
@@ -64,7 +64,7 @@ impl InputFilter {
         } else {
             Kind::LoadBody
         };
-        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from.0, txt);
         _ = self.tx.send(evt);
     }
 
@@ -77,7 +77,7 @@ impl InputFilter {
         arg: Option<(CharIdx, ByteIdx, String)>,
     ) {
         if let Some((ch_from, byte_from, arg)) = arg {
-            let evt = FsysEvent::new(source, Kind::ChordedArgument, ch_from, byte_from, &arg);
+            let evt = FsysEvent::new(source, Kind::ChordedArgument, ch_from, byte_from.0, &arg);
             _ = self.tx.send(evt);
         }
         let k = if self.is_scratch {
@@ -86,7 +86,7 @@ impl InputFilter {
             Kind::ExecuteBody
         };
 
-        let evt = FsysEvent::new(source, k, ch_from, byte_from, txt);
+        let evt = FsysEvent::new(source, k, ch_from, byte_from.0, txt);
         _ = self.tx.send(evt);
     }
 }

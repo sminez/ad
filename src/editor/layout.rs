@@ -33,7 +33,7 @@ macro_rules! assert_invariants {
                 );
                 let b = $buffers.with_id(win.view.bufid).unwrap();
                 assert!(
-                    win.view.row_off < b.len_lines(),
+                    win.view.row_off.0 < b.len_lines(),
                     "col {i} window {j} has an OOB row_off ({} vs {})",
                     win.view.row_off,
                     b.len_lines()
@@ -48,7 +48,7 @@ macro_rules! assert_invariants {
             );
             let b = $buffers.with_id(view.bufid).unwrap();
             assert!(
-                view.row_off < b.len_lines(),
+                view.row_off.0 < b.len_lines(),
                 "stored view for bufid {} has an OOB row_off ({} vs {})",
                 view.bufid,
                 view.row_off,

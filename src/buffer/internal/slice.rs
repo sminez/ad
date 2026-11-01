@@ -32,7 +32,7 @@ impl<'a> From<Slice<'a>> for Cow<'a, str> {
 
 impl<'a> Slice<'a> {
     pub(super) const NULL: Slice<'a> = Slice {
-        from: 0,
+        from: ByteIdx(0),
         left: &[],
         right: &[],
     };
@@ -74,7 +74,7 @@ impl<'a> Slice<'a> {
         }
 
         let to = min(to, self.len());
-        let logical_from = self.from + from;
+        let logical_from = self.from.uadd(from);
 
         if to <= self.left.len() {
             Slice {
@@ -334,7 +334,7 @@ mod tests {
     #[test]
     fn slice_to_string_works(cur: usize, line: usize, expected: &str) {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        gb.move_gap_to(cur);
+        gb.move_gap_to(ByteIdx(cur));
         gb.shred_gap();
 
         assert_eq!(gb.line(LineIdx(line)).to_string(), expected);
@@ -424,7 +424,7 @@ mod tests {
         assert_eq!(s1, " world!\nhow");
         assert_eq!(s2, "");
 
-        gb.move_gap_to(12);
+        gb.move_gap_to(ByteIdx(12));
         gb.shred_gap();
         println!("after move:  {:?}", raw_debug_buffer_content(&gb));
 
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     fn slice_eq_str_works() {
         let mut gb = GapBuffer::from("hello, world!\nhow are you?");
-        gb.move_gap_to(3);
+        gb.move_gap_to(ByteIdx(3));
         gb.shred_gap();
         let slice = gb.slice(0, 5);
         assert_eq!(slice, "hello");

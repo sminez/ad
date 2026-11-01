@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx, GapBuffer, LineIdx},
+    buffer::{Buffer, CharIdx, GapBuffer, LineIdx},
     dot::{Cur, Dot, Range},
     parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
@@ -400,7 +400,7 @@ pub trait Address: Haystack + Sized {
     /// so that don't need to special case running programs against an in-editor
     /// buffer vs stdin or a file read from disk.
     fn current_dot(&self) -> Dot;
-    fn len_bytes(&self) -> ByteIdx;
+    fn len_bytes(&self) -> usize;
     fn len_chars(&self) -> CharIdx;
     fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx>;
     fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx>;
@@ -478,7 +478,7 @@ pub trait Address: Haystack + Sized {
             }
 
             Regex(re) => {
-                let from = cur_dot.last_cur().idx;
+                let from = self.char_to_byte(cur_dot.last_cur().idx)?;
                 let m = re.find_from(self, from)?;
                 let (byte_from, byte_to) = m.loc();
                 let from = self.byte_to_char(byte_from).unwrap();
@@ -488,7 +488,7 @@ pub trait Address: Haystack + Sized {
             }
 
             RegexBack(re) => {
-                let from = cur_dot.first_cur().idx;
+                let from = self.char_to_byte(cur_dot.first_cur().idx)?;
                 let m = re.find_rev_from(self, from)?;
                 let (byte_from, byte_to) = m.loc();
                 let from = self.byte_to_char(byte_from).unwrap();
@@ -524,7 +524,7 @@ impl Address for GapBuffer {
         Dot::from_char_indices(0, self.len_chars().saturating_sub(1))
     }
 
-    fn len_bytes(&self) -> ByteIdx {
+    fn len_bytes(&self) -> usize {
         self.len()
     }
 
@@ -559,7 +559,7 @@ impl Address for Buffer {
         self.dot
     }
 
-    fn len_bytes(&self) -> ByteIdx {
+    fn len_bytes(&self) -> usize {
         self.txt.len()
     }
 

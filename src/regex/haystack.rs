@@ -12,7 +12,7 @@ use std::borrow::Cow;
 pub trait Haystack {
     fn try_make_contiguous(&mut self);
     fn is_contiguous(&self) -> bool;
-    fn len(&self) -> ByteIdx;
+    fn len(&self) -> usize;
     fn substr_from<'a>(&'a self, offset: ByteIdx) -> Option<Cow<'a, str>>;
     fn substr<'a>(&'a self, from: ByteIdx, to: ByteIdx) -> Cow<'a, str>;
 
@@ -32,52 +32,54 @@ impl Haystack for &str {
         true
     }
 
-    fn len(&self) -> ByteIdx {
+    fn len(&self) -> usize {
         str::len(self)
     }
 
     fn substr_from<'a>(&'a self, offset: ByteIdx) -> Option<Cow<'a, str>> {
-        if offset > self.len() {
+        if offset.0 > self.len() {
             None
         } else {
-            let raw = &self.as_bytes()[offset..];
+            let raw = &self.as_bytes()[offset.0..];
             // SAFETY: assumes a valid byte offset
             Some(Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(raw) }))
         }
     }
 
     fn substr<'a>(&'a self, from: ByteIdx, to: ByteIdx) -> Cow<'a, str> {
-        Cow::Borrowed(&self[from..to])
+        Cow::Borrowed(&self[from.0..to.0])
     }
 
     fn byte_to_char(&self, byte_idx: ByteIdx) -> Option<CharIdx> {
         Some(
             self.char_indices()
-                .take_while(|&(idx, _)| idx < byte_idx)
+                .take_while(|&(idx, _)| idx < byte_idx.0)
                 .count(),
         )
     }
 
     fn char_to_byte(&self, char_idx: CharIdx) -> Option<ByteIdx> {
-        self.char_indices().nth(char_idx).map(|(idx, _)| idx)
+        self.char_indices()
+            .nth(char_idx)
+            .map(|(idx, _)| ByteIdx(idx))
     }
 
     fn iter_from(&self, from: ByteIdx) -> Option<impl Iterator<Item = (ByteIdx, char)>> {
-        if from >= self.len() {
+        if from.0 >= self.len() {
             None
         } else {
             Some(
-                self[from..]
+                self[from.0..]
                     .char_indices()
-                    .map(move |(i, ch)| (i + from, ch)),
+                    .map(move |(i, ch)| (from.uadd(i), ch)),
             )
         }
     }
 
     fn iter_between(&self, from: ByteIdx, to: ByteIdx) -> impl Iterator<Item = (ByteIdx, char)> {
-        self[from..to]
+        self[from.0..to.0]
             .char_indices()
-            .map(move |(i, ch)| (i + from, ch))
+            .map(move |(i, ch)| (from.uadd(i), ch))
     }
 
     fn rev_iter_between(
@@ -85,9 +87,9 @@ impl Haystack for &str {
         from: ByteIdx,
         to: ByteIdx,
     ) -> impl Iterator<Item = (ByteIdx, char)> {
-        self[from..to]
+        self[from.0..to.0]
             .char_indices()
-            .map(move |(i, ch)| (i + from, ch))
+            .map(move |(i, ch)| (from.uadd(i), ch))
             .rev()
     }
 }
@@ -101,12 +103,12 @@ impl Haystack for GapBuffer {
         self.is_contiguous()
     }
 
-    fn len(&self) -> ByteIdx {
+    fn len(&self) -> usize {
         self.len()
     }
 
     fn substr_from<'a>(&'a self, offset: ByteIdx) -> Option<Cow<'a, str>> {
-        if offset > self.len() {
+        if offset.0 > self.len() {
             None
         } else {
             // SAFETY: assumes make_contiguous was called first
@@ -119,7 +121,7 @@ impl Haystack for GapBuffer {
     }
 
     fn byte_to_char(&self, byte_idx: ByteIdx) -> Option<CharIdx> {
-        if byte_idx > self.len() {
+        if byte_idx.0 > self.len() {
             None
         } else {
             Some(self.byte_to_char(byte_idx))
@@ -135,16 +137,16 @@ impl Haystack for GapBuffer {
     }
 
     fn iter_from(&self, from: ByteIdx) -> Option<impl Iterator<Item = (ByteIdx, char)>> {
-        if from >= self.len() {
+        if from.0 >= self.len() {
             None
         } else {
             let mut acc = from;
             Some(
-                self.slice_from_byte_offsets(from, self.len())
+                self.slice_from_byte_offsets(from, ByteIdx(self.len()))
                     .chars()
                     .map(move |ch| {
                         let item = (acc, ch);
-                        acc += ch.len_utf8();
+                        acc = acc.uadd(ch.len_utf8());
                         item
                     }),
             )
@@ -158,7 +160,7 @@ impl Haystack for GapBuffer {
             .chars()
             .map(move |ch| {
                 let item = (acc, ch);
-                acc += ch.len_utf8();
+                acc = acc.uadd(ch.len_utf8());
                 item
             })
     }
@@ -173,7 +175,7 @@ impl Haystack for GapBuffer {
         self.slice_from_byte_offsets(from, to)
             .rev_chars()
             .map(move |ch| {
-                acc -= ch.len_utf8();
+                acc = acc.usub(ch.len_utf8());
                 (acc, ch)
             })
     }
@@ -188,12 +190,12 @@ impl Haystack for Buffer {
         self.txt.is_contiguous()
     }
 
-    fn len(&self) -> ByteIdx {
+    fn len(&self) -> usize {
         self.txt.len()
     }
 
     fn substr_from<'a>(&'a self, offset: ByteIdx) -> Option<Cow<'a, str>> {
-        if offset > self.txt.len() {
+        if offset.0 > self.txt.len() {
             None
         } else {
             // SAFETY: assumes make_contiguous was called first
@@ -206,7 +208,7 @@ impl Haystack for Buffer {
     }
 
     fn byte_to_char(&self, byte_idx: ByteIdx) -> Option<CharIdx> {
-        if byte_idx > self.txt.len() {
+        if byte_idx.0 > self.txt.len() {
             None
         } else {
             Some(self.txt.byte_to_char(byte_idx))
@@ -222,17 +224,17 @@ impl Haystack for Buffer {
     }
 
     fn iter_from(&self, from: ByteIdx) -> Option<impl Iterator<Item = (ByteIdx, char)>> {
-        if from >= self.len() {
+        if from.0 >= self.len() {
             None
         } else {
             let mut acc = from;
             Some(
                 self.txt
-                    .slice_from_byte_offsets(from, self.len())
+                    .slice_from_byte_offsets(from, ByteIdx(self.len()))
                     .chars()
                     .map(move |ch| {
                         let item = (acc, ch);
-                        acc += ch.len_utf8();
+                        acc = acc.uadd(ch.len_utf8());
                         item
                     }),
             )
@@ -247,7 +249,7 @@ impl Haystack for Buffer {
             .chars()
             .map(move |ch| {
                 let item = (acc, ch);
-                acc += ch.len_utf8();
+                acc = acc.uadd(ch.len_utf8());
                 item
             })
     }
@@ -263,7 +265,7 @@ impl Haystack for Buffer {
             .slice_from_byte_offsets(from, to)
             .rev_chars()
             .map(move |ch| {
-                acc -= ch.len_utf8();
+                acc = acc.usub(ch.len_utf8());
                 (acc, ch)
             })
     }

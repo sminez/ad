@@ -239,7 +239,7 @@ impl Program {
         let byte_from = ed.char_to_byte(char_from).unwrap();
         let byte_to = ed
             .char_to_byte(char_to.saturating_add(1))
-            .unwrap_or_else(|| ed.len_bytes());
+            .unwrap_or_else(|| ByteIdx(ed.len_bytes()));
 
         let mut edit_actions = self.gather_actions(byte_from, byte_to, ed, runner, fname, out)?;
 
@@ -297,15 +297,15 @@ impl Program {
         let mut edit_actions = Vec::new();
         let mut ctx = Ctx {
             fname,
-            byte_from: 0,
+            byte_from: ByteIdx(0),
             ed,
             row_col: RefCell::new(None),
         };
 
-        for caps in se.iter_tagged_captures_between(byte_from, byte_to, ed) {
+        for caps in se.iter_tagged_captures_between(byte_from.0, byte_to.0, ed) {
             let action = caps.action.as_ref().unwrap();
             let id = action.id();
-            ctx.byte_from = caps.from();
+            ctx.byte_from = ByteIdx(caps.from());
             ctx.row_col.borrow_mut().take();
 
             match action.tag() {
@@ -336,13 +336,15 @@ impl Program {
                 // Edit actions
 
                 // Delete matched text
-                'd' => edit_actions.push(EditAction::Remove(caps.from(), caps.to())),
+                'd' => {
+                    edit_actions.push(EditAction::Remove(ByteIdx(caps.from()), ByteIdx(caps.to())))
+                }
 
                 // Change matched text to rendered template
                 'c' => {
                     edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
+                        ByteIdx(caps.from()),
+                        ByteIdx(caps.to()),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
@@ -350,7 +352,7 @@ impl Program {
                 // Insert rendered template before match
                 'i' => {
                     edit_actions.push(EditAction::Insert(
-                        caps.from(),
+                        ByteIdx(caps.from()),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
@@ -358,7 +360,7 @@ impl Program {
                 // Append rendered template after match
                 'a' => {
                     edit_actions.push(EditAction::Insert(
-                        caps.to(),
+                        ByteIdx(caps.to()),
                         self.templates[&id].render_with_context(&caps, &ctx)?,
                     ));
                 }
@@ -367,8 +369,8 @@ impl Program {
                 '<' => {
                     let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
                     edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
+                        ByteIdx(caps.from()),
+                        ByteIdx(caps.to()),
                         runner.run_shell_command(&cmd, None)?,
                     ));
                 }
@@ -378,8 +380,8 @@ impl Program {
                     let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
                     let slice = caps.as_slice();
                     edit_actions.push(EditAction::Replace(
-                        caps.from(),
-                        caps.to(),
+                        ByteIdx(caps.from()),
+                        ByteIdx(caps.to()),
                         runner.run_shell_command(&cmd, Some(slice.into().as_ref()))?,
                     ));
                 }
@@ -438,9 +440,9 @@ impl EditAction {
             }
 
             Self::Replace(from, to, s) => {
-                Self::Remove(from, to).apply(ed);
-                let n_chars = Self::Insert(from, s).apply(ed);
-                n_chars - (to - from) as isize
+                let removed = Self::Remove(from, to).apply(ed);
+                let inserted = Self::Insert(from, s).apply(ed);
+                inserted + removed
             }
         }
     }
@@ -661,6 +663,21 @@ mod tests {
         assert_eq!(&b.str_contents(), expected_content);
         assert_eq!(&dot.content(&b), expected_dot_content);
         assert_eq!(dot.as_char_indices(), expected_dot);
+    }
+
+    #[test]
+    fn returned_dot_is_correct_when_replacing_multibyte_chars() {
+        let prog = Program::try_parse(", x/é/ c/E/").unwrap();
+        let mut runner = SystemRunner::new(env::current_dir().unwrap());
+        let mut b = Buffer::new_unnamed(0, "éa éa", Default::default());
+
+        let dot = prog
+            .execute(&mut b, &mut runner, "test", &mut vec![])
+            .unwrap();
+
+        assert_eq!(&b.str_contents(), "Ea Ea");
+        assert_eq!(&dot.content(&b), "E");
+        assert_eq!(dot.as_char_indices(), (3, 3));
     }
 
     #[test_case(", d"; "delete buffer")]

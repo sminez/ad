@@ -43,10 +43,10 @@ impl ReState {
 
         let pos = gb.line_to_byte(from);
         let to = from.uadd(n_rows + 1);
-        let byte_to = if to < gb.len_lines() {
+        let byte_to = if to.0 < gb.len_lines() {
             gb.line_to_byte(to)
         } else {
-            gb.len()
+            ByteIdx(gb.len())
         };
 
         self.ranges.extend(Tokenizer {
@@ -199,6 +199,6 @@ plumb to edit";
         state.update(&gb, LineIdx(0), 1);
 
         let ranges: Vec<_> = state.ranges.iter().map(|sr| (sr.r.from, sr.r.to)).collect();
-        assert_eq!(ranges, vec![(6, 10)]);
+        assert_eq!(ranges, vec![(ByteIdx(6), ByteIdx(10))]);
     }
 }

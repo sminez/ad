@@ -817,7 +817,7 @@ impl Layout {
                 }
 
                 let b = buffers.with_id_mut(win.view.bufid).unwrap();
-                let y_max = b.txt.len_lines().usub(1);
+                let y_max = LineIdx(b.txt.len_lines() - 1);
                 win.view.row_off = min(win.view.row_off, y_max);
             }
         }
@@ -917,8 +917,11 @@ impl Layout {
             .saturating_sub(1)
             .saturating_sub(x_offset)
             .saturating_sub(w_sgncol);
-        let y =
-            min(row_off.uadd(y.saturating_sub(y_offset)), b.len_lines()).saturating_sub(LineIdx(1));
+        let y = min(
+            row_off.uadd(y.saturating_sub(y_offset)),
+            LineIdx(b.len_lines()),
+        )
+        .saturating_sub(LineIdx(1));
 
         win.view.rx = rx;
         b.cached_rx = rx;
@@ -1040,7 +1043,7 @@ impl View {
     }
 
     pub(crate) fn rx_from_x(&self, b: &Buffer, y: LineIdx, x: usize, tabstop: usize) -> usize {
-        if y >= b.len_lines() {
+        if y.0 >= b.len_lines() {
             return 0;
         }
 
@@ -1240,7 +1243,7 @@ fn apply_scroll(
         view.cur
     };
     let (y, x) = cur.as_yx(b);
-    let y_max = b.txt.len_lines().usub(1);
+    let y_max = LineIdx(b.txt.len_lines() - 1);
     let mut need_clamp = false;
 
     if up && view.row_off > LineIdx(0) && y == view.row_off.uadd(n_rows).usub(1) {
@@ -1904,7 +1907,7 @@ mod tests {
     fn apply_scroll_for_unfocused_window_clamps_row_off() {
         let config = Arc::new(RwLock::new(Config::default()));
         let mut b = Buffer::new_unnamed(0, "line1\nline2\nline3\nline4\nline5", config);
-        let y_max = b.txt.len_lines().usub(1);
+        let y_max = LineIdx(b.txt.len_lines() - 1);
         assert_eq!(y_max, LineIdx(4));
 
         let mut win = Window::new(0, 3);

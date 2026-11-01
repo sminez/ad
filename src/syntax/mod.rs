@@ -288,7 +288,7 @@ pub struct LineIter<'a> {
     /// the next line to yield
     line: LineIdx,
     /// total number of lines (cached from gb.len_lines())
-    n_lines: LineIdx,
+    n_lines: usize,
     dot_range: ByteRange,
     load_exec_range: Option<(bool, ByteRange)>,
 }
@@ -322,7 +322,7 @@ impl<'a> Iterator for LineIter<'a> {
     type Item = TokenIter<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.line == self.n_lines {
+        if self.line.0 == self.n_lines {
             return None;
         }
 
@@ -757,35 +757,50 @@ mod tests {
     fn sr(from: usize, to: usize) -> SyntaxRange {
         SyntaxRange {
             cap_idx: Some(0),
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_def(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: TK_DEFAULT,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_dot(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: TK_DOT,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_exe(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: TK_EXEC,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
     fn rt_str(from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag: "string",
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 
@@ -946,8 +961,8 @@ mod tests {
         expected: Held<'static>,
     ) {
         let mut it = TokenIter {
-            start_byte: 0,
-            end_byte: 42,
+            start_byte: ByteIdx(0),
+            end_byte: ByteIdx(42),
             names: &["string".to_string()],
             ranges: ranges.iter().peekable(),
             held,

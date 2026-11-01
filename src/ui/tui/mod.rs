@@ -1123,7 +1123,7 @@ fn try_read_input(stdin: &mut impl Read) -> Option<RawInput> {
 mod tests {
     use super::*;
     use crate::{
-        buffer::LineIdx,
+        buffer::{ByteIdx, LineIdx},
         syntax::{ByteRange, TK_DEFAULT},
     };
     use simple_test_case::test_case;
@@ -1148,7 +1148,10 @@ mod tests {
     fn rt(tag: &'static str, from: usize, to: usize) -> RangeToken<'static> {
         RangeToken {
             tag,
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: ByteIdx(from),
+                to: ByteIdx(to),
+            },
         }
     }
 

@@ -122,7 +122,7 @@ pub struct PlumbingMessage {
     pub dst: Option<String>,
     /// The working directory (used when data is a filename)
     pub wdir: Option<String>,
-    /// The offset within 'data' where the user's cursor currently lies (default=0).
+    /// The character offset within 'data' where the user's cursor currently lies.
     /// If a rule specifies a 'narrows-to' rule it will be used to narrow initial data
     /// to only include the specified cursor, otherwise the match will be rejected.
     pub cur: usize,
@@ -434,7 +434,10 @@ impl Pattern {
                 debug!(%msg.cur, "narrowing for provided cur");
                 for m in re.find_iter(&msg.data.as_str()) {
                     let (from, to) = m.loc();
-                    if from <= msg.cur && msg.cur <= to {
+                    // The match location is in bytes but cur is a character offset
+                    let ch_from = msg.data[..from.0].chars().count();
+                    let ch_to = ch_from + msg.data[from.0..to.0].chars().count();
+                    if ch_from <= msg.cur && msg.cur <= ch_to {
                         debug!(%from, %to, "successfully narrowed");
                         msg.data = m.match_text(&msg.data.as_str()).into_owned();
                         msg.cur = 0; // consume the cursor as it is now invalid

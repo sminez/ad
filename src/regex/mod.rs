@@ -181,7 +181,7 @@ fn next_char(it: &mut Peekable<Chars<'_>>) -> Result<Option<(char, bool)>, Error
 
 mod impl_structex {
     use super::*;
-    use crate::buffer::{Buffer, GapBuffer, Slice};
+    use crate::buffer::{Buffer, ByteIdx, GapBuffer, Slice};
     use std::{io, ops::Range};
     use structex::re::{Haystack, RawCaptures, RegexEngine, Sliceable, Writable};
 
@@ -195,25 +195,25 @@ mod impl_structex {
 
     impl Haystack<Regex> for str {
         fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
-            re.matches_between(&self, from, to)
+            re.matches_between(&self, ByteIdx(from), ByteIdx(to))
         }
 
         fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
-            let m = re.find_between(&self, from, to)?;
+            let m = re.find_between(&self, ByteIdx(from), ByteIdx(to))?;
 
-            Some(RawCaptures::new(m.iter_locs()))
+            Some(RawCaptures::new(m.iter_raw_locs()))
         }
     }
 
     impl Haystack<Regex> for GapBuffer {
         fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
-            re.matches_between(self, from, to)
+            re.matches_between(self, ByteIdx(from), ByteIdx(to))
         }
 
         fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
-            let m = re.find_between(self, from, to)?;
+            let m = re.find_between(self, ByteIdx(from), ByteIdx(to))?;
 
-            Some(RawCaptures::new(m.iter_locs()))
+            Some(RawCaptures::new(m.iter_raw_locs()))
         }
     }
 
@@ -224,11 +224,11 @@ mod impl_structex {
             Self: 'h;
 
         fn char_at(&self, byte_offset: usize) -> Option<char> {
-            self.get_char_at(byte_offset)
+            self.get_char_at(ByteIdx(byte_offset))
         }
 
         fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
-            self.slice_from_byte_offsets(range.start, range.end)
+            self.slice_from_byte_offsets(ByteIdx(range.start), ByteIdx(range.end))
         }
 
         fn max_len(&self) -> usize {
@@ -264,13 +264,13 @@ mod impl_structex {
 
     impl Haystack<Regex> for Buffer {
         fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
-            re.matches_between(self, from, to)
+            re.matches_between(self, ByteIdx(from), ByteIdx(to))
         }
 
         fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
-            let m = re.find_between(self, from, to)?;
+            let m = re.find_between(self, ByteIdx(from), ByteIdx(to))?;
 
-            Some(RawCaptures::new(m.iter_locs()))
+            Some(RawCaptures::new(m.iter_raw_locs()))
         }
     }
 
@@ -281,11 +281,12 @@ mod impl_structex {
             Self: 'h;
 
         fn char_at(&self, byte_offset: usize) -> Option<char> {
-            self.txt.get_char_at(byte_offset)
+            self.txt.get_char_at(ByteIdx(byte_offset))
         }
 
         fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
-            self.txt.slice_from_byte_offsets(range.start, range.end)
+            self.txt
+                .slice_from_byte_offsets(ByteIdx(range.start), ByteIdx(range.end))
         }
 
         fn max_len(&self) -> usize {
