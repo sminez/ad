@@ -5,7 +5,7 @@
 //! or overlapping regex sets but its better than nothing if all you need is some quick and simple
 //! rules for highlighting regions of a known file format.
 use crate::{
-    buffer::{CharIdx, GapBuffer, LineIdx},
+    buffer::{ByteIdx, GapBuffer, LineIdx},
     dot::Range,
     regex::{Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
@@ -41,19 +41,19 @@ impl ReState {
     pub fn update(&mut self, gb: &GapBuffer, from: LineIdx, n_rows: usize) {
         self.ranges.clear();
 
-        let pos = gb.line_to_char(from);
+        let pos = gb.line_to_byte(from);
         let to = from.uadd(n_rows + 1);
-        let ch_to = if to < gb.len_lines() {
-            gb.line_to_char(to)
+        let byte_to = if to < gb.len_lines() {
+            gb.line_to_byte(to)
         } else {
-            gb.len_chars()
+            gb.len()
         };
 
         self.ranges.extend(Tokenizer {
             mr: &mut self.mr,
             gb,
             pos,
-            ch_to,
+            byte_to,
         });
     }
 
@@ -80,24 +80,21 @@ impl ReState {
 struct Tokenizer<'a> {
     mr: &'a mut MultiRegex,
     gb: &'a GapBuffer,
-    pos: CharIdx,
-    ch_to: CharIdx,
+    pos: ByteIdx,
+    byte_to: ByteIdx,
 }
 
 impl Iterator for Tokenizer<'_> {
     type Item = SyntaxRange;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.ch_to {
+        if self.pos >= self.byte_to {
             return None;
         }
 
         let (i, m) = self.mr.match_gb_from(self.gb, self.pos)?;
-        let (mfrom, mto) = m.loc();
-        self.pos = mto;
-
-        let from = self.gb.char_to_byte(mfrom);
-        let to = self.gb.offset_char_to_byte(mto, from, mfrom);
+        let (from, to) = m.loc();
+        self.pos = to;
 
         Some(SyntaxRange {
             cap_idx: Some(i),
@@ -118,11 +115,11 @@ impl MultiRegex {
     // really this should live in the regex module and it should run the VMs in parallel, returning
     // the first match rather than in series like this
 
-    pub fn match_gb_from(&mut self, gb: &GapBuffer, ch_from: CharIdx) -> Option<(usize, Match)> {
+    pub fn match_gb_from(&mut self, gb: &GapBuffer, byte_from: ByteIdx) -> Option<(usize, Match)> {
         let mut leftmost: Option<(usize, Match)> = None;
 
         for (i, re) in self.re.iter_mut().enumerate() {
-            let m = re.find_from(gb, ch_from);
+            let m = re.find_from(gb, byte_from);
             match (leftmost.as_ref(), m) {
                 (Some((_, prev)), Some(m)) if &m < prev => leftmost = Some((i, m)),
                 (None, Some(m)) => leftmost = Some((i, m)),
@@ -192,5 +189,16 @@ plumb to edit";
         }
 
         assert_eq!(toks, expected);
+    }
+
+    #[test]
+    fn tokenizing_handles_multibyte_chars() {
+        // "data" is at chars 4..8 but bytes 6..10
+        let gb = GapBuffer::from("été data");
+        let mut state = ReState::new(&[("keyword", r"\bdata\b")]).expect("valid regex patterns");
+        state.update(&gb, LineIdx(0), 1);
+
+        let ranges: Vec<_> = state.ranges.iter().map(|sr| (sr.r.from, sr.r.to)).collect();
+        assert_eq!(ranges, vec![(6, 10)]);
     }
 }
