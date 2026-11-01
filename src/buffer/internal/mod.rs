@@ -447,6 +447,10 @@ impl GapBuffer {
     /// allocation in any way. It simply resets internal state so that it behaves like an empty
     /// initial buffer.
     pub fn clear(&mut self) {
+        // move_gap_to will clear the cache if the gap is _not_ currently at index 0. We
+        // unconditionally clear first to ensure that hitting that edge case doesn't leave stale
+        // cache content.
+        self.char_to_byte_cache.clear();
         self.move_gap_to(ByteIdx(0));
         self.gap_end = RawIdx(self.cap);
         self.line_endings.clear();
