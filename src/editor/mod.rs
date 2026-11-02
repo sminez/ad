@@ -513,13 +513,13 @@ where
                 default_handled();
             }
 
-            LoadInBuffer { id, txt } => {
-                self.load_string_in_buffer(id, txt, false);
+            LoadInBuffer { id, evt } => {
+                self.load_fsys_event(id, evt);
                 default_handled();
             }
 
-            ExecuteInBuffer { id, txt } => {
-                self.execute_explicit_string(Some(id), &txt, Source::Fsys);
+            ExecuteInBuffer { id, evt, arg } => {
+                self.execute_fsys_event(id, evt, arg);
                 default_handled();
             }
         }

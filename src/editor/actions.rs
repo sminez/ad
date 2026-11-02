@@ -1,6 +1,6 @@
 //! Editor actions in response to user input
 use crate::{
-    buffer::{BufferId, BufferKind, LineIdx},
+    buffer::{BufferId, BufferKind, CharIdx, LineIdx},
     config::Config,
     dot::{Cur, Range, TextObject},
     editor::{Editor, MbSelect, MbSelector, MiniBufferSelection, minibuffer::SimpleMbSelect},
@@ -14,7 +14,7 @@ use crate::{
     ui::{StateChange, UserInterface},
     util::gen_help_docs,
 };
-use ad_event::Source;
+use ad_event::{FsysEvent, Kind, Source};
 use std::{
     env, fs,
     mem::take,
@@ -947,6 +947,65 @@ where
         }
     }
 
+    /// Resolve the full text of an event written back to a buffer's `event` file.
+    fn fsys_event_text(&self, id: BufferId, evt: &FsysEvent, from_scratch: bool) -> Option<String> {
+        if !evt.truncated {
+            return Some(evt.txt.clone());
+        }
+
+        let b = if from_scratch {
+            self.buffers.scratch().buffer()
+        } else {
+            self.buffers.with_id(id)?
+        };
+        let n_chars = b.txt.len_chars();
+        let from = CharIdx(evt.ch_from.min(n_chars));
+        let to = CharIdx(evt.ch_to.min(n_chars));
+
+        Some(b.txt.slice(from, to).to_string())
+    }
+
+    /// Load the text of an event written back to a buffer's `event` file.
+    pub(super) fn load_fsys_event(&mut self, id: BufferId, evt: FsysEvent) {
+        let from_scratch = evt.kind == Kind::LoadScratch;
+        if let Some(txt) = self.fsys_event_text(id, &evt, from_scratch) {
+            self.load_string_in_buffer(id, txt, false);
+        }
+    }
+
+    /// The command to run for an execute event written back to a buffer's `event` file, using
+    /// the same semantics as [Editor::default_execute_dot] for appending a chorded argument.
+    fn fsys_execute_cmd(
+        &self,
+        id: BufferId,
+        evt: &FsysEvent,
+        arg: Option<&FsysEvent>,
+    ) -> Option<String> {
+        let from_scratch = evt.kind == Kind::ExecuteScratch;
+        let mut cmd = self
+            .fsys_event_text(id, evt, from_scratch)?
+            .trim()
+            .to_string();
+        if let Some(arg) = arg.and_then(|a| self.fsys_event_text(id, a, from_scratch)) {
+            cmd.push(' ');
+            cmd.push_str(&arg);
+        }
+
+        Some(cmd)
+    }
+
+    /// Execute the text of an event written back to a buffer's `event` file.
+    pub(super) fn execute_fsys_event(
+        &mut self,
+        id: BufferId,
+        evt: FsysEvent,
+        arg: Option<FsysEvent>,
+    ) {
+        if let Some(cmd) = self.fsys_execute_cmd(id, &evt, arg.as_ref()) {
+            self.execute_explicit_string(Some(id), &cmd, Source::Fsys);
+        }
+    }
+
     pub(super) fn execute_explicit_string(
         &mut self,
         bufid: Option<usize>,
@@ -1305,6 +1364,43 @@ recv {}({})",
             assert_recv!(brx, Open, expected);
             assert_recv!(brx, Focus, expected);
         }
+    }
+
+    fn editor_with_buffer(content: &str) -> Editor<crate::system::DefaultSystem> {
+        let mut ed = Editor::new(
+            Config::default(),
+            PlumbingRules::default(),
+            EditorMode::Headless,
+            LogBuffer::default(),
+        );
+        ed.update_window_size(400, 800);
+        ed.open_file("foo", false);
+        ed.buffers.active_mut().txt.insert_str(CharIdx(0), content);
+
+        ed
+    }
+
+    #[test]
+    fn fsys_event_text_reads_truncated_text_from_buffer() {
+        let content = format!("prefix {}", "a".repeat(ad_event::MAX_CHARS + 10));
+        let ed = editor_with_buffer(&content);
+        let evt = FsysEvent::new(Source::Fsys, Kind::ExecuteBody, 7, 7, &content[7..]);
+        assert!(evt.truncated);
+
+        let txt = ed.fsys_event_text(1, &evt, false);
+
+        assert_eq!(txt.as_deref(), Some(&content[7..]));
+    }
+
+    #[test]
+    fn fsys_execute_cmd_appends_chorded_arg() {
+        let ed = editor_with_buffer("");
+        let evt = FsysEvent::new(Source::Fsys, Kind::ExecuteBody, 0, 0, "echo\n");
+        let arg = FsysEvent::new(Source::Fsys, Kind::ChordedArgument, 0, 0, "hello");
+
+        let cmd = ed.fsys_execute_cmd(1, &evt, Some(&arg));
+
+        assert_eq!(cmd.as_deref(), Some("echo hello"));
     }
 
     #[test_case("next-column", 2, 1; "move focus to foo")]

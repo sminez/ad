@@ -9,6 +9,7 @@ use crate::{
     },
     input::Event,
 };
+use ad_event::IndexEntry;
 use ninep::{
     fs::{FileType, Perm, Stat, Timestamp},
     sync::server::ReadOutcome,
@@ -217,9 +218,7 @@ impl BufferNodes {
             let filename = b
                 .current_file_content_as_string(FILENAME, &self.tx)
                 .expect("FILENAME to be valid");
-            let id = &b.str_id;
-
-            entries.push(format!("{id}\t{filename}\n"));
+            entries.push(IndexEntry { id: b.id, filename }.as_index_file_line());
         }
 
         entries.join("")

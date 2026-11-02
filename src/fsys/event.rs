@@ -140,16 +140,119 @@ pub fn run_threaded_input_listener(event_rx: Receiver<FsysEvent>) -> Sender<Inpu
 }
 
 pub fn send_event_to_editor(id: usize, s: &str, tx: &Sender<Event>) -> Result<usize> {
-    let n_bytes_written = s.len();
+    let mut arg = None;
 
-    let evt = FsysEvent::try_from_str(s)?;
-    let req = match evt.kind {
-        Kind::LoadBody | Kind::LoadScratch => Req::LoadInBuffer { id, txt: evt.txt },
-        Kind::ExecuteBody | Kind::ExecuteScratch => Req::ExecuteInBuffer { id, txt: evt.txt },
-        _ => return Ok(n_bytes_written),
-    };
+    for line in s.lines().filter(|l| !l.trim().is_empty()) {
+        let evt = FsysEvent::try_from_str(line)?;
+        let req = match evt.kind {
+            Kind::ChordedArgument => {
+                arg = Some(evt);
+                continue;
+            }
+            Kind::LoadBody | Kind::LoadScratch => Req::LoadInBuffer { id, evt },
+            Kind::ExecuteBody | Kind::ExecuteScratch => Req::ExecuteInBuffer {
+                id,
+                evt,
+                arg: arg.take(),
+            },
+            _ => {
+                arg = None;
+                continue;
+            }
+        };
 
-    Message::send(req, tx)?;
+        arg = None;
+        Message::send(req, tx)?;
+    }
 
-    Ok(n_bytes_written)
+    Ok(s.len())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{assert_matches, sync::mpsc::Receiver};
+
+    fn line(kind: Kind, txt: &str) -> String {
+        FsysEvent::new(Source::Mouse, kind, 0, 0, txt).as_event_file_line()
+    }
+
+    fn requests_for_write(s: &str) -> Vec<Req> {
+        let (tx, rx) = channel();
+        let handle = spawn(move || {
+            let rx: Receiver<Event> = rx;
+            let mut reqs = Vec::new();
+            for evt in rx.iter() {
+                if let Event::Message(Message { req, tx }) = evt {
+                    reqs.push(req);
+                    _ = tx.send(Ok(String::new()));
+                }
+            }
+            reqs
+        });
+
+        let res = send_event_to_editor(1, s, &tx);
+        drop(tx);
+        assert_eq!(res, Ok(s.len()));
+
+        handle.join().unwrap()
+    }
+
+    #[test]
+    fn execute_write_back_carries_chorded_arg() {
+        let s = format!(
+            "{}{}",
+            line(Kind::ChordedArgument, "arg"),
+            line(Kind::ExecuteBody, "cmd")
+        );
+        let reqs = requests_for_write(&s);
+
+        assert_eq!(reqs.len(), 1, "{reqs:?}");
+        match &reqs[0] {
+            Req::ExecuteInBuffer {
+                id: 1,
+                evt,
+                arg: Some(arg),
+            } => {
+                assert_eq!(evt.txt, "cmd");
+                assert_eq!(arg.txt, "arg");
+            }
+            req => panic!("unexpected request: {req:?}"),
+        }
+    }
+
+    #[test]
+    fn chorded_arg_is_only_paired_with_a_following_execute() {
+        let s = format!(
+            "{}{}{}",
+            line(Kind::ChordedArgument, "arg"),
+            line(Kind::LoadBody, "foo"),
+            line(Kind::ExecuteBody, "cmd")
+        );
+        let reqs = requests_for_write(&s);
+
+        assert_eq!(reqs.len(), 2, "{reqs:?}");
+        assert_matches!(&reqs[0], Req::LoadInBuffer { id: 1, .. }, "{reqs:?}");
+        assert_matches!(
+            &reqs[1],
+            Req::ExecuteInBuffer {
+                id: 1,
+                arg: None,
+                ..
+            },
+            "{reqs:?}"
+        );
+    }
+
+    #[test]
+    fn write_back_of_insert_and_delete_is_ignored() {
+        let s = format!(
+            "{}{}",
+            line(Kind::InsertBody, "foo"),
+            line(Kind::DeleteBody, "foo")
+        );
+        let reqs = requests_for_write(&s);
+
+        assert!(reqs.is_empty(), "{reqs:?}");
+    }
 }

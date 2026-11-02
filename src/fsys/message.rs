@@ -1,5 +1,6 @@
 //! RPC messaging between the fuse filesystem thread and the main editor thread
 use crate::{buffer::BufferId, fsys::event::InputFilter, input::Event};
+use ad_event::FsysEvent;
 use std::sync::mpsc::{Sender, channel};
 use tracing::error;
 
@@ -103,10 +104,11 @@ pub enum Req {
     },
     LoadInBuffer {
         id: BufferId,
-        txt: String,
+        evt: FsysEvent,
     },
     ExecuteInBuffer {
         id: BufferId,
-        txt: String,
+        evt: FsysEvent,
+        arg: Option<FsysEvent>,
     },
 }
