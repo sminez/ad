@@ -21,7 +21,7 @@ pub mod tokio;
 #[cfg(test)]
 pub(crate) mod test_util;
 
-pub use ad_event::Source;
+pub use ad_event::{IndexEntry, Source};
 pub use ninep::sansio::client::{Error, Result};
 
 /// The result of asking the user to provide input via the minibuffer.
@@ -135,6 +135,73 @@ pub enum EventOutcome {
     Exit,
 }
 
+#[derive(Debug, Default)]
+pub(crate) struct FilterState {
+    arg: Option<FsysEvent>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct FilterStep {
+    pub(crate) write_back: Option<String>,
+    pub(crate) exit: bool,
+}
+
+impl FilterState {
+    /// Parse the next line from the `event` file, returning the event that should be passed to
+    /// the filter (if any).
+    ///
+    /// Chorded arguments are held until the execute event that immediately follows them.
+    pub(crate) fn next_event(&mut self, line: &str) -> Result<Option<FsysEvent>> {
+        let evt = FsysEvent::try_from_str(line).map_err(io::Error::other)?;
+
+        match evt.kind {
+            Kind::ChordedArgument => {
+                self.arg = Some(evt);
+                return Ok(None);
+            }
+            Kind::ExecuteBody | Kind::ExecuteScratch => (),
+            _ => self.arg = None,
+        }
+
+        Ok(Some(evt))
+    }
+
+    pub(crate) fn chorded_arg(&self, evt: &FsysEvent) -> Option<EventData<'_>> {
+        self.arg.as_ref().map(|arg| EventData {
+            from_scratch: evt.kind == Kind::ExecuteScratch,
+            ..EventData::from(arg)
+        })
+    }
+
+    pub(crate) fn handle_outcome(&mut self, evt: &FsysEvent, outcome: EventOutcome) -> FilterStep {
+        let arg = self.arg.take();
+        let write_back = match outcome {
+            EventOutcome::Passthrough | EventOutcome::PassthroughAndExit => {
+                let mut s = arg.map(|a| a.as_event_file_line()).unwrap_or_default();
+                s.push_str(&evt.as_event_file_line());
+
+                Some(s)
+            }
+            EventOutcome::Handled | EventOutcome::Exit => None,
+        };
+
+        FilterStep {
+            write_back,
+            exit: matches!(
+                outcome,
+                EventOutcome::PassthroughAndExit | EventOutcome::Exit
+            ),
+        }
+    }
+}
+
+pub(crate) fn parse_index_file(s: &str) -> Result<Vec<IndexEntry>> {
+    let entries = IndexEntry::parse_index_file(s)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+
+    Ok(entries)
+}
+
 pub(crate) fn parse_bufid(str_id: &str) -> io::Result<usize> {
     str_id.parse().map_err(|_| {
         io::Error::new(
@@ -219,7 +286,7 @@ pub struct SessionMeta {
     /// The id of the currently active buffer.
     pub active_buffer_id: String,
     /// Metadata for the buffers open in this session.
-    pub buffers: Vec<BufferMeta>,
+    pub buffers: Vec<IndexEntry>,
 }
 
 impl SessionMeta {
@@ -229,15 +296,6 @@ impl SessionMeta {
 
         Ok(())
     }
-}
-
-/// Metadata for an open buffer within an ad editor session.
-#[derive(Debug)]
-pub struct BufferMeta {
-    /// The id of the buffer.
-    pub id: usize,
-    /// The full filename of the buffer.
-    pub filename: String,
 }
 
 /// Call [SessionMeta::remove_socket] for all currently unresponsive editor sessions.
@@ -269,17 +327,7 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
             }
         };
         let active_buffer_id = client.read_str("buffers/current")?;
-        let buffers = client
-            .read_str("buffers/index")?
-            .lines()
-            .map(|line| {
-                let mut it = line.split_whitespace();
-                let id = parse_bufid(it.next().unwrap_or_default())?;
-                let filename = it.next().map(String::from).unwrap_or_default();
-
-                Ok(BufferMeta { id, filename })
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let buffers = parse_index_file(&client.read_str("buffers/index")?)?;
 
         sessions.push(SessionMeta {
             socket_name: ns,
@@ -290,4 +338,51 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
     }
 
     Ok(sessions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use simple_test_case::test_case;
+
+    fn line(kind: Kind, txt: &str) -> String {
+        FsysEvent::new(Source::Mouse, kind, 0, 0, txt).as_event_file_line()
+    }
+
+    #[test_case(EventOutcome::Passthrough, true, false; "passthrough")]
+    #[test_case(EventOutcome::PassthroughAndExit, true, true; "passthrough and exit")]
+    #[test_case(EventOutcome::Handled, false, false; "handled")]
+    #[test_case(EventOutcome::Exit, false, true; "exit")]
+    #[test]
+    fn handle_outcome_works(outcome: EventOutcome, write_back: bool, exit: bool) {
+        let mut state = FilterState::default();
+        let evt = state
+            .next_event(&line(Kind::LoadBody, "foo"))
+            .unwrap()
+            .unwrap();
+        let step = state.handle_outcome(&evt, outcome);
+
+        assert_eq!(step.write_back.is_some(), write_back, "write_back");
+        assert_eq!(step.exit, exit, "exit");
+    }
+
+    #[test]
+    fn passthrough_of_execute_writes_back_chorded_arg() {
+        let mut state = FilterState::default();
+        state
+            .next_event(&line(Kind::ChordedArgument, "arg"))
+            .unwrap();
+        let evt = state
+            .next_event(&line(Kind::ExecuteBody, "cmd"))
+            .unwrap()
+            .unwrap();
+        let step = state.handle_outcome(&evt, EventOutcome::Passthrough);
+
+        let expected = format!(
+            "{}{}",
+            line(Kind::ChordedArgument, "arg"),
+            line(Kind::ExecuteBody, "cmd")
+        );
+        assert_eq!(step.write_back, Some(expected));
+    }
 }

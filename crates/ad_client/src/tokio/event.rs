@@ -1,7 +1,6 @@
 //! Handling of event filtering
-use crate::{EventData, EventOutcome, Result, tokio::BufferClient};
-use ad_event::{FsysEvent, Kind};
-use std::io;
+use crate::{EventData, EventOutcome, FilterState, Result, tokio::BufferClient};
+use ad_event::Kind;
 
 /// An event filter takes control over a buffer's events file and handles processing the events
 /// that come through. Any events without a corresponding handler are written back to ad for
@@ -50,18 +49,17 @@ pub(super) async fn run_filter<F>(mut filter: F, client: &BufferClient) -> Resul
 where
     F: AsyncEventFilter,
 {
-    let mut arg: Option<FsysEvent> = None;
+    let mut state = FilterState::default();
 
     loop {
         let mut stream = client.event_lines().await?;
 
         while let Some(line) = stream.next().await {
-            let evt = FsysEvent::try_from_str(&line).map_err(io::Error::other)?;
+            let evt = match state.next_event(&line)? {
+                Some(evt) => evt,
+                None => continue,
+            };
             let data = EventData::from(&evt);
-
-            if let Some(e) = arg.as_mut() {
-                e.kind = evt.kind; // ensure that the from_scratch flag is correct
-            }
 
             let outcome = match evt.kind {
                 Kind::InsertBody | Kind::InsertScratch => filter.on_insert(data, client).await?,
@@ -69,26 +67,18 @@ where
                 Kind::LoadBody | Kind::LoadScratch => filter.on_load(data, client).await?,
                 Kind::ExecuteBody | Kind::ExecuteScratch => {
                     filter
-                        .on_execute(data, arg.as_ref().map(Into::into), client)
+                        .on_execute(data, state.chorded_arg(&evt), client)
                         .await?
                 }
-
-                Kind::ChordedArgument => {
-                    arg = Some(evt.clone());
-                    client.write_event(&evt.as_event_file_line()).await?;
-
-                    continue;
-                }
+                Kind::ChordedArgument => unreachable!("chorded arguments are held by FilterState"),
             };
 
-            match outcome {
-                EventOutcome::Handled => (),
-                EventOutcome::Passthrough => client.write_event(&evt.as_event_file_line()).await?,
-                EventOutcome::PassthroughAndExit => {
-                    client.write_event(&evt.as_event_file_line()).await?;
-                    return Ok(());
-                }
-                EventOutcome::Exit => return Ok(()),
+            let step = state.handle_outcome(&evt, outcome);
+            if let Some(s) = step.write_back {
+                client.write_event(&s).await?;
+            }
+            if step.exit {
+                return Ok(());
             }
         }
     }

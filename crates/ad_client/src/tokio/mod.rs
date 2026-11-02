@@ -1,5 +1,7 @@
 //! An asynchronous client implementation.
-use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
+use crate::{
+    IndexEntry, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid, parse_index_file,
+};
 use ninep::tokio::client::{Client as NinepClient, Error, ReadLineStream, Result};
 use std::{env, io, path::Path, str::FromStr, time::Duration};
 use tokio::time::sleep;
@@ -67,22 +69,8 @@ impl Client {
     }
 
     /// Get the list of currently open buffers
-    pub async fn open_buffers(&self) -> Result<Vec<BufferMeta>> {
-        let buffers = self
-            .inner
-            .read_str("buffers/index")
-            .await?
-            .lines()
-            .map(|line| {
-                let mut it = line.split_whitespace();
-                let id = parse_bufid(it.next().unwrap_or_default())?;
-                let filename = it.next().map(String::from).unwrap_or_default();
-
-                Ok(BufferMeta { id, filename })
-            })
-            .collect::<Result<Vec<_>>>()?;
-
-        Ok(buffers)
+    pub async fn open_buffers(&self) -> Result<Vec<IndexEntry>> {
+        parse_index_file(&self.inner.read_str("buffers/index").await?)
     }
 
     /// Focus the given buffer
@@ -127,7 +115,7 @@ impl Client {
 
     async fn _id_for_path(&self, path: &str) -> Result<usize> {
         sleep(Duration::from_millis(5)).await;
-        for BufferMeta { id, filename } in self.open_buffers().await?.into_iter() {
+        for IndexEntry { id, filename } in self.open_buffers().await?.into_iter() {
             if filename.ends_with(path) {
                 return Ok(id);
             }
