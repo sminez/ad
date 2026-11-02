@@ -7,9 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Plumbing rule variables are now passed to commands via environment variables (using `shellexpand`)
+  rather than direct string substitution, preventing shell injection from plumbed data
+
+### Added
+- Tree-sitter syntax highlighting for Go
+- Syntax highlighting in virtual buffers
+- Support for unbinding keys from user config (#172)
+- Readline style bindings in the minibuffer
+- `open-virtual` and `open-virtual-in-new-window` commands for opening virtual files
+- Per-buffer `ctl` files in fsys
+- Removing a buffer's fsys directory now closes that buffer
+- Byte offsets included in fsys events
+- `-9p rm` and `-9p lsl` CLI commands
+- Built-in command docs for the `!`, `<`, `>` and `|` shell command prefixes
+- **ad_client**
+  - tokio based client alongside the existing sync client
+  - Minibuffer support and additional utility methods
+  - Reading buffer and scratch contents from an offset
+
 ### Changed
 - Update the behaviour of `*` / double-click cursor expansion to support dashes so the behaviour
   is correct for built-in commands (#170)
+- Edit scripts now apply changes in buffer position order rather than match order, and reject
+  programs whose changes overlap (matching Sam semantics)
+- fsys is now restricted to the user running ad and enforces 9p file permissions
+- Minibuffer input is now handled through the main event loop
+- Less aggressive fast mouse scrolling
+- The `ninep` crate has moved to its own repository ([sminez/ninep](https://github.com/sminez/ninep))
+- Internal GapBuffer indexing now uses distinct `ByteIdx`, `CharIdx` and `LineIdx` types
+- Moved over to `parking_lot` for all locks
+
+### Fixed
+- LSP edits sending an empty insert in place of a delete caused tree-sitter highlighting to drift
+- Byte/char indexing issues in regex based syntax highlighting
+- Panic in `Buffer::substr_from`
+- Buffer display names and status messages are now truncated by terminal column width rather
+  than byte length (#175)
+- Reloading a buffer from disk could leave the cursor beyond the end of the buffer
+- Replacing buffer content now also resets buffer metadata
+- Setting dot via fsys now updates the UI
+- Reverse find behaviour
+- `ad_client` event filters no longer exit on empty reads
 
 
 ## [0.4.0] - 2025-12-15
