@@ -126,10 +126,84 @@ impl FsysEvent {
     }
 }
 
+/// A single entry in `ad`'s `buffers/index` file.
+///
+/// Each line of the index file is a buffer id and the full filename of the buffer, separated by
+/// a tab character.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IndexEntry {
+    /// The id of the buffer.
+    pub id: usize,
+    /// The full filename of the buffer.
+    pub filename: String,
+}
+
+impl IndexEntry {
+    pub fn as_index_file_line(&self) -> String {
+        format!("{}\t{}\n", self.id, self.filename)
+    }
+
+    pub fn try_from_str(s: &str) -> Result<Self, String> {
+        let s = s.strip_suffix('\n').unwrap_or(s);
+        let (id, filename) = s
+            .split_once('\t')
+            .ok_or_else(|| format!("invalid index line: {s:?}"))?;
+        let id = id
+            .parse()
+            .map_err(|_| format!("expected integer ID, got {id:?}"))?;
+
+        Ok(Self {
+            id,
+            filename: filename.to_string(),
+        })
+    }
+
+    /// Parse the full contents of an index file.
+    pub fn parse_index_file(s: &str) -> Result<Vec<Self>, String> {
+        s.lines().map(Self::try_from_str).collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use simple_test_case::test_case;
+
+    #[test_case("foo.rs"; "simple")]
+    #[test_case("/home/user/my file.rs"; "with spaces")]
+    #[test_case("/tmp/a\tb"; "with tab")]
+    #[test_case(""; "empty")]
+    #[test]
+    fn index_entry_round_trip_works(filename: &str) {
+        let entry = IndexEntry {
+            id: 42,
+            filename: filename.to_string(),
+        };
+        let line = entry.as_index_file_line();
+        let parsed = IndexEntry::try_from_str(&line).expect("to parse");
+
+        assert_eq!(parsed, entry);
+    }
+
+    #[test]
+    fn parse_index_file_works() {
+        let s = "1\tfoo.rs\n2\t/my dir/bar.rs\n";
+        let entries = IndexEntry::parse_index_file(s).unwrap();
+
+        assert_eq!(
+            entries,
+            vec![
+                IndexEntry {
+                    id: 1,
+                    filename: "foo.rs".to_string()
+                },
+                IndexEntry {
+                    id: 2,
+                    filename: "/my dir/bar.rs".to_string()
+                },
+            ]
+        );
+    }
 
     fn evt(s: &str) -> FsysEvent {
         FsysEvent::new(Source::Keyboard, Kind::InsertBody, 17, 17, s)
