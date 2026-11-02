@@ -1,8 +1,5 @@
 //! Handling of event filtering
-use crate::{
-    EventData, EventOutcome, Result,
-    tokio::{BufferClient, Client},
-};
+use crate::{EventData, EventOutcome, Result, tokio::BufferClient};
 use ad_event::{FsysEvent, Kind};
 use std::io;
 
@@ -15,7 +12,7 @@ pub trait AsyncEventFilter {
     fn on_insert(
         &mut self,
         data: EventData<'_>,
-        client: &Client,
+        client: &BufferClient,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Handled) }
     }
@@ -24,7 +21,7 @@ pub trait AsyncEventFilter {
     fn on_delete(
         &mut self,
         data: EventData<'_>,
-        client: &Client,
+        client: &BufferClient,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Handled) }
     }
@@ -33,7 +30,7 @@ pub trait AsyncEventFilter {
     fn on_load(
         &mut self,
         data: EventData<'_>,
-        client: &Client,
+        client: &BufferClient,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Passthrough) }
     }
@@ -43,7 +40,7 @@ pub trait AsyncEventFilter {
         &mut self,
         data: EventData<'_>,
         chorded_arg: Option<EventData<'_>>,
-        client: &Client,
+        client: &BufferClient,
     ) -> impl Future<Output = Result<EventOutcome>> + Send {
         async { Ok(EventOutcome::Passthrough) }
     }

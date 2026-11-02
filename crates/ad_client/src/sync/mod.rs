@@ -1,10 +1,9 @@
 //! A synchronous client implementation.
-use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
+use crate::{BufferMeta, LogEvent, MiniBufferSelection, parse_bufid};
 use ninep::sync::client::{Client as NinepClient, Error, ReadLineIter, Result};
 use std::{
     env,
     io::{self, Write},
-    ops::Deref,
     path::Path,
     str::FromStr,
     thread::sleep,
@@ -207,11 +206,15 @@ impl Client {
     }
 
     /// Reload the currently active buffer.
+    ///
+    /// Use [BufferClient] to target a specific buffer.
     pub fn reload_current_buffer(&self) -> Result<()> {
         self.ctl("reload", "")
     }
 
     /// Mark the currently active buffer as being clean.
+    ///
+    /// Use [BufferClient::mark_clean] to target a specific buffer.
     pub fn mark_clean(&self) -> Result<()> {
         self.ctl("mark-clean", "")
     }
@@ -219,6 +222,16 @@ impl Client {
     /// Run the provided ad Edit script against the current buffer
     pub fn run_edit_script(&self, script: impl AsRef<str>) -> Result<()> {
         self.ctl("Edit", script.as_ref())
+    }
+
+    /// Create a [BodyWriter] impl that can be used to continuously write to the given path
+    pub fn body_writer(&self, bufid: usize) -> Result<BodyWriter> {
+        Ok(BodyWriter {
+            client: BufferClient {
+                bufid,
+                client: self.clone(),
+            },
+        })
     }
 
     /// Open the minibuffer with the provided `prompt` showing `lines`.
@@ -271,14 +284,6 @@ pub struct BufferClient {
     client: Client,
 }
 
-impl Deref for BufferClient {
-    type Target = Client;
-
-    fn deref(&self) -> &Self::Target {
-        &self.client
-    }
-}
-
 impl BufferClient {
     /// The ID of the buffer this client is for.
     pub fn id(&self) -> usize {
@@ -311,6 +316,22 @@ impl BufferClient {
             .write(format!("buffers/{}/{file}", self.bufid), offset, content)
     }
 
+    pub(crate) fn read_scratch_from(&self, byte_offset: u64, count: u32) -> Result<Vec<u8>> {
+        self.client.read_scratch_from(byte_offset, count)
+    }
+
+    /// Send a control message to ad targeting the given buffer.
+    pub fn ctl(&self, command: &str, args: &str) -> Result<()> {
+        self._write_buffer_file("ctl", 0, format!("{command} {args}").as_bytes())?;
+
+        Ok(())
+    }
+
+    /// Mark the given buffer as being clean.
+    pub fn mark_clean(&self) -> Result<()> {
+        self.ctl("mark-clean", "")
+    }
+
     /// Read the contents of the dot of the given buffer
     pub fn read_dot(&self) -> Result<String> {
         self._read_buffer_file("dot")
@@ -323,7 +344,8 @@ impl BufferClient {
 
     /// Read `count` bytes from the contents of the buffer body from a particular offset.
     pub fn read_body_from(&self, byte_offset: u64, count: u32) -> Result<Vec<u8>> {
-        self.inner
+        self.client
+            .inner
             .read_from(format!("buffers/{}/body", self.bufid), byte_offset, count)
     }
 
@@ -411,33 +433,27 @@ impl BufferClient {
     /// Create a [Write] impl that can be used to continuously write to the given path
     pub fn body_writer(&self) -> Result<BodyWriter> {
         Ok(BodyWriter {
-            path: format!("buffers/{}/body", self.bufid),
-            client: self.client.inner.clone(),
+            client: self.clone(),
         })
     }
 }
 
-impl SessionMeta {}
-
 /// A writer for appending to the body of a buffer
 #[derive(Debug)]
 pub struct BodyWriter {
-    path: String,
-    client: NinepClient,
+    client: BufferClient,
 }
 
 impl BodyWriter {
     /// Mark the buffer as being clean
     pub fn mark_clean(&self) -> Result<()> {
-        self.client.write("ctl", 0, "mark-clean".as_bytes())?;
-
-        Ok(())
+        self.client.mark_clean()
     }
 }
 
 impl Write for BodyWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(self.client.write(&self.path, 0, buf)?)
+        Ok(self.client._write_buffer_file("body", 0, buf)?)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -478,15 +494,26 @@ mod tests {
 
     #[test]
     fn ctl_works() {
-        let (client, _ted) = prepare(&[("foo", "foo content")]);
-        let client = client.for_buffer(1);
+        // with two buffers, the second will be active as it is the last to open
+        let (client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]);
+        let b1 = client.for_buffer(1);
+        let b2 = client.for_buffer(2);
 
-        let fname = client.read_filename().unwrap();
+        // initial file names should be correct
+        let fname = b1.read_filename().unwrap();
         assert!(fname.ends_with("foo"), "{fname:?}");
-
-        client.ctl("rename-buffer", "bar").unwrap();
-        let fname = client.read_filename().unwrap();
+        let fname = b2.read_filename().unwrap();
         assert!(fname.ends_with("bar"), "{fname:?}");
+
+        // Client.ctl should target the active buffer
+        client.ctl("rename-buffer", "baz").unwrap();
+        let fname = b2.read_filename().unwrap();
+        assert!(fname.ends_with("baz"), "{fname:?}");
+
+        // BufferClient.ctl should target the buffer it was created for
+        b1.ctl("rename-buffer", "qux").unwrap();
+        let fname = b1.read_filename().unwrap();
+        assert!(fname.ends_with("qux"), "{fname:?}");
     }
 
     #[test]

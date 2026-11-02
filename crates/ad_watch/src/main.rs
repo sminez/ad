@@ -32,12 +32,12 @@ fn main() -> anyhow::Result<()> {
         }
     };
 
-    let client = client
+    let watch = client
         .open_in_new_window(format!("{dir}/+watch"))
         .context("unable to open +watch buffer")?;
-    let buffer_id = client.id();
+    let buffer_id = watch.id();
 
-    clear_and_rerun(&client, &cmd, &args)?;
+    clear_and_rerun(&watch, &cmd, &args)?;
 
     for evt in client.log_events()? {
         match evt? {
@@ -49,7 +49,7 @@ fn main() -> anyhow::Result<()> {
                     .read_filename()
                     .context("unable to read filename of saved buffer")?;
                 if fname.starts_with(&dir) {
-                    clear_and_rerun(&client, &cmd, &args)?;
+                    clear_and_rerun(&watch, &cmd, &args)?;
                 }
             }
 

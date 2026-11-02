@@ -1,7 +1,7 @@
 //! An asynchronous client implementation.
 use crate::{BufferMeta, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
 use ninep::tokio::client::{Client as NinepClient, Error, ReadLineStream, Result};
-use std::{env, io, ops::Deref, path::Path, str::FromStr, time::Duration};
+use std::{env, io, path::Path, str::FromStr, time::Duration};
 use tokio::time::sleep;
 
 mod event;
@@ -203,11 +203,15 @@ impl Client {
     }
 
     /// Reload the currently active buffer.
+    ///
+    /// Use [BufferClient] to target a specific buffer.
     pub async fn reload_current_buffer(&self) -> Result<()> {
         self.ctl("reload", "").await
     }
 
     /// Mark the currently active buffer as being clean.
+    ///
+    /// Use [BufferClient::mark_clean] to target a specific buffer.
     pub async fn mark_clean(&self) -> Result<()> {
         self.ctl("mark-clean", "").await
     }
@@ -218,10 +222,12 @@ impl Client {
     }
 
     /// Create a [BodyWriter] impl that can be used to continuously write to the given path
-    pub async fn body_writer(&self, buffer_id: usize) -> Result<BodyWriter> {
+    pub fn body_writer(&self, bufid: usize) -> Result<BodyWriter> {
         Ok(BodyWriter {
-            path: format!("buffers/{buffer_id}/body"),
-            client: self.inner.clone(),
+            client: BufferClient {
+                bufid,
+                client: self.clone(),
+            },
         })
     }
 
@@ -281,14 +287,6 @@ pub struct BufferClient {
     client: Client,
 }
 
-impl Deref for BufferClient {
-    type Target = Client;
-
-    fn deref(&self) -> &Self::Target {
-        &self.client
-    }
-}
-
 impl BufferClient {
     /// The ID of the buffer this client is for.
     pub fn id(&self) -> usize {
@@ -325,6 +323,23 @@ impl BufferClient {
             .await
     }
 
+    pub(crate) async fn read_scratch_from(&self, byte_offset: u64, count: u32) -> Result<Vec<u8>> {
+        self.client.read_scratch_from(byte_offset, count).await
+    }
+
+    /// Send a control message to ad targeting the given buffer.
+    pub async fn ctl(&self, command: &str, args: &str) -> Result<()> {
+        self._write_buffer_file("ctl", 0, format!("{command} {args}").as_bytes())
+            .await?;
+
+        Ok(())
+    }
+
+    /// Mark the given buffer as being clean.
+    pub async fn mark_clean(&self) -> Result<()> {
+        self.ctl("mark-clean", "").await
+    }
+
     /// Read the contents of the dot of the given buffer
     pub async fn read_dot(&self) -> Result<String> {
         self._read_buffer_file("dot").await
@@ -337,7 +352,8 @@ impl BufferClient {
 
     /// Read `count` bytes from the contents of the buffer body from a particular offset.
     pub async fn read_body_from(&self, byte_offset: u64, count: u32) -> Result<Vec<u8>> {
-        self.inner
+        self.client
+            .inner
             .read_from(format!("buffers/{}/body", self.bufid), byte_offset, count)
             .await
     }
@@ -427,8 +443,7 @@ impl BufferClient {
     /// Create a [BodyWriter] that can be used to continuously write to the given path
     pub async fn body_writer(&self) -> Result<BodyWriter> {
         Ok(BodyWriter {
-            path: format!("buffers/{}/body", self.bufid),
-            client: self.client.inner.clone(),
+            client: self.clone(),
         })
     }
 }
@@ -463,21 +478,18 @@ impl LogStream {
 /// A writer for appending to the body of a buffer
 #[derive(Debug)]
 pub struct BodyWriter {
-    path: String,
-    client: NinepClient,
+    client: BufferClient,
 }
 
 impl BodyWriter {
     /// Write the provided data to the buffer.
     pub async fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        Ok(self.client.write(&self.path, 0, buf).await?)
+        Ok(self.client._write_buffer_file("body", 0, buf).await?)
     }
 
     /// Mark the buffer as being clean
     pub async fn mark_clean(&mut self) -> Result<()> {
-        self.client.write("ctl", 0, "mark-clean".as_bytes()).await?;
-
-        Ok(())
+        self.client.mark_clean().await
     }
 }
 
@@ -513,15 +525,26 @@ mod tests {
 
     #[tokio::test]
     async fn ctl_works() {
-        let (client, _ted) = prepare(&[("foo", "foo content")]).await;
-        let client = client.for_buffer(1);
+        // with two buffers, the second will be active as it is the last to open
+        let (client, _ted) = prepare(&[("foo", "foo content"), ("bar", "bar content")]).await;
+        let b1 = client.for_buffer(1);
+        let b2 = client.for_buffer(2);
 
-        let fname = client.read_filename().await.unwrap();
+        // initial file names should be correct
+        let fname = b1.read_filename().await.unwrap();
         assert!(fname.ends_with("foo"), "{fname:?}");
-
-        client.ctl("rename-buffer", "bar").await.unwrap();
-        let fname = client.read_filename().await.unwrap();
+        let fname = b2.read_filename().await.unwrap();
         assert!(fname.ends_with("bar"), "{fname:?}");
+
+        // Client.ctl should target the active buffer
+        client.ctl("rename-buffer", "baz").await.unwrap();
+        let fname = b2.read_filename().await.unwrap();
+        assert!(fname.ends_with("baz"), "{fname:?}");
+
+        // BufferClient.ctl should target the buffer it was created for
+        b1.ctl("rename-buffer", "qux").await.unwrap();
+        let fname = b1.read_filename().await.unwrap();
+        assert!(fname.ends_with("qux"), "{fname:?}");
     }
 
     #[tokio::test]
@@ -648,7 +671,7 @@ mod tests {
         async fn on_load(
             &mut self,
             _data: EventData<'_>,
-            _client: &Client,
+            _client: &BufferClient,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("load");
 
@@ -659,7 +682,7 @@ mod tests {
             &mut self,
             _data: EventData<'_>,
             _arg: Option<EventData<'_>>,
-            _client: &Client,
+            _client: &BufferClient,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("execute");
 
@@ -669,7 +692,7 @@ mod tests {
         async fn on_insert(
             &mut self,
             _data: EventData<'_>,
-            _client: &Client,
+            _client: &BufferClient,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("insert");
 
@@ -679,7 +702,7 @@ mod tests {
         async fn on_delete(
             &mut self,
             _data: EventData<'_>,
-            _client: &Client,
+            _client: &BufferClient,
         ) -> Result<EventOutcome> {
             self.inner.lock().await.push("delete");
 
