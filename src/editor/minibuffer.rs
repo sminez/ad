@@ -11,7 +11,7 @@ use crate::{
     key::{Arrow, Input},
     system::System,
 };
-use ad_event::Source;
+use ad_event::{MiniBufferSelection, Source};
 use parking_lot::{Mutex, RwLock};
 use std::{
     cmp::{self, min},
@@ -32,24 +32,6 @@ pub struct MiniBufferState<'a> {
     pub(crate) b: Option<&'a Buffer>,
     pub(crate) top: LineIdx,
     pub(crate) bottom: LineIdx,
-}
-
-pub(crate) enum MiniBufferSelection {
-    Line { cy: usize, line: String },
-    UserInput { input: String },
-    Cancelled,
-}
-
-impl MiniBufferSelection {
-    /// Discard any information around which line was selected by the user and only
-    /// return the content of the selected line itself.
-    pub(crate) fn into_content(self) -> Option<String> {
-        match self {
-            Self::Line { line, .. } => Some(line),
-            Self::UserInput { input } => Some(input),
-            Self::Cancelled => None,
-        }
-    }
 }
 
 /// A mini-buffer always has a single line prompt for accepting user input

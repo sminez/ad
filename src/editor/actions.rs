@@ -652,13 +652,7 @@ where
 
         let prompt: &str = prompt.as_deref().unwrap_or("> ");
         let mb = SimpleMbSelect::new(prompt, lines, move |selection| {
-            let s = match selection {
-                MiniBufferSelection::Line { line, .. } => line,
-                MiniBufferSelection::UserInput { input } => input,
-                MiniBufferSelection::Cancelled => String::new(),
-            };
-
-            _ = tx.send(s);
+            _ = tx.send(selection.into_content().unwrap_or_default());
 
             None
         });

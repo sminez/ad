@@ -43,8 +43,9 @@ pub use mouse::Click;
 pub use commands::parse_command_fuzz;
 
 pub(crate) use actions::{Actions, ViewPort};
+pub(crate) use ad_event::MiniBufferSelection;
 pub(crate) use built_in_commands::built_in_commands;
-pub(crate) use minibuffer::{MbSelect, MbSelector, MiniBufferSelection};
+pub(crate) use minibuffer::{MbSelect, MbSelector};
 
 /// The mode that the [Editor] will run in following a call to [Editor::run].
 pub enum EditorMode {

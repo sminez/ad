@@ -206,6 +206,53 @@ impl LogEvent {
     }
 }
 
+/// The result of asking the user to provide input via the minibuffer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MiniBufferSelection {
+    /// The user selected one of the provided input lines
+    Line {
+        /// The index of the selected line within the input
+        cy: usize,
+        /// The content of the selected line
+        line: String,
+    },
+    /// The user provided a custom response that was not in the input
+    UserInput {
+        /// The content provided by the user
+        input: String,
+    },
+    /// The user dismissed the minibuffer without providing input
+    Cancelled,
+}
+
+impl MiniBufferSelection {
+    /// Discard any information around which line was selected by the user and only
+    /// return the content of the selected line itself.
+    pub fn into_content(self) -> Option<String> {
+        match self {
+            Self::Line { line, .. } => Some(line),
+            Self::UserInput { input } => Some(input),
+            Self::Cancelled => None,
+        }
+    }
+
+    /// Interpret the content of `ad`'s `minibuffer` file after offering `lines` to the user.
+    pub fn from_minibuffer_file_content(lines: &[String], mut s: String) -> Self {
+        if s.ends_with('\n') {
+            s.pop();
+        }
+
+        if s.is_empty() {
+            return Self::Cancelled;
+        }
+
+        match lines.iter().position(|l| l == &s) {
+            Some(cy) => Self::Line { cy, line: s },
+            None => Self::UserInput { input: s },
+        }
+    }
+}
+
 fn invalid_data(msg: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
 }
@@ -219,6 +266,31 @@ fn parse_id(s: &str) -> io::Result<usize> {
 mod tests {
     use super::*;
     use simple_test_case::test_case;
+
+    #[test_case("", MiniBufferSelection::Cancelled; "empty is cancelled")]
+    #[test_case("\n", MiniBufferSelection::Cancelled; "newline is cancelled")]
+    #[test_case("b\n", MiniBufferSelection::Line { cy: 1, line: "b".to_string() }; "line")]
+    #[test_case("x", MiniBufferSelection::UserInput { input: "x".to_string() }; "user input")]
+    #[test_case("b\n\n", MiniBufferSelection::UserInput { input: "b\n".to_string() }; "only one newline stripped")]
+    #[test]
+    fn minibuffer_selection_from_file_content_works(s: &str, expected: MiniBufferSelection) {
+        let lines = vec!["a".to_string(), "b".to_string()];
+        let sel = MiniBufferSelection::from_minibuffer_file_content(&lines, s.to_string());
+
+        assert_eq!(sel, expected);
+    }
+
+    #[test_case(MiniBufferSelection::Line { cy: 1, line: "b".to_string() }; "line")]
+    #[test_case(MiniBufferSelection::UserInput { input: "x".to_string() }; "user input")]
+    #[test_case(MiniBufferSelection::Cancelled; "cancelled")]
+    #[test]
+    fn minibuffer_selection_round_trip_works(sel: MiniBufferSelection) {
+        let lines = vec!["a".to_string(), "b".to_string()];
+        let s = sel.clone().into_content().unwrap_or_default();
+        let parsed = MiniBufferSelection::from_minibuffer_file_content(&lines, s);
+
+        assert_eq!(parsed, sel);
+    }
 
     #[test_case(LogEvent::Open(1); "open")]
     #[test_case(LogEvent::Close(2); "close")]

@@ -221,7 +221,8 @@ impl Client {
 
     /// Open the minibuffer with the provided `prompt` showing `lines`.
     ///
-    /// If the user makes a selection (either from the provided lines or
+    /// Returns the line the user selected, any custom input they provided instead, or
+    /// [MiniBufferSelection::Cancelled] if they dismissed the minibuffer.
     pub async fn minibuffer_select<I, S>(
         &self,
         prompt: &str,
@@ -239,18 +240,9 @@ impl Client {
             .write_str("minibuffer", 0, &lines.join("\n"))
             .await?;
         self.ctl("minibuffer-prompt", prompt).await?;
-        let mut s = self.inner.read_str("minibuffer").await?;
-        if s.ends_with('\n') {
-            s.pop();
-        }
+        let s = self.inner.read_str("minibuffer").await?;
 
-        if s.is_empty() {
-            Ok(MiniBufferSelection::Cancelled)
-        } else if let Some(index) = lines.iter().position(|elem| elem == &s) {
-            Ok(MiniBufferSelection::Line { index, content: s })
-        } else {
-            Ok(MiniBufferSelection::UserInput { content: s })
-        }
+        Ok(MiniBufferSelection::from_minibuffer_file_content(&lines, s))
     }
 
     /// Prompt the user for input via the minibuffer.
@@ -259,12 +251,9 @@ impl Client {
     pub async fn minibuffer_prompt(&self, prompt: &str) -> Result<Option<String>> {
         self.inner.write_str("minibuffer", 0, "").await?;
         self.ctl("minibuffer-prompt", prompt).await?;
-        let mut s = self.inner.read_str("minibuffer").await?;
-        if s.ends_with('\n') {
-            s.pop();
-        }
+        let s = self.inner.read_str("minibuffer").await?;
 
-        if s.is_empty() { Ok(None) } else { Ok(Some(s)) }
+        Ok(MiniBufferSelection::from_minibuffer_file_content(&[], s).into_content())
     }
 }
 

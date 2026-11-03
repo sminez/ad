@@ -14,14 +14,14 @@ use std::{
 
 pub fn mbs_line(index: usize, content: &str) -> MiniBufferSelection {
     MiniBufferSelection::Line {
-        index,
-        content: content.into(),
+        cy: index,
+        line: content.into(),
     }
 }
 
 pub fn mbs_user(content: &str) -> MiniBufferSelection {
     MiniBufferSelection::UserInput {
-        content: content.into(),
+        input: content.into(),
     }
 }
 

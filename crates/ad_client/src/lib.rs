@@ -14,34 +14,15 @@ use ad_event::{FsysEvent, Kind};
 use ninep::{sansio::server::socket_dir, sync::client::Client};
 use std::{fs, io};
 
+pub use ad_event::{IndexEntry, LogEvent, MiniBufferSelection, Source};
+pub use ninep::sansio::client::{Error, Result};
+
 pub mod sync;
 #[cfg(feature = "tokio")]
 pub mod tokio;
 
 #[cfg(test)]
 pub(crate) mod test_util;
-
-pub use ad_event::{IndexEntry, LogEvent, Source};
-pub use ninep::sansio::client::{Error, Result};
-
-/// The result of asking the user to provide input via the minibuffer.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MiniBufferSelection {
-    /// The user selected one of the provided input lines
-    Line {
-        /// The index of the selected line within the input
-        index: usize,
-        /// The content of the selected line
-        content: String,
-    },
-    /// The user provided a custom response that was not in the input
-    UserInput {
-        /// The content provided by the user
-        content: String,
-    },
-    /// The user dismissed the minibuffer without providing input
-    Cancelled,
-}
 
 /// Event data received from an ad buffer's `events` file.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
