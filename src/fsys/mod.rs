@@ -45,6 +45,7 @@ use std::{
     cmp::min,
     env,
     fs::{create_dir_all, remove_file},
+    io,
     mem::take,
     path::{Path, PathBuf},
     process::Command,
@@ -199,7 +200,7 @@ impl Drop for State {
 }
 
 impl State {
-    fn set_active_buffer(&mut self, s: String) -> Result<usize> {
+    fn set_active_buffer(&mut self, s: String) -> io::Result<usize> {
         let id: usize = match s.trim().parse() {
             Ok(n) => n,
             Err(_) => {
@@ -230,14 +231,15 @@ impl State {
         }
     }
 
-    fn scratch_write(&mut self, s: String) -> Result<usize> {
+    fn scratch_write(&mut self, s: String) -> io::Result<usize> {
         let n_bytes = s.len();
         let req = Req::AppendBufferBody { id: SCRATCH_ID, s };
 
         match Message::send(req, &self.tx) {
             Ok(_) => Ok(n_bytes),
-            Err(e) => Err(format!(
-                "unable to write to scratch buffer (n_bytes={n_bytes}): {e}",
+            Err(e) => Err(io::Error::new(
+                e.kind(),
+                format!("unable to write to scratch buffer (n_bytes={n_bytes}): {e}"),
             )),
         }
     }
@@ -306,7 +308,7 @@ impl State {
     /// Writing data to the minibuffer causes fsys to buffer the writes internally until the client
     /// is done. When a client then attempts to read back the selection the full buffer is sent to
     /// the editor for rendering and the reads block until the user makes a selection.
-    fn minibuffer_write(&mut self, lines: String) -> Result<usize> {
+    fn minibuffer_write(&mut self, lines: String) -> io::Result<usize> {
         let n_bytes = lines.len();
         match &mut self.minibuffer_content {
             MiniBufferContent::Buffering(buffer) => buffer.extend_from_slice(lines.as_bytes()),
@@ -499,7 +501,9 @@ impl Serve9p for AdFs {
             && !s.buffer_nodes.has_input_filter(buf_qid)
         {
             trace!("attaching filter qid={qid} cid={cid:?}");
-            s.buffer_nodes.attach_input_filter(buf_qid)?;
+            s.buffer_nodes
+                .attach_input_filter(buf_qid)
+                .map_err(|e| e.to_string())?;
         }
 
         match s.buffer_nodes.get_file_content(qid, offset, count) {
@@ -556,13 +560,16 @@ impl Serve9p for AdFs {
                 }
             },
 
-            MINIBUFFER_QID => s.minibuffer_write(str),
-            SCRATCH_QID => s.scratch_write(str),
-            CURRENT_BUFFER_QID => s.set_active_buffer(str),
+            MINIBUFFER_QID => s.minibuffer_write(str).map_err(|e| e.to_string()),
+            SCRATCH_QID => s.scratch_write(str).map_err(|e| e.to_string()),
+            CURRENT_BUFFER_QID => s.set_active_buffer(str).map_err(|e| e.to_string()),
 
             LOG_FILE_QID | INDEX_BUFFER_QID => Err(E_NOT_ALLOWED.to_string()),
 
-            qid => s.buffer_nodes.write(qid, str, offset),
+            qid => s
+                .buffer_nodes
+                .write(qid, str, offset)
+                .map_err(|e| e.to_string()),
         }
     }
 

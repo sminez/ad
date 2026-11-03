@@ -2,8 +2,8 @@
 use crate::{
     fsys::{
         BUFFERS_DIR, BUFFERS_QID, CURRENT_BUFFER, CURRENT_BUFFER_QID, E_UNKNOWN_FILE, INDEX_BUFFER,
-        INDEX_BUFFER_QID, InternalRead, Message, QID_OFFSET, Req, Result, apply_offset,
-        empty_dir_stat, empty_file_stat, empty_file_stat_with_perms,
+        INDEX_BUFFER_QID, InternalRead, Message, QID_OFFSET, Req, apply_offset, empty_dir_stat,
+        empty_file_stat, empty_file_stat_with_perms,
         event::{InputFilter, InputRequest, run_threaded_input_listener, send_event_to_editor},
         log::{Log, LogEvent},
     },
@@ -16,6 +16,7 @@ use ninep::{
 };
 use std::{
     collections::BTreeMap,
+    io,
     sync::mpsc::{Receiver, Sender, channel},
 };
 use tracing::{debug, error, trace};
@@ -139,10 +140,10 @@ impl BufferNodes {
         }
     }
 
-    pub(super) fn attach_input_filter(&mut self, buf_qid: u64) -> Result<()> {
+    pub(super) fn attach_input_filter(&mut self, buf_qid: u64) -> io::Result<()> {
         match self.known.get_mut(&buf_qid) {
             Some(bn) => bn.attach_input_filter(&self.tx),
-            None => Err(E_UNKNOWN_FILE.to_string()),
+            None => Err(unknown_file()),
         }
     }
 
@@ -243,11 +244,11 @@ impl BufferNodes {
         }
     }
 
-    pub(super) fn write(&mut self, qid: u64, s: String, _offset: usize) -> Result<usize> {
+    pub(super) fn write(&mut self, qid: u64, s: String, _offset: usize) -> io::Result<usize> {
         let (parent, fname) = parent_and_fname(qid);
         let b = match self.known.get_mut(&parent) {
             Some(b) => b,
-            None => return Err(E_UNKNOWN_FILE.to_string()),
+            None => return Err(unknown_file()),
         };
         b.stat.last_modified = Timestamp::now();
         let id = b.id;
@@ -266,13 +267,14 @@ impl BufferNodes {
             OUTPUT => Req::AppendOutput { id, s },
             XADDR => Req::SetBufferXAddr { id, s },
             XDOT => Req::SetBufferXDot { id, s },
-            _ => return Err(E_UNKNOWN_FILE.to_string()),
+            _ => return Err(unknown_file()),
         };
 
         match Message::send(req, &self.tx) {
             Ok(_) => Ok(n_bytes),
-            Err(e) => Err(format!(
-                "unable to write to {fname} (n_bytes={n_bytes}): {e}",
+            Err(e) => Err(io::Error::new(
+                e.kind(),
+                format!("unable to write to {fname} (n_bytes={n_bytes}): {e}"),
             )),
         }
     }
@@ -359,7 +361,7 @@ impl BufferNode {
         QidCheck::Unknown
     }
 
-    fn attach_input_filter(&mut self, etx: &Sender<Event>) -> Result<()> {
+    fn attach_input_filter(&mut self, etx: &Sender<Event>) -> io::Result<()> {
         let (tx, rx) = channel();
         let req = Req::AddInputEventFilter {
             id: self.id,
@@ -463,7 +465,7 @@ impl BufferNode {
         }
     }
 
-    fn pending_events(&self) -> Result<InternalRead> {
+    fn pending_events(&self) -> io::Result<InternalRead> {
         let tx = match self.input_handle.as_ref() {
             Some(tx) => tx,
             None => {
@@ -474,15 +476,19 @@ impl BufferNode {
 
         let (read_tx, read_rx) = channel();
         if tx.send(InputRequest::Read { tx: read_tx }).is_err() {
-            return Err("failed to send".to_string());
+            return Err(io::Error::new(io::ErrorKind::BrokenPipe, "failed to send"));
         }
 
         match read_rx.recv() {
             Ok(ReadOutcome::Immediate(data)) => Ok(InternalRead::Immediate(data)),
             Ok(ReadOutcome::Blocked(rx)) => Ok(InternalRead::Blocked(rx)),
-            Err(_) => Err("failed to read".to_string()),
+            Err(_) => Err(io::Error::new(io::ErrorKind::BrokenPipe, "failed to read")),
         }
     }
+}
+
+fn unknown_file() -> io::Error {
+    io::Error::new(io::ErrorKind::NotFound, E_UNKNOWN_FILE)
 }
 
 fn stub_file_stats(qid: u64) -> BTreeMap<&'static str, Stat> {

@@ -1,9 +1,7 @@
 //! An asynchronous client implementation.
-use crate::{
-    IndexEntry, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid, parse_index_file,
-};
+use crate::{IndexEntry, LogEvent, MiniBufferSelection, SessionMeta, parse_bufid};
 use ninep::tokio::client::{Client as NinepClient, Error, ReadLineStream, Result};
-use std::{env, io, path::Path, str::FromStr, time::Duration};
+use std::{env, io, path::Path, time::Duration};
 use tokio::time::sleep;
 
 mod event;
@@ -70,7 +68,9 @@ impl Client {
 
     /// Get the list of currently open buffers
     pub async fn open_buffers(&self) -> Result<Vec<IndexEntry>> {
-        parse_index_file(&self.inner.read_str("buffers/index").await?)
+        Ok(IndexEntry::parse_index_file(
+            &self.inner.read_str("buffers/index").await?,
+        )?)
     }
 
     /// Focus the given buffer
@@ -459,7 +459,7 @@ impl LogStream {
         self.inner
             .next()
             .await
-            .map(|line| LogEvent::from_str(&line))
+            .map(|line| Ok(LogEvent::try_from_str(&line)?))
     }
 }
 

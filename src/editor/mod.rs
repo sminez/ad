@@ -18,7 +18,7 @@ use crate::{
 use ad_event::Source;
 use parking_lot::RwLock;
 use std::{
-    env, fmt, panic,
+    env, fmt, io, panic,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -398,7 +398,7 @@ where
     fn send_buffer_resp(
         &self,
         id: usize,
-        tx: Sender<Result<String, String>>,
+        tx: Sender<io::Result<String>>,
         f: fn(&Buffer) -> String,
     ) {
         if id == SCRATCH_ID {
@@ -409,7 +409,10 @@ where
         match self.buffers.with_id(id) {
             Some(b) => _ = tx.send(Ok((f)(b))),
             None => {
-                _ = tx.send(Err("unknown buffer".to_string()));
+                _ = tx.send(Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "unknown buffer",
+                )));
                 _ = self.tx_fsys.send(LogEvent::Close(id));
             }
         }
@@ -418,7 +421,7 @@ where
     fn handle_buffer_mutation<F: FnOnce(&mut Buffer, String)>(
         &mut self,
         id: usize,
-        tx: Sender<Result<String, String>>,
+        tx: Sender<io::Result<String>>,
         s: String,
         f: F,
     ) {
@@ -435,7 +438,10 @@ where
             }
 
             None => {
-                _ = tx.send(Err("unknown buffer".to_string()));
+                _ = tx.send(Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "unknown buffer",
+                )));
                 _ = self.tx_fsys.send(LogEvent::Close(id));
             }
         }
@@ -503,7 +509,10 @@ where
                 let resp = if self.buffers.try_set_input_filter(id, filter) {
                     Ok("handled".to_string())
                 } else {
-                    Err("filter already in place".to_string())
+                    Err(io::Error::new(
+                        io::ErrorKind::AlreadyExists,
+                        "filter already in place",
+                    ))
                 };
                 _ = tx.send(resp);
             }

@@ -1,3 +1,4 @@
+pub(crate) use ad_event::LogEvent;
 use ninep::sync::server::{ClientId, ReadOutcome};
 use std::{
     collections::HashMap,
@@ -18,40 +19,13 @@ pub(super) fn spawn_log_listener(
         for event in log_event_rx.iter() {
             // Handle ReadOutcome::Blocked responses first
             for tx in pending_rx.try_iter() {
-                _ = tx.send(event.as_log_line_bytes());
+                _ = tx.send(event.as_log_file_line().into_bytes());
             }
 
             // Lazy update of fsys state
             _ = listener_tx.send(event);
         }
     });
-}
-
-/// A message sent by the main editor thread to notify the fs thread that
-/// the current buffer list has changed.
-#[derive(Debug, Clone, Copy)]
-pub(crate) enum LogEvent {
-    /// A newly created buffer
-    Open(usize),
-    /// A buffer that has now been closed and needs removing from state
-    Close(usize),
-    /// A change to the currently active buffer
-    Focus(usize),
-    /// A buffer was saved
-    Save(usize),
-}
-
-impl LogEvent {
-    pub(crate) fn as_log_line_bytes(self) -> Vec<u8> {
-        let s = match self {
-            LogEvent::Open(id) => format!("{id} open\n"),
-            LogEvent::Close(id) => format!("{id} close\n"),
-            LogEvent::Focus(id) => format!("{id} focus\n"),
-            LogEvent::Save(id) => format!("{id} save\n"),
-        };
-
-        s.into_bytes()
-    }
 }
 
 #[derive(Debug)]
@@ -123,7 +97,11 @@ impl Log {
                 let mut v = Vec::new();
                 swap(events, &mut v);
 
-                ReadOutcome::Immediate(v.into_iter().flat_map(|e| e.as_log_line_bytes()).collect())
+                ReadOutcome::Immediate(
+                    v.into_iter()
+                        .flat_map(|e| e.as_log_file_line().into_bytes())
+                        .collect(),
+                )
             }
 
             Some(ClientLog::Pending) => {

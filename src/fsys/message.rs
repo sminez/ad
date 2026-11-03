@@ -1,19 +1,22 @@
 //! RPC messaging between the fuse filesystem thread and the main editor thread
 use crate::{buffer::BufferId, fsys::event::InputFilter, input::Event};
 use ad_event::FsysEvent;
-use std::sync::mpsc::{Sender, channel};
+use std::{
+    io,
+    sync::mpsc::{Sender, channel},
+};
 use tracing::error;
 
 /// A wrapper around a [Req] that can be sent to the main editor event loop
 #[derive(Debug)]
 pub struct Message {
     pub req: Req,
-    pub tx: Sender<Result<String, String>>,
+    pub tx: Sender<io::Result<String>>,
 }
 
 impl Message {
     /// Make a request to the main thread and return the response we got back
-    pub(super) fn send(req: Req, etx: &Sender<Event>) -> Result<String, String> {
+    pub(super) fn send(req: Req, etx: &Sender<Event>) -> io::Result<String> {
         let (tx, rx) = channel();
         let evt = Event::Message(Self { req, tx });
 
@@ -26,7 +29,7 @@ impl Message {
             Err(e) => {
                 let err = format!("error receiving message from main thread: {e}");
                 error!("{err}");
-                Err(err)
+                Err(io::Error::new(io::ErrorKind::BrokenPipe, err))
             }
         }
     }

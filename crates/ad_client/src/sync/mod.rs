@@ -1,11 +1,10 @@
 //! A synchronous client implementation.
-use crate::{IndexEntry, LogEvent, MiniBufferSelection, parse_bufid, parse_index_file};
+use crate::{IndexEntry, LogEvent, MiniBufferSelection, parse_bufid};
 use ninep::sync::client::{Client as NinepClient, Error, ReadLineIter, Result};
 use std::{
     env,
     io::{self, Write},
     path::Path,
-    str::FromStr,
     thread::sleep,
     time::Duration,
 };
@@ -63,7 +62,7 @@ impl Client {
         Ok(self
             .inner
             .iter_lines("log")?
-            .map(|line| LogEvent::from_str(&line)))
+            .map(|line| Ok(LogEvent::try_from_str(&line)?)))
     }
 
     /// Get the currently active buffer id.
@@ -75,7 +74,9 @@ impl Client {
 
     /// Get the list of currently open buffers
     pub fn open_buffers(&self) -> Result<Vec<IndexEntry>> {
-        parse_index_file(&self.inner.read_str("buffers/index")?)
+        Ok(IndexEntry::parse_index_file(
+            &self.inner.read_str("buffers/index")?,
+        )?)
     }
 
     /// Focus the given buffer

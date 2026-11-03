@@ -1,5 +1,6 @@
 //! A shared event message format between ad and clients
 use serde::{Deserialize, Serialize};
+use std::io;
 
 /// The maximum number of characters included in a serialized message.
 ///
@@ -115,11 +116,13 @@ impl FsysEvent {
         format!("{}\n", serde_json::to_string(self).unwrap())
     }
 
-    pub fn try_from_str(s: &str) -> Result<Self, String> {
-        let evt: Self =
-            serde_json::from_str(s.trim()).map_err(|e| format!("invalid event: {e}"))?;
+    pub fn try_from_str(s: &str) -> io::Result<Self> {
+        let evt: Self = serde_json::from_str(s.trim())
+            .map_err(|e| invalid_data(format!("invalid event: {e}")))?;
         if evt.txt.chars().count() > MAX_CHARS {
-            return Err(format!("txt field too long: max chars = {MAX_CHARS}"));
+            return Err(invalid_data(format!(
+                "txt field too long: max chars = {MAX_CHARS}"
+            )));
         }
 
         Ok(evt)
@@ -143,31 +146,101 @@ impl IndexEntry {
         format!("{}\t{}\n", self.id, self.filename)
     }
 
-    pub fn try_from_str(s: &str) -> Result<Self, String> {
+    pub fn try_from_str(s: &str) -> io::Result<Self> {
         let s = s.strip_suffix('\n').unwrap_or(s);
         let (id, filename) = s
             .split_once('\t')
-            .ok_or_else(|| format!("invalid index line: {s:?}"))?;
-        let id = id
-            .parse()
-            .map_err(|_| format!("expected integer ID, got {id:?}"))?;
+            .ok_or_else(|| invalid_data(format!("invalid index line: {s:?}")))?;
 
         Ok(Self {
-            id,
+            id: parse_id(id)?,
             filename: filename.to_string(),
         })
     }
 
     /// Parse the full contents of an index file.
-    pub fn parse_index_file(s: &str) -> Result<Vec<Self>, String> {
+    pub fn parse_index_file(s: &str) -> io::Result<Vec<Self>> {
         s.lines().map(Self::try_from_str).collect()
     }
+}
+
+/// A single event from `ad`'s `log` file.
+///
+/// Each line of the log file is a buffer id and the action that occurred, separated by a space.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogEvent {
+    /// A newly created buffer
+    Open(usize),
+    /// A buffer that has now been closed
+    Close(usize),
+    /// A change to the currently active buffer
+    Focus(usize),
+    /// A buffer was saved
+    Save(usize),
+}
+
+impl LogEvent {
+    pub fn as_log_file_line(&self) -> String {
+        match self {
+            Self::Open(id) => format!("{id} open\n"),
+            Self::Close(id) => format!("{id} close\n"),
+            Self::Focus(id) => format!("{id} focus\n"),
+            Self::Save(id) => format!("{id} save\n"),
+        }
+    }
+
+    pub fn try_from_str(s: &str) -> io::Result<Self> {
+        let s = s.strip_suffix('\n').unwrap_or(s);
+        let (id, action) = s
+            .split_once(' ')
+            .ok_or_else(|| invalid_data(format!("malformed log line: {s:?}")))?;
+        let id = parse_id(id)?;
+
+        match action {
+            "open" => Ok(Self::Open(id)),
+            "close" => Ok(Self::Close(id)),
+            "focus" => Ok(Self::Focus(id)),
+            "save" => Ok(Self::Save(id)),
+            _ => Err(invalid_data(format!("unknown log action {action:?}"))),
+        }
+    }
+}
+
+fn invalid_data(msg: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, msg)
+}
+
+fn parse_id(s: &str) -> io::Result<usize> {
+    s.parse()
+        .map_err(|_| invalid_data(format!("expected integer ID, got {s:?}")))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use simple_test_case::test_case;
+
+    #[test_case(LogEvent::Open(1); "open")]
+    #[test_case(LogEvent::Close(2); "close")]
+    #[test_case(LogEvent::Focus(3); "focus")]
+    #[test_case(LogEvent::Save(4); "save")]
+    #[test]
+    fn log_event_round_trip_works(evt: LogEvent) {
+        let line = evt.as_log_file_line();
+        let parsed = LogEvent::try_from_str(&line).expect("to parse");
+
+        assert_eq!(parsed, evt);
+    }
+
+    #[test_case("1open"; "missing separator")]
+    #[test_case("x open"; "non-integer id")]
+    #[test_case("1 explode"; "unknown action")]
+    #[test_case("1 open\n2 close\n"; "multiple lines")]
+    #[test]
+    fn invalid_log_lines_are_rejected(s: &str) {
+        let err = LogEvent::try_from_str(s).expect_err("to be rejected");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+    }
 
     #[test_case("foo.rs"; "simple")]
     #[test_case("/home/user/my file.rs"; "with spaces")]

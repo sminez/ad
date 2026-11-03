@@ -1,15 +1,13 @@
 //! Message formats for the events file
 use crate::{
     buffer::{ByteIdx, CharIdx},
-    fsys::{
-        Result,
-        message::{Message, Req},
-    },
+    fsys::message::{Message, Req},
     input::Event,
 };
 use ad_event::{FsysEvent, Kind, Source};
 use ninep::sync::server::ReadOutcome;
 use std::{
+    io,
     sync::mpsc::{Receiver, Sender, channel},
     thread::spawn,
 };
@@ -139,7 +137,7 @@ pub fn run_threaded_input_listener(event_rx: Receiver<FsysEvent>) -> Sender<Inpu
     fsys_tx
 }
 
-pub fn send_event_to_editor(id: usize, s: &str, tx: &Sender<Event>) -> Result<usize> {
+pub fn send_event_to_editor(id: usize, s: &str, tx: &Sender<Event>) -> io::Result<usize> {
     let mut arg = None;
 
     for line in s.lines().filter(|l| !l.trim().is_empty()) {
@@ -193,7 +191,7 @@ mod tests {
 
         let res = send_event_to_editor(1, s, &tx);
         drop(tx);
-        assert_eq!(res, Ok(s.len()));
+        assert_eq!(res.expect("write to succeed"), s.len());
 
         handle.join().unwrap()
     }

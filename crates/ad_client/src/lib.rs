@@ -12,7 +12,7 @@
 )]
 use ad_event::{FsysEvent, Kind};
 use ninep::{sansio::server::socket_dir, sync::client::Client};
-use std::{fs, io, str::FromStr};
+use std::{fs, io};
 
 pub mod sync;
 #[cfg(feature = "tokio")]
@@ -21,7 +21,7 @@ pub mod tokio;
 #[cfg(test)]
 pub(crate) mod test_util;
 
-pub use ad_event::{IndexEntry, Source};
+pub use ad_event::{IndexEntry, LogEvent, Source};
 pub use ninep::sansio::client::{Error, Result};
 
 /// The result of asking the user to provide input via the minibuffer.
@@ -152,7 +152,7 @@ impl FilterState {
     ///
     /// Chorded arguments are held until the execute event that immediately follows them.
     pub(crate) fn next_event(&mut self, line: &str) -> Result<Option<FsysEvent>> {
-        let evt = FsysEvent::try_from_str(line).map_err(io::Error::other)?;
+        let evt = FsysEvent::try_from_str(line)?;
 
         match evt.kind {
             Kind::ChordedArgument => {
@@ -195,13 +195,6 @@ impl FilterState {
     }
 }
 
-pub(crate) fn parse_index_file(s: &str) -> Result<Vec<IndexEntry>> {
-    let entries = IndexEntry::parse_index_file(s)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-    Ok(entries)
-}
-
 pub(crate) fn parse_bufid(str_id: &str) -> io::Result<usize> {
     str_id.parse().map_err(|_| {
         io::Error::new(
@@ -209,53 +202,6 @@ pub(crate) fn parse_bufid(str_id: &str) -> io::Result<usize> {
             format!("expected integer ID, got {str_id:?}"),
         )
     })
-}
-
-/// A message sent by the main editor thread to notify the fs thread that
-/// the current buffer list has changed.
-#[derive(Debug, Clone, Copy)]
-pub enum LogEvent {
-    /// A newly created buffer
-    Open(usize),
-    /// A buffer that has now been closed and needs removing from state
-    Close(usize),
-    /// A change to the currently active buffer
-    Focus(usize),
-    /// A buffer was saved
-    Save(usize),
-}
-
-impl FromStr for LogEvent {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        let s = s.trim();
-        if s.contains('\n') {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "expected single line").into());
-        }
-
-        let (str_id, action) = s.split_once(' ').ok_or(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("malformed log line: {s:?}"),
-        ))?;
-
-        let id = parse_bufid(str_id)?;
-        let evt = match action {
-            "open" => Self::Open(id),
-            "close" => Self::Close(id),
-            "focus" => Self::Focus(id),
-            "save" => Self::Save(id),
-            _ => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("unknown log action {action:?}"),
-                )
-                .into());
-            }
-        };
-
-        Ok(evt)
-    }
 }
 
 fn open_9p_sockets() -> io::Result<Vec<String>> {
@@ -327,7 +273,7 @@ pub fn list_open_sessions() -> Result<Vec<SessionMeta>> {
             }
         };
         let active_buffer_id = client.read_str("buffers/current")?;
-        let buffers = parse_index_file(&client.read_str("buffers/index")?)?;
+        let buffers = IndexEntry::parse_index_file(&client.read_str("buffers/index")?)?;
 
         sessions.push(SessionMeta {
             socket_name: ns,
