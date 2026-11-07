@@ -9,12 +9,10 @@ mod ast;
 mod compile;
 mod haystack;
 mod matches;
-mod stream;
 mod vm;
 
 pub use haystack::Haystack;
 pub use matches::Match;
-pub use stream::{CachingStream, CachingStreamIter};
 pub use vm::{Regex, RevRegex};
 
 /// Errors that can be returned by the regex engine

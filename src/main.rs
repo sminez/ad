@@ -4,14 +4,8 @@ use ad_editor::{
     buffer::GapBuffer,
     client::{list_open_sessions, oneshot_9p, remove_open_sockets},
     exec::SystemRunner,
-    regex::CachingStream,
 };
-use std::{
-    env, fs,
-    io::{self, stdin},
-    path::PathBuf,
-    process::exit,
-};
+use std::{env, fs, io, path::PathBuf, process::exit};
 use tracing::{level_filters::LevelFilter, subscriber::set_global_default};
 
 fn main() {
@@ -94,14 +88,8 @@ fn run_script(script: &str, files: Vec<PathBuf>) {
     let mut runner = SystemRunner::new(env::current_dir().unwrap());
 
     if files.is_empty() {
-        let mut haystack = CachingStream::new(stdin());
-        match prog.execute(&mut haystack, &mut runner, "stdin", &mut stdout) {
-            Ok(_) => return,
-            Err(e) => {
-                eprintln!("error running script: {e:?}");
-                exit(1);
-            }
-        }
+        eprintln!("no input files provided for edit script");
+        exit(1);
     }
 
     for path in files.iter() {

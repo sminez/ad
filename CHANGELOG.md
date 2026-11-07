@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reverse find behaviour
 - `ad_client` event filters no longer exit on empty reads
 
+### Removed
+- Edit scripts run from the command line via `-e` and `-f` no longer support running over stdin
+
 
 ## [0.4.0] - 2025-12-15
 
