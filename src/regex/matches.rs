@@ -1,6 +1,6 @@
 use crate::{
     buffer::{ByteIdx, ByteOffset},
-    regex::{Haystack, Regex, vm::N_SLOTS},
+    regex::{Haystack, Regex},
 };
 use std::{borrow::Cow, sync::Arc};
 
@@ -10,19 +10,15 @@ use std::{borrow::Cow, sync::Arc};
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Match {
     pub(super) n_submatches: usize,
-    pub(super) sub_matches: [ByteIdx; N_SLOTS],
-    pub(super) submatch_names: Arc<[String]>,
+    pub(super) sub_matches: Vec<ByteIdx>,
+    pub(super) submatch_names: Arc<[Option<Arc<str>>]>,
 }
 
 impl Match {
     pub(crate) fn synthetic(from: ByteIdx, to: ByteIdx) -> Self {
-        let mut sub_matches = [ByteIdx(0); N_SLOTS];
-        sub_matches[0] = from;
-        sub_matches[1] = to;
-
         Self {
             n_submatches: 0,
-            sub_matches,
+            sub_matches: vec![from, to],
             submatch_names: Arc::new([]),
         }
     }
@@ -47,6 +43,11 @@ impl Match {
         Some(haystack.substr(from, to))
     }
 
+    /// The names of all submatches.
+    pub fn submatch_names(&self) -> &[Option<Arc<str>>] {
+        &self.submatch_names
+    }
+
     /// Extract the given submatch by name if it exists
     pub fn submatch_text_by_name<'a, H>(&self, name: &str, haystack: &'a H) -> Option<Cow<'a, str>>
     where
@@ -55,18 +56,6 @@ impl Match {
         let (from, to) = self.sub_loc_by_name(name)?;
 
         Some(haystack.substr(from, to))
-    }
-
-    /// The names of each submatch
-    pub fn named_matches(&self) -> Vec<&str> {
-        let mut matches = Vec::new();
-        for name in self.submatch_names.iter() {
-            if self.sub_loc_by_name(name).is_some() {
-                matches.push(name.as_str());
-            }
-        }
-
-        matches
     }
 
     /// The start and end of this match in terms of byte offsets
@@ -83,12 +72,16 @@ impl Match {
     }
 
     fn sub_loc_by_name(&self, name: &str) -> Option<(ByteIdx, ByteIdx)> {
-        let n = self.submatch_names.iter().position(|s| s == name)?;
-        self.sub_loc(n + 1)
+        let n = self
+            .submatch_names
+            .iter()
+            .position(|s| s.as_ref().map(|s| s.as_ref()) == Some(name))?;
+
+        self.sub_loc(n)
     }
 
     pub(crate) fn sub_loc(&self, n: usize) -> Option<(ByteIdx, ByteIdx)> {
-        if 2 * n + 1 >= N_SLOTS {
+        if 2 * n + 1 >= self.sub_matches.len() {
             return None;
         }
         let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
@@ -136,7 +129,7 @@ where
     H: Haystack,
 {
     pub(super) haystack: &'a H,
-    pub(super) r: &'a mut Regex,
+    pub(super) re: &'a mut Regex,
     pub(super) from: ByteIdx,
 }
 
@@ -147,17 +140,22 @@ where
     type Item = Match;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let m = self.r.find_from(self.haystack, self.from)?;
+        let mut m = self.re.find_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
+
+        // If we had a zero length match we need to bump self.from along by a character so we don't
+        // end up stuck repeating the same match each iteration.
         if from == self.from {
-            let ch = self
-                .haystack
-                .substr_from(from)
-                .unwrap()
-                .chars()
-                .next()
-                .unwrap();
+            let ch = self.haystack.substr_from(from)?.chars().next()?;
             self.from += ByteOffset::from(ch);
+
+            // We start with self.from=0, so we allow a match at 0 to be emitted, but anything
+            // after that is a repeat which we need to drop and move on to the next match.
+            if from > ByteIdx(0) {
+                m = self.re.find_from(self.haystack, self.from)?;
+                let (_, from) = m.loc();
+                self.from = from;
+            }
         } else {
             self.from = from;
         }

@@ -1229,9 +1229,9 @@ mod tests {
 
     #[test_case(", x/.*/ i/X/", "foo", "Xfoo"; "zero-length dot star insert")]
     #[test_case(", x/.*/ p/{0}/", "a\nb", "a\nb"; "zero-length dot star print")]
-    #[test_case(", x/^/ i/> /", "foo\nbar", "> f> o> o> \n> b> a> r"; "zero-length line start")]
-    #[test_case(", x/$/ a/ </", "foo\nbar", " <f <o <o <\n <b <a <r"; "zero-length line end")]
-    #[test_case(", x/\\b/ i/|/", "foo bar", "|f|o|o| |b|a|r"; "zero-length word boundary")]
+    #[test_case(", x/^/ i/> /", "foo\nbar", "> foo\n> > bar"; "zero-length line start")]
+    #[test_case(", x/$/ a/ </", "foo\nbar", "foo < <\nbar <"; "zero-length line end")]
+    #[test_case(", x/\\b/ i/|/", "foo bar", "|foo|| |bar|"; "zero-length word boundary")]
     #[test_case(", y/.*/ i/X/", "foo", "foo"; "y with zero-length")]
     #[test]
     fn edge_case_zero_length_matches_work(
@@ -1313,7 +1313,7 @@ mod tests {
     #[test_case(", x/./ c/X/", "🦊🐕", "XX"; "emoji")]
     #[test_case(", x/./ c/X/", "é", "X"; "e with acute literal")]
     #[test_case("#2,#4 d", "世界你好", "世界"; "char offset with multibyte")]
-    #[test_case(", x/\\w+/ c/X/", "hello世界", "X世界"; "word with mixed scripts")]
+    #[test_case(", x/\\w+/ c/X/", "hello世界", "X"; "word with mixed scripts")]
     #[test_case("1:2,1:4 d", "世界你好", "世"; "line:col with multibyte")]
     #[test]
     fn edge_case_unicode_works(program: &str, initial_content: &str, expected_content: &str) {

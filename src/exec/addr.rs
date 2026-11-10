@@ -27,7 +27,7 @@ use std::fmt;
 
 pub type Error = parse::Error<ErrorKind>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum ErrorKind {
     InvalidRegex(regex::Error),
     InvalidSuffix,
