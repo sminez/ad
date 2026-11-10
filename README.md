@@ -120,7 +120,7 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
   crate but with a custom pre-processing step that adds a couple of behavioural changes.
   See [here](https://docs.rs/regex/latest/regex/#syntax) for the supported syntax in addition to the
   following changes:
-  - `@` is a custom meta-character that matches truely any character (rewritten to `(?s:.)`
+  - `@` is a custom meta-character that matches truly any character (rewritten to `(?s:.)`
   - Matches are always multi-line, so `^` and `$` match start and end of line rather than start and end of input
   - [df83edd](https://github.com/sminez/ad/tree/df83edd0e84dc40a4bd22d95eb6fec8057798f28) is the last commit
     containing the original regex engine
