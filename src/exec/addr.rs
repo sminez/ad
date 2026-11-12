@@ -18,7 +18,7 @@
 //! e1,e2  => set dot to e1_start..=e2_end
 //! ```
 use crate::{
-    buffer::{Buffer, CharIdx, CharOffset, GapBuffer, LineIdx, LineOffset},
+    buffer::{Buffer, CharIdx, CharOffset, GapBuffer, LineIdx, LineOffset, View},
     dot::{Cur, Dot, Range},
     parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
@@ -407,10 +407,6 @@ impl<'a> Parser<'a> {
 
 /// Something that is capable of resolving an Addr to a Dot
 pub trait Address: Haystack + Sized {
-    /// This only really makes sense for use with a buffer but is supported
-    /// so that don't need to special case running programs against an in-editor
-    /// buffer vs stdin or a file read from disk.
-    fn current_dot(&self) -> Dot;
     fn len_bytes(&self) -> usize;
     fn len_chars(&self) -> usize;
     fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx>;
@@ -418,19 +414,15 @@ pub trait Address: Haystack + Sized {
     fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx>;
     fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx>;
 
-    fn max_iter(&self) -> usize {
-        self.len_chars()
-    }
-
-    fn map_addr(&self, a: &Addr) -> Dot {
+    fn map_addr(&self, a: &Addr, cur_dot: Dot) -> Dot {
         let maybe_dot = match a {
             Addr::Explicit(d) => Some(*d),
-            Addr::Simple(a) => self.map_simple_addr(a, self.current_dot()),
-            Addr::Compound(from, to) => self.map_compound_addr(from, to),
+            Addr::Simple(a) => self.map_simple_addr(a, cur_dot),
+            Addr::Compound(from, to) => self.map_compound_addr(from, to, cur_dot),
         };
 
         let mut dot = maybe_dot.unwrap_or_default();
-        dot.clamp_idx(CharIdx(self.max_iter()));
+        dot.clamp_idx(CharIdx(self.len_chars()));
 
         dot
     }
@@ -448,7 +440,7 @@ pub trait Address: Haystack + Sized {
         let dot = match addr_base {
             Current => cur_dot,
             Bof => Cur { idx: CharIdx(0) }.into(),
-            Eof => Cur::new(CharIdx(self.max_iter())).into(),
+            Eof => Cur::new(CharIdx(self.len_chars())).into(),
 
             Bol => {
                 let Range { start, end, .. } = cur_dot.as_range();
@@ -522,19 +514,15 @@ pub trait Address: Haystack + Sized {
         Some(dot)
     }
 
-    fn map_compound_addr(&self, from: &SimpleAddr, to: &SimpleAddr) -> Option<Dot> {
-        let c1 = self.map_simple_addr(from, self.current_dot())?.first_cur();
-        let c2 = self.map_simple_addr(to, self.current_dot())?.last_cur();
+    fn map_compound_addr(&self, from: &SimpleAddr, to: &SimpleAddr, cur_dot: Dot) -> Option<Dot> {
+        let c1 = self.map_simple_addr(from, cur_dot)?.first_cur();
+        let c2 = self.map_simple_addr(to, cur_dot)?.last_cur();
 
         Some(Range::from_cursors(c1, c2, false).into())
     }
 }
 
 impl Address for GapBuffer {
-    fn current_dot(&self) -> Dot {
-        Dot::from_char_indices(CharIdx(0), CharIdx(self.len_chars().saturating_sub(1)))
-    }
-
     fn len_bytes(&self) -> usize {
         self.len()
     }
@@ -565,11 +553,39 @@ impl Address for GapBuffer {
     }
 }
 
-impl Address for Buffer {
-    fn current_dot(&self) -> Dot {
-        self.dot
+impl<'a> Address for View<'a> {
+    fn len_bytes(&self) -> usize {
+        self.len()
     }
 
+    fn len_chars(&self) -> usize {
+        self.len_chars()
+    }
+
+    fn line_to_char(&self, line_idx: LineIdx) -> Option<CharIdx> {
+        self.gb().try_line_to_char(line_idx)
+    }
+
+    fn char_to_line(&self, char_idx: CharIdx) -> Option<LineIdx> {
+        self.gb().try_char_to_line(char_idx)
+    }
+
+    fn char_to_line_end(&self, char_idx: CharIdx) -> Option<CharIdx> {
+        let line_idx = self.gb().try_char_to_line(char_idx)?;
+        match self.gb().try_line_to_char(line_idx.uadd(1)) {
+            None => Some(CharIdx(self.len_chars() - 1)),
+            Some(idx) => Some(idx),
+        }
+    }
+
+    fn char_to_line_start(&self, char_idx: CharIdx) -> Option<CharIdx> {
+        let line_idx = self.gb().try_char_to_line(char_idx)?;
+
+        Some(self.gb().line_to_char(line_idx))
+    }
+}
+
+impl Address for Buffer {
     fn len_bytes(&self) -> usize {
         self.txt.len()
     }
@@ -689,7 +705,7 @@ mod tests {
         b.dot = Cur::new(CharIdx(16)).into();
 
         let addr = Addr::parse(s).expect("valid addr");
-        b.dot = b.map_addr(&addr);
+        b.dot = b.map_addr(&addr, b.dot);
 
         assert_eq!(b.dot, expected, ">{}<", b.dot_contents());
         assert_eq!(b.dot_contents(), expected_contents);

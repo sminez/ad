@@ -1,14 +1,13 @@
 //! Sam style language for executing structural regular expressions against ad Buffers
 use crate::{
-    buffer::{Buffer, ByteIdx, CharIdx, CharOffset, GapBuffer},
+    buffer::{Buffer, ByteIdx, CharIdx, CharOffset, GapBuffer, View},
     dot::{Cur, Dot},
     editor::BAction,
     parse::ParseInput,
-    regex::{self, Regex},
+    regex::{self, Haystack as _, Regex},
 };
 use ad_event::Source;
 use std::{
-    borrow::Cow,
     cell::RefCell,
     cmp::min,
     collections::BTreeMap,
@@ -17,7 +16,6 @@ use std::{
 };
 use structex::{
     Structex, StructexBuilder,
-    re::{Haystack, Sliceable},
     template::{self, Context, Template},
 };
 
@@ -98,21 +96,24 @@ impl From<template::RenderError> for Error {
 }
 
 /// Something that can be edited by a Program
-pub trait Edit: Address + Haystack<Regex> {
-    /// Insert a string at the specified index
+pub trait Edit: Address {
+    fn as_view(&mut self) -> View<'_>;
+    fn current_dot(&self) -> Dot;
     fn insert(&mut self, ix: CharIdx, s: &str);
-
-    /// Remove all characters from (from..to)
     fn remove(&mut self, from: CharIdx, to: CharIdx);
-
-    /// Mark the start of an edit transaction
     fn begin_edit_transaction(&mut self) {}
-
-    /// Mark the end of an edit transaction
     fn end_edit_transaction(&mut self) {}
 }
 
 impl Edit for GapBuffer {
+    fn as_view(&mut self) -> View<'_> {
+        self.as_view()
+    }
+
+    fn current_dot(&self) -> Dot {
+        Dot::from_char_indices(CharIdx(0), CharIdx(self.len_chars()))
+    }
+
     fn insert(&mut self, idx: CharIdx, s: &str) {
         self.insert_str(idx, s)
     }
@@ -123,6 +124,14 @@ impl Edit for GapBuffer {
 }
 
 impl Edit for Buffer {
+    fn as_view(&mut self) -> View<'_> {
+        self.txt.as_view()
+    }
+
+    fn current_dot(&self) -> Dot {
+        self.dot
+    }
+
     fn insert(&mut self, idx: CharIdx, s: &str) {
         self.dot = Dot::Cur { c: Cur { idx } };
         self.handle_action(BAction::InsertString { s: s.to_string() }, Source::Fsys);
@@ -215,21 +224,20 @@ impl Program {
     }
 
     /// Execute this program against a given [Edit].
-    pub fn execute<'a, E, R, W>(
+    pub fn execute<E, R, W>(
         &self,
-        ed: &'a mut E,
+        ed: &mut E,
         runner: &mut R,
         fname: &str,
         out: &mut W,
     ) -> Result<Dot, Error>
     where
         E: Edit,
-        for<'s> <E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
         R: Runner,
         W: Write,
     {
         let mut dot = match self.initial_addr.as_ref() {
-            Some(addr) => ed.map_addr(addr),
+            Some(addr) => ed.map_addr(addr, ed.current_dot()),
             None => ed.current_dot(),
         };
 
@@ -238,12 +246,12 @@ impl Program {
         };
 
         let (char_from, char_to) = dot.as_char_indices();
-        let byte_from = ed.char_to_byte(char_from).unwrap();
-        let byte_to = ed
-            .char_to_byte(char_to.uadd(1))
-            .unwrap_or_else(|| ByteIdx(ed.len_bytes()));
+        let view = ed.as_view();
 
-        let mut edit_actions = self.gather_actions(byte_from, byte_to, ed, runner, fname, out)?;
+        let byte_from = view.map_char_index(char_from);
+        let byte_to = view.map_char_index(char_to.uadd(1));
+
+        let mut edit_actions = self.gather_actions(byte_from, byte_to, view, runner, fname, out)?;
 
         ed.begin_edit_transaction();
 
@@ -283,18 +291,16 @@ impl Program {
         ))
     }
 
-    fn gather_actions<'a, E, R, W>(
+    fn gather_actions<'a, R, W>(
         &self,
         byte_from: ByteIdx,
         byte_to: ByteIdx,
-        ed: &'a E,
+        view: View<'a>,
         runner: &mut R,
         fname: &str,
         out: &mut W,
     ) -> Result<Vec<EditAction>, Error>
     where
-        E: Edit,
-        for<'s> <E as Sliceable>::Slice<'s>: Into<Cow<'s, str>>,
         R: Runner,
         W: Write,
     {
@@ -303,11 +309,11 @@ impl Program {
         let mut ctx = Ctx {
             fname,
             byte_from: ByteIdx(0),
-            ed,
+            view,
             row_col: RefCell::new(None),
         };
 
-        for caps in se.iter_tagged_captures_between(byte_from.0, byte_to.0, ed) {
+        for caps in se.iter_tagged_captures_between(byte_from.0, byte_to.0, &view) {
             let action = caps.action.as_ref().unwrap();
             let id = action.id();
             ctx.byte_from = ByteIdx(caps.from());
@@ -331,11 +337,7 @@ impl Program {
                 '>' => {
                     let cmd = self.templates[&id].render_with_context(&caps, &ctx)?;
                     let slice = caps.as_slice();
-                    out.write_all(
-                        runner
-                            .run_shell_command(&cmd, Some(slice.into().as_ref()))?
-                            .as_bytes(),
-                    )?;
+                    out.write_all(runner.run_shell_command(&cmd, Some(slice))?.as_bytes())?;
                 }
 
                 // Edit actions
@@ -387,7 +389,7 @@ impl Program {
                     edit_actions.push(EditAction::Replace(
                         ByteIdx(caps.from()),
                         ByteIdx(caps.to()),
-                        runner.run_shell_command(&cmd, Some(slice.into().as_ref()))?,
+                        runner.run_shell_command(&cmd, Some(slice))?,
                     ));
                 }
 
@@ -475,37 +477,28 @@ impl EditAction {
     }
 }
 
-struct Ctx<'a, E>
-where
-    E: Edit,
-{
+struct Ctx<'a> {
     fname: &'a str,
     byte_from: ByteIdx,
-    ed: &'a E,
+    view: View<'a>,
     row_col: RefCell<Option<(String, String)>>,
 }
 
-impl<'a, E> Ctx<'a, E>
-where
-    E: Edit,
-{
+impl<'a> Ctx<'a> {
     fn ensure_row_col(&self) {
         if self.row_col.borrow().is_some() {
             return;
         }
 
-        let char_from = self.ed.byte_to_char(self.byte_from).unwrap();
-        let row = self.ed.char_to_line(char_from).unwrap();
-        let col = char_from - self.ed.line_to_char(row).unwrap();
+        let char_from = self.view.byte_to_char(self.byte_from).unwrap();
+        let row = self.view.char_to_line(char_from).unwrap();
+        let col = char_from - self.view.line_to_char(row).unwrap();
 
         *self.row_col.borrow_mut() = Some((row.to_string(), col.to_string()));
     }
 }
 
-impl<'a, E> Context for Ctx<'a, E>
-where
-    E: Edit,
-{
+impl<'a> Context for Ctx<'a> {
     fn render_var<W>(&self, var: &str, w: &mut W) -> Option<io::Result<usize>>
     where
         W: Write,

@@ -40,7 +40,7 @@ impl<'a> View<'a> {
         let raw_from = gb.byte_to_raw_byte(from);
         let raw_to = gb.byte_to_raw_byte(to);
         let ch_from = gb.byte_to_char(from);
-        let ch_to = gb.byte_to_char(from);
+        let ch_to = gb.byte_to_char(to);
 
         Self {
             gb,
@@ -53,14 +53,18 @@ impl<'a> View<'a> {
         }
     }
 
+    pub fn gb(&self) -> &GapBuffer {
+        self.gb
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
-        self.to.0 - self.from.0
+        self.gb.len()
     }
 
     #[inline]
     pub fn len_chars(&self) -> usize {
-        self.ch_to.0 - self.ch_from.0
+        self.gb.len_chars()
     }
 
     #[inline]
@@ -91,8 +95,15 @@ impl<'a> View<'a> {
     }
 }
 
-impl<'a> AsRef<str> for View<'a> {
-    fn as_ref(&self) -> &str {
-        self.as_str()
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn as_str_is_full_content() {
+        let mut gb = GapBuffer::from("12345");
+        let view = View::new(&mut gb);
+
+        assert_eq!(view.as_str(), "12345");
     }
 }

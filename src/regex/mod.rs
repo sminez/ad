@@ -343,7 +343,7 @@ fn rewrite_at_meta_char(ast: &mut Ast) {
 
 mod impl_structex {
     use super::*;
-    use crate::buffer::{Buffer, ByteIdx, GapBuffer, Slice};
+    use crate::buffer::{ByteIdx, View};
     use std::{io, ops::Range};
     use structex::re::{Haystack, RawCaptures, RegexEngine, Sliceable, Writable};
 
@@ -367,7 +367,7 @@ mod impl_structex {
         }
     }
 
-    impl Haystack<Regex> for GapBuffer {
+    impl<'a> Haystack<Regex> for View<'a> {
         fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
             re.matches_between(self, ByteIdx(from), ByteIdx(to))
         }
@@ -379,18 +379,18 @@ mod impl_structex {
         }
     }
 
-    impl Sliceable for GapBuffer {
+    impl<'a> Sliceable for View<'a> {
         type Slice<'h>
-            = Slice<'h>
+            = &'h str
         where
             Self: 'h;
 
         fn char_at(&self, byte_offset: usize) -> Option<char> {
-            self.get_char_at(ByteIdx(byte_offset))
+            self.gb().get_char_at(ByteIdx(byte_offset))
         }
 
         fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
-            self.slice_from_byte_offsets(ByteIdx(range.start), ByteIdx(range.end))
+            &self.as_str()[range]
         }
 
         fn max_len(&self) -> usize {
@@ -398,74 +398,12 @@ mod impl_structex {
         }
     }
 
-    impl Writable for GapBuffer {
+    impl<'a> Writable for View<'a> {
         fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
         where
             W: io::Write,
         {
-            let (l, r) = self.as_byte_slices();
-            w.write_all(l)?;
-            w.write_all(r)?;
-
-            Ok(self.len())
-        }
-    }
-
-    impl<'a> Writable for Slice<'a> {
-        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
-        where
-            W: std::io::Write,
-        {
-            let (l, r) = self.as_slices();
-            w.write_all(l)?;
-            w.write_all(r)?;
-
-            Ok(l.len() + r.len())
-        }
-    }
-
-    impl Haystack<Regex> for Buffer {
-        fn is_match_between(&self, re: &Regex, from: usize, to: usize) -> bool {
-            re.matches_between(self, ByteIdx(from), ByteIdx(to))
-        }
-
-        fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
-            let m = re.find_between(self, ByteIdx(from), ByteIdx(to))?;
-
-            Some(RawCaptures::new(m.iter_raw_locs()))
-        }
-    }
-
-    impl Sliceable for Buffer {
-        type Slice<'h>
-            = Slice<'h>
-        where
-            Self: 'h;
-
-        fn char_at(&self, byte_offset: usize) -> Option<char> {
-            self.txt.get_char_at(ByteIdx(byte_offset))
-        }
-
-        fn slice(&self, range: Range<usize>) -> Self::Slice<'_> {
-            self.txt
-                .slice_from_byte_offsets(ByteIdx(range.start), ByteIdx(range.end))
-        }
-
-        fn max_len(&self) -> usize {
-            self.txt.len()
-        }
-    }
-
-    impl Writable for Buffer {
-        fn write_to<W>(&self, w: &mut W) -> io::Result<usize>
-        where
-            W: io::Write,
-        {
-            let (l, r) = self.txt.as_byte_slices();
-            w.write_all(l)?;
-            w.write_all(r)?;
-
-            Ok(self.txt.len())
+            w.write_all(self.as_bytes()).map(|_| self.len())
         }
     }
 }

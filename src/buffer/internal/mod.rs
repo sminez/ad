@@ -1040,7 +1040,7 @@ impl GapBuffer {
 
     #[inline]
     pub(super) fn byte_to_raw_byte(&self, byte: ByteIdx) -> RawIdx {
-        if byte.0 > self.gap_start.0 {
+        if byte.0 >= self.gap_start.0 {
             RawIdx(byte.0 + self.gap())
         } else {
             RawIdx(byte.0)

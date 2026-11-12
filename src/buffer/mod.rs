@@ -1007,7 +1007,7 @@ impl Buffer {
     /// Set this Buffer's dot from an [Addr] expression.
     pub fn set_dot_from_addr_string(&mut self, s: &str) {
         if let Ok(addr) = Addr::parse(s.trim_end()) {
-            self.dot = self.map_addr(&addr);
+            self.dot = self.map_addr(&addr, self.dot);
             self.changed_since_last_render = true;
         }
     }
@@ -1022,7 +1022,7 @@ impl Buffer {
 
     fn set_dot_from_coords(&mut self, coords: Coords) {
         let addr: Addr = coords.as_addr(self);
-        self.dot = self.map_addr(&addr);
+        self.dot = self.map_addr(&addr, self.dot);
         self.dot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
         self.changed_since_last_render = true;
@@ -1030,14 +1030,14 @@ impl Buffer {
 
     fn set_xdot_from_coords(&mut self, coords: Coords) {
         let addr: Addr = coords.as_addr(self);
-        self.xdot = self.map_addr(&addr);
+        self.xdot = self.map_addr(&addr, self.dot);
         self.xdot.clamp_idx(CharIdx(self.txt.len_chars()));
     }
 
     /// Set this Buffer's xdot from an [Addr] expression.
     pub fn set_xdot_from_addr_string(&mut self, s: &str) {
         if let Ok(addr) = Addr::parse(s.trim_end()) {
-            self.xdot = self.map_addr(&addr);
+            self.xdot = self.map_addr(&addr, self.dot);
         }
     }
 
