@@ -1,5 +1,5 @@
 //! A haystack is something that can be searched over by a Regex
-use crate::buffer::{Buffer, ByteIdx, CharIdx, GapBuffer};
+use crate::buffer::{Buffer, ByteIdx, CharIdx, GapBuffer, View};
 use std::borrow::Cow;
 
 /// Something that can be searched over by a [Regex][0].
@@ -17,9 +17,7 @@ impl Haystack for &str {
         if offset.0 > self.len() {
             None
         } else {
-            let raw = &self.as_bytes()[offset.0..];
-            // SAFETY: assumes a valid byte offset
-            Some(Cow::Borrowed(unsafe { std::str::from_utf8_unchecked(raw) }))
+            Some(Cow::Borrowed(&self[offset.0..]))
         }
     }
 
@@ -100,6 +98,36 @@ impl Haystack for Buffer {
             None
         } else {
             Some(self.txt.char_to_byte(char_idx))
+        }
+    }
+}
+
+impl<'gb> Haystack for View<'gb> {
+    fn substr_from<'a>(&'a self, offset: ByteIdx) -> Option<Cow<'a, str>> {
+        if offset.0 > self.len() {
+            None
+        } else {
+            Some(Cow::Borrowed(&self.as_str()[offset.0..]))
+        }
+    }
+
+    fn substr<'a>(&'a self, from: ByteIdx, to: ByteIdx) -> Cow<'a, str> {
+        Cow::Borrowed(&self.as_str()[from.0..to.0])
+    }
+
+    fn byte_to_char(&self, byte_idx: ByteIdx) -> Option<CharIdx> {
+        if byte_idx.0 > self.len() {
+            None
+        } else {
+            Some(self.map_byte_index(byte_idx))
+        }
+    }
+
+    fn char_to_byte(&self, char_idx: CharIdx) -> Option<ByteIdx> {
+        if char_idx.0 > self.len_chars() {
+            None
+        } else {
+            Some(self.map_char_index(char_idx))
         }
     }
 }

@@ -27,9 +27,11 @@ use std::{
 mod index;
 mod slice;
 mod utf8;
+mod view;
 
 pub use index::{ByteIdx, ByteOffset, CharIdx, CharOffset, LineIdx, LineOffset};
 pub use slice::{Chars, IdxChars, RevChars, Slice, SliceIter};
+pub use view::View;
 
 use index::RawIdx;
 use utf8::{decode_char_at, decode_char_ending_at};
@@ -263,14 +265,14 @@ impl GapBuffer {
 
     /// A slice of the raw buffer (including the gap) for the given range of raw byte offsets.
     #[inline]
-    fn raw_slice(&self, r: impl RangeBounds<RawIdx>) -> &[u8] {
+    pub(super) fn raw_slice(&self, r: impl RangeBounds<RawIdx>) -> &[u8] {
         &self.data[(r.start_bound().map(|i| i.0), r.end_bound().map(|i| i.0))]
     }
 
     /// A mutable slice of the raw buffer (including the gap) for the given range of raw byte
     /// offsets.
     #[inline]
-    fn raw_slice_mut(&mut self, r: impl RangeBounds<RawIdx>) -> &mut [u8] {
+    pub(super) fn raw_slice_mut(&mut self, r: impl RangeBounds<RawIdx>) -> &mut [u8] {
         &mut self.data[(r.start_bound().map(|i| i.0), r.end_bound().map(|i| i.0))]
     }
 
@@ -325,24 +327,6 @@ impl GapBuffer {
         };
         // SAFETY: We know that buffer is contiguous and that indices are within bounds
         unsafe { std::str::from_utf8_unchecked(self.raw_slice(start..end)) }
-    }
-
-    /// Assume that the gap is at 0 and return the full contents of the inner buffer as a slice of
-    /// bytes.
-    ///
-    /// # Safety
-    /// You must call [GapBuffer::make_contiguous] before calling this method.
-    pub unsafe fn assume_contiguous_bytes(&self) -> &[u8] {
-        self.raw_slice(self.gap_end..)
-    }
-
-    /// Assume that the gap is at 0 and return the full contents of the inner buffer as a &str
-    ///
-    /// # Safety
-    /// You must call [GapBuffer::make_contiguous] before calling this method.
-    pub unsafe fn assume_contiguous_str(&self) -> &str {
-        // SAFETY: See above
-        unsafe { std::str::from_utf8_unchecked(self.raw_slice(self.gap_end..)) }
     }
 
     /// The contents of the buffer either side of the current gap as &str slices.
@@ -633,6 +617,14 @@ impl GapBuffer {
 
     pub fn as_slice(&self) -> Slice<'_> {
         self.slice(CharIdx(0), CharIdx(self.len_chars()))
+    }
+
+    pub fn as_view(&mut self) -> View<'_> {
+        View::new(self)
+    }
+
+    pub fn view(&mut self, from: ByteIdx, to: ByteIdx) -> View<'_> {
+        View::new_for_range(self, from, to)
     }
 
     /// Convert a character index to the index of the line containing it

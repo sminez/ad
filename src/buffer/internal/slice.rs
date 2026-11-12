@@ -1,13 +1,16 @@
-//! Reference types and iterators for working with views on a GapBuffer.
+//! Reference types and iterators for working with discontiguous views on a [GapBuffer].
 use crate::buffer::internal::{
     ByteIdx, CharIdx, GapBuffer, RawIdx,
     utf8::{count_chars, decode_char_at, decode_char_ending_at},
 };
 use std::{borrow::Cow, cmp::min, fmt};
 
-/// A view on a region of the GapBuffer.
+/// A view on a region of a [GapBuffer].
 ///
-/// Slices will become invalidated if the gap is moved from the position they were created with
+/// [Slice] makes no guarantees about whether or not the underlying memory allocation being pointed
+/// to is contiguous. As such, you can always construct a [Cow<'a, str>] from a Slice but not a
+/// `&str`. If you absolutely _must_ work with a single `&str` without cloning the underlying
+/// data, use a [View][crate::buffer::internal::View] instead.
 #[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
 pub struct Slice<'a> {
     /// The logical byte offset that this slice was taken from
