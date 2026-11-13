@@ -32,7 +32,7 @@ fn main() {
 
     println!("\n:: matching against a gap buffer");
     let t1 = Instant::now();
-    let m = r.find(&gb).unwrap();
+    let m = r.captures(&gb).unwrap();
     let d_match = Instant::now().duration_since(t1).as_millis();
     println!("match time (ms): {d_match}");
 

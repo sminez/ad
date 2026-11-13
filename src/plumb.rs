@@ -302,7 +302,7 @@ impl Pattern {
                     }
                 };
 
-                if let Some(m) = re.find(&s.as_str()) {
+                if let Some(m) = re.captures(&s.as_str()) {
                     debug!("matched: updating vars");
                     vars.insert("$0".to_string(), m.match_text(&s.as_str()).into_owned());
                     for n in 1..10 {
@@ -429,7 +429,7 @@ impl Pattern {
 
             Self::NarrowsTo(re) => {
                 debug!(%msg.cur, "narrowing for provided cur");
-                for m in re.find_iter(&msg.data.as_str()) {
+                for m in re.captures_iter(&msg.data.as_str()) {
                     let (from, to) = m.loc();
                     // The match location is in bytes but cur is a character offset
                     let ch_from = msg.data[..from.0].chars().count();

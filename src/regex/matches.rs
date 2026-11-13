@@ -1,20 +1,21 @@
+//! Representations of the matches reported by a [Regex].
 use crate::{
     buffer::{ByteIdx, ByteOffset},
     regex::{Haystack, Regex},
 };
 use std::{borrow::Cow, sync::Arc};
 
-/// The match location of a Regex against a given input.
+/// The match location of a Regex against a given input along with all capture groups.
 ///
-/// The sub-match indices are relative to the input used to run the original match.
+/// The submatch indices are relative to the input used to run the original search.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
-pub struct Match {
+pub struct Captures {
     pub(super) n_submatches: usize,
     pub(super) sub_matches: Vec<ByteIdx>,
     pub(super) submatch_names: Arc<[Option<Arc<str>>]>,
 }
 
-impl Match {
+impl Captures {
     pub(crate) fn synthetic(from: ByteIdx, to: ByteIdx) -> Self {
         Self {
             n_submatches: 0,
@@ -113,7 +114,7 @@ impl Match {
         })
     }
 
-    /// The same as [Match::iter_locs] but returning the raw usize offsets for use with APIs that
+    /// The same as [Captures::iter_locs] but returning the raw usize offsets for use with APIs that
     /// do not make use of [ByteIdx].
     pub fn iter_raw_locs(&self) -> impl Iterator<Item = Option<(usize, usize)>> {
         self.iter_locs()
@@ -121,10 +122,9 @@ impl Match {
     }
 }
 
-/// An iterator over sequential, non overlapping matches of a Regex
-/// against a given input
+/// An iterator over sequential, non overlapping [Captures] of a Regex against a given input.
 #[derive(Debug)]
-pub struct MatchIter<'a, H>
+pub struct CapturesIter<'a, H>
 where
     H: Haystack,
 {
@@ -133,14 +133,14 @@ where
     pub(super) from: ByteIdx,
 }
 
-impl<'a, H> Iterator for MatchIter<'a, H>
+impl<'a, H> Iterator for CapturesIter<'a, H>
 where
     H: Haystack,
 {
-    type Item = Match;
+    type Item = Captures;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let mut m = self.re.find_from(self.haystack, self.from)?;
+        let mut m = self.re.captures_from(self.haystack, self.from)?;
         let (_, from) = m.loc();
 
         // If we had a zero length match we need to bump self.from along by a character so we don't
@@ -152,7 +152,7 @@ where
             // We start with self.from=0, so we allow a match at 0 to be emitted, but anything
             // after that is a repeat which we need to drop and move on to the next match.
             if from > ByteIdx(0) {
-                m = self.re.find_from(self.haystack, self.from)?;
+                m = self.re.captures_from(self.haystack, self.from)?;
                 let (_, from) = m.loc();
                 self.from = from;
             }

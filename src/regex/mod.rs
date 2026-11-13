@@ -4,7 +4,7 @@ use regex_automata::{
     hybrid::{self, dfa::DFA},
     meta,
     nfa::thompson::{self, Compiler, Config, WhichCaptures},
-    util::captures::Captures,
+    util::captures as ra_captures,
 };
 use regex_syntax::{
     ast::{
@@ -18,7 +18,7 @@ mod haystack;
 mod matches;
 
 pub use haystack::Haystack;
-pub use matches::{Match, MatchIter};
+pub use matches::{Captures, CapturesIter};
 
 /// An error that can occur when building a [Regex] or [RevRegex].
 #[derive(Debug, Clone)]
@@ -118,8 +118,7 @@ impl Regex {
         })
     }
 
-    /// Determine whether or not this Regex matches the haystack without searching for the
-    /// leftmost-longest match and associated submatch boundaries.
+    /// Determine whether or not this Regex matches the haystack.
     pub fn matches<H>(&self, haystack: &H) -> bool
     where
         H: Haystack,
@@ -127,8 +126,7 @@ impl Regex {
         self.matches_from(haystack, ByteIdx(0))
     }
 
-    /// Determine whether or not this Regex matches the [Haystack] from the given offset without
-    /// searching for the leftmost-longest match and associated submatch boundaries.
+    /// Determine whether or not this Regex matches the [Haystack] from the given offset.
     pub fn matches_from<H>(&self, haystack: &H, offset: ByteIdx) -> bool
     where
         H: Haystack,
@@ -139,8 +137,7 @@ impl Regex {
         self.inner.is_match(input)
     }
 
-    /// Determine whether or not this Regex matches the [Haystack] between the given offsets
-    /// without searching for the leftmost-longest match and associated submatch boundaries.
+    /// Determine whether or not this Regex matches the [Haystack] between the given offsets.
     pub fn matches_between<H>(&self, haystack: &H, from: ByteIdx, to: ByteIdx) -> bool
     where
         H: Haystack,
@@ -151,8 +148,8 @@ impl Regex {
         self.inner.is_match(input)
     }
 
-    fn build_match(&self, caps: Captures) -> Match {
-        Match {
+    fn build_caps(&self, caps: ra_captures::Captures) -> Captures {
+        Captures {
             n_submatches: caps.group_len(),
             sub_matches: caps
                 .iter()
@@ -167,17 +164,17 @@ impl Regex {
 
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] and return the
     /// match position along with all submatches.
-    pub fn find<H>(&self, haystack: &H) -> Option<Match>
+    pub fn captures<H>(&self, haystack: &H) -> Option<Captures>
     where
         H: Haystack,
     {
-        self.find_from(haystack, ByteIdx(0))
+        self.captures_from(haystack, ByteIdx(0))
     }
 
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
     /// the provided byte offset rather than the beginning of the haystack, returning
     /// the match position along with all submatches.
-    pub fn find_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Match>
+    pub fn captures_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Captures>
     where
         H: Haystack,
     {
@@ -188,7 +185,7 @@ impl Regex {
         self.inner.captures(input, &mut caps);
 
         if caps.is_match() {
-            Some(self.build_match(caps))
+            Some(self.build_caps(caps))
         } else {
             None
         }
@@ -198,7 +195,7 @@ impl Regex {
     /// the provided `from` byte offset rather than the beginning of the haystack, and ending
     /// before the provided `to` byte offset, returning the match position along with all
     /// submatches.
-    pub fn find_between<H>(&self, haystack: &H, from: ByteIdx, to: ByteIdx) -> Option<Match>
+    pub fn captures_between<H>(&self, haystack: &H, from: ByteIdx, to: ByteIdx) -> Option<Captures>
     where
         H: Haystack,
     {
@@ -208,17 +205,19 @@ impl Regex {
         self.inner.captures(input, &mut caps);
 
         if caps.is_match() {
-            Some(self.build_match(caps))
+            Some(self.build_caps(caps))
         } else {
             None
         }
     }
 
-    pub fn find_iter<'a, H>(&'a mut self, haystack: &'a H) -> MatchIter<'a, H>
+    /// Returns an iterator over all non-overlapping [Captures] within the given [Haystack].
+    /// If no match exists, then the iterator yields no elements.
+    pub fn captures_iter<'a, H>(&'a mut self, haystack: &'a H) -> CapturesIter<'a, H>
     where
         H: Haystack,
     {
-        MatchIter {
+        CapturesIter {
             haystack,
             re: self,
             from: ByteIdx(0),
@@ -277,7 +276,7 @@ impl RevRegex {
 
     /// Executes a reverse search returning the leftmost match that is found. If no match exists,
     /// then `None` is returned.
-    pub fn find_rev_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Match>
+    pub fn find_rev_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Captures>
     where
         H: Haystack,
     {
@@ -297,7 +296,7 @@ impl RevRegex {
         // the end of the match.
         let end = self.fwd_dfa.try_search_fwd(&mut cache, &input).ok()??;
 
-        Some(Match::synthetic(
+        Some(Captures::synthetic(
             ByteIdx(start.offset()),
             ByteIdx(end.offset()),
         ))
@@ -361,7 +360,7 @@ mod impl_structex {
         }
 
         fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
-            let m = re.find_between(&self, ByteIdx(from), ByteIdx(to))?;
+            let m = re.captures_between(&self, ByteIdx(from), ByteIdx(to))?;
 
             Some(RawCaptures::new(m.iter_raw_locs()))
         }
@@ -373,7 +372,7 @@ mod impl_structex {
         }
 
         fn captures_between(&self, re: &Regex, from: usize, to: usize) -> Option<RawCaptures> {
-            let m = re.find_between(self, ByteIdx(from), ByteIdx(to))?;
+            let m = re.captures_between(self, ByteIdx(from), ByteIdx(to))?;
 
             Some(RawCaptures::new(m.iter_raw_locs()))
         }
@@ -492,7 +491,7 @@ mod tests {
     #[test]
     fn find_works(pattern: &str, s: &str, expected: Option<&str>) {
         let re = Regex::compile(pattern).unwrap();
-        let m = re.find(&s).map(|m| m.match_text(&s));
+        let m = re.captures(&s).map(|m| m.match_text(&s));
         assert_eq!(m.as_deref(), expected);
     }
 
@@ -537,7 +536,7 @@ mod tests {
     fn find_iter_works(pattern: &str, s: &str, expected: &[&str]) {
         let mut re = Regex::compile(pattern).unwrap();
         let matches: Vec<String> = re
-            .find_iter(&s)
+            .captures_iter(&s)
             .map(|m| m.match_text(&s).into_owned())
             .collect();
 
@@ -549,7 +548,7 @@ mod tests {
         let re = "([0-9]+)-([0-9]+)-([0-9]+)";
         let r = Regex::compile(re).unwrap();
         let s = "this should work 123-456-789 other stuff";
-        let m = r.find(&s).unwrap();
+        let m = r.captures(&s).unwrap();
 
         assert_eq!(m.match_text(&s), "123-456-789");
         assert_eq!(m.submatch_text(1, &s).as_deref(), Some("123"));
@@ -565,7 +564,7 @@ mod tests {
     fn named_submatch_works(re: &str, name: &str, expected: &str) {
         let r = Regex::compile(re).unwrap();
         let s = "text before Xanadu";
-        let m = r.find(&s).unwrap();
+        let m = r.captures(&s).unwrap();
 
         assert_eq!(m.submatch_text_by_name(name, &s).as_deref(), Some(expected));
     }
@@ -579,7 +578,7 @@ impl Editor {
 
         let re = r"impl (\w+) \{";
         let r = Regex::compile(re).unwrap();
-        let m = r.find(&s).unwrap();
+        let m = r.captures(&s).unwrap();
 
         assert_eq!(m.submatch_text(1, &s).as_deref(), Some("Editor"));
         assert_eq!(m.match_text(&s), "impl Editor {");

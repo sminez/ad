@@ -7,7 +7,7 @@
 use crate::{
     buffer::{ByteIdx, GapBuffer, LineIdx},
     dot::Range,
-    regex::{Match, Regex},
+    regex::{Captures, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
 
@@ -115,11 +115,15 @@ impl MultiRegex {
     // really this should live in the regex module and it should run the VMs in parallel, returning
     // the first match rather than in series like this
 
-    pub fn match_gb_from(&mut self, gb: &GapBuffer, byte_from: ByteIdx) -> Option<(usize, Match)> {
-        let mut leftmost: Option<(usize, Match)> = None;
+    pub fn match_gb_from(
+        &mut self,
+        gb: &GapBuffer,
+        byte_from: ByteIdx,
+    ) -> Option<(usize, Captures)> {
+        let mut leftmost: Option<(usize, Captures)> = None;
 
         for (i, re) in self.re.iter_mut().enumerate() {
-            let m = re.find_from(gb, byte_from);
+            let m = re.captures_from(gb, byte_from);
             match (leftmost.as_ref(), m) {
                 (Some((_, prev)), Some(m)) if &m < prev => leftmost = Some((i, m)),
                 (None, Some(m)) => leftmost = Some((i, m)),
