@@ -7,7 +7,7 @@
 use crate::{
     buffer::{ByteIdx, GapBuffer, LineIdx},
     dot::Range,
-    regex::{Captures, Regex},
+    regex::{Match, Regex},
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
 
@@ -93,12 +93,14 @@ impl Iterator for Tokenizer<'_> {
         }
 
         let (i, m) = self.mr.match_gb_from(self.gb, self.pos)?;
-        let (from, to) = m.loc();
-        self.pos = to;
+        self.pos = m.to;
 
         Some(SyntaxRange {
             cap_idx: Some(i),
-            r: ByteRange { from, to },
+            r: ByteRange {
+                from: m.from,
+                to: m.to,
+            },
         })
     }
 }
@@ -111,19 +113,11 @@ struct MultiRegex {
 }
 
 impl MultiRegex {
-    // FIXME: for now this is just a dumb way to run multiple regex patterns over the same input
-    // really this should live in the regex module and it should run the VMs in parallel, returning
-    // the first match rather than in series like this
-
-    pub fn match_gb_from(
-        &mut self,
-        gb: &GapBuffer,
-        byte_from: ByteIdx,
-    ) -> Option<(usize, Captures)> {
-        let mut leftmost: Option<(usize, Captures)> = None;
+    pub fn match_gb_from(&mut self, gb: &GapBuffer, byte_from: ByteIdx) -> Option<(usize, Match)> {
+        let mut leftmost: Option<(usize, Match)> = None;
 
         for (i, re) in self.re.iter_mut().enumerate() {
-            let m = re.captures_from(gb, byte_from);
+            let m = re.find_from(gb, byte_from);
             match (leftmost.as_ref(), m) {
                 (Some((_, prev)), Some(m)) if &m < prev => leftmost = Some((i, m)),
                 (None, Some(m)) => leftmost = Some((i, m)),

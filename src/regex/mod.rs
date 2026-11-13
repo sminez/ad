@@ -1,10 +1,9 @@
 use crate::buffer::ByteIdx;
 use regex_automata::{
-    Anchored, Input, MatchKind, PatternID,
+    Anchored, Input, MatchKind,
     hybrid::{self, dfa::DFA},
     meta,
     nfa::thompson::{self, Compiler, Config, WhichCaptures},
-    util::captures as ra_captures,
 };
 use regex_syntax::{
     ast::{
@@ -83,7 +82,6 @@ impl From<hybrid::BuildError> for Error {
 pub struct Regex {
     pattern: Arc<str>,
     inner: meta::Regex,
-    submatch_names: Arc<[Option<Arc<str>>]>,
 }
 
 impl PartialEq for Regex {
@@ -105,16 +103,24 @@ impl Regex {
         let hir = build_hir(pattern.as_ref())?;
         let inner = meta::Regex::builder().build_from_hir(&hir)?;
 
-        let submatch_names: Vec<Option<Arc<str>>> = inner
-            .group_info()
-            .pattern_names(PatternID::must(0))
-            .map(|name| name.map(Arc::from))
-            .collect();
-
         Ok(Self {
             pattern: Arc::from(pattern.as_ref()),
             inner,
-            submatch_names: Arc::from(submatch_names.into_boxed_slice()),
+        })
+    }
+
+    pub fn compile_many(patterns: &[&str]) -> Result<Self, Error> {
+        #[expect(clippy::result_large_err)]
+        let hirs = patterns
+            .iter()
+            .map(|p| build_hir(p))
+            .collect::<Result<Vec<_>, _>>()?;
+        let inner = meta::Regex::builder().build_many_from_hir(&hirs)?;
+        let pattern = patterns.join("\n");
+
+        Ok(Self {
+            pattern: Arc::from(pattern.as_str()),
+            inner,
         })
     }
 
@@ -193,22 +199,6 @@ impl Regex {
         Some(self.build_match(m))
     }
 
-    #[inline]
-    fn build_caps(&self, caps: ra_captures::Captures) -> Captures {
-        Captures {
-            pattern_id: caps.pattern().unwrap().as_usize(),
-            n_submatches: caps.group_len(),
-            sub_matches: caps
-                .iter()
-                .flat_map(|maybe_cap| match maybe_cap {
-                    Some(cap) => [ByteIdx(cap.start), ByteIdx(cap.end)],
-                    None => [ByteIdx(0), ByteIdx(0)],
-                })
-                .collect(),
-            submatch_names: self.submatch_names.clone(),
-        }
-    }
-
     /// Search the given [Haystack] for the leftmost longest match of this [Regex] and return the
     /// match position along with all submatches.
     pub fn captures<H>(&self, haystack: &H) -> Option<Captures>
@@ -232,7 +222,7 @@ impl Regex {
         self.inner.captures(input, &mut caps);
 
         if caps.is_match() {
-            Some(self.build_caps(caps))
+            Some(Captures { inner: caps })
         } else {
             None
         }
@@ -252,7 +242,7 @@ impl Regex {
         self.inner.captures(input, &mut caps);
 
         if caps.is_match() {
-            Some(self.build_caps(caps))
+            Some(Captures { inner: caps })
         } else {
             None
         }

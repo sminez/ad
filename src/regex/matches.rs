@@ -3,7 +3,8 @@ use crate::{
     buffer::{ByteIdx, ByteOffset},
     regex::{Haystack, Regex},
 };
-use std::{borrow::Cow, sync::Arc};
+use regex_automata::util::captures as ra_caps;
+use std::borrow::Cow;
 
 /// The match location of a Regex against a given input.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -26,12 +27,9 @@ impl Match {
 /// The match location of a Regex against a given input along with all capture groups.
 ///
 /// The submatch indices are relative to the input used to run the original search.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone)]
 pub struct Captures {
-    pub(super) pattern_id: usize,
-    pub(super) n_submatches: usize,
-    pub(super) sub_matches: Vec<ByteIdx>,
-    pub(super) submatch_names: Arc<[Option<Arc<str>>]>,
+    pub(super) inner: ra_caps::Captures,
 }
 
 impl Captures {
@@ -55,11 +53,6 @@ impl Captures {
         Some(haystack.substr(from, to))
     }
 
-    /// The names of all submatches.
-    pub fn submatch_names(&self) -> &[Option<Arc<str>>] {
-        &self.submatch_names
-    }
-
     /// Extract the given submatch by name if it exists
     pub fn submatch_text_by_name<'a, H>(&self, name: &str, haystack: &'a H) -> Option<Cow<'a, str>>
     where
@@ -72,49 +65,28 @@ impl Captures {
 
     /// The start and end of this match in terms of byte offsets
     pub fn loc(&self) -> (ByteIdx, ByteIdx) {
-        let (start, end) = (self.sub_matches[0], self.sub_matches[1]);
+        let span = self.inner.get_match().unwrap().span();
 
-        assert!(
-            start <= end,
-            "invalid match: {start} > {end}: {:?}",
-            self.sub_matches
-        );
-
-        (start, end)
+        (ByteIdx(span.start), ByteIdx(span.end))
     }
 
     fn sub_loc_by_name(&self, name: &str) -> Option<(ByteIdx, ByteIdx)> {
-        let n = self
-            .submatch_names
-            .iter()
-            .position(|s| s.as_ref().map(|s| s.as_ref()) == Some(name))?;
+        let span = self.inner.get_group_by_name(name)?;
 
-        self.sub_loc(n)
+        Some((ByteIdx(span.start), ByteIdx(span.end)))
     }
 
     pub(crate) fn sub_loc(&self, n: usize) -> Option<(ByteIdx, ByteIdx)> {
-        if 2 * n + 1 >= self.sub_matches.len() {
-            return None;
-        }
-        let (start, end) = (self.sub_matches[2 * n], self.sub_matches[2 * n + 1]);
-        if n > 0 && start == ByteIdx(0) && end == ByteIdx(0) {
-            return None;
-        }
+        let span = self.inner.get_group(n)?;
 
-        assert!(
-            start <= end,
-            "invalid match: {start} > {end}: {:?}",
-            self.sub_matches
-        );
-
-        Some((start, end))
+        Some((ByteIdx(span.start), ByteIdx(span.end)))
     }
 
     pub fn iter_locs(&self) -> impl Iterator<Item = Option<(ByteIdx, ByteIdx)>> {
         let mut n = 0;
 
         std::iter::from_fn(move || {
-            if n > self.n_submatches {
+            if n > self.inner.group_len() {
                 None
             } else {
                 let loc = self.sub_loc(n);
