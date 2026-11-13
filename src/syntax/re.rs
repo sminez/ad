@@ -7,13 +7,13 @@
 use crate::{
     buffer::{ByteIdx, GapBuffer, LineIdx},
     dot::Range,
-    regex::{Match, Regex},
+    regex::Regex,
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
 
 #[derive(Debug)]
 pub struct ReState {
-    mr: MultiRegex,
+    re: Regex,
     names: Vec<String>,
     ranges: Vec<SyntaxRange>,
 }
@@ -21,18 +21,18 @@ pub struct ReState {
 impl ReState {
     pub fn new(tagged_re: &[(impl AsRef<str>, impl AsRef<str>)]) -> Result<Self, String> {
         let mut names = Vec::with_capacity(tagged_re.len());
-        let mut re = Vec::with_capacity(tagged_re.len());
+        let mut patterns = Vec::with_capacity(tagged_re.len());
 
-        for (name, re_str) in tagged_re.iter() {
+        for (name, pattern) in tagged_re.iter() {
             names.push(name.as_ref().to_string());
-            re.push(
-                Regex::compile(re_str.as_ref())
-                    .map_err(|err| format!("invalid regex ({:?}): {err:?}", re_str.as_ref()))?,
-            );
+            patterns.push(pattern.as_ref());
         }
 
+        let re = Regex::compile_many(&patterns)
+            .map_err(|err| format!("invalid regex ({patterns:?}): {err:?}"))?;
+
         Ok(Self {
-            mr: MultiRegex { re },
+            re,
             names,
             ranges: Vec::new(),
         })
@@ -41,20 +41,22 @@ impl ReState {
     pub fn update(&mut self, gb: &GapBuffer, from: LineIdx, n_rows: usize) {
         self.ranges.clear();
 
-        let pos = gb.line_to_byte(from);
-        let to = from.uadd(n_rows + 1);
-        let byte_to = if to.0 < gb.len_lines() {
-            gb.line_to_byte(to)
-        } else {
-            ByteIdx(gb.len())
-        };
+        for i in from.0..from.0 + n_rows {
+            let line = gb.line(LineIdx(i));
+            let line_start = gb.line_to_byte(LineIdx(i));
+            let mut offset = ByteIdx(0);
 
-        self.ranges.extend(Tokenizer {
-            mr: &mut self.mr,
-            gb,
-            pos,
-            byte_to,
-        });
+            while let Some(m) = self.re.find_from(&line, offset) {
+                self.ranges.push(SyntaxRange {
+                    cap_idx: Some(m.pattern_id),
+                    r: ByteRange {
+                        from: m.from + line_start,
+                        to: m.to + line_start,
+                    },
+                });
+                offset = m.to;
+            }
+        }
     }
 
     #[inline]
@@ -73,59 +75,6 @@ impl ReState {
             &self.names,
             &self.ranges,
         )
-    }
-}
-
-#[derive(Debug)]
-struct Tokenizer<'a> {
-    mr: &'a mut MultiRegex,
-    gb: &'a GapBuffer,
-    pos: ByteIdx,
-    byte_to: ByteIdx,
-}
-
-impl Iterator for Tokenizer<'_> {
-    type Item = SyntaxRange;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.byte_to {
-            return None;
-        }
-
-        let (i, m) = self.mr.match_gb_from(self.gb, self.pos)?;
-        self.pos = m.to;
-
-        Some(SyntaxRange {
-            cap_idx: Some(i),
-            r: ByteRange {
-                from: m.from,
-                to: m.to,
-            },
-        })
-    }
-}
-
-/// An set of [Regex] that will report the first match encountered out of any of the inner
-/// patterns.
-#[derive(Debug, Clone)]
-struct MultiRegex {
-    re: Vec<Regex>,
-}
-
-impl MultiRegex {
-    pub fn match_gb_from(&mut self, gb: &GapBuffer, byte_from: ByteIdx) -> Option<(usize, Match)> {
-        let mut leftmost: Option<(usize, Match)> = None;
-
-        for (i, re) in self.re.iter_mut().enumerate() {
-            let m = re.find_from(gb, byte_from);
-            match (leftmost.as_ref(), m) {
-                (Some((_, prev)), Some(m)) if &m < prev => leftmost = Some((i, m)),
-                (None, Some(m)) => leftmost = Some((i, m)),
-                _ => (),
-            }
-        }
-
-        leftmost
     }
 }
 
