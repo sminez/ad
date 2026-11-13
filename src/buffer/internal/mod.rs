@@ -623,10 +623,6 @@ impl GapBuffer {
         View::new(self)
     }
 
-    pub fn view(&mut self, from: ByteIdx, to: ByteIdx) -> View<'_> {
-        View::new_for_range(self, from, to)
-    }
-
     /// Convert a character index to the index of the line containing it
     ///
     /// # Panics

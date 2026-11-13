@@ -34,7 +34,7 @@ impl<'a> View<'a> {
         Self::new_for_range(gb, ByteIdx(0), ByteIdx(gb.len()))
     }
 
-    pub fn new_for_range(gb: &'a mut GapBuffer, from: ByteIdx, to: ByteIdx) -> Self {
+    fn new_for_range(gb: &'a mut GapBuffer, from: ByteIdx, to: ByteIdx) -> Self {
         gb.make_contiguous();
 
         let raw_from = gb.byte_to_raw_byte(from);
