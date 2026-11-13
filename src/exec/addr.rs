@@ -493,9 +493,8 @@ pub trait Address: Haystack + Sized {
             RegexBack(re) => {
                 let from = self.char_to_byte(cur_dot.first_cur().idx)?;
                 let m = re.find_rev_from(self, from)?;
-                let (byte_from, byte_to) = m.loc();
-                let from = self.byte_to_char(byte_from).unwrap();
-                let to = self.byte_to_char(byte_to).unwrap();
+                let from = self.byte_to_char(m.from).unwrap();
+                let to = self.byte_to_char(m.to).unwrap();
 
                 Dot::from_char_indices(from, to.saturating_usub(1))
             }

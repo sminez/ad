@@ -18,7 +18,7 @@ mod haystack;
 mod matches;
 
 pub use haystack::Haystack;
-pub use matches::{Captures, CapturesIter};
+pub use matches::{Captures, CapturesIter, Match};
 
 /// An error that can occur when building a [Regex] or [RevRegex].
 #[derive(Debug, Clone)]
@@ -148,8 +148,55 @@ impl Regex {
         self.inner.is_match(input)
     }
 
+    #[inline]
+    fn build_match(&self, m: regex_automata::Match) -> Match {
+        Match {
+            pattern_id: m.pattern().as_usize(),
+            from: ByteIdx(m.start()),
+            to: ByteIdx(m.end()),
+        }
+    }
+
+    /// Search the given [Haystack] for the leftmost longest match of this [Regex].
+    pub fn find<H>(&self, haystack: &H) -> Option<Match>
+    where
+        H: Haystack,
+    {
+        self.find_from(haystack, ByteIdx(0))
+    }
+
+    /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
+    /// the provided byte offset rather than the beginning of the haystack, returning
+    /// the match position along with all submatches.
+    pub fn find_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Match>
+    where
+        H: Haystack,
+    {
+        let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        let input = Input::new(cow.as_ref()).range(offset.0..);
+        let m = self.inner.find(input)?;
+
+        Some(self.build_match(m))
+    }
+
+    /// Search the given [Haystack] for the leftmost longest match of this [Regex] starting from
+    /// the provided `from` byte offset rather than the beginning of the haystack, and ending
+    /// before the provided `to` byte offset.
+    pub fn find_between<H>(&self, haystack: &H, from: ByteIdx, to: ByteIdx) -> Option<Match>
+    where
+        H: Haystack,
+    {
+        let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        let input = Input::new(cow.as_ref()).range(from.0..to.0);
+        let m = self.inner.find(input)?;
+
+        Some(self.build_match(m))
+    }
+
+    #[inline]
     fn build_caps(&self, caps: ra_captures::Captures) -> Captures {
         Captures {
+            pattern_id: caps.pattern().unwrap().as_usize(),
             n_submatches: caps.group_len(),
             sub_matches: caps
                 .iter()
@@ -276,7 +323,7 @@ impl RevRegex {
 
     /// Executes a reverse search returning the leftmost match that is found. If no match exists,
     /// then `None` is returned.
-    pub fn find_rev_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Captures>
+    pub fn find_rev_from<H>(&self, haystack: &H, offset: ByteIdx) -> Option<Match>
     where
         H: Haystack,
     {
@@ -296,10 +343,11 @@ impl RevRegex {
         // the end of the match.
         let end = self.fwd_dfa.try_search_fwd(&mut cache, &input).ok()??;
 
-        Some(Captures::synthetic(
-            ByteIdx(start.offset()),
-            ByteIdx(end.offset()),
-        ))
+        Some(Match {
+            pattern_id: 0,
+            from: ByteIdx(start.offset()),
+            to: ByteIdx(end.offset()),
+        })
     }
 }
 

@@ -5,25 +5,36 @@ use crate::{
 };
 use std::{borrow::Cow, sync::Arc};
 
+/// The match location of a Regex against a given input.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Match {
+    pub pattern_id: usize,
+    pub from: ByteIdx,
+    pub to: ByteIdx,
+}
+
+impl Match {
+    /// Extract this match from the given haystack
+    pub fn match_text<'a, H>(&self, haystack: &'a H) -> Cow<'a, str>
+    where
+        H: Haystack,
+    {
+        haystack.substr(self.from, self.to)
+    }
+}
+
 /// The match location of a Regex against a given input along with all capture groups.
 ///
 /// The submatch indices are relative to the input used to run the original search.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Captures {
+    pub(super) pattern_id: usize,
     pub(super) n_submatches: usize,
     pub(super) sub_matches: Vec<ByteIdx>,
     pub(super) submatch_names: Arc<[Option<Arc<str>>]>,
 }
 
 impl Captures {
-    pub(crate) fn synthetic(from: ByteIdx, to: ByteIdx) -> Self {
-        Self {
-            n_submatches: 0,
-            sub_matches: vec![from, to],
-            submatch_names: Arc::new([]),
-        }
-    }
-
     /// Extract this match from the given haystack
     pub fn match_text<'a, H>(&self, haystack: &'a H) -> Cow<'a, str>
     where
