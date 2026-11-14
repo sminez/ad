@@ -3,10 +3,10 @@ name: Build
 on:
   push:
     branches:
-      - develop
+      - main
   pull_request:
     branches:
-      - develop
+      - main
 
 env:
   CARGO_TERM_COLOR: always
@@ -18,9 +18,9 @@ jobs:
     name: Lint non-Rust files
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v2
-    - run: cargo xtask lint-ts-queries
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+      - run: cargo xtask lint-ts-queries
 
   test:
     name: Test Rust ${{ matrix.rust }}
@@ -28,39 +28,39 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [stable, beta, nightly]
+        rust: [ stable, beta, nightly ]
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v2
-      with:
-        rust-version: ${{ matrix.rust }}
-    - uses: taiki-e/install-action@nextest
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: ${{ matrix.rust }}
+      - uses: taiki-e/install-action@nextest
 
-    - name: Run tests
-      run: cargo nextest run --workspace --no-fail-fast
+      - name: Run tests
+        run: cargo nextest run --workspace --no-fail-fast
 
   reference_tests:
     name: Run refrence editing tests on stable
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v2
-      with:
-        rust-version: stable
-    - uses: taiki-e/install-action@nextest
-    - name: Run tests
-      run: cd reference-tests && cargo nextest run --no-fail-fast
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          rust-version: stable
+      - uses: taiki-e/install-action@nextest
+      - name: Run tests
+        run: cd reference-tests && cargo nextest run --no-fail-fast
 
   rustfmt:
     name: Ensure rustfmt is happy
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v2
-      with:
-        components: rustfmt
-    - run: cargo fmt --all -- --check
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
 
   clippy:
     name: Lint the codebase with clippy
@@ -68,14 +68,14 @@ jobs:
     # env:
     #   RUSTFLAGS: -Dwarnings
     steps:
-    - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v2
-      with:
-        components: clippy
-    - uses: actions-rs/clippy-check@v1
-      with:
-        token: ${{ secrets.GITHUB_TOKEN }}
-        args: --all-targets --all-features --examples --tests
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+        with:
+          components: clippy
+      - uses: actions-rs/clippy-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          args: --all-targets --all-features --examples --tests
 
   rustdoc-links:
     name: Check doc links are valid
@@ -84,9 +84,9 @@ jobs:
       RUSTDOCFLAGS: "-D warnings -D rustdoc::broken-intra-doc-links"
 
     steps:
-    - uses: actions/checkout@v4
-    - uses: hecrj/setup-rust-action@v2
-    - run: cargo doc --all-features --workspace
+      - uses: actions/checkout@v4
+      - uses: hecrj/setup-rust-action@v2
+      - run: cargo doc --all-features --workspace
 
   typos:
     runs-on: ubuntu-latest
