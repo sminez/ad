@@ -216,15 +216,20 @@ impl FindParagraph {
         Self: Sized,
     {
         let Range {
-            mut start,
-            mut end,
+            start,
+            end,
             start_active,
         } = dot.as_range();
 
-        start = find_backward_start(self, start, b);
-        end = find_forward_end(self, end, b);
+        let new_start = find_backward(self, start, b).map(|d| d.last_cur());
+        let new_end = find_forward(self, end, b).map(|d| d.first_cur());
 
-        Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
+        // If either search failed to find the delimiter it needed we leave dot unchanged
+        if let (Some(new_start), Some(new_end)) = (new_start, new_end) {
+            Dot::from(Range::from_cursors(new_start, new_end, start_active)).collapse_null_range()
+        } else {
+            dot
+        }
     }
 }
 
@@ -238,12 +243,11 @@ impl Find for FindParagraph {
         }
     }
 
-    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
+    fn try_find<I>(&self, mut it: I) -> Option<(CharIdx, CharIdx)>
     where
         I: Iterator<Item = (CharIdx, char)>,
     {
-        let mut prev_was_newline = false;
-        let mut pos = CharIdx(0);
+        let mut prev_was_newline = it.next()?.1 == '\n';
 
         for (i, ch) in it {
             match ch {
@@ -256,10 +260,9 @@ impl Find for FindParagraph {
                 '\n' => prev_was_newline = true,
                 _ => prev_was_newline = false,
             }
-            pos = i;
         }
 
-        Some((pos, pos))
+        None
     }
 }
 
@@ -456,5 +459,17 @@ mod tests {
         };
 
         assert_eq!(expanded.content(&b), expected);
+    }
+
+    #[test]
+    fn find_paragraph_at_eof_is_noop() {
+        let b = Buffer::new_virtual(0, "test", "abc\n\ndef\n\n\n", Default::default());
+        let dot = Dot::Cur {
+            c: Cur { idx: CharIdx(9) },
+        };
+        assert_eq!(dot.content(&b), "\n");
+
+        let new_dot = FindParagraph::Fwd.expand(dot, &b);
+        assert_eq!(new_dot, dot);
     }
 }
