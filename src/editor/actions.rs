@@ -841,7 +841,7 @@ where
                     match Addr::parse(s) {
                         Ok(addr) => {
                             let b = self.buffers.active_mut();
-                            b.dot = b.map_addr(&addr);
+                            b.dot = b.map_addr(&addr, b.dot);
                         }
                         Err(e) => self.set_status_message(format!("malformed addr: {e:?}")),
                     }
@@ -887,7 +887,7 @@ where
             self.open_file(path, load_in_new_window);
             if let Some(addr) = maybe_addr {
                 let b = self.buffers.active_mut();
-                b.dot = b.map_addr(&addr);
+                b.dot = b.map_addr(&addr, b.dot);
                 self.clamp_scroll();
                 self.handle_action(UAction::SetViewPort(ViewPort::Center).into(), Source::Fsys);
             }

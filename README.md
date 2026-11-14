@@ -113,9 +113,17 @@ _This is a non-exhaustive list of some of the more interesting parts of the inte
 - **lsp**: a minimal [LSP](https://microsoft.github.io/language-server-protocol/) client
 - **ninep**: [9p protocol](http://9p.cat-v.org/) implementation that backs the fsys module
   - Now moved out to its own crate with source code available [here](https://github.com/sminez/ninep).
-- **regex**: custom regex engine that is able to work on character streams. This is nowhere near as performant as
-  the [regex crate](https://github.com/rust-lang/regex) (obviously) but it allows for some flexibility in tinkering
-  with the exec command language.
+- **regex**: Originally this was a fully custom regex engine that was hand written following the Pike
+  VM design shown by Russ Cox in his series of blog posts [here](https://swtch.com/~rsc/regexp/). As
+  fun as that was to write and work on, the engine was never particularly fast and had a number of
+  quirks and bugs. The current engine is powered by the [regex](https://github.com/rust-lang/regex)
+  crate but with a custom pre-processing step that adds a couple of behavioural changes.
+  See [here](https://docs.rs/regex/latest/regex/#syntax) for the supported syntax in addition to the
+  following changes:
+  - `@` is a custom meta-character that matches truly any character (rewritten to `(?s:.)`
+  - Matches are always multi-line, so `^` and `$` match start and end of line rather than start and end of input
+  - [df83edd](https://github.com/sminez/ad/tree/df83edd0e84dc40a4bd22d95eb6fec8057798f28) is the last commit
+    containing the original regex engine
 - **syntax**: [tree-sitter](https://tree-sitter.github.io/tree-sitter/) based syntax highlighting (with
   optional per-line regex based highlighting if grammars are unavailable for a particular filetype)
 - **trie**: [trie](https://en.wikipedia.org/wiki/Trie) data structure for handling sequence based keybindings
