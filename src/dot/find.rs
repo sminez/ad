@@ -34,11 +34,6 @@ pub fn find_forward_end<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
         .last_cur()
 }
 
-pub fn find_forward_wrapping<F: Find>(f: &F, b: &Buffer) -> Option<Dot> {
-    find_between(f, b.dot.last_cur().idx, CharIdx(b.txt.len_chars()), b)
-        .or_else(|| find_between(f, CharIdx(0), b.dot.last_cur().idx, b))
-}
-
 pub fn find_backward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
     rev_find_between(f, cur.idx, CharIdx(0), b)
 }
@@ -46,11 +41,6 @@ pub fn find_backward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
 pub fn find_backward_start<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Cur {
     find_backward(f, cur, b).unwrap_or_default().first_cur()
 }
-
-// pub fn find_backward_wrapping<F: Find>(f: &F, b: &Buffer) -> Option<Dot> {
-//     rev_find_between(f, b.dot.first_cur().idx, 0, b)
-//         .or_else(|| rev_find_between(f, b.txt.len_chars(), b.dot.first_cur().idx, b))
-// }
 
 fn match_to_dot(m: Option<(CharIdx, CharIdx)>) -> Option<Dot> {
     match m {
@@ -112,80 +102,5 @@ impl Find for char {
 
     fn reversed(&self) -> Self::Reversed {
         *self
-    }
-}
-
-// Strings need to locate themselves character by character.
-impl Find for &str {
-    type Reversed = String;
-
-    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
-    where
-        I: Iterator<Item = (CharIdx, char)>,
-    {
-        let chars: Vec<char> = self.chars().collect();
-        let last = chars.len().saturating_sub(1);
-        let mut cix = 0;
-        let mut start = CharIdx(0);
-
-        for (i, ch) in it {
-            if ch != chars[cix] {
-                start = CharIdx(0);
-                cix = 0;
-                continue;
-            }
-
-            if cix == 0 {
-                start = i;
-            }
-
-            if cix == last {
-                return Some((start, i));
-            }
-
-            cix += 1;
-        }
-
-        None
-    }
-
-    fn reversed(&self) -> Self::Reversed {
-        self.chars().rev().collect()
-    }
-}
-
-// Deferring to &str for the impl
-impl Find for String {
-    type Reversed = String;
-
-    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
-    where
-        I: Iterator<Item = (CharIdx, char)>,
-    {
-        self.as_str().try_find(it)
-    }
-
-    fn reversed(&self) -> Self::Reversed {
-        self.chars().rev().collect()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use simple_test_case::test_case;
-
-    #[test_case("this"; "first word")]
-    #[test_case("is"; "inner word two chars")]
-    #[test_case("a"; "inner word single char")]
-    #[test_case("find"; "inner word multiple chars")]
-    #[test_case("test"; "last word")]
-    #[test]
-    fn find_forward_str(s: &str) {
-        let b = Buffer::new_virtual(0, "test", "this is a find test", Default::default());
-        let dot = find_forward_wrapping(&s, &b).expect("to find string");
-        let matched_text = dot.content(&b);
-
-        assert_eq!(matched_text, s);
     }
 }

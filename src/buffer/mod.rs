@@ -2,7 +2,7 @@
 use crate::{
     Config, MAX_NAME_LEN, UNNAMED_BUFFER,
     config::ftype_config_for_path_and_first_line,
-    dot::{Cur, Dot, Range, TextObject, find::find_forward_wrapping},
+    dot::{Cur, Dot, Range, TextObject},
     editor::{ActionOutcome, BAction},
     exec::{Addr, Address},
     fsys::InputFilter,
@@ -11,6 +11,7 @@ use crate::{
     util::{normalize_line_endings, truncate_string_to_columns},
 };
 use ad_event::Source;
+use aho_corasick::{AhoCorasick, Input};
 use parking_lot::RwLock;
 use std::{
     cmp::min,
@@ -1383,10 +1384,27 @@ impl Buffer {
     }
 
     pub(crate) fn find_forward(&mut self, s: &str) {
-        if let Some(dot) = find_forward_wrapping(&s, self) {
-            self.dot = dot;
+        let ac = match AhoCorasick::new([s]) {
+            Ok(ac) => ac,
+            Err(_) => return,
+        };
+
+        let start = self.txt.char_to_byte(self.dot.last_cur().idx).0;
+        let end = self.txt.len();
+        let view = self.txt.as_view();
+
+        // Search forward from the end of the current dot first before wrapping round to search
+        // from the beginning of the buffer up until the end of the current dot.
+        let maybe_match = ac
+            .find(Input::new(view.as_str()).span(start..end))
+            .or_else(|| ac.find(Input::new(view.as_str()).span(0..start)));
+
+        if let Some(m) = maybe_match {
+            let from = self.txt.byte_to_char(ByteIdx(m.start()));
+            let to = self.txt.byte_to_char(ByteIdx(m.end()).usub(1));
+            self.dot = Dot::from_char_indices(from, to);
             self.changed_since_last_render = true;
-        }
+        };
     }
 
     /// Insert a string into the buffer using the current xdot rather than dot,
