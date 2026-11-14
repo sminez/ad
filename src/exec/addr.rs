@@ -421,7 +421,7 @@ pub trait Address: Haystack + Sized {
             Addr::Compound(from, to) => self.map_compound_addr(from, to, cur_dot),
         };
 
-        let mut dot = maybe_dot.unwrap_or_default();
+        let mut dot = maybe_dot.unwrap_or(cur_dot);
         dot.clamp_idx(CharIdx(self.len_chars()));
 
         dot
@@ -694,6 +694,7 @@ mod tests {
     #[test_case("-/his/", Dot::from_char_indices(CharIdx(1), CharIdx(3)), "his"; "regex back 2")]
     #[test_case("-/a/,/a/", Dot::from_char_indices(CharIdx(15), CharIdx(19)), "and a"; "regex range")]
     #[test_case("-/\\s/+#1,/\\s/-#1", Dot::from_char_indices(CharIdx(15), CharIdx(17)), "and"; "regex range boundaries")]
+    #[test_case("/ABC/", Cur::new(CharIdx(16)).into(), "n"; "failed match leaves dot unchanged")]
     #[test]
     fn map_addr_works(s: &str, expected: Dot, expected_contents: &str) {
         let mut b = Buffer::new_unnamed(
