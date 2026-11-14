@@ -18,7 +18,7 @@ than the built in `:help` section, so you will need to read through the source c
 issues to learn about what is and is not implemented.
 
 
-![screenshot](https://raw.githubusercontent.com/sminez/ad/develop/screenshot.png)
+![screenshot](https://raw.githubusercontent.com/sminez/ad/main/screenshot.png)
 
 
 ## Project Status

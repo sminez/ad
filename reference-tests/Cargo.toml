@@ -11,10 +11,10 @@ opt-level = 3
 
 [dependencies]
 ad-editor = { path = "../" }
-libflate = "2.1.0"
-parking_lot = "0.12.5"
-serde = { version = "1.0.219", features = ["derive"] }
-serde_json = "1.0.143"
+libflate = "2.3.2"
+parking_lot = "0.13.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
