@@ -34,8 +34,8 @@ impl From<ts::Range> for ByteRange {
 #[derive(Debug)]
 pub struct TsState {
     tree: ts::Tree,
-    p: Parser,
     t: Tokenizer,
+    p: Parser,
 }
 
 impl TsState {
@@ -396,61 +396,6 @@ impl fmt::Debug for Tokenizer {
     }
 }
 
-#[inline]
-fn mark_region(regions: &mut Vec<ByteRange>, from: ByteIdx, to: ByteIdx) {
-    regions.push(ByteRange { from, to });
-    if regions.len() == 1 {
-        return;
-    }
-
-    regions.sort_unstable();
-
-    let mut idx = 0;
-    for i in 1..regions.len() {
-        if regions[idx].to >= regions[i].from {
-            // Merge overlapping regions
-            regions[idx].to = max(regions[idx].to, regions[i].to);
-        } else {
-            // Move to the next region to check for overlaps
-            idx += 1;
-            regions.swap(idx, i);
-        }
-    }
-
-    // If we performed any merges then there will be unused regions at the end of the
-    // Vec now that we need to drop
-    regions.truncate(idx + 1);
-}
-
-/// This is not attempting to be maximally efficient in returning a set of missing regions as the
-/// goal is simply to minimise the amount of retokenization we do via tree-sitter where possible.
-#[inline]
-fn missing_region(regions: &[ByteRange], from: ByteIdx, to: ByteIdx) -> Option<(ByteIdx, ByteIdx)> {
-    let mut it = regions.iter();
-    while let Some(r) = it.next() {
-        if to < r.from {
-            // before this region and not in the previous so all missing
-            break;
-        } else if from < r.from {
-            // runs up to the start of this region or over this region
-            let end = if r.to > to { r.from } else { to };
-            return Some((from, end));
-        } else if r.contains(from, to) {
-            // contained entirely within this region so nothing missing
-            return None;
-        } else if from < r.to && to > r.to {
-            // from inside this region out to the next or past it
-            let end = match it.next() {
-                Some(r) if r.from < to => r.from,
-                _ => to,
-            };
-            return Some((r.to, end));
-        }
-    }
-
-    Some((from, to))
-}
-
 impl Tokenizer {
     fn clear(&mut self) {
         self.ranges.clear();
@@ -527,6 +472,61 @@ impl Tokenizer {
             })
             .collect()
     }
+}
+
+#[inline]
+fn mark_region(regions: &mut Vec<ByteRange>, from: ByteIdx, to: ByteIdx) {
+    regions.push(ByteRange { from, to });
+    if regions.len() == 1 {
+        return;
+    }
+
+    regions.sort_unstable();
+
+    let mut idx = 0;
+    for i in 1..regions.len() {
+        if regions[idx].to >= regions[i].from {
+            // Merge overlapping regions
+            regions[idx].to = max(regions[idx].to, regions[i].to);
+        } else {
+            // Move to the next region to check for overlaps
+            idx += 1;
+            regions.swap(idx, i);
+        }
+    }
+
+    // If we performed any merges then there will be unused regions at the end of the
+    // Vec now that we need to drop
+    regions.truncate(idx + 1);
+}
+
+/// This is not attempting to be maximally efficient in returning a set of missing regions as the
+/// goal is simply to minimise the amount of retokenization we do via tree-sitter where possible.
+#[inline]
+fn missing_region(regions: &[ByteRange], from: ByteIdx, to: ByteIdx) -> Option<(ByteIdx, ByteIdx)> {
+    let mut it = regions.iter();
+    while let Some(r) = it.next() {
+        if to < r.from {
+            // before this region and not in the previous so all missing
+            break;
+        } else if from < r.from {
+            // runs up to the start of this region or over this region
+            let end = if r.to > to { r.from } else { to };
+            return Some((from, end));
+        } else if r.contains(from, to) {
+            // contained entirely within this region so nothing missing
+            return None;
+        } else if from < r.to && to > r.to {
+            // from inside this region out to the next or past it
+            let end = match it.next() {
+                Some(r) if r.from < to => r.from,
+                _ => to,
+            };
+            return Some((r.to, end));
+        }
+    }
+
+    Some((from, to))
 }
 
 #[cfg(test)]
