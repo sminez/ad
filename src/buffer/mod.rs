@@ -1295,8 +1295,9 @@ impl Buffer {
         (cur, deleted)
     }
 
-    fn delete_dot(&mut self, dot: Dot, source: Option<Source>) -> (Cur, Option<String>) {
+    fn delete_dot(&mut self, mut dot: Dot, source: Option<Source>) -> (Cur, Option<String>) {
         let mut have_prepared_edit = false;
+        dot = dot.collapse_null_range();
 
         if let Some(ts) = self.syntax_state.as_mut() {
             match &dot {
@@ -1304,10 +1305,14 @@ impl Buffer {
                     ts.prepare_delete_char(c.idx, &self.txt);
                     have_prepared_edit = true;
                 }
-                Dot::Range { r } if r.start.idx != r.end.idx => {
+
+                // collapse_null_range above ensures that matching Dot::Range here is at least two
+                // characters long.
+                Dot::Range { r } => {
                     ts.prepare_delete_range(r.start.idx, r.end.idx.uadd(1), &self.txt);
                     have_prepared_edit = true;
                 }
+
                 _ => (),
             }
         }
