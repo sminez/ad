@@ -3,7 +3,7 @@ use crate::{
     buffer::{Buffer, CharIdx},
     dot::{
         Cur, Dot, Range,
-        find::{Find, find_backward_start, find_forward_end},
+        find::{Find, find_backward, find_backward_start, find_forward, find_forward_end},
     },
     key::Arrow,
 };
@@ -124,17 +124,46 @@ impl TextObject {
 }
 
 pub struct FindDelimited {
-    l: String,
-    r: String,
+    l: char,
+    r: char,
     rev: bool,
 }
 
 impl FindDelimited {
-    pub fn new(l: impl Into<String>, r: impl Into<String>) -> Self {
-        Self {
-            l: l.into(),
-            r: r.into(),
-            rev: false,
+    pub fn new(l: char, r: char) -> Self {
+        Self { l, r, rev: false }
+    }
+
+    fn expand(&self, dot: Dot, b: &Buffer) -> Dot
+    where
+        Self: Sized,
+    {
+        let Range {
+            mut start,
+            mut end,
+            start_active,
+        } = dot.as_range();
+
+        // Special case starting on either delimiter as we know we are only one character away
+        let new_start = if dot.collapse_to_first_cur().content(b).contains(self.l) {
+            start.idx = start.idx.uadd(1);
+            Some(start)
+        } else {
+            find_backward(self, end, b).map(|d| d.last_cur())
+        };
+
+        let new_end = if dot.collapse_to_last_cur().content(b).contains(self.r) {
+            end.idx = end.idx.usub(1);
+            Some(end)
+        } else {
+            find_forward(self, start, b).map(|d| d.first_cur())
+        };
+
+        // If either search failed to find the delimiter it needed we leave dot unchanged
+        if let (Some(new_start), Some(new_end)) = (new_start, new_end) {
+            Dot::from(Range::from_cursors(new_start, new_end, start_active)).collapse_null_range()
+        } else {
+            dot
         }
     }
 }
@@ -144,8 +173,8 @@ impl Find for FindDelimited {
 
     fn reversed(&self) -> Self::Reversed {
         Self {
-            l: self.l.clone(),
-            r: self.r.clone(),
+            l: self.l,
+            r: self.r,
             rev: !self.rev,
         }
     }
@@ -155,19 +184,19 @@ impl Find for FindDelimited {
         I: Iterator<Item = (CharIdx, char)>,
     {
         let (target, other) = if self.rev {
-            (&self.l, &self.r)
+            (self.l, self.r)
         } else {
-            (&self.r, &self.l)
+            (self.r, self.l)
         };
         let mut skips = 0;
 
         for (i, ch) in it {
-            if other.contains(ch) && target != other {
+            if other == ch && target != other {
                 skips += 1;
-            } else if skips == 0 && target.contains(ch) {
+            } else if skips == 0 && target == ch {
                 let ix = if self.rev { i.uadd(1) } else { i.usub(1) };
                 return Some((ix, ix));
-            } else if target.contains(ch) {
+            } else if target == ch {
                 skips -= 1;
             }
         }
@@ -179,6 +208,24 @@ impl Find for FindDelimited {
 enum FindParagraph {
     Fwd,
     Bck,
+}
+
+impl FindParagraph {
+    fn expand(&self, dot: Dot, b: &Buffer) -> Dot
+    where
+        Self: Sized,
+    {
+        let Range {
+            mut start,
+            mut end,
+            start_active,
+        } = dot.as_range();
+
+        start = find_backward_start(self, start, b);
+        end = find_forward_end(self, end, b);
+
+        Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
+    }
 }
 
 impl Find for FindParagraph {
@@ -221,49 +268,7 @@ enum FindWord {
     Bck,
 }
 
-impl Find for FindWord {
-    type Reversed = FindWord;
-
-    fn reversed(&self) -> Self::Reversed {
-        match self {
-            Self::Fwd => Self::Bck,
-            Self::Bck => Self::Fwd,
-        }
-    }
-
-    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
-    where
-        I: Iterator<Item = (CharIdx, char)>,
-    {
-        use CharKind::*;
-
-        let mut it = it.peekable();
-        let mut prev = CharKind::from(it.peek()?.1);
-
-        // If we are searching forward and are not currently sat on whitespace then we could be
-        // on the end of a word which would cause us to stick in place, so we advance a single
-        // character and start the search from there.
-        if matches!((prev, self), (Word | Punctuation, FindWord::Fwd)) {
-            it.next();
-            prev = CharKind::from(it.peek()?.1);
-        }
-
-        for (i, ch) in it {
-            let kind = CharKind::from(ch);
-            match (prev, kind) {
-                (Word, Punctuation) | (Punctuation, Word) | (Word | Punctuation, Whitespace) => {
-                    return match self {
-                        Self::Fwd => Some((i.usub(1), i.usub(1))),
-                        Self::Bck => Some((i.uadd(1), i.uadd(1))),
-                    };
-                }
-                _ => prev = kind,
-            }
-        }
-
-        None
-    }
-
+impl FindWord {
     fn expand(&self, dot: Dot, b: &Buffer) -> Dot {
         use CharKind::*;
 
@@ -314,6 +319,50 @@ impl Find for FindWord {
         }
 
         Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
+    }
+}
+
+impl Find for FindWord {
+    type Reversed = FindWord;
+
+    fn reversed(&self) -> Self::Reversed {
+        match self {
+            Self::Fwd => Self::Bck,
+            Self::Bck => Self::Fwd,
+        }
+    }
+
+    fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
+    where
+        I: Iterator<Item = (CharIdx, char)>,
+    {
+        use CharKind::*;
+
+        let mut it = it.peekable();
+        let mut prev = CharKind::from(it.peek()?.1);
+
+        // If we are searching forward and are not currently sat on whitespace then we could be
+        // on the end of a word which would cause us to stick in place, so we advance a single
+        // character and start the search from there.
+        if matches!((prev, self), (Word | Punctuation, FindWord::Fwd)) {
+            it.next();
+            prev = CharKind::from(it.peek()?.1);
+        }
+
+        for (i, ch) in it {
+            let kind = CharKind::from(ch);
+            match (prev, kind) {
+                (Word, Punctuation) | (Punctuation, Word) | (Word | Punctuation, Whitespace) => {
+                    return match self {
+                        Self::Fwd => Some((i.usub(1), i.usub(1))),
+                        Self::Bck => Some((i.uadd(1), i.uadd(1))),
+                    };
+                }
+                _ => prev = kind,
+            }
+        }
+
+        None
     }
 }
 
@@ -380,20 +429,32 @@ mod tests {
         assert_eq!(content, " ");
     }
 
+    #[test_case(CharIdx(2), "(", true; "on left delimiter")]
+    #[test_case(CharIdx(3), "E", true; "first char after left delimiter")]
+    #[test_case(CharIdx(41), "9", true; "first char before right delimiter")]
+    #[test_case(CharIdx(42), ")", true; "on right delimiter")]
+    #[test_case(CharIdx(1), " ", false; "before left delimiter")]
+    #[test_case(CharIdx(43), " ", false; "after right delimiter")]
     #[test]
-    fn find_delimited() {
+    fn find_delimited(idx: CharIdx, initial: &str, should_expand: bool) {
         let b = Buffer::new_virtual(
             0,
             "test",
             "│ (EX:40727d6d-32a6-4ebc-ae4f-4d92e326a8c9) │",
             Default::default(),
         );
-        let dot = Dot::Cur {
-            c: Cur { idx: CharIdx(3) },
-        };
-        let expanded = FindDelimited::new("(", ")").expand(dot, &b);
-        let content = expanded.content(&b);
 
-        assert_eq!(content, "EX:40727d6d-32a6-4ebc-ae4f-4d92e326a8c9");
+        let dot = Dot::Cur { c: Cur { idx } };
+        assert_eq!(dot.content(&b), initial);
+
+        let expanded = FindDelimited::new('(', ')').expand(dot, &b);
+
+        let expected = if should_expand {
+            "EX:40727d6d-32a6-4ebc-ae4f-4d92e326a8c9"
+        } else {
+            initial
+        };
+
+        assert_eq!(expanded.content(&b), expected);
     }
 }

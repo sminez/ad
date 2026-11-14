@@ -3,7 +3,7 @@
 //! For more complex patterns, Regex should be used instead
 use crate::{
     buffer::{Buffer, CharIdx},
-    dot::{Cur, Dot, Range},
+    dot::{Cur, Dot},
 };
 
 /// A Find is able to locate its next occurrence within an indexed character stream and return
@@ -22,22 +22,6 @@ pub trait Find {
     fn try_find<I>(&self, it: I) -> Option<(CharIdx, CharIdx)>
     where
         I: Iterator<Item = (CharIdx, char)>;
-
-    fn expand(&self, dot: Dot, b: &Buffer) -> Dot
-    where
-        Self: Sized,
-    {
-        let Range {
-            mut start,
-            mut end,
-            start_active,
-        } = dot.as_range();
-
-        start = find_backward_start(self, start, b);
-        end = find_forward_end(self, end, b);
-
-        Dot::from(Range::from_cursors(start, end, start_active)).collapse_null_range()
-    }
 }
 
 pub fn find_forward<F: Find>(f: &F, cur: Cur, b: &Buffer) -> Option<Dot> {
