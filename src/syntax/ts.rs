@@ -472,7 +472,7 @@ impl Tokenizer {
         let mut it = self.cur.captures(&self.q, root, gb);
 
         while let Some((m, idx)) = it.next() {
-            let cap = m.captures[*idx];
+            let cap = m.captures()[*idx];
             let r = ByteRange::from(cap.node.range());
             if let Some(prev) = self.ranges.last_mut() {
                 if r == prev.r {

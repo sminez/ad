@@ -10,5 +10,5 @@ path = "src/main.rs"
 
 [dependencies]
 ad_client = { version = "0.6", path = "../ad_client" }
-anyhow = "1.0.102"
-subprocess = "1.1.0"
+anyhow = "1.0.104"
+subprocess = "1.2.3"
