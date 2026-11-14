@@ -275,11 +275,16 @@ impl FindWord {
     fn expand(&self, dot: Dot, b: &Buffer) -> Dot {
         use CharKind::*;
 
+        if b.is_empty() {
+            return dot;
+        }
+
         let Range {
             mut start,
             mut end,
             start_active,
         } = dot.as_range();
+
         let max_idx = CharIdx(b.txt.len_chars() - 1);
         start.idx = min(start.idx, max_idx);
         end.idx = min(end.idx, max_idx);
@@ -470,6 +475,17 @@ mod tests {
         assert_eq!(dot.content(&b), "\n");
 
         let new_dot = FindParagraph::Fwd.expand(dot, &b);
+        assert_eq!(new_dot, dot);
+    }
+
+    #[test]
+    fn find_word_expand_doesnt_panic_on_empty_buffer() {
+        let b = Buffer::new_virtual(0, "test", "", Default::default());
+        let dot = Dot::Cur {
+            c: Cur { idx: CharIdx(0) },
+        };
+
+        let new_dot = FindWord::Fwd.expand(dot, &b);
         assert_eq!(new_dot, dot);
     }
 }
