@@ -927,9 +927,7 @@ impl Buffer {
             BAction::Undo => return self.undo(),
 
             BAction::CurToLine { y } => {
-                self.dot = Dot::Cur {
-                    c: Cur::from_yx(y, CharOffset(0), self),
-                };
+                self.dot = Dot::cur(Cur::from_yx(y, CharOffset(0), self));
             }
 
             BAction::DotCollapseFirst => self.collapse_dot(true),
@@ -1137,7 +1135,7 @@ impl Buffer {
             }
         };
 
-        self.dot = Dot::Cur { c: new_cur };
+        self.dot = new_cur.into();
     }
 
     /// Only files get marked as dirty to ensure that they are prompted for saving before being

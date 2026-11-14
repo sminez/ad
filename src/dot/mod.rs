@@ -66,6 +66,10 @@ impl Dot {
         }
     }
 
+    pub fn cur(c: impl Into<Cur>) -> Self {
+        Self::Cur { c: c.into() }
+    }
+
     /// Convert a [Dot] into character offsets within the buffer identifying its start and end
     /// positions.
     ///

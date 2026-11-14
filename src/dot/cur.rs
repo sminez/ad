@@ -110,6 +110,12 @@ impl Cur {
     }
 }
 
+impl From<CharIdx> for Cur {
+    fn from(idx: CharIdx) -> Self {
+        Self { idx }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

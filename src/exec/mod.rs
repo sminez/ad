@@ -440,12 +440,16 @@ impl EditAction {
                 let from = ed.byte_to_char(*from).unwrap();
                 let n_chars = CharOffset::from(s.as_str());
 
-                Dot::from_char_indices(from, from + n_chars - CharOffset(1))
+                if n_chars.0 == 0 {
+                    Dot::cur(from)
+                } else {
+                    Dot::from_char_indices(from, from + n_chars - CharOffset(1))
+                }
             }
 
             Self::Remove(from, _) => {
                 let from = ed.byte_to_char(*from).unwrap();
-                Dot::from_char_indices(from, from)
+                Dot::cur(from)
             }
         }
     }
@@ -605,6 +609,7 @@ mod tests {
     #[test_case(0, ", x/\\b\\w+\\b/ c/X/", "X│X│X"; "change each word")]
     #[test_case(0, ", x/foo/ { a/X/; i/Y/; }", "YfooX│YfooX│YfooX"; "x append then insert")]
     #[test_case(0, ", x/foo/ { d; i/Y/; }", "Y│Y│Y"; "x delete then insert")]
+    #[test_case(0, ", c//", ""; "change with no argument deletes")]
     #[test]
     fn execute_produces_the_correct_string(idx: usize, s: &str, expected: &str) {
         let prog = Program::try_parse(s).unwrap();
@@ -1205,11 +1210,7 @@ mod tests {
     #[test_case(", y/foo/ i/X/", "bar baz", "Xbar baz"; "y no matches inserts once")]
     #[test_case("/foo/ d", "bar baz", "ar baz"; "regex address no match")]
     #[test]
-    fn edge_case_empty_and_no_matches_work(
-        program: &str,
-        initial_content: &str,
-        expected_content: &str,
-    ) {
+    fn empty_and_no_matches_work(program: &str, initial_content: &str, expected_content: &str) {
         let prog = Program::try_parse(program).unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
@@ -1227,11 +1228,7 @@ mod tests {
     #[test_case(", x/\\b/ i/|/", "foo bar", "|foo|| |bar|"; "zero-length word boundary")]
     #[test_case(", y/.*/ i/X/", "foo", "foo"; "y with zero-length")]
     #[test]
-    fn edge_case_zero_length_matches_work(
-        program: &str,
-        initial_content: &str,
-        expected_content: &str,
-    ) {
+    fn zero_length_matches_work(program: &str, initial_content: &str, expected_content: &str) {
         let prog = Program::try_parse(program).unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
@@ -1243,7 +1240,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_case_very_large_replacement() {
+    fn very_large_replacement() {
         let large_replacement = "X".repeat(10000);
         let prog = Program::try_parse(&format!(", x/foo/ c/{}/", large_replacement)).unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
@@ -1257,7 +1254,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_case_large_buffer_with_many_matches() {
+    fn large_buffer_with_many_matches() {
         let initial = "foo ".repeat(1000);
         let prog = Program::try_parse(", x/foo/ c/bar/").unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
@@ -1275,7 +1272,7 @@ mod tests {
     #[test_case("2", "L1\nL2\nL3", "L1\nL2\nL3", (3, 5); "line address only")]
     #[test_case("#5", "hello world", "hello world", (5, 5); "char address only")]
     #[test]
-    fn edge_case_address_only_programs_work(
+    fn address_only_programs_work(
         program: &str,
         initial_content: &str,
         expected_content: &str,
@@ -1309,7 +1306,7 @@ mod tests {
     #[test_case(", x/\\w+/ c/X/", "hello世界", "X"; "word with mixed scripts")]
     #[test_case("1:2,1:4 d", "世界你好", "世"; "line:col with multibyte")]
     #[test]
-    fn edge_case_unicode_works(program: &str, initial_content: &str, expected_content: &str) {
+    fn unicode_works(program: &str, initial_content: &str, expected_content: &str) {
         let prog = Program::try_parse(program).unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
@@ -1337,7 +1334,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_case_buffer_grows_significantly() {
+    fn buffer_growing_significantly_works() {
         let prog = Program::try_parse(", x/x/ c/REPLACEMENT/").unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, "x x x", Default::default());
@@ -1351,7 +1348,7 @@ mod tests {
     }
 
     #[test]
-    fn edge_case_buffer_shrinks_significantly() {
+    fn buffer_shrinks_significantly() {
         let prog = Program::try_parse(", x/LONGWORD/ c/x/").unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, "LONGWORD LONGWORD LONGWORD", Default::default());
@@ -1368,11 +1365,7 @@ mod tests {
     #[test_case(", x/\\w+/ y/o/ c/X/", "foo boo", "Xoo Xoo"; "x containing y")]
     #[test_case(", y/foo/ x/o/ c/X/", "foo bar foo", "foo bar foo"; "y containing x")]
     #[test]
-    fn edge_case_complex_structex_works(
-        program: &str,
-        initial_content: &str,
-        expected_content: &str,
-    ) {
+    fn complex_structex_works(program: &str, initial_content: &str, expected_content: &str) {
         let prog = Program::try_parse(program).unwrap();
         let mut runner = SystemRunner::new(env::current_dir().unwrap());
         let mut b = Buffer::new_unnamed(0, initial_content, Default::default());
