@@ -31,7 +31,6 @@ pub mod key;
 pub mod log;
 pub mod lsp;
 pub mod mode;
-mod parse;
 pub mod plumb;
 pub mod regex;
 pub mod syntax;

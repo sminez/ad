@@ -20,7 +20,7 @@
 use crate::{
     buffer::{Buffer, CharIdx, CharOffset, GapBuffer, LineIdx, LineOffset, View},
     dot::{Cur, Dot, Range},
-    parse::{self, ParseInput},
+    exec::parse::{self, ParseInput},
     regex::{self, Haystack, Regex, RevRegex},
 };
 use std::fmt;
@@ -655,6 +655,7 @@ mod tests {
     #[test_case("/foo/", simple(Regex(re("foo"))); "regex")]
     #[test_case("+/baz/", simple(Regex(re("baz"))); "regex explicit forward")]
     #[test_case("-/bar/", simple(RegexBack(re_rev("bar"))); "regex back")]
+    #[test_case(r"/a\/b/", simple(Regex(re(r"a\/b"))); "regex with escaped slash")]
     // Simple with suffix
     #[test_case("#5+", simple(SimpleAddr::new(Char(CharIdx(5)),  vec![Eol])); "char to eol")]
     #[test_case("#5-", simple(SimpleAddr::new(Char(CharIdx(5)), vec![Bol])); "char to bol")]

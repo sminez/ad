@@ -3,7 +3,6 @@ use crate::{
     buffer::{Buffer, ByteIdx, CharIdx, CharOffset, GapBuffer, View},
     dot::{Cur, Dot},
     editor::BAction,
-    parse::ParseInput,
     regex::{self, Haystack as _, Regex},
 };
 use ad_event::Source;
@@ -20,15 +19,16 @@ use structex::{
 };
 
 mod addr;
+mod parse;
 mod runner;
-
-pub use runner::SystemRunner;
 
 pub(crate) use addr::Address;
 pub use addr::{Addr, AddrBase, SimpleAddr};
+pub use runner::SystemRunner;
 pub(crate) use runner::{EditorRunner, Runner};
 
 use addr::ErrorKind;
+use parse::ParseInput;
 
 /// Errors that can be returned by the exec engine
 #[derive(Debug)]
