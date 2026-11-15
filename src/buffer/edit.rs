@@ -158,26 +158,26 @@ impl EditLog {
     }
 
     pub(crate) fn undo(&mut self) -> Option<Transaction> {
-        let mut t = self.edits.pop()?;
-        while t.is_empty() {
-            t = self.edits.pop()?;
+        let mut trans = self.edits.pop()?;
+        while trans.is_empty() {
+            trans = self.edits.pop()?;
         }
 
-        self.undone_edits.push(t.clone());
-        t.reverse();
+        self.undone_edits.push(trans.clone());
+        trans.reverse();
 
-        Some(t.into_iter().map(|e| e.into_undo()).collect())
+        Some(trans.into_iter().map(|e| e.into_undo()).collect())
     }
 
     pub(crate) fn redo(&mut self) -> Option<Transaction> {
-        let mut t = self.undone_edits.pop()?;
-        while t.is_empty() {
-            t = self.edits.pop()?;
+        let mut trans = self.undone_edits.pop()?;
+        while trans.is_empty() {
+            trans = self.undone_edits.pop()?;
         }
 
-        self.edits.push(t.clone());
+        self.edits.push(trans.clone());
 
-        Some(t)
+        Some(trans)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -185,12 +185,12 @@ impl EditLog {
     }
 
     /// Record a single character being inserted at the given cursor position
-    pub(crate) fn insert_char(&mut self, cur: Cur, c: char) {
+    pub(crate) fn insert_char(&mut self, cur: Cur, ch: char) {
         if !self.paused {
             self.push(Edit {
                 kind: Kind::Insert,
                 cur,
-                txt: Txt::Char(c),
+                txt: Txt::Char(ch),
             });
         }
     }
@@ -207,12 +207,12 @@ impl EditLog {
     }
 
     /// Record a single character being deleted from the given cursor position
-    pub(crate) fn delete_char(&mut self, cur: Cur, c: char) {
+    pub(crate) fn delete_char(&mut self, cur: Cur, ch: char) {
         if !self.paused {
             self.push(Edit {
                 kind: Kind::Delete,
                 cur,
-                txt: Txt::Char(c),
+                txt: Txt::Char(ch),
             });
         }
     }
@@ -236,25 +236,27 @@ impl EditLog {
         self.edits.push(Vec::new());
     }
 
+    // So long as we have at least one existing edit in an existing transaction we can try to
+    // extend it by combining it with this new one. If that fails we simply store the new edit as
+    // it was provided. If we had no previous transaction at all we create a new one containing the
+    // new edit.
     fn push(&mut self, e: Edit) {
         self.undone_edits.clear();
 
-        if self.edits.is_empty() {
-            self.edits.push(vec![e]);
-            return;
-        }
+        match self.edits.last_mut() {
+            Some(trans) => match trans.last_mut() {
+                Some(prev) => {
+                    // On success we combined with prev and we're done. If combining failed then
+                    // the returned value here is simply the edit we passed in so we push it onto
+                    // the transaction directly.
+                    if let Some(e) = prev.try_combine(e) {
+                        trans.push(e);
+                    }
+                }
+                None => trans.push(e),
+            },
 
-        let transaction = self.edits.last_mut().unwrap();
-        if transaction.is_empty() {
-            transaction.push(e);
-            return;
-        }
-
-        // So long as we have at least one existing edit we can try to extend it
-        // by combining it with this new one. If that fails we simply store the
-        // new edit as provided.
-        if let Some(e) = transaction.last_mut().unwrap().try_combine(e) {
-            self.edits.last_mut().unwrap().push(e);
+            None => self.edits.push(vec![e]),
         }
     }
 }
@@ -297,123 +299,221 @@ pub(crate) mod tests {
         }
     }
 
-    #[test_case(
-        vec![in_c(0, 'a'), in_c(1, 'b')],
-        &[in_s(0, "ab")];
-        "run of characters"
-    )]
-    #[test_case(
-        vec![in_c(0, 'a'), in_c(0, 'b')],
-        &[in_s(0, "ba")];  // typos:ignore
-        "run of characters at same cursor"
-    )]
-    #[test_case(
-        vec![in_c(0, 'a'), in_s(1, "bcd")],
-        &[in_s(0, "abcd")];
-        "char then string"
-    )]
-    #[test_case(
-        vec![in_c(0, 'a'), in_s(0, "bcd")],
-        &[in_s(0, "bcda")];
-        "char then string at same cursor"
-    )]
-    #[test_case(
-        vec![in_s(0, "ab"), in_s(2, "cd")],
-        &[in_s(0, "abcd")];
-        "run of strings"
-    )]
-    #[test_case(
-        vec![in_s(0, "ab"), in_s(0, "cd")],
-        &[in_s(0, "cdab")];
-        "run of strings at same cursor"
-    )]
-    #[test_case(
-        vec![in_s(0, "abc"), in_c(3, 'd')],
-        &[in_s(0, "abcd")];
-        "string then char"
-    )]
-    #[test_case(
-        vec![in_s(0, "abc"), in_c(0, 'd')],
-        &[in_s(0, "dabc")];
-        "string then char at same cursor"
-    )]
-    #[test_case(
-        vec![in_s(0, "éé"), in_c(2, 'x')],
-        &[in_s(0, "ééx")];
-        "multi-byte string then adjacent char"
-    )]
-    #[test_case(
-        vec![in_s(0, "é"), in_c(2, 'x')],
-        &[in_s(0, "é"), in_c(2, 'x')];
-        "multi-byte string then non-adjacent char"
-    )]
+    // insert appending to previous
+    #[test_case(in_c(0, 'a'), in_c(1, 'b'), Some(in_s(0, "ab")); "insert append char char")]
+    #[test_case(in_c(0, 'a'), in_s(1, "bc"), Some(in_s(0, "abc")); "insert append char string")]
+    #[test_case(in_s(0, "ab"), in_s(2, "cd"), Some(in_s(0, "abcd")); "insert append string string")]
+    #[test_case(in_s(0, "ab"), in_c(2, 'c'), Some(in_s(0, "abc")); "insert append string char")]
+    // insert with non-moving cursor
+    #[test_case(in_c(0, 'a'), in_c(0, 'b'), Some(in_s(0, "ba")); "insert same cur char char")] // typos:ignore
+    #[test_case(in_c(0, 'a'), in_s(0, "bc"), Some(in_s(0, "bca")); "insert same cur char string")]
+    #[test_case(in_s(0, "ab"), in_s(0, "cd"), Some(in_s(0, "cdab")); "insert same cur string string")]
+    #[test_case(in_s(0, "ab"), in_c(0, 'c'), Some(in_s(0, "cab")); "insert same cur string char")]
+    // delete appending to previous
+    #[test_case(del_c(1, 'a'), del_c(0, 'b'), Some(del_s(0, "ba")); "delete append char char")] // typos:ignore
+    #[test_case(del_c(2, 'a'), del_s(0, "bc"), Some(del_s(0, "bca")); "delete append char string")]
+    #[test_case(del_s(2, "ab"), del_s(0, "cd"), Some(del_s(0, "cdab")); "delete append string string")]
+    #[test_case(del_s(1, "ab"), del_c(0, 'c'), Some(del_s(0, "cab")); "delete append string char")]
+    // delete with non-moving cursor
+    #[test_case(del_c(0, 'a'), del_c(0, 'b'), Some(del_s(0, "ab")); "delete same cur char char")]
+    #[test_case(del_c(0, 'a'), del_s(0, "b"), Some(del_s(0, "ab")); "delete same cur char string")]
+    #[test_case(del_s(0, "a"), del_s(0, "b"), Some(del_s(0, "ab")); "delete same cur string string")]
+    #[test_case(del_s(0, "a"), del_c(0, 'b'), Some(del_s(0, "ab")); "delete same cur string char")]
+    // disjoint inserts
+    #[test_case(in_c(0, 'a'), in_c(9, 'b'), None; "insert disjoint char char")]
+    #[test_case(in_c(0, 'a'), in_s(9, "bc"), None; "insert disjoint char string")]
+    #[test_case(in_s(0, "ab"), in_s(9, "cd"), None; "insert disjoint string string")]
+    #[test_case(in_s(0, "ab"), in_c(9, 'c'), None; "insert disjoint string char")]
+    // disjoint deletes
+    #[test_case(del_c(0, 'a'), del_c(9, 'b'), None; "delete disjoint char char")]
+    #[test_case(del_c(0, 'a'), del_s(9, "b"), None; "delete disjoint char string")]
+    #[test_case(del_s(0, "a"), del_s(9, "b"), None; "delete disjoint string string")]
+    #[test_case(del_s(0, "a"), del_c(9, 'b'), None; "delete disjoint string char")]
+    // mixed insert and delete (modified from the otherwise successful cases above)
+    #[test_case(in_c(0, 'a'), del_c(1, 'b'), None; "insert delete char char")]
+    #[test_case(in_c(0, 'a'), del_s(1, "bc"), None; "insert delete char string")]
+    #[test_case(in_s(0, "ab"), del_s(2, "cd"), None; "insert delete string string")]
+    #[test_case(in_s(0, "ab"), del_c(2, 'c'), None; "insert delete string char")]
+    #[test_case(del_c(0, 'a'), in_c(0, 'b'), None; "delete insert char char")]
+    #[test_case(del_c(0, 'a'), in_s(0, "bc"), None; "delete insert char string")]
+    #[test_case(del_s(0, "ab"), in_s(0, "cd"), None; "delete insert string string")]
+    #[test_case(del_s(0, "ab"), in_c(0, 'c'), None; "delete insert string char")]
     #[test]
-    fn inserts_work(edits: Vec<Edit>, expected: &[Edit]) {
-        let mut log = EditLog::default();
-        for e in edits {
-            log.push(e);
-        }
+    fn edit_try_combine_works(mut e1: Edit, e2: Edit, expected: Option<Edit>) {
+        let res = e1.try_combine(e2.clone());
 
-        assert_eq!(&log.edits, &[expected.to_vec()]);
+        match (res, expected) {
+            (Some(rejected), None) => assert_eq!(rejected, e2),
+            (None, Some(combined)) => assert_eq!(combined, e1),
+            (Some(res), Some(_)) => panic!("expected to combine but got {res:?}"),
+            (None, None) => panic!("expected to reject but merged e1 is {e1:?}"),
+        }
+    }
+
+    fn transaction_vec(raw: &[&[Edit]]) -> Vec<Transaction> {
+        raw.iter().map(|edits| edits.to_vec()).collect()
+    }
+
+    fn cur(i: usize) -> Cur {
+        Cur { idx: CharIdx(i) }
+    }
+
+    #[test]
+    fn inserts_combine() {
+        let mut log = EditLog::default();
+
+        // cursor moves with the text being inserted here
+        log.insert_char(cur(0), 'a'); // start with single char
+        log.insert_string(cur(1), "bc".into()); // combine to string
+        log.insert_string(cur(3), "de".into()); // extend with string
+        log.insert_char(cur(5), 'f'); // extend with char
+
+        assert_eq!(log.edits, transaction_vec(&[&[in_s(0, "abcdef")]]));
+        assert_eq!(log.undone_edits, transaction_vec(&[]));
+    }
+
+    #[test]
+    fn deletes_combine() {
+        let mut log = EditLog::default();
+
+        // unlike insert, the cursor stays fixed here
+        log.delete_char(cur(0), 'a'); // start with single char
+        log.delete_string(cur(0), "bc".into()); // combine to string
+        log.delete_string(cur(0), "de".into()); // extend with string
+        log.delete_char(cur(0), 'f'); // extend with char
+
+        assert_eq!(log.edits, transaction_vec(&[&[del_s(0, "abcdef")]]));
+        assert_eq!(log.undone_edits, transaction_vec(&[]));
+    }
+
+    #[test]
+    fn creating_a_new_transaction_prevents_combining() {
+        let mut log = EditLog::default();
+
+        log.insert_char(cur(0), 'a');
+        log.insert_string(cur(1), "bc".into());
+
+        log.new_transaction();
+
+        log.insert_string(cur(3), "de".into());
+        log.insert_char(cur(5), 'f');
+
+        assert_eq!(
+            log.edits,
+            transaction_vec(&[&[in_s(0, "abc")], &[in_s(3, "def")]])
+        );
+        assert_eq!(log.undone_edits, transaction_vec(&[]));
+    }
+
+    #[test]
+    fn new_transaction_is_noop_for_empty_current_transaction() {
+        let initial_edits = transaction_vec(&[&[in_c(0, 'a')], &[]]);
+
+        let mut log = EditLog {
+            edits: initial_edits.clone(),
+            undone_edits: vec![],
+            paused: false,
+        };
+
+        log.new_transaction();
+
+        assert_eq!(log.edits, initial_edits);
+        assert_eq!(log.undone_edits, transaction_vec(&[]));
     }
 
     #[test_case(
-        vec![del_c(1, 'b'), del_c(0, 'a')],
-        &[del_s(0, "ab")];
-        "run of chars"
+        transaction_vec(&[&[in_c(0, 'a')], &[in_c(1, 'b'), del_c(2, 'c')]]),
+        Some(vec![in_c(2, 'c'), del_c(1, 'b')]),
+        transaction_vec(&[&[in_c(0, 'a')]]),
+        transaction_vec(&[&[in_c(1, 'b'), del_c(2, 'c')]]);
+        "with historic edits"
     )]
     #[test_case(
-        vec![del_c(0, 'a'), del_c(0, 'b')],
-        &[del_s(0, "ab")];
-        "run of characters at same cursor"
+        vec![vec![]],
+        None,
+        vec![],
+        vec![];
+        "only empty transaction is None"
     )]
     #[test_case(
-        vec![del_c(3, 'd'), del_s(0, "abc")],
-        &[del_s(0, "abcd")];
-        "char then string"
-    )]
-    #[test_case(
-        vec![del_c(0, 'a'), del_s(0, "bcd")],
-        &[del_s(0, "abcd")];
-        "char then string at same cursor"
-    )]
-    #[test_case(
-        vec![del_s(2, "cde"), del_s(0, "ab")],
-        &[del_s(0, "abcde")];
-        "run of strings"
-    )]
-    #[test_case(
-        vec![del_s(0, "abc"), del_s(0, "de")],
-        &[del_s(0, "abcde")];
-        "run of strings at same cursor"
-    )]
-    #[test_case(
-        vec![del_s(0, "abc"), del_c(0, 'd')],
-        &[del_s(0, "abcd")];
-        "string then char"
-    )]
-    #[test_case(
-        vec![del_s(0, "abc"), del_c(0, 'd')],
-        &[del_s(0, "abcd")];
-        "string then char at same cursor"
-    )]
-    #[test_case(
-        vec![del_c(2, 'x'), del_s(0, "éé")],
-        &[del_s(0, "ééx")];
-        "char then adjacent multi-byte string"
-    )]
-    #[test_case(
-        vec![del_c(4, 'x'), del_s(0, "éé")],
-        &[del_c(4, 'x'), del_s(0, "éé")];
-        "char then non-adjacent multi-byte string"
+        transaction_vec(&[&[in_c(0, 'a')], &[in_c(1, 'b'), del_c(2, 'c')], &[]]),
+        Some(vec![in_c(2, 'c'), del_c(1, 'b')]),
+        transaction_vec(&[&[in_c(0, 'a')]]),
+        transaction_vec(&[&[in_c(1, 'b'), del_c(2, 'c')]]);
+        "an empty transaction is skipped"
     )]
     #[test]
-    fn delete_work(edits: Vec<Edit>, expected: &[Edit]) {
-        let mut log = EditLog::default();
-        for e in edits {
-            log.push(e);
-        }
+    fn undo_works(
+        edits: Vec<Transaction>,
+        res: Option<Transaction>,
+        expected_edits: Vec<Transaction>,
+        expected_undone: Vec<Transaction>,
+    ) {
+        let mut log = EditLog {
+            edits,
+            undone_edits: vec![],
+            paused: false,
+        };
 
-        assert_eq!(&log.edits, &[expected.to_vec()]);
+        assert_eq!(log.undo(), res);
+        assert_eq!(log.edits, expected_edits);
+        assert_eq!(log.undone_edits, expected_undone);
+    }
+
+    #[test_case(
+        transaction_vec(&[&[in_c(0, 'a')]]),
+        transaction_vec(&[&[in_c(1, 'b'), del_c(2, 'c')]]),
+        Some(vec![in_c(1, 'b'), del_c(2, 'c')]),
+        transaction_vec(&[&[in_c(0, 'a')], &[in_c(1, 'b'), del_c(2, 'c')]]),
+        transaction_vec(&[]);
+        "with historic edits"
+    )]
+    #[test_case(
+        vec![],
+        vec![vec![]],
+        None,
+        vec![],
+        vec![];
+        "only empty transaction is None"
+    )]
+    #[test_case(
+        transaction_vec(&[&[in_c(0, 'a')]]),
+        transaction_vec(&[&[in_c(1, 'b'), del_c(2, 'c')], &[]]),
+        Some(vec![in_c(1, 'b'), del_c(2, 'c')]),
+        transaction_vec(&[&[in_c(0, 'a')], &[in_c(1, 'b'), del_c(2, 'c')]]),
+        transaction_vec(&[]);
+        "an empty transaction is skipped"
+    )]
+    #[test]
+    fn redo_works(
+        edits: Vec<Transaction>,
+        undone_edits: Vec<Transaction>,
+        res: Option<Transaction>,
+        expected_edits: Vec<Transaction>,
+        expected_undone: Vec<Transaction>,
+    ) {
+        let mut log = EditLog {
+            edits,
+            undone_edits,
+            paused: false,
+        };
+
+        assert_eq!(log.redo(), res);
+        assert_eq!(log.edits, expected_edits);
+        assert_eq!(log.undone_edits, expected_undone);
+    }
+
+    #[test]
+    fn push_clears_undone_edit_state() {
+        let mut log = EditLog {
+            edits: vec![],
+            undone_edits: transaction_vec(&[&[in_c(1, 'a')]]),
+            paused: false,
+        };
+
+        log.push(in_c(100, 'b'));
+
+        assert_eq!(log.edits, transaction_vec(&[&[in_c(100, 'b')]]));
+        assert!(log.undone_edits.is_empty(), "{log:?}");
     }
 }
