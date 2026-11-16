@@ -138,9 +138,11 @@ pub type Transaction = Vec<Edit>;
 /// as no new edits have been made to the buffer (i.e. it is a flat timeline not a tree).
 #[derive(Default, Debug, Clone, PartialEq, Eq)]
 pub(crate) struct EditLog {
-    pub(super) edits: Vec<Transaction>,
-    pub(super) undone_edits: Vec<Transaction>,
-    pub(super) paused: bool,
+    edits: Vec<Transaction>,
+    undone_edits: Vec<Transaction>,
+    paused: bool,
+    depth_at_last_save: usize,
+    undone_depth_at_last_save: usize,
 }
 
 impl EditLog {
@@ -148,6 +150,8 @@ impl EditLog {
         self.edits.clear();
         self.undone_edits.clear();
         self.paused = false;
+        self.depth_at_last_save = 0;
+        self.undone_depth_at_last_save = 0;
     }
 
     pub(crate) fn debug_edits(&self, b: &Buffer) -> Vec<String> {
@@ -155,6 +159,10 @@ impl EditLog {
             .iter()
             .flat_map(|t| t.iter().map(|e| e.string_repr(b)))
             .collect()
+    }
+
+    pub(crate) fn pause(&mut self, paused: bool) {
+        self.paused = paused;
     }
 
     pub(crate) fn undo(&mut self) -> Option<Transaction> {
@@ -180,8 +188,14 @@ impl EditLog {
         Some(trans)
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        self.edits.is_empty()
+    pub(crate) fn mark_last_save(&mut self) {
+        self.depth_at_last_save = self.edits.len();
+        self.undone_depth_at_last_save = self.undone_edits.len();
+    }
+
+    pub(crate) fn is_dirty(&self) -> bool {
+        self.undone_edits.len() == self.depth_at_last_save
+            && self.undone_edits.len() == self.undone_depth_at_last_save
     }
 
     /// Record a single character being inserted at the given cursor position
@@ -267,36 +281,30 @@ pub(crate) mod tests {
     use crate::buffer::CharIdx;
     use simple_test_case::test_case;
 
-    pub(crate) fn in_c(idx: usize, c: char) -> Edit {
-        Edit {
-            kind: Kind::Insert,
-            cur: Cur { idx: CharIdx(idx) },
-            txt: Txt::Char(c),
+    impl Edit {
+        fn new(idx: usize, kind: Kind, txt: Txt) -> Self {
+            Self {
+                kind,
+                cur: Cur { idx: CharIdx(idx) },
+                txt,
+            }
         }
     }
 
-    pub(crate) fn in_s(idx: usize, s: &str) -> Edit {
-        Edit {
-            kind: Kind::Insert,
-            cur: Cur { idx: CharIdx(idx) },
-            txt: Txt::String(s.to_string()),
-        }
+    fn in_c(idx: usize, ch: char) -> Edit {
+        Edit::new(idx, Kind::Insert, Txt::Char(ch))
     }
 
-    pub(crate) fn del_c(idx: usize, c: char) -> Edit {
-        Edit {
-            kind: Kind::Delete,
-            cur: Cur { idx: CharIdx(idx) },
-            txt: Txt::Char(c),
-        }
+    fn in_s(idx: usize, s: &str) -> Edit {
+        Edit::new(idx, Kind::Insert, Txt::String(s.into()))
     }
 
-    pub(crate) fn del_s(idx: usize, s: &str) -> Edit {
-        Edit {
-            kind: Kind::Delete,
-            cur: Cur { idx: CharIdx(idx) },
-            txt: Txt::String(s.to_string()),
-        }
+    fn del_c(idx: usize, ch: char) -> Edit {
+        Edit::new(idx, Kind::Delete, Txt::Char(ch))
+    }
+
+    fn del_s(idx: usize, s: &str) -> Edit {
+        Edit::new(idx, Kind::Delete, Txt::String(s.into()))
     }
 
     // insert appending to previous
@@ -413,6 +421,8 @@ pub(crate) mod tests {
             edits: initial_edits.clone(),
             undone_edits: vec![],
             paused: false,
+            depth_at_last_save: 0,
+            undone_depth_at_last_save: 0,
         };
 
         log.new_transaction();
@@ -453,6 +463,8 @@ pub(crate) mod tests {
             edits,
             undone_edits: vec![],
             paused: false,
+            depth_at_last_save: 0,
+            undone_depth_at_last_save: 0,
         };
 
         assert_eq!(log.undo(), res);
@@ -496,6 +508,8 @@ pub(crate) mod tests {
             edits,
             undone_edits,
             paused: false,
+            depth_at_last_save: 0,
+            undone_depth_at_last_save: 0,
         };
 
         assert_eq!(log.redo(), res);
@@ -509,6 +523,8 @@ pub(crate) mod tests {
             edits: vec![],
             undone_edits: transaction_vec(&[&[in_c(1, 'a')]]),
             paused: false,
+            depth_at_last_save: 0,
+            undone_depth_at_last_save: 0,
         };
 
         log.push(in_c(100, 'b'));

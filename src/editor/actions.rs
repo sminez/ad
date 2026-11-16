@@ -406,7 +406,9 @@ where
 
     pub(crate) fn delete_buffer(&mut self, id: usize, force: bool) {
         match self.buffers.with_id(id) {
-            Some(b) if b.dirty && !force => self.set_status_message("No write since last change"),
+            Some(b) if b.is_dirty() && !force => {
+                self.set_status_message("No write since last change")
+            }
             None => warn!("attempt to close unknown buffer, id={id}"),
             _ => {
                 _ = self.tx_fsys.send(LogEvent::Close(id));
@@ -443,7 +445,7 @@ where
         let ids: Vec<usize> = self
             .buffers
             .iter()
-            .flat_map(|b| if b.dirty { Some(b.id) } else { None })
+            .flat_map(|b| if b.is_dirty() { Some(b.id) } else { None })
             .collect();
         let mut n_saved = 0;
         let mut n_errors = 0;
@@ -451,7 +453,7 @@ where
         for &id in ids.iter() {
             let b = self.buffers.with_id_mut(id).unwrap();
             let p = match &b.kind {
-                BufferKind::File(p) if b.dirty => p.clone(),
+                BufferKind::File(p) if b.is_dirty() => p.clone(),
                 _ => continue,
             };
 

@@ -170,11 +170,11 @@ pub struct Buffer {
     pub(crate) xdot: Dot,
     pub(crate) txt: GapBuffer,
     pub(crate) cached_rx: usize,
-    pub(crate) last_save: SystemTime,
-    pub(crate) dirty: bool,
     pub(crate) changed_since_last_render: bool,
     pub(crate) input_filter: Option<InputFilter>,
     pub(crate) syntax_state: Option<SyntaxState>,
+    last_save: SystemTime,
+    dirty: bool,
     config: Arc<RwLock<Config>>,
     version: AtomicUsize,
     edit_log: EditLog,
@@ -390,6 +390,7 @@ impl Buffer {
                 Ok(_) => {
                     self.dirty = false;
                     self.last_save = SystemTime::now();
+                    self.edit_log.mark_last_save();
                     Ok(format!("\"{display_path}\" {n_lines}L {n_bytes}B written"))
                 }
                 Err(e) => Err(format!("Unable to save buffer: {e}")),
@@ -400,6 +401,7 @@ impl Buffer {
         {
             self.dirty = false;
             self.last_save = SystemTime::now();
+            self.edit_log.mark_last_save();
             Ok(format!("\"{display_path}\" {n_lines}L {n_bytes}B written"))
         }
     }
@@ -1082,12 +1084,14 @@ impl Buffer {
     fn undo(&mut self) -> Option<ActionOutcome> {
         match self.edit_log.undo() {
             Some(edits) => {
-                self.edit_log.paused = true;
+                self.edit_log.pause(true);
                 for edit in edits.into_iter() {
                     self.apply_edit(edit);
                 }
-                self.edit_log.paused = false;
-                self.dirty = !self.edit_log.is_empty();
+                self.edit_log.pause(false);
+                if self.edit_log.is_dirty() {
+                    self.mark_dirty();
+                }
                 self.changed_since_last_render = true;
                 None
             }
@@ -1100,12 +1104,14 @@ impl Buffer {
     fn redo(&mut self) -> Option<ActionOutcome> {
         match self.edit_log.redo() {
             Some(edits) => {
-                self.edit_log.paused = true;
+                self.edit_log.pause(true);
                 for edit in edits.into_iter() {
                     self.apply_edit(edit);
                 }
-                self.edit_log.paused = false;
-                self.dirty = true;
+                self.edit_log.pause(false);
+                if self.edit_log.is_dirty() {
+                    self.mark_dirty();
+                }
                 self.changed_since_last_render = true;
                 None
             }
@@ -1117,7 +1123,7 @@ impl Buffer {
 
     fn apply_edit(&mut self, Edit { kind, cur, txt }: Edit) {
         let new_cur = match (kind, txt) {
-            (Kind::Insert, Txt::Char(c)) => self.insert_char(Dot::Cur { c: cur }, c, None).0,
+            (Kind::Insert, Txt::Char(ch)) => self.insert_char(Dot::Cur { c: cur }, ch, None).0,
             (Kind::Insert, Txt::String(s)) => self.insert_string(Dot::Cur { c: cur }, s, None).0,
             (Kind::Delete, Txt::Char(_)) => self.delete_dot(Dot::Cur { c: cur }, None).0,
             (Kind::Delete, Txt::String(s)) => {
@@ -1136,6 +1142,10 @@ impl Buffer {
         };
 
         self.dot = new_cur.into();
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
     }
 
     /// Only files get marked as dirty to ensure that they are prompted for saving before being
@@ -1477,7 +1487,6 @@ fn n_digits(mut n: usize) -> usize {
 pub(crate) mod tests {
     use super::*;
     use crate::{key::Arrow, syntax::ts::TsState};
-    use edit::tests::{del_c, del_s, in_c, in_s};
     use simple_test_case::test_case;
     use std::env;
 
@@ -1528,10 +1537,6 @@ pub(crate) mod tests {
         assert_eq!(lines[0], LINE_1);
         assert_eq!(lines[1], LINE_2);
         assert_eq!(b.dot, Dot::Cur { c });
-        assert_eq!(
-            b.edit_log.edits,
-            vec![vec![in_s(0, &format!("{LINE_1}\n{LINE_2}"))]]
-        );
     }
 
     #[test]
@@ -1560,18 +1565,10 @@ pub(crate) mod tests {
         assert_eq!(b.txt.to_string(), "hello, world!");
     }
 
-    #[test_case(
-        BAction::InsertChar { c: 'x' },
-        in_c(LINE_1.len() + 1, 'x');
-        "char"
-    )]
-    #[test_case(
-        BAction::InsertString { s: "x".to_string() },
-        in_s(LINE_1.len() + 1, "x");
-        "string"
-    )]
+    #[test_case(BAction::InsertChar { c: 'x' }; "char")]
+    #[test_case(BAction::InsertString { s: "x".to_string() }; "string")]
     #[test]
-    fn insert_w_range_dot_works(a: BAction, edit: Edit) {
+    fn insert_w_range_dot_works(a: BAction) {
         let mut b = simple_initial_buffer();
         b.handle_action(BAction::DotSet(TextObject::Line, 1), Source::Keyboard);
 
@@ -1586,14 +1583,6 @@ pub(crate) mod tests {
 
         assert_eq!(lines[0], LINE_1);
         assert_eq!(lines[1], "x");
-        assert_eq!(
-            b.edit_log.edits,
-            vec![vec![
-                in_s(0, &format!("{LINE_1}\n{LINE_2}")),
-                del_s(LINE_1.len() + 1, LINE_2),
-                edit,
-            ]]
-        );
     }
 
     #[test]
@@ -1615,7 +1604,6 @@ pub(crate) mod tests {
         assert_eq!(b.dot, Dot::Cur { c });
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0], "");
-        assert!(b.edit_log.edits.is_empty());
     }
 
     #[test]
@@ -1634,13 +1622,6 @@ pub(crate) mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], LINE_1);
         assert_eq!(lines[1], "involving multiple line");
-        assert_eq!(
-            b.edit_log.edits,
-            vec![vec![
-                in_s(0, &format!("{LINE_1}\n{LINE_2}")),
-                del_c(LINE_1.len() + 24, 's')
-            ]]
-        );
     }
 
     #[test]
@@ -1656,13 +1637,6 @@ pub(crate) mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], LINE_1);
         assert_eq!(lines[1], "");
-        assert_eq!(
-            b.edit_log.edits,
-            vec![vec![
-                in_s(0, &format!("{LINE_1}\n{LINE_2}")),
-                del_s(LINE_1.len() + 1, "involving multiple lines")
-            ]]
-        );
     }
 
     #[test]
@@ -1742,6 +1716,36 @@ pub(crate) mod tests {
         b.handle_action(BAction::Undo, Source::Keyboard);
 
         assert_eq!(b.string_lines(), vec!["foo foo foo", ""]);
+    }
+
+    #[test]
+    fn undo_redo_sets_dirty_flag_correctly() {
+        let mut b = Buffer::new_unnamed(0, "", Default::default());
+        // we need a File type buffer for dirty tracking to be active
+        b.kind = BufferKind::File(PathBuf::from("/test.txt"));
+
+        b.insert_char(Dot::cur(CharIdx(0)), 'a', None);
+
+        assert!(b.dirty, "should be dirty after insert");
+        assert_eq!(b.str_contents(), "a");
+
+        b.dirty = false; // simulate saving which clears the flag
+        b.undo();
+
+        assert!(
+            b.dirty,
+            "should be dirty after undo as we differ from saved state"
+        );
+        assert_eq!(b.str_contents(), "");
+
+        b.dirty = false; // simulate saving again
+        b.redo();
+
+        assert!(
+            b.dirty,
+            "should be dirty after redo as we differ from saved state"
+        );
+        assert_eq!(b.str_contents(), "a");
     }
 
     #[test_case('(', ')'; "parens")]

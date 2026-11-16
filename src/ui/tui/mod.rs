@@ -442,7 +442,7 @@ impl Frame {
             mode_name,
             b.display_name(),
             b.len_lines(),
-            if b.dirty { "[+]" } else { "" },
+            if b.is_dirty() { "[+]" } else { "" },
             if !b.has_trailing_newline() {
                 "[noeol]"
             } else {

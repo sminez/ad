@@ -199,7 +199,7 @@ impl LspManagerHandle {
     }
 
     pub fn show_diagnostics(&self, b: &Buffer) -> Action {
-        if b.dirty {
+        if b.is_dirty() {
             // give diagnostics a chance to update
             self.document_changed(b);
             sleep(Duration::from_millis(300));
@@ -278,7 +278,7 @@ impl LspManagerHandle {
 
     pub fn goto_declaration(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -289,7 +289,7 @@ impl LspManagerHandle {
 
     pub fn goto_definition(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -300,7 +300,7 @@ impl LspManagerHandle {
 
     pub fn goto_type_definition(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -311,7 +311,7 @@ impl LspManagerHandle {
 
     pub fn hover(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -322,7 +322,7 @@ impl LspManagerHandle {
 
     pub fn completion(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -334,7 +334,7 @@ impl LspManagerHandle {
 
     pub fn find_references(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -345,7 +345,7 @@ impl LspManagerHandle {
 
     pub fn format(&self, b: &Buffer) {
         if let Some((lsp_id, _)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -360,7 +360,7 @@ impl LspManagerHandle {
 
     pub fn prepare_rename(&self, b: &Buffer) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
@@ -372,7 +372,7 @@ impl LspManagerHandle {
 
     pub fn rename(&self, b: &Buffer, new_name: String) {
         if let Some((lsp_id, enc)) = self.lsp_id_and_encoding_for(b) {
-            if b.dirty {
+            if b.is_dirty() {
                 self.document_changed(b);
             }
 
