@@ -138,6 +138,9 @@ impl Regex {
         H: Haystack,
     {
         let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        if offset.0 >= cow.len() {
+            return false;
+        }
         let input = Input::new(cow.as_ref()).range(offset.0..);
 
         self.inner.is_match(input)
@@ -149,6 +152,10 @@ impl Regex {
         H: Haystack,
     {
         let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        if from.0 >= cow.len() || to.0 > cow.len() {
+            return false;
+        }
+
         let input = Input::new(cow.as_ref()).range(from.0..to.0);
 
         self.inner.is_match(input)
@@ -179,6 +186,10 @@ impl Regex {
         H: Haystack,
     {
         let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        if offset.0 >= cow.len() {
+            return None;
+        }
+
         let input = Input::new(cow.as_ref()).range(offset.0..);
         let m = self.inner.find(input)?;
 
@@ -193,6 +204,10 @@ impl Regex {
         H: Haystack,
     {
         let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        if from.0 >= cow.len() || to.0 > cow.len() {
+            return None;
+        }
+
         let input = Input::new(cow.as_ref()).range(from.0..to.0);
         let m = self.inner.find(input)?;
 
@@ -216,8 +231,11 @@ impl Regex {
         H: Haystack,
     {
         let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
-        let input = Input::new(cow.as_ref()).range(offset.0..);
+        if offset.0 >= cow.len() {
+            return None;
+        }
 
+        let input = Input::new(cow.as_ref()).range(offset.0..);
         let mut caps = self.inner.create_captures();
         self.inner.captures(input, &mut caps);
 
@@ -237,6 +255,10 @@ impl Regex {
         H: Haystack,
     {
         let cow = haystack.substr_from(ByteIdx(0)).unwrap_or_default();
+        if from.0 >= cow.len() || to.0 > cow.len() {
+            return None;
+        }
+
         let input = Input::new(cow.as_ref()).range(from.0..to.0);
         let mut caps = self.inner.create_captures();
         self.inner.captures(input, &mut caps);
@@ -571,7 +593,7 @@ mod tests {
     #[test_case("\\b(foo|bar|baz)\\b", "foo foobar barfoo baz", &["foo", "baz"]; "alts with word boundaries")]
     #[test_case("\\b", "foo bar", &["", "", "", ""]; "zero-length word boundary")]
     #[test]
-    fn find_iter_works(pattern: &str, s: &str, expected: &[&str]) {
+    fn captures_iter_works(pattern: &str, s: &str, expected: &[&str]) {
         let mut re = Regex::compile(pattern).unwrap();
         let matches: Vec<String> = re
             .captures_iter(&s)
