@@ -575,6 +575,7 @@ where
         info!("{msg}");
 
         self.set_status_message(msg);
+        self.layout.update_scratch_size();
         self.ui.state_change(StateChange::ConfigUpdated);
     }
 

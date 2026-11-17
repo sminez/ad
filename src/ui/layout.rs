@@ -155,6 +155,10 @@ impl Layout {
         self.changed_since_last_render = true;
     }
 
+    pub(crate) fn update_scratch_size(&mut self) {
+        self.scratch.w.n_rows = self.config.read().minibuffer_lines;
+    }
+
     pub(crate) fn clear_stale_views(&mut self, buffers: &Buffers) {
         self.views.retain(|v| buffers.contains_bufid(v.bufid));
     }
