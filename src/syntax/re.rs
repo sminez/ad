@@ -10,6 +10,7 @@ use crate::{
     regex::Regex,
     syntax::{ByteRange, LineIter, SyntaxRange},
 };
+use std::cmp::min;
 
 #[derive(Debug)]
 pub struct ReState {
@@ -41,12 +42,16 @@ impl ReState {
     pub fn update(&mut self, gb: &GapBuffer, from: LineIdx, n_rows: usize) {
         self.ranges.clear();
 
-        for i in from.0..from.0 + n_rows {
+        for i in from.0..min(from.0 + n_rows, gb.len_lines()) {
             let line = gb.line(LineIdx(i));
             let line_start = gb.line_to_byte(LineIdx(i));
             let mut offset = ByteIdx(0);
 
             while let Some(m) = self.re.find_from(&line, offset) {
+                if m.is_empty() {
+                    offset.uadd(1);
+                }
+
                 self.ranges.push(SyntaxRange {
                     cap_idx: Some(m.pattern_id),
                     r: ByteRange {
@@ -144,6 +149,17 @@ plumb to edit";
         let gb = GapBuffer::from("été data");
         let mut state = ReState::new(&[("keyword", r"\bdata\b")]).expect("valid regex patterns");
         state.update(&gb, LineIdx(0), 1);
+
+        let ranges: Vec<_> = state.ranges.iter().map(|sr| (sr.r.from, sr.r.to)).collect();
+        assert_eq!(ranges, vec![(ByteIdx(6), ByteIdx(10))]);
+    }
+
+    #[test]
+    fn tokenizing_handles_buffers_with_fewer_lines_than_requested() {
+        // "data" is at chars 4..8 but bytes 6..10
+        let gb = GapBuffer::from("été data");
+        let mut state = ReState::new(&[("keyword", r"\bdata\b")]).expect("valid regex patterns");
+        state.update(&gb, LineIdx(0), 10);
 
         let ranges: Vec<_> = state.ranges.iter().map(|sr| (sr.r.from, sr.r.to)).collect();
         assert_eq!(ranges, vec![(ByteIdx(6), ByteIdx(10))]);

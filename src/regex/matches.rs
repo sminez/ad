@@ -22,6 +22,10 @@ impl Match {
     {
         haystack.substr(self.from, self.to)
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.from == self.to
+    }
 }
 
 /// The match location of a Regex against a given input along with all capture groups.
