@@ -3,7 +3,7 @@
 use crate::{
     config::{
         ColorScheme, Config, DEFAULT_CONFIG, EditorConfig, FsysConfig, FtypeConfig, KeyBindings,
-        LspConfig, TsConfig,
+        LspConfig, MAX_MB_LINES, MAX_TABSTOP, TsConfig,
     },
     syntax::{TK_DEFAULT, TK_DOT, TK_EXEC, TK_LOAD},
     ui::style::{Color, Styles},
@@ -41,7 +41,10 @@ impl RawConfig {
         let config_path = PathBuf::from(config_path);
         let config_dir = config_path.parent().unwrap();
 
-        let editor = self.editor.map(|raw| raw.resolve()).unwrap_or_default();
+        let editor = self
+            .editor
+            .map(|raw| raw.resolve(&mut errs))
+            .unwrap_or_default();
         let filesystem = self.filesystem.unwrap_or_default();
         let tree_sitter = self.tree_sitter.unwrap_or_default();
         let colorscheme = self
@@ -122,7 +125,7 @@ macro_rules! set_if_some {
 }
 
 impl RawEditorConfig {
-    fn resolve(self) -> EditorConfig {
+    fn resolve(self, errs: &mut Vec<String>) -> EditorConfig {
         let mut cfg = EditorConfig::default();
         set_if_some!(show_splash, self, cfg);
         set_if_some!(tabstop, self, cfg);
@@ -133,6 +136,18 @@ impl RawEditorConfig {
         set_if_some!(double_click_ms, self, cfg);
         set_if_some!(minibuffer_lines, self, cfg);
         set_if_some!(find_command, self, cfg);
+
+        if cfg.tabstop == 0 || cfg.tabstop > MAX_TABSTOP {
+            errs.push(format!("tabstop must be between 1 and {MAX_TABSTOP}"));
+        }
+        if cfg.minibuffer_lines == 0 || cfg.minibuffer_lines > MAX_MB_LINES {
+            errs.push(format!(
+                "minibuffer_lines must be between 1 and {MAX_MB_LINES}"
+            ));
+        }
+        if cfg.double_click_ms == 0 {
+            errs.push("double_click_ms must be greater than 0".into());
+        }
 
         cfg
     }

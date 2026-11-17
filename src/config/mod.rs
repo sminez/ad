@@ -17,6 +17,8 @@ mod raw;
 use raw::{RawColorScheme, RawConfig};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../../data/config.toml");
+pub const MAX_TABSTOP: usize = 8;
+pub const MAX_MB_LINES: usize = 30;
 
 pub(crate) fn config_path() -> String {
     let home = env::var("HOME").unwrap();
