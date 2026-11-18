@@ -78,24 +78,25 @@ impl<'a> Slice<'a> {
 
         let to = min(to, ByteIdx(self.len()));
         let logical_from = self.from + from;
+        let len_left = self.left.len();
 
-        if to.0 <= self.left.len() {
+        if to.0 <= len_left {
             Slice {
                 from: logical_from,
                 left: &self.left[from.0..to.0],
                 right: &[],
             }
-        } else if from.0 >= self.left.len() {
+        } else if from.0 >= len_left {
             Slice {
                 from: logical_from,
                 left: &[],
-                right: &self.right[from.0..to.0],
+                right: &self.right[from.0 - len_left..to.0 - len_left],
             }
         } else {
             Slice {
                 from: logical_from,
                 left: &self.left[from.0..],
-                right: &self.right[..to.0],
+                right: &self.right[..to.0 - len_left],
             }
         }
     }
@@ -472,5 +473,24 @@ mod tests {
         gb.shred_gap();
         let slice = gb.slice(CharIdx(0), CharIdx(5));
         assert_eq!(slice, "hello");
+    }
+
+    #[test_case(0, 4, "hell"; "left of gap")]
+    #[test_case(7, 12, "world"; "right of gap")]
+    #[test_case(2, 10, "lloX wor"; "over gap")]
+    #[test]
+    fn subslice_of_discontiguous_slice_works(from: usize, to: usize, expected: &str) {
+        let mut gb = GapBuffer::from("hello world!");
+        gb.insert_char(CharIdx(5), 'X');
+        let s = gb.as_slice();
+
+        let (left, right) = s.as_strs();
+        assert_eq!(left, "helloX");
+        assert_eq!(right, " world!");
+
+        let sub = s.subslice(ByteIdx(from), ByteIdx(to));
+
+        assert_eq!(sub.to_string(), expected);
+        assert_eq!(sub.from(), ByteIdx(from));
     }
 }
