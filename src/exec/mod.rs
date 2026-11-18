@@ -664,7 +664,7 @@ mod tests {
             .unwrap();
 
         // '.*' will match the null string at the end of lines containing a newline as well
-        assert_eq!(&b.txt.to_string(), "foofoo\nfoofoo\nfoo");
+        assert_eq!(&b.txt.to_string(), "foo\nfoo\nfoo");
     }
 
     #[test]
@@ -1223,9 +1223,9 @@ mod tests {
 
     #[test_case(", x/.*/ i/X/", "foo", "Xfoo"; "zero-length dot star insert")]
     #[test_case(", x/.*/ p/{0}/", "a\nb", "a\nb"; "zero-length dot star print")]
-    #[test_case(", x/^/ i/> /", "foo\nbar", "> foo\n> > bar"; "zero-length line start")]
-    #[test_case(", x/$/ a/ </", "foo\nbar", "foo < <\nbar <"; "zero-length line end")]
-    #[test_case(", x/\\b/ i/|/", "foo bar", "|foo|| |bar|"; "zero-length word boundary")]
+    #[test_case(", x/^/ i/> /", "foo\nbar", "> foo\n> bar"; "zero-length line start")]
+    #[test_case(", x/$/ a/ </", "foo\nbar", "foo <\nbar <"; "zero-length line end")]
+    #[test_case(", x/\\b/ i/|/", "foo bar", "|foo| |bar|"; "zero-length word boundary")]
     #[test_case(", y/.*/ i/X/", "foo", "foo"; "y with zero-length")]
     #[test]
     fn zero_length_matches_work(program: &str, initial_content: &str, expected_content: &str) {
